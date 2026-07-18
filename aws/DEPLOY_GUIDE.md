@@ -57,7 +57,7 @@ This guide details the step-by-step process of deploying the **StockOracle Pro**
    chmod +x setup_ec2.sh
    ./setup_ec2.sh
    ```
-   *This script installs Python 3.11, sets up a virtual environment, installs Node.js, Nginx, and Certbot.*
+   *This script installs Python 3.12 (the default system Python on Ubuntu 24.04), sets up a virtual environment, installs Node.js, Nginx, and Certbot.*
 
 ---
 
