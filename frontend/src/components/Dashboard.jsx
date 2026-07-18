@@ -9,6 +9,8 @@ import MonteCarlo from './MonteCarlo'
 import AITraining from './AITraining'
 import Screener from './Screener'
 
+const API = import.meta.env.VITE_API_URL || ''
+
 const POPULAR = [
   { ticker: 'AAPL', name: 'Apple Inc.' },
   { ticker: 'TSLA', name: 'Tesla Inc.' },
@@ -49,7 +51,7 @@ export default function Dashboard() {
 
   // Check API health
   useEffect(() => {
-    fetch('/api/health').then(r => r.ok && setApiOnline(true)).catch(() => {})
+    fetch(`${API}/api/health`).then(r => r.ok && setApiOnline(true)).catch(() => {})
   }, [])
 
   // Load stock detail when selected changes
