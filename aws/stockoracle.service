@@ -16,15 +16,15 @@ After=network.target
 User=ubuntu
 Group=ubuntu
 
-# Set application directories
-WorkingDirectory=/var/www/stockoracle/backend
+# Set application directories — MUST be project root so backend.* imports resolve
+WorkingDirectory=/var/www/stockoracle
 
 # Paths to virtualenv executables
 Environment="PATH=/var/www/stockoracle/venv/bin"
 EnvironmentFile=/var/www/stockoracle/backend/.env
 
 # Gunicorn start command with Uvicorn worker class for performance
-ExecStart=/var/www/stockoracle/venv/bin/gunicorn -w 3 -k uvicorn.workers.UvicornWorker main:app --bind 127.0.0.1:8000 --timeout 120 --keep-alive 5
+ExecStart=/var/www/stockoracle/venv/bin/gunicorn -w 3 -k uvicorn.workers.UvicornWorker backend.main:app --bind 127.0.0.1:8000 --timeout 120 --keep-alive 5
 
 # Auto-restart policies on crashes
 Restart=always
