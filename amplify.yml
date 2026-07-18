@@ -7,7 +7,7 @@ frontend:
         - npm install
     build:
       commands:
-        - npm run build
+        - VITE_API_URL=http://54.165.116.67 npm run build
   artifacts:
     baseDirectory: frontend/dist
     files:
