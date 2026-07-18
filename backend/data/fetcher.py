@@ -1,20 +1,40 @@
 import yfinance as yf
 import pandas as pd
+import time
 from typing import Optional
+from datetime import datetime, timedelta
+
+# ── Simple TTL In-Memory Cache ──
+# Stores (data, expiry_time) pairs to avoid hitting Yahoo Finance too frequently
+_cache: dict = {}
+CACHE_TTL_SECONDS = 120  # Cache data for 2 minutes
+
+def _get_cached(key: str):
+    """Returns cached value if not expired, else None."""
+    if key in _cache:
+        data, expiry = _cache[key]
+        if datetime.now() < expiry:
+            return data
+        else:
+            del _cache[key]
+    return None
+
+def _set_cached(key: str, data):
+    """Stores data in cache with TTL expiry."""
+    _cache[key] = (data, datetime.now() + timedelta(seconds=CACHE_TTL_SECONDS))
 
 def fetch_stock_data(ticker: str, period: str = "2y", interval: str = "1d") -> Optional[pd.DataFrame]:
     """
     Fetches historical OHLCV data for a given ticker from Yahoo Finance.
-    
-    Args:
-        ticker (str): The stock ticker symbol (e.g. 'AAPL')
-        period (str): The historical period (e.g. '1y', '2y', '5y')
-        interval (str): The data interval (e.g. '1d', '1wk', '1mo')
-        
-    Returns:
-        Optional[pd.DataFrame]: Pandas DataFrame containing historical price data, or None if failed.
+    Results are cached for 2 minutes to prevent rate limiting.
     """
+    cache_key = f"hist_{ticker}_{period}_{interval}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+    
     try:
+        time.sleep(0.3)  # Small delay to avoid rate limiting
         stock = yf.Ticker(ticker)
         df = stock.history(period=period, interval=interval)
         if df.empty:
@@ -40,7 +60,8 @@ def fetch_stock_data(ticker: str, period: str = "2y", interval: str = "1d") -> O
         # Convert date to string format for JSON serialization
         if "date" in df.columns:
             df["date"] = df["date"].dt.strftime("%Y-%m-%d")
-            
+
+        _set_cached(cache_key, df)
         return df
     except Exception as e:
         print(f"Error fetching data for {ticker}: {str(e)}")
@@ -48,9 +69,16 @@ def fetch_stock_data(ticker: str, period: str = "2y", interval: str = "1d") -> O
 
 def fetch_company_info(ticker: str) -> Optional[dict]:
     """
-    Fetches company metadata (e.g. name, sector, exchange, current price) from Yahoo Finance.
+    Fetches company metadata from Yahoo Finance.
+    Results are cached for 2 minutes to prevent rate limiting.
     """
+    cache_key = f"info_{ticker}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
     try:
+        time.sleep(0.3)  # Small delay to avoid rate limiting
         stock = yf.Ticker(ticker)
         info = stock.info
         

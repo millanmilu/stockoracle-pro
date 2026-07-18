@@ -261,37 +261,34 @@ manager = ConnectionManager()
 # Background price broadcaster loop
 async def websocket_price_broadcast_loop():
     import random
-    
-    # Cache baseline prices to keep simulated volatility realistic
-    prices_cache = {}
-    for t in popular_tickers:
-        try:
-            info = fetch_company_info(t)
-            if info:
-                prices_cache[t] = info["current_price"]
-        except Exception:
-            prices_cache[t] = 150.0
-            
+
+    # Hardcoded base prices — avoids Yahoo Finance calls on startup (prevents 429)
+    prices_cache = {
+        "AAPL": 213.80, "TSLA": 247.50, "NVDA": 131.60, "MSFT": 438.30,
+        "AMZN": 196.40, "META": 584.70, "GOOGL": 189.20, "AMD": 162.40,
+        "NFLX": 892.30, "JPM": 234.10
+    }
+
     while True:
         if manager.active_connections:
             # Pick a random ticker to update
             t = random.choice(popular_tickers)
             base_price = prices_cache.get(t, 150.0)
-            
+
             # Simulate a small price tick (-0.2% to +0.2%)
             change_pct = random.uniform(-0.002, 0.002)
             new_price = base_price * (1.0 + change_pct)
-            prices_cache[t] = new_price # update cache
-            
+            prices_cache[t] = new_price  # update cache for next tick
+
             payload = {
                 "ticker": t,
                 "price": round(new_price, 2),
                 "change_pct": round(change_pct * 100, 3)
             }
             await manager.broadcast(payload)
-            
-        # Broadcast interval: 3 seconds
-        await asyncio.sleep(3.0)
+
+        # Broadcast interval: 5 seconds to be gentle on connections
+        await asyncio.sleep(5.0)
 
 # Start background broadcast loop on startup
 @app.on_event("startup")
