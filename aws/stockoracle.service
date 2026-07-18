@@ -1,0 +1,39 @@
+# ==============================================================================
+# StockOracle Pro — systemd Service Unit Config
+# Place this at: /etc/systemd/system/stockoracle.service
+# Enable it:    sudo systemctl daemon-reload
+#               sudo systemctl enable stockoracle.service
+#               sudo systemctl start stockoracle.service
+# Control it:   sudo systemctl status/restart/stop stockoracle.service
+# ==============================================================================
+
+[Unit]
+Description=StockOracle Pro FastAPI Daemon Application
+After=network.target
+
+[Service]
+# Run as the default Ubuntu user on EC2
+User=ubuntu
+Group=ubuntu
+
+# Set application directories
+WorkingDirectory=/var/www/stockoracle/backend
+
+# Paths to virtualenv executables
+Environment="PATH=/var/www/stockoracle/venv/bin"
+EnvironmentFile=/var/www/stockoracle/backend/.env
+
+# Gunicorn start command with Uvicorn worker class for performance
+ExecStart=/var/www/stockoracle/venv/bin/gunicorn -w 2 -k uvicorn.workers.UvicornWorker main:app --bind 127.0.0.1:8000 --timeout 120 --keep-alive 5
+
+# Auto-restart policies on crashes
+Restart=always
+RestartSec=5
+
+# Logging configuration
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=stockoracle
+
+[Install]
+WantedBy=multi-user.target
