@@ -8,7 +8,10 @@ from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 
 # Import our custom modules
-from backend.data.fetcher import fetch_stock_data, fetch_company_info, ensure_session
+from backend.data.fetcher import (
+    fetch_stock_data, fetch_company_info, ensure_session,
+    _session_active, reset_session
+)
 from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.monte_carlo import run_monte_carlo_simulation
 from backend.analysis.anomaly import detect_anomalies
@@ -51,44 +54,61 @@ def read_root():
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "angel_one_session": _session_active,
+        "timestamp": datetime.now().isoformat()
+    }
 
 @app.get("/api/stock/{ticker}/info")
 def get_stock_info(ticker: str):
-    info = fetch_company_info(ticker.upper())
+    t = ticker.upper().strip()
+    if not t.replace("-", "").isalpha() or len(t) > 20:
+        raise HTTPException(status_code=422, detail=f"Invalid ticker format: '{ticker}'. Use NSE symbol like RELIANCE, TCS.")
+    info = fetch_company_info(t)
     if not info:
-        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found.")
+        if not _session_active:
+            raise HTTPException(status_code=503, detail="Angel One API is unavailable. Server is authenticating — try again in a moment.")
+        raise HTTPException(status_code=404, detail=f"Ticker '{t}' not found on NSE or data unavailable.")
     return info
 
 @app.get("/api/stock/{ticker}/history")
 def get_stock_history(ticker: str, timeframe: str = "3M"):
-    days_map = {"1W": "10d", "1M": "45d", "3M": "120d", "6M": "200d", "1Y": "370d"}
-    period = days_map.get(timeframe.upper(), "120d")
-    
-    df = fetch_stock_data(ticker.upper(), period=period)
+    t = ticker.upper().strip()
+    days_map = {"1W": "10D", "1M": "45D", "3M": "120D", "6M": "200D", "1Y": "370D"}
+    period = days_map.get(timeframe.upper())
+    if not period:
+        raise HTTPException(status_code=422, detail=f"Invalid timeframe '{timeframe}'. Valid: 1W, 1M, 3M, 6M, 1Y.")
+
+    df = fetch_stock_data(t, period=period)
     if df is None or df.empty:
-        raise HTTPException(status_code=404, detail=f"No price history found for {ticker}.")
-        
-    # Enrich with technical indicators
+        if not _session_active:
+            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
+        raise HTTPException(status_code=404, detail=f"No price history found for '{t}'. Market may be closed or ticker invalid.")
+
     enriched_df = enrich_stock_dataframe(df)
     return enriched_df.to_dict(orient="records")
 
 @app.get("/api/stock/{ticker}/montecarlo")
 def get_monte_carlo(ticker: str):
-    df = fetch_stock_data(ticker.upper(), period="1y")
+    t = ticker.upper().strip()
+    df = fetch_stock_data(t, period="1Y")
     if df is None or df.empty:
-        raise HTTPException(status_code=404, detail=f"No price history found for {ticker}.")
-        
+        if not _session_active:
+            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
+        raise HTTPException(status_code=404, detail=f"No price history found for '{t}' to run Monte Carlo simulation.")
     closes = df["close"].tolist()
     mc_results = run_monte_carlo_simulation(closes, simulations=150, horizon=30)
     return mc_results
 
 @app.get("/api/stock/{ticker}/anomalies")
 def get_anomalies(ticker: str):
-    df = fetch_stock_data(ticker.upper(), period="1y")
+    t = ticker.upper().strip()
+    df = fetch_stock_data(t, period="1Y")
     if df is None or df.empty:
-        raise HTTPException(status_code=404, detail=f"No price history for {ticker} to compute anomalies.")
-    
+        if not _session_active:
+            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
+        raise HTTPException(status_code=404, detail=f"No price history found for '{t}' to compute anomalies.")
     anoms = detect_anomalies(df, window=20, threshold=2.2)
     return anoms
 
