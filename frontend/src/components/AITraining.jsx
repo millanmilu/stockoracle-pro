@@ -32,7 +32,10 @@ export default function AITraining() {
         } catch (_) {}
       }, 2000)
     } catch (e) {
-      setStatus({ status: 'failed', error: 'Failed to start training.' })
+      setStatus({
+        status: 'failed',
+        error: e.response?.data?.detail || 'Failed to start training. Check that the API is reachable.'
+      })
     } finally {
       setStarting(false)
     }

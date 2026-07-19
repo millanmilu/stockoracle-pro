@@ -21,7 +21,9 @@ WorkingDirectory=/var/www/stockoracle
 
 # Paths to virtualenv executables
 Environment="PATH=/var/www/stockoracle/venv/bin"
-EnvironmentFile=/var/www/stockoracle/backend/.env
+# The app can still start and expose its health endpoint when this file has
+# not been created yet; data endpoints then return a clear authentication error.
+EnvironmentFile=-/var/www/stockoracle/backend/.env
 
 # Gunicorn start command with Uvicorn worker class for performance
 ExecStart=/var/www/stockoracle/venv/bin/gunicorn -w 1 -k uvicorn.workers.UvicornWorker backend.main:app --bind 127.0.0.1:8000 --timeout 120 --keep-alive 5

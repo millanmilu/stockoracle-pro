@@ -7,6 +7,11 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 
+# Load the local development credentials before importing ``fetcher``: that
+# module constructs the Angel One client at import time.  In production,
+# systemd also supplies these variables through EnvironmentFile.
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
 # Import our custom modules
 from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, ensure_session,
@@ -17,8 +22,6 @@ from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.monte_carlo import run_monte_carlo_simulation
 from backend.analysis.anomaly import detect_anomalies
 from backend.ml.predictor import StockPredictor
-
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 app = FastAPI(
     title="StockOracle Pro API",
