@@ -22,6 +22,7 @@ from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.monte_carlo import run_monte_carlo_simulation
 from backend.analysis.anomaly import detect_anomalies
 from backend.ml.predictor import StockPredictor
+from backend.analysis.backtester import run_backtest
 
 app = FastAPI(
     title="StockOracle Pro API",
@@ -231,6 +232,18 @@ def get_prediction(ticker: str):
         "signal": signal,
         "model_trained": model_trained
     }
+
+@app.get("/api/stock/{ticker}/backtest")
+def get_backtest(ticker: str):
+    t_upper = ticker.upper().strip()
+    df = fetch_stock_data(t_upper, period="2y")
+    if df is None or df.empty:
+        raise HTTPException(status_code=404, detail=f"No price history found for {t_upper} to run backtest.")
+    
+    results = run_backtest(df, t_upper)
+    if "error" in results:
+        raise HTTPException(status_code=400, detail=results["error"])
+    return results
 
 @app.get("/api/screener")
 def get_screener_list(signal: str = "", min_score: int = 0):
