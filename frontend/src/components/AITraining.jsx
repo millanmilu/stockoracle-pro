@@ -48,7 +48,7 @@ export default function AITraining() {
     <div className="ailab-panel">
       <div className="card-title">🧠 AI Lab — Train LSTM Model</div>
       <p style={{ color: '#9CA3AF', fontSize: '0.85rem', marginBottom: 20, lineHeight: 1.7 }}>
-        Train a custom <strong style={{ color: '#F0F0FF' }}>BiLSTM + Multi-Head Attention</strong> model on real 2-year historical data from Yahoo Finance.
+        Train a custom <strong style={{ color: '#F0F0FF' }}>BiLSTM + Multi-Head Attention</strong> model on real 1-year historical data from Angel One.
         Once trained, the model is saved to disk and used for all future predictions on this ticker.
       </p>
 
@@ -58,7 +58,7 @@ export default function AITraining() {
           <input
             className="ticker-input"
             style={{ background: '#080B18', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 10, padding: '9px 12px', color: '#F0F0FF', fontFamily: 'JetBrains Mono, monospace', width: '100%', fontSize: '0.9rem', outline: 'none', letterSpacing: '0.08em', textTransform: 'uppercase' }}
-            placeholder="e.g. AAPL"
+            placeholder="e.g. RELIANCE"
             value={ticker}
             onChange={e => setTicker(e.target.value.toUpperCase())}
           />
@@ -141,7 +141,7 @@ export default function AITraining() {
       {/* Idle hint */}
       {!status && (
         <div style={{ marginTop: 16, padding: '12px 16px', background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 10, color: '#9CA3AF', fontSize: '0.82rem' }}>
-          💡 Enter a ticker symbol (e.g. AAPL, TSLA, NVDA) and click Train. Training takes ~2 minutes on the EC2 server.
+          💡 Enter an Indian NSE stock ticker symbol (e.g. RELIANCE, TCS, INFY) and click Train. Training takes ~2 minutes on the EC2 server.
         </div>
       )}
     </div>
