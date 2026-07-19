@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # Import our custom modules
 from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, ensure_session,
-    _session_active, reset_session
+    get_session_status, reset_session
 )
 from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.monte_carlo import run_monte_carlo_simulation
@@ -56,7 +56,7 @@ def read_root():
 def health_check():
     return {
         "status": "healthy",
-        "angel_one_session": _session_active,
+        "angel_one_session": get_session_status(),
         "timestamp": datetime.now().isoformat()
     }
 
@@ -67,7 +67,7 @@ def get_stock_info(ticker: str):
         raise HTTPException(status_code=422, detail=f"Invalid ticker format: '{ticker}'. Use NSE symbol like RELIANCE, TCS.")
     info = fetch_company_info(t)
     if not info:
-        if not _session_active:
+        if not get_session_status():
             raise HTTPException(status_code=503, detail="Angel One API is unavailable. Server is authenticating — try again in a moment.")
         raise HTTPException(status_code=404, detail=f"Ticker '{t}' not found on NSE or data unavailable.")
     return info
@@ -82,7 +82,7 @@ def get_stock_history(ticker: str, timeframe: str = "3M"):
 
     df = fetch_stock_data(t, period=period)
     if df is None or df.empty:
-        if not _session_active:
+        if not get_session_status():
             raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
         raise HTTPException(status_code=404, detail=f"No price history found for '{t}'. Market may be closed or ticker invalid.")
 
@@ -94,7 +94,7 @@ def get_monte_carlo(ticker: str):
     t = ticker.upper().strip()
     df = fetch_stock_data(t, period="1Y")
     if df is None or df.empty:
-        if not _session_active:
+        if not get_session_status():
             raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
         raise HTTPException(status_code=404, detail=f"No price history found for '{t}' to run Monte Carlo simulation.")
     closes = df["close"].tolist()

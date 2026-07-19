@@ -25,6 +25,11 @@ SESSION_REFRESH_HOURS = 8
 _AUTH_ERROR_CODES = {"AB1010", "AG8002", "AB1004"}
 
 
+def get_session_status() -> bool:
+    """Returns the current Angel One session status (live value, not a stale import copy)."""
+    return _session_active
+
+
 def reset_session():
     """Force re-authentication on the next API call."""
     global _session_active, _session_expires_at
