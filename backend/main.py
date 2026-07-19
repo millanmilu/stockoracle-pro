@@ -3,11 +3,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Back
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import json
-from typing import Dict, Any, List
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 
 # Import our custom modules
-from backend.data.fetcher import fetch_stock_data, fetch_company_info
+from backend.data.fetcher import fetch_stock_data, fetch_company_info, ensure_session
 from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.monte_carlo import run_monte_carlo_simulation
 from backend.analysis.anomaly import detect_anomalies
@@ -33,7 +34,10 @@ app.add_middleware(
 
 # Global in-memory status stores
 training_status: Dict[str, Dict[str, Any]] = {}
-popular_tickers = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "META", "GOOGL", "AMD", "NFLX", "JPM"]
+popular_tickers = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL"]
+
+# Screener results cache — refreshed every 5 minutes to avoid blocking API requests
+_screener_cache: Dict[str, Any] = {"data": [], "expires": datetime(2000, 1, 1)}
 
 # ── REST API ROUTES ──
 
@@ -196,44 +200,42 @@ def get_prediction(ticker: str):
     }
 
 @app.get("/api/screener")
-def get_screener_list(sector: str = "", signal: str = "", min_score: int = 0):
-    screener_results = []
-    
-    # We populate the screener by running predictions on the popular tickers
-    for t in popular_tickers:
-        try:
-            info = fetch_company_info(t)
-            if not info: continue
-            
-            # Check sector filter early to avoid unnecessary computation
-            if sector and info["sector"] != sector.lower():
+def get_screener_list(signal: str = "", min_score: int = 0):
+    global _screener_cache
+
+    # Refresh cache only if expired (every 5 minutes) to avoid blocking the server
+    if datetime.now() > _screener_cache["expires"]:
+        fresh_results = []
+        for t in popular_tickers:
+            try:
+                info = fetch_company_info(t)
+                if not info:
+                    continue
+                pred = get_prediction(t)
+                prev = info["previous_close"] or 1.0
+                change_pct = ((info["current_price"] - prev) / prev) * 100
+                fresh_results.append({
+                    "ticker":        t,
+                    "name":          info["name"],
+                    "price":         info["current_price"],
+                    "change":        round(change_pct, 3),
+                    "ai_score":      pred["ai_confidence_score"],
+                    "signal":        pred["signal"],
+                    "predicted_pct": round(pred["predicted_return_7d"] * 100, 3),
+                })
+            except Exception:
                 continue
-                
-            pred = get_prediction(t)
-            
-            # Apply signal filter
-            if signal and pred["signal"] != signal.lower():
-                continue
-                
-            # Apply AI Score filter
-            if pred["ai_confidence_score"] < min_score:
-                continue
-                
-            change_pct = ((info["current_price"] - info["previous_close"]) / info["previous_close"]) * 100
-            
-            screener_results.append({
-                "ticker": t,
-                "name": info["name"],
-                "price": info["current_price"],
-                "change": change_pct,
-                "ai_score": pred["ai_confidence_score"],
-                "signal": pred["signal"],
-                "predicted_pct": pred["predicted_return_7d"] * 100
-            })
-        except Exception:
-            continue
-            
-    return screener_results
+        _screener_cache = {"data": fresh_results, "expires": datetime.now() + timedelta(minutes=5)}
+
+    results = _screener_cache["data"]
+
+    # Apply optional filters on the cached snapshot
+    if signal:
+        results = [r for r in results if r["signal"] == signal.lower()]
+    if min_score:
+        results = [r for r in results if r["ai_score"] >= min_score]
+
+    return results
 
 # ── WEBSOCKET LIVE PRICE FEED MANAGER ──
 
@@ -262,18 +264,36 @@ manager = ConnectionManager()
 async def websocket_price_broadcast_loop():
     import random
 
-    # Hardcoded base prices — avoids Yahoo Finance calls on startup (prevents 429)
+    # Accurate fallback prices (INR) — used until real LTP is fetched
     prices_cache = {
-        "AAPL": 213.80, "TSLA": 247.50, "NVDA": 131.60, "MSFT": 438.30,
-        "AMZN": 196.40, "META": 584.70, "GOOGL": 189.20, "AMD": 162.40,
-        "NFLX": 892.30, "JPM": 234.10
+        "RELIANCE": 1420.0, "TCS": 3900.0, "HDFCBANK": 1900.0, "INFY": 1560.0,
+        "ICICIBANK": 1390.0, "SBIN": 850.0, "BHARTIARTL": 1880.0, "ITC": 430.0,
+        "LT": 3600.0, "HUL": 2320.0
     }
+
+    # Attempt to seed the cache with real LTP prices from Angel One
+    try:
+        from backend.data.fetcher import smartApi, get_token_info, _session_active
+        if _session_active and smartApi:
+            for t in popular_tickers:
+                try:
+                    tok = get_token_info(t)
+                    if tok:
+                        ltp_resp = smartApi.ltpData(tok["exch_seg"], tok["symbol"], tok["token"])
+                        if ltp_resp and ltp_resp.get("status") and ltp_resp.get("data"):
+                            ltp = float(ltp_resp["data"].get("ltp", 0.0))
+                            if ltp > 0:
+                                prices_cache[t] = ltp
+                except Exception:
+                    pass
+    except Exception:
+        pass  # Fallback values remain in effect
 
     while True:
         if manager.active_connections:
             # Pick a random ticker to update
             t = random.choice(popular_tickers)
-            base_price = prices_cache.get(t, 150.0)
+            base_price = prices_cache.get(t, 1000.0)
 
             # Simulate a small price tick (-0.2% to +0.2%)
             change_pct = random.uniform(-0.002, 0.002)
@@ -290,9 +310,12 @@ async def websocket_price_broadcast_loop():
         # Broadcast interval: 5 seconds to be gentle on connections
         await asyncio.sleep(5.0)
 
+
 # Start background broadcast loop on startup
 @app.on_event("startup")
 async def startup_event():
+    # Authenticate with Angel One on startup so all requests are ready immediately
+    ensure_session()
     asyncio.create_task(websocket_price_broadcast_loop())
 
 @app.websocket("/ws/prices")

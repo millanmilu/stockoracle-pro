@@ -12,16 +12,16 @@ import Screener from './Screener'
 const API = import.meta.env.VITE_API_URL || ''
 
 const POPULAR = [
-  { ticker: 'AAPL', name: 'Apple Inc.' },
-  { ticker: 'TSLA', name: 'Tesla Inc.' },
-  { ticker: 'NVDA', name: 'NVIDIA Corp.' },
-  { ticker: 'MSFT', name: 'Microsoft Corp.' },
-  { ticker: 'AMZN', name: 'Amazon.com Inc.' },
-  { ticker: 'META', name: 'Meta Platforms' },
-  { ticker: 'GOOGL', name: 'Alphabet Inc.' },
-  { ticker: 'AMD',  name: 'Advanced Micro Devices' },
-  { ticker: 'NFLX', name: 'Netflix Inc.' },
-  { ticker: 'JPM',  name: 'JPMorgan Chase' },
+  { ticker: 'RELIANCE',   name: 'Reliance Industries' },
+  { ticker: 'TCS',        name: 'Tata Consultancy Services' },
+  { ticker: 'HDFCBANK',   name: 'HDFC Bank' },
+  { ticker: 'INFY',       name: 'Infosys Ltd.' },
+  { ticker: 'ICICIBANK',  name: 'ICICI Bank' },
+  { ticker: 'SBIN',       name: 'State Bank of India' },
+  { ticker: 'BHARTIARTL', name: 'Bharti Airtel' },
+  { ticker: 'ITC',        name: 'ITC Ltd.' },
+  { ticker: 'LT',         name: 'Larsen & Toubro' },
+  { ticker: 'HUL',        name: 'Hindustan Unilever' },
 ]
 
 const NAV = [
