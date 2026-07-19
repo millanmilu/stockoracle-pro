@@ -14,7 +14,7 @@ from backend.analysis.monte_carlo import run_monte_carlo_simulation
 from backend.analysis.anomaly import detect_anomalies
 from backend.ml.predictor import StockPredictor
 
-load_dotenv()
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 app = FastAPI(
     title="StockOracle Pro API",
