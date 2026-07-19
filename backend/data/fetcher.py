@@ -6,6 +6,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Tuple
 from SmartApi import SmartConnect
+from backend.data.database import save_historical_prices, get_historical_prices
 
 # ── API & Authentication Setup ──
 ANGEL_API_KEY     = os.getenv("ANGEL_API_KEY",     "").strip()
@@ -205,28 +206,61 @@ def _set_cached(key: str, data):
 
 def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> Optional[pd.DataFrame]:
     """
-    Fetches historical OHLCV data from Angel One SmartAPI.
-    Returns a DataFrame: date, open, high, low, close, volume.
-    Falls back to stale cache when Angel One is temporarily unavailable.
+    Fetches historical OHLCV data. 
+    First checks the local SQLite database. If data is missing or stale,
+    fetches from Angel One SmartAPI, updates the SQLite database, and returns.
     """
-    ensure_session()
+    ticker = ticker.upper().strip()
     cache_key = f"hist_{ticker}_{period}_{interval}"
 
-    if not _session_active:
-        # Return stale cache data as fallback
-        stale = _get_stale(cache_key)
-        if stale is not None:
-            print(f"⚠️  Using stale cache for {ticker} history (Angel One unavailable).")
-            return stale
-        return None
-
+    # 1. Check in-memory fast cache first
     fresh = _get_cached(cache_key)
     if fresh is not None:
         return fresh
 
     token_info = get_token_info(ticker)
     if not token_info:
-        print(f"❌ Token not found for '{ticker}'. Is it a valid NSE equity symbol?")
+        print(f"❌ Token not found for '{ticker}'.")
+        return None
+
+    # Map period to days count
+    period_map = {
+        "10D": 10, "1W": 7,   "45D": 45,  "1M": 30,  "120D": 120,
+        "3M":  90, "200D": 200, "6M": 180, "370D": 370,
+        "1Y":  365, "2Y": 730,
+    }
+    days = period_map.get(period.upper(), 120)
+    todate = datetime.now()
+    fromdate = todate - timedelta(days=days)
+
+    fromdate_str = fromdate.strftime("%Y-%m-%d")
+    todate_str = todate.strftime("%Y-%m-%d")
+
+    # 2. Check SQLite local database
+    db_df = get_historical_prices(ticker, fromdate_str, todate_str)
+    
+    # Check if DB has sufficient up-to-date data
+    # (data exists and the latest record is within the last 4 days to account for weekends/holidays)
+    if db_df is not None and not db_df.empty:
+        latest_db_date = pd.to_datetime(db_df["date"].max())
+        is_up_to_date = (todate - latest_db_date).days <= 4
+        
+        if is_up_to_date:
+            # Check if we have roughly the expected number of records (e.g. 5 trading days per week)
+            # A 1-year request has ~250 trading days. If we have > 80% of expected days, return it.
+            expected_trading_days = int(days * (5/7))
+            if len(db_df) >= expected_trading_days * 0.8:
+                # Cache in-memory and return
+                _set_cached(cache_key, db_df)
+                return db_df
+
+    # 3. Fetch from Angel One (database is missing or stale)
+    ensure_session()
+    if not _session_active:
+        # Fallback to whatever stale data we have in SQLite
+        if db_df is not None and not db_df.empty:
+            print(f"⚠️  Angel One session offline. Returning stale SQLite data for {ticker}.")
+            return db_df
         return None
 
     interval_map = {
@@ -234,15 +268,6 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
         "1h": "ONE_HOUR",   "1d": "ONE_DAY",
     }
     api_interval = interval_map.get(interval.lower(), "ONE_DAY")
-
-    period_map = {
-        "10D": 10, "1W": 7,   "45D": 45,  "1M": 30,  "120D": 120,
-        "3M":  90, "200D": 200, "6M": 180, "370D": 370,
-        "1Y":  365, "2Y": 365,
-    }
-    days     = period_map.get(period.upper(), 120)
-    todate   = datetime.now()
-    fromdate = todate - timedelta(days=days)
 
     historicParam = {
         "exchange":    token_info["exch_seg"],
@@ -262,16 +287,23 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
         df = df.astype({"open": float, "high": float, "low": float,
                         "close": float, "volume": int})
         df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
-        _set_cached(cache_key, df)
-        return df
+        
+        # Save to local database (UPSERT)
+        save_historical_prices(ticker, df)
+        
+        # Query again from database to get a complete/merged historical set
+        merged_df = get_historical_prices(ticker, fromdate_str, todate_str)
+        final_df = merged_df if merged_df is not None else df
+        
+        _set_cached(cache_key, final_df)
+        return final_df
 
-    # API returned no data — try stale cache before giving up
-    stale = _get_stale(cache_key)
-    if stale is not None:
-        print(f"⚠️  Returning stale cache for {ticker} history (market may be closed).")
-        return stale
+    # API request failed — fallback to local database
+    if db_df is not None and not db_df.empty:
+        print(f"⚠️  Angel One API request failed. Returning stale SQLite data for {ticker}.")
+        return db_df
 
-    msg = response.get("message", "Unknown error") if response else "No response from Angel One"
+    msg = response.get("message", "Unknown error") if response else "No response"
     print(f"❌ Failed to fetch history for {ticker}: {msg}")
     return None
 

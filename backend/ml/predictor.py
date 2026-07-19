@@ -70,8 +70,16 @@ class StockPredictor:
 
         # Fit or re-use min/max scaler
         if fit_scaler or self.feature_min is None:
-            self.feature_min = feat_matrix.min(axis=0)
-            self.feature_max = feat_matrix.max(axis=0)
+            # Prevent validation data leakage: fit scaler on training portion only (first 80% of samples)
+            n_samples = len(feat_matrix) - self.window_size - 7
+            if n_samples > 0:
+                split_idx = int(n_samples * 0.8)
+                train_feat_len = split_idx + self.window_size
+                train_feats = feat_matrix[:train_feat_len]
+            else:
+                train_feats = feat_matrix
+            self.feature_min = train_feats.min(axis=0)
+            self.feature_max = train_feats.max(axis=0)
 
         ranges = self.feature_max - self.feature_min
         ranges[ranges < 1e-8] = 1.0
@@ -193,9 +201,22 @@ class StockPredictor:
         self.model.load_state_dict(checkpoint["model_state"])
         self.model.eval()
 
-        # Build normalised sequences using saved scaler (fit_scaler=False)
-        X, _ = self._prepare_data(df, fit_scaler=False)
-        latest_seq = X[-1]   # shape [window_size, N_FEATURES]
+        # Build normalised features ending at current price (newest row) for inference
+        enriched_df = enrich_stock_dataframe(df)
+        feat_matrix = self._build_feature_matrix(enriched_df)
+
+        ranges = self.feature_max - self.feature_min
+        ranges[ranges < 1e-8] = 1.0
+        feat_norm = (feat_matrix - self.feature_min) / ranges
+
+        if len(feat_norm) < self.window_size:
+            raise ValueError(
+                f"Insufficient data for inference for {ticker}. "
+                f"Got {len(feat_norm)} rows, need at least {self.window_size}."
+            )
+
+        # The trailing window of size `window_size` ends at the last available row
+        latest_seq = feat_norm[-self.window_size:]
 
         # Add batch dimension → [1, window_size, N_FEATURES]
         latest_tensor = torch.tensor(latest_seq, dtype=torch.float32).unsqueeze(0).to(device)

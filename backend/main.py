@@ -12,6 +12,7 @@ from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, ensure_session,
     get_session_status, reset_session
 )
+from backend.data.database import init_db, save_live_tick
 from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.monte_carlo import run_monte_carlo_simulation
 from backend.analysis.anomaly import detect_anomalies
@@ -26,7 +27,16 @@ app = FastAPI(
 )
 
 # CORS configuration
-origins = ["*"] # Allow all for easy setup on AWS
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+env_origins = os.getenv("ALLOWED_ORIGINS")
+if env_origins:
+    origins.extend([o.strip() for o in env_origins.split(",") if o.strip()])
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -106,7 +116,7 @@ def get_anomalies(ticker: str):
     t = ticker.upper().strip()
     df = fetch_stock_data(t, period="1Y")
     if df is None or df.empty:
-        if not _session_active:
+        if not get_session_status():
             raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
         raise HTTPException(status_code=404, detail=f"No price history found for '{t}' to compute anomalies.")
     anoms = detect_anomalies(df, window=20, threshold=2.2)
@@ -293,8 +303,9 @@ async def websocket_price_broadcast_loop():
 
     # Attempt to seed the cache with real LTP prices from Angel One
     try:
-        from backend.data.fetcher import smartApi, get_token_info, _session_active
-        if _session_active and smartApi:
+        from backend.data.fetcher import smartApi, get_token_info
+        ensure_session()
+        if get_session_status() and smartApi:
             for t in popular_tickers:
                 try:
                     tok = get_token_info(t)
@@ -313,19 +324,43 @@ async def websocket_price_broadcast_loop():
         if manager.active_connections:
             # Pick a random ticker to update
             t = random.choice(popular_tickers)
-            base_price = prices_cache.get(t, 1000.0)
+            
+            fetched = False
+            try:
+                from backend.data.fetcher import smartApi, get_token_info
+                ensure_session()
+                if get_session_status() and smartApi:
+                    tok = get_token_info(t)
+                    if tok:
+                        ltp_resp = smartApi.ltpData(tok["exch_seg"], tok["symbol"], tok["token"])
+                        if ltp_resp and ltp_resp.get("status") and ltp_resp.get("data"):
+                            ltp = float(ltp_resp["data"].get("ltp", 0.0))
+                            prev_close = float(ltp_resp["data"].get("close", 0.0))
+                            if ltp > 0:
+                                change_pct = ((ltp - prev_close) / prev_close) if prev_close > 0 else 0.0
+                                prices_cache[t] = ltp
+                                
+                                payload = {
+                                    "ticker": t,
+                                    "price": round(ltp, 2),
+                                    "change_pct": round(change_pct * 100, 3)
+                                }
+                                # Save tick updates directly to SQL database in the background (real ticks only)
+                                save_live_tick(t, round(ltp, 2), round(change_pct * 100, 3))
+                                await manager.broadcast(payload)
+                                fetched = True
+            except Exception as e:
+                print(f"Error fetching live tick for {t}: {e}")
 
-            # Simulate a small price tick (-0.2% to +0.2%)
-            change_pct = random.uniform(-0.002, 0.002)
-            new_price = base_price * (1.0 + change_pct)
-            prices_cache[t] = new_price  # update cache for next tick
-
-            payload = {
-                "ticker": t,
-                "price": round(new_price, 2),
-                "change_pct": round(change_pct * 100, 3)
-            }
-            await manager.broadcast(payload)
+            if not fetched:
+                # Broadcast static cached price without simulated changes or database writes
+                base_price = prices_cache.get(t, 1000.0)
+                payload = {
+                    "ticker": t,
+                    "price": round(base_price, 2),
+                    "change_pct": 0.0
+                }
+                await manager.broadcast(payload)
 
         # Broadcast interval: 5 seconds to be gentle on connections
         await asyncio.sleep(5.0)
@@ -334,6 +369,8 @@ async def websocket_price_broadcast_loop():
 # Start background broadcast loop on startup
 @app.on_event("startup")
 async def startup_event():
+    # Initialize SQL database tables
+    init_db()
     # Authenticate with Angel One on startup so all requests are ready immediately
     ensure_session()
     asyncio.create_task(websocket_price_broadcast_loop())
