@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 
 # Load the local development credentials before importing ``fetcher``: that
-# module constructs the Angel One client at import time.  In production,
+# module constructs the Angel One client at import time. In production,
 # systemd also supplies these variables through EnvironmentFile.
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
@@ -181,23 +181,34 @@ def get_prediction(ticker: str):
         raise HTTPException(status_code=404, detail=f"No price history found for {t_upper}.")
         
     predictor = StockPredictor(window_size=20)
-    current_price = df["close"].iloc[-1]
+    current_price = float(df["close"].iloc[-1])
     
+    model_weights = {"bilstm": 0.333, "transformer": 0.333, "gbdt": 0.334}
+    predicted_upper_price = current_price
+    predicted_lower_price = current_price
+    confidence_std = 0.05
+
     try:
-        # Load saved PyTorch model and predict
-        pred_return = predictor.load_and_predict(df, t_upper)
+        # Load saved PyTorch model and predict with full details
+        details = predictor.load_and_predict(df, t_upper, return_details=True)
+        pred_return = float(details["expected_return"])
         predicted_price = current_price * (1.0 + pred_return)
+        predicted_upper_price = current_price * (1.0 + float(details["upper_return"]))
+        predicted_lower_price = current_price * (1.0 + float(details["lower_return"]))
+        confidence_std = float(details["confidence_std"])
+        model_weights = details["weights"]
         model_trained = True
     except FileNotFoundError:
         # Fallback to rule-based engine if model is not trained yet
         enriched = enrich_stock_dataframe(df)
         last_row = enriched.iloc[-1]
         
-        # Rule-based return estimation
-        rsi_factor = (50 - last_row["rsi"]) / 500.0  # RSI factor
-        macd_factor = last_row["macd_hist"] / current_price * 0.1
+        rsi_factor = (50 - float(last_row["rsi"])) / 500.0
+        macd_factor = float(last_row["macd_hist"]) / current_price * 0.1
         pred_return = rsi_factor + macd_factor
         predicted_price = current_price * (1.0 + pred_return)
+        predicted_upper_price = current_price * (1.0 + pred_return + 0.05)
+        predicted_lower_price = current_price * (1.0 + pred_return - 0.05)
         model_trained = False
         
     # Standard technical analysis signals
@@ -225,9 +236,13 @@ def get_prediction(ticker: str):
     
     return {
         "ticker": t_upper,
-        "current_price": float(current_price),
+        "current_price": current_price,
         "predicted_price_7d": float(predicted_price),
+        "predicted_upper_price_7d": float(predicted_upper_price),
+        "predicted_lower_price_7d": float(predicted_lower_price),
         "predicted_return_7d": float(pred_return),
+        "confidence_std": float(confidence_std),
+        "model_weights": model_weights,
         "ai_confidence_score": ai_score,
         "signal": signal,
         "model_trained": model_trained
@@ -321,20 +336,8 @@ async def websocket_price_broadcast_loop():
     try:
         from backend.data.fetcher import smartApi, get_token_info
         ensure_session()
-        if get_session_status() and smartApi:
-            for t in popular_tickers:
-                try:
-                    tok = get_token_info(t)
-                    if tok:
-                        ltp_resp = smartApi.ltpData(tok["exch_seg"], tok["symbol"], tok["token"])
-                        if ltp_resp and ltp_resp.get("status") and ltp_resp.get("data"):
-                            ltp = float(ltp_resp["data"].get("ltp", 0.0))
-                            if ltp > 0:
-                                prices_cache[t] = ltp
-                except Exception:
-                    pass
     except Exception:
-        pass  # Fallback values remain in effect
+        pass
 
     while True:
         if manager.active_connections:

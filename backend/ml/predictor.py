@@ -200,19 +200,28 @@ class StockPredictor:
         self.gbdt_model = GradientBoostingRegressor(n_estimators=100, max_depth=4, random_state=42)
         self.gbdt_model.fit(X_train_flat, y_train)
 
-        # Directional accuracy on validation set using Ensemble average
+        # Compute model validation MSE and dynamic inverse-MSE weights
         self.bilstm_model.eval()
         self.transformer_model.eval()
         with torch.no_grad():
-            final_pred_lstm = self.bilstm_model(x_val_tensor).numpy()
-            final_pred_trans = self.transformer_model(x_val_tensor).numpy()
+            final_pred_lstm = self.bilstm_model(x_val_tensor).numpy().flatten()
+            final_pred_trans = self.transformer_model(x_val_tensor).numpy().flatten()
             
-        final_pred_gbdt = self.gbdt_model.predict(X_val_flat)
+        final_pred_gbdt = self.gbdt_model.predict(X_val_flat).flatten()
         
-        # Average forecast
-        ensemble_val_preds = (final_pred_lstm + final_pred_trans + final_pred_gbdt) / 3.0
+        mse_lstm  = float(np.mean((final_pred_lstm - y_val)**2))
+        mse_trans = float(np.mean((final_pred_trans - y_val)**2))
+        mse_gbdt  = float(np.mean((final_pred_gbdt - y_val)**2))
+        
+        inv_lstm, inv_trans, inv_gbdt = 1.0 / (mse_lstm + 1e-6), 1.0 / (mse_trans + 1e-6), 1.0 / (mse_gbdt + 1e-6)
+        tot_inv = inv_lstm + inv_trans + inv_gbdt
+        w_lstm, w_trans, w_gbdt = inv_lstm / tot_inv, inv_trans / tot_inv, inv_gbdt / tot_inv
+
+        # Ensemble forecast on validation set
+        ensemble_val_preds = (w_lstm * final_pred_lstm) + (w_trans * final_pred_trans) + (w_gbdt * final_pred_gbdt)
         correct_directions = np.sum(np.sign(ensemble_val_preds) == np.sign(y_val))
         dir_acc = float(correct_directions / len(y_val))
+        val_rmse = float(np.sqrt(np.mean((ensemble_val_preds - y_val)**2)))
 
         # Save all models & scaler parameters
         os.makedirs(MODELS_DIR, exist_ok=True)
@@ -226,19 +235,24 @@ class StockPredictor:
             "window_size":        self.window_size,
             "input_dim":          input_dim,
             "n_features":         N_FEATURES,
+            "model_weights":      {"bilstm": w_lstm, "transformer": w_trans, "gbdt": w_gbdt},
+            "val_rmse":           val_rmse
         }, save_path)
 
         return {
             "train_loss":       loss_hist[-1],
             "val_loss":         val_loss_hist[-1],
+            "val_rmse":         val_rmse,
             "dir_accuracy":     dir_acc,
+            "model_weights":    {"bilstm": round(w_lstm, 3), "transformer": round(w_trans, 3), "gbdt": round(w_gbdt, 3)},
             "loss_history":     loss_hist,
             "val_loss_history": val_loss_hist,
         }
 
-    def load_and_predict(self, df: pd.DataFrame, ticker: str) -> float:
+    def load_and_predict(self, df: pd.DataFrame, ticker: str, return_details: bool = False) -> Any:
         """
         Loads saved PyTorch & Sklearn models and returns the ensembled predicted 7-day return.
+        If return_details=True, returns a dict with predictions, weights, and confidence bounds.
         """
         save_path = os.path.join(MODELS_DIR, f"{ticker}.pt")
         if not os.path.exists(save_path):
@@ -251,6 +265,8 @@ class StockPredictor:
         self.feature_min  = checkpoint["feature_min"]
         self.feature_max  = checkpoint["feature_max"]
         input_dim         = checkpoint["input_dim"]
+        weights           = checkpoint.get("model_weights", {"bilstm": 0.333, "transformer": 0.333, "gbdt": 0.334})
+        val_rmse          = checkpoint.get("val_rmse", 0.05)
 
         # Re-initialize models
         self.bilstm_model = BiLSTMWithAttention(input_dim=input_dim).to(device)
@@ -289,5 +305,25 @@ class StockPredictor:
         latest_flat = latest_seq.reshape(1, -1)
         pred_gbdt = float(self.gbdt_model.predict(latest_flat)[0])
 
-        # Return the ensemble average return
-        return (pred_lstm + pred_trans + pred_gbdt) / 3.0
+        w_lstm = weights.get("bilstm", 0.333)
+        w_trans = weights.get("transformer", 0.333)
+        w_gbdt = weights.get("gbdt", 0.334)
+
+        expected_return = (w_lstm * pred_lstm) + (w_trans * pred_trans) + (w_gbdt * pred_gbdt)
+
+        if not return_details:
+            return expected_return
+
+        # Estimate confidence interval boundaries
+        preds_array = np.array([pred_lstm, pred_trans, pred_gbdt])
+        model_spread = float(np.std(preds_array))
+        uncertainty = float(np.sqrt(val_rmse**2 + model_spread**2))
+
+        return {
+            "expected_return": expected_return,
+            "upper_return":    expected_return + (1.96 * uncertainty),
+            "lower_return":    expected_return - (1.96 * uncertainty),
+            "confidence_std":  uncertainty,
+            "weights":         {"bilstm": round(w_lstm, 3), "transformer": round(w_trans, 3), "gbdt": round(w_gbdt, 3)},
+            "individual_preds":{"bilstm": pred_lstm, "transformer": pred_trans, "gbdt": pred_gbdt}
+        }
