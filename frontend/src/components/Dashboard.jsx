@@ -25,11 +25,13 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, [search, searchStocks]);
 
+  const [timeframe, setTimeframe] = useState('3M');
+
   // Load history logic
   useEffect(() => {
     setHistory(null);
-    fetchHistory(selectedSymbol, '3M').then(setHistory);
-  }, [selectedSymbol]);
+    fetchHistory(selectedSymbol, timeframe).then(setHistory);
+  }, [selectedSymbol, timeframe]);
 
   const selectStock = ticker => {
     setSelectedSymbol(ticker);
@@ -37,13 +39,27 @@ export default function Dashboard() {
     setShowDropdown(false);
   };
 
+  const currentPrice = history && history.length > 0 ? history[history.length - 1].close : null;
+  const priceChange = history && history.length > 1 ? currentPrice - history[history.length - 2].close : null;
+  const pctChange = priceChange && currentPrice ? (priceChange / history[history.length - 2].close) * 100 : null;
+
   return (
     <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
       
       {/* Search Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '20px', position: 'relative' }}>
-        <h1 style={{ margin: 0, fontSize: '1.8rem', color: '#fff' }}>{selectedSymbol}</h1>
-        <div style={{ position: 'relative', width: '400px' }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: '1.8rem', color: '#fff' }}>{selectedSymbol}</h1>
+          {currentPrice && (
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'baseline', marginTop: '5px' }}>
+              <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>₹{currentPrice.toFixed(2)}</span>
+              <span style={{ color: priceChange >= 0 ? '#10B981' : '#F43F5E', fontWeight: 'bold' }}>
+                {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({pctChange >= 0 ? '+' : ''}{pctChange.toFixed(2)}%)
+              </span>
+            </div>
+          )}
+        </div>
+        <div style={{ position: 'relative', width: '400px', marginLeft: 'auto' }}>
           <input 
             type="text" 
             placeholder="Search any NSE stock..." 
@@ -80,7 +96,7 @@ export default function Dashboard() {
 
       {/* Main Chart */}
       <div style={{ height: '400px', backgroundColor: '#1e1e1e', padding: '15px', borderRadius: '12px', border: '1px solid #333' }}>
-        {history ? <StockChart data={history} /> : <div style={{ color: '#888', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>Loading Chart...</div>}
+        {history ? <StockChart history={history} timeframe={timeframe} onTimeframeChange={setTimeframe} /> : <div style={{ color: '#888', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>Loading Chart...</div>}
       </div>
 
       {/* AI Insight Card below chart */}
