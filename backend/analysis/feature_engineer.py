@@ -35,7 +35,7 @@ def get_features(symbol: str, end_date: str = None) -> pd.DataFrame:
     start_date = (datetime.strptime(end_date, '%Y-%m-%d') - timedelta(days=365*2)).strftime('%Y-%m-%d')
     
     # Fetch historical data (which should hit the DB cache)
-    df = fetch_stock_data(symbol, start_date, end_date)
+    df = fetch_stock_data(symbol, period="2Y")
     if df is None or df.empty:
         return pd.DataFrame()
         
