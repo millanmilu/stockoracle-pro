@@ -11,7 +11,7 @@ export default function NewsPanel() {
   useEffect(() => {
     const fetchNewsAndSentiment = async () => {
       try {
-const API = import.meta.env.VITE_API_URL || '';
+const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
         const [newsRes, sentimentRes] = await Promise.all([
           axios.get(`${API}/api/stock/${selectedSymbol}/news`),
           axios.get(`${API}/api/stock/${selectedSymbol}/sentiment`) // Wait, I need an endpoint for sentiment! Or just take it from the feature row?

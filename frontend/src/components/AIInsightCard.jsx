@@ -9,7 +9,7 @@ export default function AIInsightCard() {
   useEffect(() => {
     const fetchInsights = async () => {
       try {
-const API = import.meta.env.VITE_API_URL || '';
+const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
         const [predRes, expRes] = await Promise.all([
           axios.get(`${API}/api/stock/${selectedSymbol}/predict`),
           axios.get(`${API}/api/stock/${selectedSymbol}/explain`)

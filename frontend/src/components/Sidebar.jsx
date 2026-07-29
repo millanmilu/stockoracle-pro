@@ -30,13 +30,13 @@ export default function Sidebar() {
 
   const handleRetrain = async () => {
     try {
-      const { data } = await axios.post(`${import.meta.env.VITE_API_URL || ''}/api/stock/${selectedSymbol}/train`);
+      const { data } = await axios.post(`${import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org'}/api/stock/${selectedSymbol}/train`);
       toast.success(`Training started for ${selectedSymbol}`);
       
       // Start polling
       const interval = setInterval(async () => {
         try {
-          const statusRes = await axios.get(`${import.meta.env.VITE_API_URL || ''}/api/task/${data.task_id}/status`);
+          const statusRes = await axios.get(`${import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org'}/api/task/${data.task_id}/status`);
           setTrainingStatus(statusRes.data);
           
           if (statusRes.data.status === 'completed') {
