@@ -382,3 +382,137 @@ body {
   .overlay-panel { width: 98vw; padding: 18px; }
   .dashboard-grid { grid-template-columns: 1fr; }
 }
+
+/* ── TERMINAL LAYOUT ── */
+.terminal-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  grid-template-rows: auto;
+  gap: 20px;
+  height: calc(100vh - 120px);
+}
+
+.terminal-chart-area {
+  display: flex;
+  flex-direction: column;
+  min-height: 400px;
+}
+
+.terminal-tools-area {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.terminal-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.ttab {
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.ttab:hover {
+  background: rgba(99,102,241,0.08);
+  color: var(--text-primary);
+}
+
+.ttab.active {
+  background: rgba(99,102,241,0.15);
+  color: var(--indigo);
+  border: 1px solid rgba(99,102,241,0.25);
+}
+
+.terminal-tab-content {
+  flex: 1;
+  padding: 16px;
+  overflow-y: auto;
+  background: var(--bg-card);
+}
+
+.watchlist {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+  padding: 16px 10px;
+}
+
+.watchlist-title {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-bottom: 8px;
+  padding-left: 10px;
+  letter-spacing: 0.05em;
+}
+
+.watchlist-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.watchlist-item:hover {
+  background: rgba(99,102,241,0.08);
+}
+
+.watchlist-item.active {
+  background: rgba(99,102,241,0.15);
+  color: var(--indigo);
+  font-weight: 600;
+}
+
+.header-stock-info {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-left: 20px;
+  border-left: 1px solid var(--border);
+  padding-left: 20px;
+}
+
+.h-ticker {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: var(--indigo);
+}
+
+.h-price {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: var(--text-primary);
+}
+
+.h-change {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 1100px) {
+  .terminal-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(400px, 1fr) auto;
+    height: auto;
+  }
+}

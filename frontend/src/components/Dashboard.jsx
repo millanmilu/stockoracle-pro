@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useStock } from '../hooks/useStock'
 import { useWebSocket } from '../hooks/useWebSocket'
-import { fmt, signalLabel, signalColor } from '../utils/formatters'
+import { fmt } from '../utils/formatters'
 import StockChart from './StockChart'
 import PredictionPanel from './PredictionPanel'
 import TechnicalPanel from './TechnicalPanel'
@@ -9,6 +9,9 @@ import MonteCarlo from './MonteCarlo'
 import AITraining from './AITraining'
 import Screener from './Screener'
 import BacktestPanel from './BacktestPanel'
+import PatternsPanel from './PatternsPanel'
+import LevelsPanel from './LevelsPanel'
+import VolatilityPanel from './VolatilityPanel'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -26,24 +29,27 @@ const POPULAR = [
 ]
 
 const NAV = [
-  { id: 'dashboard', icon: '📊', label: 'Dashboard' },
+  { id: 'terminal',  icon: '📈', label: 'Terminal'  },
   { id: 'screener',  icon: '🔍', label: 'Screener'  },
   { id: 'ailab',     icon: '🧠', label: 'AI Lab'    },
 ]
 
 export default function Dashboard() {
-  const [page, setPage]               = useState('dashboard')
+  const [page, setPage]               = useState('terminal')
   const [search, setSearch]           = useState('')
+  const [searchResults, setSearchResults] = useState([])
   const [showDropdown, setDropdown]   = useState(false)
   const [livePrices, setLivePrices]   = useState({})
-  const [selected, setSelected]       = useState(null)   // ticker string for detail overlay
+  
+  // Default to RELIANCE for the terminal view
+  const [selected, setSelected]       = useState('RELIANCE') 
   const [overlayTab, setOverlayTab]   = useState('prediction')
   const [detail, setDetail]           = useState({ info: null, history: null, prediction: null })
   const [timeframe, setTimeframe]     = useState('3M')
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [apiOnline, setApiOnline]     = useState(false)
 
-  const { fetchInfo, fetchHistory, fetchPredict } = useStock()
+  const { fetchInfo, fetchHistory, fetchPredict, searchStock, fetchAnomalies } = useStock()
 
   // WebSocket live prices
   const wsConnected = useWebSocket(msg => {
@@ -54,6 +60,26 @@ export default function Dashboard() {
   useEffect(() => {
     fetch(`${API}/api/health`).then(r => r.ok && setApiOnline(true)).catch(() => {})
   }, [])
+
+  // Debounced Universal Search
+  useEffect(() => {
+    if (search.trim().length === 0) {
+      setSearchResults([])
+      return
+    }
+    const timer = setTimeout(() => {
+      searchStock(search).then(res => {
+        if (res && res.found) {
+          setSearchResults([res])
+        } else {
+          // If not found in our DB, we can still show a fallback "Try NSE: SEARCH" option
+          // We assume AngelOne will handle it if it exists.
+          setSearchResults([{ ticker: search.toUpperCase(), name: `Search NSE for ${search.toUpperCase()}`, notFound: true }])
+        }
+      })
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [search, searchStock])
 
   // Load stock detail when selected changes
   useEffect(() => {
@@ -67,37 +93,24 @@ export default function Dashboard() {
     ]).then(([info, history, prediction]) => {
       setDetail({ info, history, prediction })
     }).finally(() => setLoadingDetail(false))
-  }, [selected])
+  }, [selected]) // eslint-disable-line
 
-  // Reload history when timeframe changes (within detail overlay)
+  // Reload history when timeframe changes
   useEffect(() => {
     if (!selected) return
     fetchHistory(selected, timeframe).then(history => setDetail(d => ({ ...d, history })))
-  }, [timeframe])
+  }, [timeframe]) // eslint-disable-line
 
-  const openDetail = (ticker) => {
+  const selectStock = (ticker) => {
     setSelected(ticker)
+    setPage('terminal') // switch to terminal if on another page
     setOverlayTab('prediction')
     setTimeframe('3M')
   }
 
-  const closeDetail = () => setSelected(null)
-
-  const searchResults = search.trim().length > 0
-    ? POPULAR.filter(s =>
-        s.ticker.startsWith(search.toUpperCase()) ||
-        s.name.toLowerCase().includes(search.toLowerCase())
-      )
-    : []
-
   const getDisplayPrice = (ticker, basePrice) => {
     const live = livePrices[ticker]
     return live ? live.price : basePrice
-  }
-
-  const getDisplayChange = (ticker, baseChange) => {
-    const live = livePrices[ticker]
-    return live ? live.change_pct : baseChange
   }
 
   return (
@@ -120,6 +133,30 @@ export default function Dashboard() {
           </button>
         ))}
 
+        <div className="watchlist">
+          <div className="watchlist-title">POPULAR WATCHLIST</div>
+          {POPULAR.map(s => {
+            const liveChange = livePrices[s.ticker]?.change_pct
+            const changeUp   = (liveChange ?? 0) >= 0
+            return (
+              <div 
+                key={s.ticker} 
+                className={`watchlist-item ${selected === s.ticker && page === 'terminal' ? 'active' : ''}`}
+                onClick={() => selectStock(s.ticker)}
+              >
+                <div style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {s.ticker}
+                </div>
+                {liveChange != null && (
+                  <div style={{ fontSize: '0.72rem', color: changeUp ? '#10B981' : '#F43F5E' }}>
+                    {changeUp ? '+' : ''}{liveChange.toFixed(2)}%
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
         <div className="sidebar-bottom">
           <div className="api-status">
             <div className={`status-dot ${apiOnline ? '' : 'offline'}`} />
@@ -140,10 +177,10 @@ export default function Dashboard() {
             <span className="search-icon">🔍</span>
             <input
               className="search-input"
-              placeholder="Search ticker or company…"
+              placeholder="Search NSE ticker..."
               value={search}
               onChange={e => { setSearch(e.target.value); setDropdown(true) }}
-              onBlur={() => setTimeout(() => setDropdown(false), 150)}
+              onBlur={() => setTimeout(() => setDropdown(false), 200)}
               onFocus={() => search && setDropdown(true)}
             />
             {showDropdown && searchResults.length > 0 && (
@@ -152,15 +189,35 @@ export default function Dashboard() {
                   <div
                     key={s.ticker}
                     className="search-item"
-                    onMouseDown={() => { openDetail(s.ticker); setSearch(''); setDropdown(false) }}
+                    onMouseDown={() => { 
+                      selectStock(s.ticker); 
+                      setSearch(''); 
+                      setDropdown(false);
+                    }}
                   >
                     <span className="search-item-ticker">{s.ticker}</span>
-                    <span className="search-item-name">{s.name}</span>
+                    <span className="search-item-name" style={{ color: s.notFound ? '#F59E0B' : '#9CA3AF'}}>
+                      {s.name}
+                    </span>
                   </div>
                 ))}
               </div>
             )}
           </div>
+          
+          {/* Header Info for Selected Stock in Terminal */}
+          {page === 'terminal' && selected && detail.info && (
+            <div className="header-stock-info">
+              <div className="h-ticker">{selected}</div>
+              <div className="h-price">
+                {fmt.price(getDisplayPrice(selected, detail.info.current_price))}
+              </div>
+              <div className="h-change" style={{ color: (livePrices[selected]?.change_pct ?? 0) >= 0 ? '#10B981' : '#F43F5E' }}>
+                {livePrices[selected] ? `${livePrices[selected].change_pct >= 0 ? '+' : ''}${livePrices[selected].change_pct.toFixed(2)}%` : ''}
+              </div>
+            </div>
+          )}
+
           <span style={{ color: '#4B5563', fontSize: '0.78rem', marginLeft: 'auto', fontFamily: 'JetBrains Mono, monospace' }}>
             {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
           </span>
@@ -169,53 +226,60 @@ export default function Dashboard() {
         {/* ── PAGE CONTENT ── */}
         <div className="page-area">
 
-          {/* DASHBOARD PAGE */}
-          {page === 'dashboard' && (
-            <>
-              <div style={{ marginBottom: 24 }}>
-                <h1 style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: '1.5rem', fontWeight: 800, marginBottom: 4 }}>
-                  Market Overview
-                </h1>
-                <p style={{ color: '#4B5563', fontSize: '0.85rem' }}>
-                  Real-time AI predictions powered by PyTorch BiLSTM + Attention
-                </p>
-              </div>
-              <div className="dashboard-grid">
-                {POPULAR.map(s => {
-                  const livePrice  = livePrices[s.ticker]?.price
-                  const liveChange = livePrices[s.ticker]?.change_pct
-                  const changeUp   = (liveChange ?? 0) >= 0
+          {/* TERMINAL PAGE */}
+          {page === 'terminal' && (
+            <div className="terminal-layout">
+              {loadingDetail && !detail.history ? (
+                 <div className="spinner" style={{ gridColumn: '1 / -1', margin: '40px auto' }} />
+              ) : (
+                <>
+                  <div className="terminal-chart-area">
+                    <div className="card" style={{ height: '100%', padding: '16px' }}>
+                      <StockChart
+                        history={detail.history}
+                        prediction={detail.prediction}
+                        timeframe={timeframe}
+                        onTimeframeChange={setTimeframe}
+                      />
+                    </div>
+                  </div>
 
-                  return (
-                    <div key={s.ticker} className="stock-card" onClick={() => openDetail(s.ticker)}>
-                      <div className="stock-card-header">
-                        <div>
-                          <div className="stock-card-ticker">{s.ticker}</div>
-                          <div className="stock-card-name">{s.name}</div>
-                        </div>
-                        <div className="ai-badge">
-                          <div className="ai-badge-score">AI</div>
-                          <div className="ai-badge-label">Live</div>
-                        </div>
+                  <div className="terminal-tools-area">
+                    <div className="card" style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
+                      <div className="terminal-tabs">
+                        {[
+                          { id: 'prediction', label: '🤖 Predict' },
+                          { id: 'patterns',   label: '🕯️ Patterns' },
+                          { id: 'levels',     label: '📐 Levels'   },
+                          { id: 'volatility', label: '🌊 Volat'    },
+                          { id: 'technical',  label: '📈 Techs'    },
+                          { id: 'montecarlo', label: '🎲 MonteC'   },
+                          { id: 'anomalies',  label: '⚡ Anom'      },
+                          { id: 'backtest',   label: '📉 B-Test'   },
+                        ].map(t => (
+                          <button
+                            key={t.id}
+                            className={`ttab ${overlayTab === t.id ? 'active' : ''}`}
+                            onClick={() => setOverlayTab(t.id)}
+                          >{t.label}</button>
+                        ))}
                       </div>
-                      <div style={{ marginTop: 8 }}>
-                        <span className="stock-card-price">
-                          {livePrice ? fmt.price(livePrice) : '—'}
-                        </span>
-                        {liveChange != null && (
-                          <span className={`stock-card-change ${changeUp ? 'change-up' : 'change-down'}`}>
-                            {liveChange >= 0 ? '+' : ''}{liveChange.toFixed(3)}%
-                          </span>
-                        )}
-                      </div>
-                      <div style={{ marginTop: 12 }}>
-                        <span style={{ fontSize: '0.75rem', color: '#4B5563' }}>Click for AI analysis →</span>
+                      
+                      <div className="terminal-tab-content">
+                        {overlayTab === 'prediction' && <PredictionPanel prediction={detail.prediction} ticker={selected} />}
+                        {overlayTab === 'patterns'   && <PatternsPanel ticker={selected} />}
+                        {overlayTab === 'levels'     && <LevelsPanel ticker={selected} />}
+                        {overlayTab === 'volatility' && <VolatilityPanel ticker={selected} />}
+                        {overlayTab === 'technical'  && <TechnicalPanel history={detail.history} />}
+                        {overlayTab === 'montecarlo' && <MonteCarlo ticker={selected} />}
+                        {overlayTab === 'anomalies'  && <AnomalyTab ticker={selected} fetchAnomalies={fetchAnomalies} />}
+                        {overlayTab === 'backtest'   && <BacktestPanel ticker={selected} />}
                       </div>
                     </div>
-                  )
-                })}
-              </div>
-            </>
+                  </div>
+                </>
+              )}
+            </div>
           )}
 
           {/* SCREENER PAGE */}
@@ -228,7 +292,7 @@ export default function Dashboard() {
                 <p style={{ color: '#4B5563', fontSize: '0.85rem' }}>Filter stocks by AI signal and predicted return</p>
               </div>
               <div className="card">
-                <Screener onSelect={(t) => { openDetail(t); setPage('dashboard') }} />
+                <Screener onSelect={selectStock} />
               </div>
             </>
           )}
@@ -249,110 +313,17 @@ export default function Dashboard() {
           )}
         </div>
       </div>
-
-      {/* ── STOCK DETAIL OVERLAY ── */}
-      {selected && (
-        <div className="overlay-backdrop" onClick={e => e.target === e.currentTarget && closeDetail()}>
-          <div className="overlay-panel">
-            {/* Header */}
-            <div className="overlay-header">
-              <div>
-                <div className="overlay-ticker">{selected}</div>
-                <div className="overlay-name">{detail.info?.name || selected}</div>
-                {detail.info && (
-                  <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
-                    <span style={{ color: '#4B5563', fontSize: '0.78rem' }}>
-                      {detail.info.sector} · {detail.info.exchange}
-                    </span>
-                    <span style={{ color: '#4B5563', fontSize: '0.78rem' }}>
-                      Mkt Cap: {fmt.big(detail.info.market_cap)}
-                    </span>
-                    <span style={{ color: '#4B5563', fontSize: '0.78rem' }}>
-                      Vol: {fmt.vol(detail.info.volume)}
-                    </span>
-                  </div>
-                )}
-              </div>
-              <button className="overlay-close" onClick={closeDetail}>✕</button>
-            </div>
-
-            {/* Live Price */}
-            {detail.info && (
-              <div className="price-row">
-                <span className="price-big">{fmt.price(getDisplayPrice(selected, detail.info.current_price))}</span>
-                <span className="price-change" style={{ color: (livePrices[selected]?.change_pct ?? 0) >= 0 ? '#10B981' : '#F43F5E' }}>
-                  {livePrices[selected] ? `${livePrices[selected].change_pct >= 0 ? '+' : ''}${livePrices[selected].change_pct.toFixed(3)}%` : ''}
-                </span>
-                {wsConnected && (
-                  <span style={{ fontSize: '0.7rem', color: '#10B981', marginLeft: 8 }}>● LIVE</span>
-                )}
-              </div>
-            )}
-
-            {/* Tabs */}
-            <div className="overlay-tabs">
-              {[
-                { id: 'prediction', label: '🤖 AI Prediction' },
-                { id: 'chart',      label: '📈 Price Chart'   },
-                { id: 'technical',  label: '📐 Technical'     },
-                { id: 'montecarlo', label: '🎲 Monte Carlo'   },
-                { id: 'anomalies',  label: '⚡ Anomalies'     },
-                { id: 'backtest',   label: '📉 Backtest'      },
-              ].map(t => (
-                <button
-                  key={t.id}
-                  className={`otab ${overlayTab === t.id ? 'active' : ''}`}
-                  onClick={() => setOverlayTab(t.id)}
-                >{t.label}</button>
-              ))}
-            </div>
-
-            {/* Tab Content */}
-            {loadingDetail
-              ? <div className="spinner" />
-              : (
-                <>
-                  {overlayTab === 'prediction' && (
-                    <PredictionPanel prediction={detail.prediction} ticker={selected} />
-                  )}
-                  {overlayTab === 'chart' && (
-                    <StockChart
-                      history={detail.history}
-                      prediction={detail.prediction}
-                      timeframe={timeframe}
-                      onTimeframeChange={setTimeframe}
-                    />
-                  )}
-                  {overlayTab === 'technical' && (
-                    <TechnicalPanel history={detail.history} />
-                  )}
-                  {overlayTab === 'montecarlo' && (
-                    <MonteCarlo ticker={selected} />
-                  )}
-                  {overlayTab === 'anomalies' && (
-                    <AnomalyTab ticker={selected} />
-                  )}
-                  {overlayTab === 'backtest' && (
-                    <BacktestPanel ticker={selected} />
-                  )}
-                </>
-              )
-            }
-          </div>
-        </div>
-      )}
     </div>
   )
 }
 
 // Inline Anomaly Tab
-function AnomalyTab({ ticker }) {
-  const { fetchAnomalies } = useStock()
+function AnomalyTab({ ticker, fetchAnomalies }) {
   const [anomalies, setAnomalies] = useState(null)
 
   useEffect(() => {
     fetchAnomalies(ticker).then(setAnomalies)
-  }, [ticker])
+  }, [ticker, fetchAnomalies])
 
   if (!anomalies) return <div className="spinner" />
   if (anomalies.length === 0) return (
@@ -365,7 +336,7 @@ function AnomalyTab({ ticker }) {
   return (
     <div>
       <p style={{ color: '#4B5563', fontSize: '0.82rem', marginBottom: 16 }}>
-        Showing top {anomalies.slice(0, 10).length} anomalous daily return events (Z-score threshold: 2.2σ)
+        Showing top {Math.min(anomalies.length, 10)} anomalous daily return events (Z-score threshold: 2.2σ)
       </p>
       {anomalies.slice(0, 10).map((a, i) => (
         <div key={i} className={`anomaly-item ${a.ret >= 0 ? 'positive' : ''}`}>

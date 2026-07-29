@@ -28,6 +28,9 @@ from backend.data.database import (
 from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.monte_carlo import run_monte_carlo_simulation
 from backend.analysis.anomaly import detect_anomalies
+from backend.analysis.patterns import get_pattern_summary
+from backend.analysis.levels import calculate_support_resistance
+from backend.analysis.volatility_forecast import calculate_volatility_forecast
 from backend.ml.predictor import StockPredictor
 from backend.analysis.backtester import run_backtest
 
@@ -150,6 +153,71 @@ def get_stock_history(ticker: str, timeframe: str = "3M"):
 
     enriched_df = enrich_stock_dataframe(df)
     return enriched_df.to_dict(orient="records")
+
+
+@app.get("/api/stock/search/{query}")
+def search_stock(query: str):
+    """
+    Validates an NSE ticker and returns basic info so the frontend can open
+    any stock — not just the hardcoded popular 10.
+    Returns {found: bool, ticker: str, name: str} so the UI can decide.
+    """
+    t = query.upper().strip()
+    if not t or len(t) > 20:
+        raise HTTPException(status_code=422, detail="Invalid ticker format.")
+
+    # Try to resolve via ScripMaster first (no API call needed)
+    from backend.data.fetcher import get_token_info
+    tok = get_token_info(t)
+    if tok:
+        return {"found": True, "ticker": t, "name": tok.get("name", t), "exchange": tok.get("exch_seg", "NSE")}
+
+    # ScripMaster not loaded yet — try fetching info directly
+    info = fetch_company_info(t)
+    if info:
+        return {"found": True, "ticker": t, "name": info.get("name", t), "exchange": info.get("exchange", "NSE")}
+
+    return {"found": False, "ticker": t, "name": t, "exchange": "NSE"}
+
+
+@app.get("/api/stock/{ticker}/patterns")
+def get_patterns(ticker: str, days: int = 45):
+    """Returns detected candlestick patterns for the last `days` sessions."""
+    t = ticker.upper().strip()
+    df = fetch_stock_data(t, period="6M")
+    if df is None or df.empty:
+        if not get_session_status():
+            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
+        raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
+    return get_pattern_summary(df, lookback=min(days, len(df)))
+
+
+@app.get("/api/stock/{ticker}/levels")
+def get_levels(ticker: str):
+    """Returns support, resistance, pivot points, and Fibonacci retracement levels."""
+    t = ticker.upper().strip()
+    df = fetch_stock_data(t, period="1Y")
+    if df is None or df.empty:
+        if not get_session_status():
+            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
+        raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
+    if len(df) < 15:
+        raise HTTPException(status_code=400, detail="Insufficient data to compute levels.")
+    return calculate_support_resistance(df)
+
+
+@app.get("/api/stock/{ticker}/volatility")
+def get_volatility(ticker: str):
+    """Returns GARCH(1,1) volatility forecast and rolling historical volatility."""
+    t = ticker.upper().strip()
+    df = fetch_stock_data(t, period="1Y")
+    if df is None or df.empty:
+        if not get_session_status():
+            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
+        raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
+    if len(df) < 25:
+        raise HTTPException(status_code=400, detail="Insufficient data for volatility forecast.")
+    return calculate_volatility_forecast(df)
 
 @app.get("/api/stock/{ticker}/montecarlo")
 def get_monte_carlo(ticker: str):

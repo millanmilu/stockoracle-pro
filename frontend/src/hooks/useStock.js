@@ -75,5 +75,38 @@ export function useStock() {
     } catch (e) { return null }
   }, [])
 
-  return { loading, error, fetchInfo, fetchHistory, fetchPredict, fetchMonteCarlo, fetchAnomalies, fetchScreener, fetchBacktest, startTraining, fetchTrainingStatus }
+  const fetchPatterns = useCallback(async (ticker) => {
+    try {
+      const { data } = await api.get(`/api/stock/${ticker}/patterns`)
+      return data
+    } catch (e) { return null }
+  }, [])
+
+  const fetchLevels = useCallback(async (ticker) => {
+    try {
+      const { data } = await api.get(`/api/stock/${ticker}/levels`)
+      return data
+    } catch (e) { return null }
+  }, [])
+
+  const fetchVolatility = useCallback(async (ticker) => {
+    try {
+      const { data } = await api.get(`/api/stock/${ticker}/volatility`)
+      return data
+    } catch (e) { return null }
+  }, [])
+
+  const searchStock = useCallback(async (query) => {
+    try {
+      const { data } = await api.get(`/api/stock/search/${query.toUpperCase()}`)
+      return data
+    } catch (e) { return { found: false, ticker: query.toUpperCase(), name: query.toUpperCase() } }
+  }, [])
+
+  return {
+    loading, error,
+    fetchInfo, fetchHistory, fetchPredict, fetchMonteCarlo, fetchAnomalies,
+    fetchScreener, fetchBacktest, fetchPatterns, fetchLevels, fetchVolatility,
+    searchStock, startTraining, fetchTrainingStatus
+  }
 }
