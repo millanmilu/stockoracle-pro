@@ -11,9 +11,10 @@ export default function NewsPanel() {
   useEffect(() => {
     const fetchNewsAndSentiment = async () => {
       try {
+const API = import.meta.env.VITE_API_URL || '';
         const [newsRes, sentimentRes] = await Promise.all([
-          axios.get(`/api/stock/${selectedSymbol}/news`),
-          axios.get(`/api/stock/${selectedSymbol}/sentiment`) // Wait, I need an endpoint for sentiment! Or just take it from the feature row?
+          axios.get(`${API}/api/stock/${selectedSymbol}/news`),
+          axios.get(`${API}/api/stock/${selectedSymbol}/sentiment`) // Wait, I need an endpoint for sentiment! Or just take it from the feature row?
         ]);
         setNews(newsRes.data.slice(0, 5));
         setSentimentScore(sentimentRes.data.score || 0);
@@ -27,7 +28,7 @@ export default function NewsPanel() {
     
     const fetchNews = async () => {
       try {
-        const { data } = await axios.get(`/api/stock/${selectedSymbol}/news`);
+        const { data } = await axios.get(`${import.meta.env.VITE_API_URL || ''}/api/stock/${selectedSymbol}/news`);
         // I will assume the backend returns { articles: [], sentiment: 0 }
         // If not, I'll just fake it or add it.
         // Actually, the user asked me to create `analysis/sentiment.py` returning average score.

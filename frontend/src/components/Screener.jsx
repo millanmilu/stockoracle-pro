@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import axios from 'axios'
 import { fmt, signalLabel, signalColor } from '../utils/formatters'
 
-const API = import.meta.env.VITE_API_URL || ''
+const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
 
 export default function Screener({ onSelect }) {
   const [rows, setRows]       = useState([])

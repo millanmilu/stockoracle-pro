@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { useState, useCallback } from 'react'
 
-const API = import.meta.env.VITE_API_URL || ''
+const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
 const api = axios.create({ baseURL: API, timeout: 30000 })
 
 export function useStock() {

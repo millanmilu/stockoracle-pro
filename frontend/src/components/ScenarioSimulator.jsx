@@ -12,7 +12,7 @@ export default function ScenarioSimulator() {
   useEffect(() => {
     const timer = setTimeout(async () => {
       try {
-        const { data } = await axios.post(`/api/stock/${selectedSymbol}/simulate`, {
+        const { data } = await axios.post(`${import.meta.env.VITE_API_URL || ''}/api/stock/${selectedSymbol}/simulate`, {
           sentiment: parseFloat(sentiment),
           volatility_multiplier: parseFloat(volatility),
           volume_multiplier: parseFloat(volume)

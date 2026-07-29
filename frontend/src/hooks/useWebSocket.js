@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 
-const API = import.meta.env.VITE_API_URL || ''
+const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
 
 export function useWebSocket(onMessage) {
   const wsRef = useRef(null)
