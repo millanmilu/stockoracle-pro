@@ -115,8 +115,10 @@ def predict_future(symbol: str, override_features: dict = None) -> dict:
     """
     model_path = os.path.join(MODEL_DIR, f"{symbol}.json")
     if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model for {symbol} not trained yet.")
-        
+        print(f"⚠️ Model for {symbol} not trained yet. Auto-training now...")
+        train_pipeline(symbol)
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model for {symbol} failed to train.")
     with open(model_path, 'r') as f:
         bundle = json.load(f)
         
