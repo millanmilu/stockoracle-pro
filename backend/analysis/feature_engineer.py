@@ -5,7 +5,26 @@ from datetime import datetime, timedelta
 from backend.data.fetcher import fetch_stock_data
 from backend.analysis.sentiment import fetch_and_score_sentiment
 
-@lru_cache(maxsize=128)
+import time
+from functools import wraps
+
+def ttl_cache(ttl_seconds):
+    cache = {}
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            key = str(args) + str(kwargs)
+            if key in cache:
+                result, timestamp = cache[key]
+                if time.time() - timestamp < ttl_seconds:
+                    return result.copy() if isinstance(result, pd.DataFrame) else result
+            result = func(*args, **kwargs)
+            cache[key] = (result.copy() if isinstance(result, pd.DataFrame) else result, time.time())
+            return result
+        return wrapper
+    return decorator
+
+@ttl_cache(ttl_seconds=300)
 def get_features(symbol: str, end_date: str = None) -> pd.DataFrame:
     """
     Fetches historical OHLCV data, computes 25 features (OHLCV + 20 engineered),
