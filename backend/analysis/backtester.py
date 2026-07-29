@@ -1,35 +1,74 @@
+import os
+import json
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, List
-from backend.ml.predictor import StockPredictor
+from typing import Dict, Any
+import xgboost as xgb
+import tempfile
+from backend.analysis.feature_engineer import get_features
+from backend.analysis.trainer import train_pipeline
+
+MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
 
 def run_backtest(df: pd.DataFrame, ticker: str, initial_capital: float = 100000.0) -> Dict[str, Any]:
     """
-    Backtests the AI Ensemble model strategy on historical stock data.
-    Simulates trades based on model forecast signals and calculates standard metrics:
-    Win Rate, CAGR, Sharpe Ratio, Max Drawdown, and Cumulative Returns.
+    Backtests the XGBoost + ElasticNet Ensemble model strategy on historical stock data.
+    Simulates trades based on model forecast signals and calculates standard metrics.
     """
-    # 1. Initialize predictor
-    predictor = StockPredictor(window_size=20)
-    
-    # 2. Check if a trained model exists; if not, train a quick model (15 epochs) for backtesting
-    try:
-        # Load model and verify by running on a small sub-slice
-        _ = predictor.load_and_predict(df.iloc[:predictor.window_size + 10], ticker)
-    except Exception:
-        print(f"⚠️ No model found for backtest of {ticker} — training a quick ensemble...")
-        # Train model with 15 epochs to initialize weights
-        predictor.train_model(df, ticker, epochs=15)
+    # 1. Fetch full engineered features
+    features_df = get_features(ticker)
+    if features_df.empty:
+        return {"error": "Insufficient data to run backtest."}
+        
+    model_path = os.path.join(MODEL_DIR, f"{ticker}.json")
+    if not os.path.exists(model_path):
+        print(f"⚠️ No model found for backtest of {ticker} — training XGBoost ensemble...")
+        try:
+            train_pipeline(ticker)
+        except Exception as e:
+            return {"error": f"Failed to train model for backtest: {str(e)}"}
+            
+    if not os.path.exists(model_path):
+        return {"error": "Model training failed, cannot backtest."}
 
-    # 3. Calculate sliding window predictions over the backtest period
-    # To keep execution under reasonable limits, we test on the last 120 trading days
-    backtest_len = min(120, len(df) - predictor.window_size - 7)
+    # Load model bundle
+    with open(model_path, 'r') as f:
+        bundle = json.load(f)
+        
+    en_features = bundle['elasticnet']['features']
+    
+    # 2. Select backtest window (last 120 trading days)
+    backtest_len = min(120, len(features_df) - 7)
     if backtest_len <= 0:
         return {"error": "Insufficient data to run backtest. Need at least 30 rows."}
         
-    start_idx = len(df) - backtest_len
+    sub_df = features_df.iloc[-backtest_len:].copy()
     
-    # Trade tracking states
+    # 3. Vectorized Prediction
+    # XGBoost
+    xgb_json = bundle.get("xgboost")
+    booster = xgb.Booster()
+    with tempfile.NamedTemporaryFile('w', delete=False) as tf:
+        json.dump(xgb_json, tf)
+        temp_name = tf.name
+    try:
+        booster.load_model(temp_name)
+    finally:
+        os.remove(temp_name)
+        
+    X_matrix = sub_df[en_features]
+    dtest = xgb.DMatrix(X_matrix)
+    xgb_preds = booster.predict(dtest)
+    
+    # ElasticNet
+    coef = np.array(bundle['elasticnet']['coef'])
+    intercept = bundle['elasticnet']['intercept']
+    en_preds = np.dot(X_matrix.values, coef) + intercept
+    
+    # Final predictions
+    final_preds = xgb_preds + (0.15 * en_preds)
+    
+    # 4. Simulate Trades
     cash = initial_capital
     shares = 0
     portfolio_value = []
@@ -40,18 +79,15 @@ def run_backtest(df: pd.DataFrame, ticker: str, initial_capital: float = 100000.
     wins = 0
     buy_price = 0.0
     
-    for idx in range(start_idx, len(df)):
-        current_row = df.iloc[idx]
+    # Iterate through the window to simulate trading
+    for idx in range(len(sub_df)):
+        current_row = sub_df.iloc[idx]
         current_close = float(current_row["close"])
-        current_date = str(current_row["date"])
+        current_date = str(current_row.name.strftime('%Y-%m-%d'))
+        pred_target_price = final_preds[idx]
         
-        # Build historical slice up to this day to prevent look-ahead bias
-        sub_df = df.iloc[:idx + 1]
-        
-        try:
-            pred_return = predictor.load_and_predict(sub_df, ticker)
-        except Exception:
-            pred_return = 0.0
+        # Predicted return
+        pred_return = (pred_target_price - current_close) / current_close
             
         # Manage trade position
         if shares > 0:
@@ -75,7 +111,7 @@ def run_backtest(df: pd.DataFrame, ticker: str, initial_capital: float = 100000.
         dates.append(current_date)
         close_prices.append(current_close)
 
-    # 4. Compute Portfolio Performance Analytics
+    # 5. Compute Portfolio Performance Analytics
     portfolio_value = np.array(portfolio_value)
     close_prices = np.array(close_prices)
     
