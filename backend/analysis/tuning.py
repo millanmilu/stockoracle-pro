@@ -1,0 +1,39 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import RandomizedSearchCV
+import xgboost as xgb
+
+def tune_xgboost(X: pd.DataFrame, y: pd.Series) -> dict:
+    """
+    Performs a RandomizedSearchCV on an XGBoost Regressor with 10 iterations and 3-fold CV.
+    Tunes max_depth, learning_rate, and subsample.
+    """
+    # Define the parameter grid
+    param_dist = {
+        'max_depth': np.arange(3, 11),  # 3 to 10
+        'learning_rate': np.linspace(0.01, 0.3, 30),
+        'subsample': np.linspace(0.6, 1.0, 10)
+    }
+    
+    # Initialize the base model
+    # Using n_estimators=100 for speed as requested (lightweight)
+    base_model = xgb.XGBRegressor(n_estimators=100, objective='reg:squarederror', random_state=42)
+    
+    # Setup RandomizedSearchCV
+    # 10 iterations, 3-fold CV
+    random_search = RandomizedSearchCV(
+        estimator=base_model,
+        param_distributions=param_dist,
+        n_iter=10,
+        cv=3,
+        scoring='neg_mean_absolute_error',
+        n_jobs=-1,  # Use all available CPU cores
+        random_state=42,
+        verbose=0
+    )
+    
+    # Fit the search
+    random_search.fit(X, y)
+    
+    # Return the best parameters
+    return random_search.best_params_

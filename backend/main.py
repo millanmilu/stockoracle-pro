@@ -600,3 +600,13 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+@app.post("/api/stock/{symbol}/train")
+def train_model_endpoint(symbol: str):
+    """Runs the lightweight CPU-only feature generation, tuning, and XGBoost/ElasticNet ensemble training pipeline."""
+    try:
+        from backend.analysis.predictor import train_pipeline
+        result = train_pipeline(symbol)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
