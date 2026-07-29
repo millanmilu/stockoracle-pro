@@ -8,8 +8,14 @@ export default function ScenarioSimulator() {
   const [volatility, setVolatility] = useState(1);
   const [volume, setVolume] = useState(1);
 
+  const [initialLoad, setInitialLoad] = useState(true);
+
   // Debounce simulation requests
   useEffect(() => {
+    if (initialLoad) {
+      setInitialLoad(false);
+      return;
+    }
     const timer = setTimeout(async () => {
       try {
         const { data } = await axios.post(`${import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org'}/api/stock/${selectedSymbol}/simulate`, {

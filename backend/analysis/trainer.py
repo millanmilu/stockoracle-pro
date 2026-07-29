@@ -74,9 +74,9 @@ def train_pipeline(symbol: str) -> dict:
     sorted_importance = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:5]
     top_features = {k: float(v) for k, v in sorted_importance}
     
-    # 6. Save Models
     # Save XGBoost natively to a temp file then bundle with EN params
-    temp_xgb_path = os.path.join(MODEL_DIR, f"{symbol}_temp.json")
+    import uuid
+    temp_xgb_path = os.path.join(MODEL_DIR, f"{symbol}_temp_{uuid.uuid4().hex}.json")
     xgb_model.save_model(temp_xgb_path)
     
     with open(temp_xgb_path, 'r') as f:

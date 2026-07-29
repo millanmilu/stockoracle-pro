@@ -10,10 +10,10 @@ export default function AIInsightCard() {
     const fetchInsights = async () => {
       try {
 const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
-        const [predRes, expRes] = await Promise.all([
-          axios.get(`${API}/api/stock/${selectedSymbol}/predict`),
-          axios.get(`${API}/api/stock/${selectedSymbol}/explain`)
-        ]);
+        // Await predict FIRST, which will auto-train the model if it doesn't exist
+        const predRes = await axios.get(`${API}/api/stock/${selectedSymbol}/predict`);
+        // Then await explain, which will safely find the newly trained model
+        const expRes = await axios.get(`${API}/api/stock/${selectedSymbol}/explain`);
         setPredictionData(predRes.data);
         setExplainData(expRes.data);
       } catch (err) {
