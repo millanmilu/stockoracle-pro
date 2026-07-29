@@ -47,7 +47,9 @@ export default function Dashboard() {
   const [detail, setDetail]           = useState({ info: null, history: null, prediction: null })
   const [timeframe, setTimeframe]     = useState('3M')
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [detailError, setDetailError] = useState(null)
   const [apiOnline, setApiOnline]     = useState(false)
+  const detailRequestRef = useRef(0)
 
   const { fetchInfo, fetchHistory, fetchPredict, searchStock, fetchAnomalies } = useStock()
 
@@ -84,21 +86,33 @@ export default function Dashboard() {
   // Load stock detail when selected changes
   useEffect(() => {
     if (!selected) return
+    const requestId = ++detailRequestRef.current
     setLoadingDetail(true)
+    setDetailError(null)
     setDetail({ info: null, history: null, prediction: null })
     Promise.all([
       fetchInfo(selected),
       fetchHistory(selected, timeframe),
       fetchPredict(selected),
     ]).then(([info, history, prediction]) => {
+      if (requestId !== detailRequestRef.current) return
       setDetail({ info, history, prediction })
-    }).finally(() => setLoadingDetail(false))
+      if (!info && !history && !prediction) {
+        setDetailError(`Unable to load data for ${selected}. Please try again.`)
+      }
+    }).finally(() => {
+      if (requestId === detailRequestRef.current) setLoadingDetail(false)
+    })
   }, [selected]) // eslint-disable-line
 
   // Reload history when timeframe changes
   useEffect(() => {
     if (!selected) return
-    fetchHistory(selected, timeframe).then(history => setDetail(d => ({ ...d, history })))
+    let active = true
+    fetchHistory(selected, timeframe).then(history => {
+      if (active) setDetail(d => ({ ...d, history }))
+    })
+    return () => { active = false }
   }, [timeframe]) // eslint-disable-line
 
   const selectStock = (ticker) => {
@@ -231,6 +245,10 @@ export default function Dashboard() {
             <div className="terminal-layout">
               {loadingDetail && !detail.history ? (
                  <div className="spinner" style={{ gridColumn: '1 / -1', margin: '40px auto' }} />
+              ) : detailError ? (
+                <div className="empty-state" style={{ gridColumn: '1 / -1' }}>
+                  <div className="empty-state-text">{detailError}</div>
+                </div>
               ) : (
                 <>
                   <div className="terminal-chart-area">

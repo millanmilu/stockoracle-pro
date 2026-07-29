@@ -46,7 +46,7 @@ export default function PredictionPanel({ prediction }) {
             </span>
           </div>
           <div className="pred-return" style={{ color: signalColor(signal), marginTop: 8 }}>
-            {model_trained ? '⚡ LSTM Active' : '📐 Rule-Based'}
+              {model_trained ? 'AI Ensemble Active' : 'Rule-Based'}
           </div>
         </div>
       </div>
@@ -60,7 +60,7 @@ export default function PredictionPanel({ prediction }) {
           borderRadius: 12, display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center'
         }}>
           <div>
-            <div style={{ fontSize: '0.72rem', color: '#6B7280', marginBottom: 2 }}>LOWER BAND (1σ)</div>
+            <div style={{ fontSize: '0.72rem', color: '#6B7280', marginBottom: 2 }}>LOWER 95% RANGE</div>
             <div style={{ fontFamily: 'JetBrains Mono, monospace', color: '#F43F5E', fontWeight: 700, fontSize: '0.92rem' }}>
               {fmt.price(predicted_lower_price_7d)}
             </div>
@@ -72,7 +72,7 @@ export default function PredictionPanel({ prediction }) {
             </div>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '0.72rem', color: '#6B7280', marginBottom: 2 }}>UPPER BAND (1σ)</div>
+            <div style={{ fontSize: '0.72rem', color: '#6B7280', marginBottom: 2 }}>UPPER 95% RANGE</div>
             <div style={{ fontFamily: 'JetBrains Mono, monospace', color: '#10B981', fontWeight: 700, fontSize: '0.92rem' }}>
               {fmt.price(predicted_upper_price_7d)}
             </div>
@@ -120,10 +120,9 @@ export default function PredictionPanel({ prediction }) {
         color: model_trained ? '#10B981' : '#F59E0B'
       }}>
         {model_trained
-          ? '✅ Predictions powered by trained PyTorch BiLSTM + Attention model'
-          : '⚠️ Using rule-based fallback — go to AI Lab to train the LSTM model for this ticker'}
+          ? 'Predictions use the trained BiLSTM, Transformer, and gradient-boosting ensemble.'
+          : 'Using a rule-based fallback — train a model in AI Lab for this ticker.'}
       </div>
     </div>
   )
 }
-

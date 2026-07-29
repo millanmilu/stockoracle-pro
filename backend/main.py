@@ -1,5 +1,5 @@
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -41,10 +41,17 @@ async def lifespan(app: FastAPI):
     # Authenticate with Angel One on startup
     ensure_session()
     # Start live price broadcast
-    asyncio.create_task(websocket_price_broadcast_loop())
+    price_task = asyncio.create_task(websocket_price_broadcast_loop())
     # Prefetch historical data for all popular tickers in background
-    asyncio.create_task(prefetch_all_tickers())
-    yield
+    prefetch_task = asyncio.create_task(prefetch_all_tickers())
+    try:
+        yield
+    finally:
+        for task in (price_task, prefetch_task):
+            task.cancel()
+        for task in (price_task, prefetch_task):
+            with suppress(asyncio.CancelledError):
+                await task
 
 
 async def prefetch_all_tickers():
@@ -55,7 +62,7 @@ async def prefetch_all_tickers():
     """
     import asyncio as _asyncio
     print("⏳ Starting background prefetch of historical data for all tickers...")
-    loop = _asyncio.get_event_loop()
+    loop = _asyncio.get_running_loop()
     for ticker in popular_tickers:
         try:
             # Run blocking fetch in thread pool to not block event loop
@@ -442,7 +449,7 @@ async def get_screener_list(signal: str = "", min_score: int = 0):
                     continue
             return fresh_results
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         cached_results = await loop.run_in_executor(None, _build_screener_cache)
         save_screener_results(cached_results)
 
@@ -466,15 +473,19 @@ class ConnectionManager:
         self.active_connections.append(websocket)
         
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
         
     async def broadcast(self, message: dict):
+        disconnected = []
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
             except Exception:
                 # Connection might have closed without clean handshake
-                continue
+                disconnected.append(connection)
+        for connection in disconnected:
+            self.disconnect(connection)
 
 manager = ConnectionManager()
 

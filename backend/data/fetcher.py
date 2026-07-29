@@ -191,7 +191,8 @@ def _get_cached(key: str):
     if key in _cache:
         data, expiry = _cache[key]
         if datetime.now() < expiry:
-            return data
+            # DataFrames are mutable; callers must not mutate the cache entry.
+            return data.copy(deep=True) if isinstance(data, pd.DataFrame) else data
         del _cache[key]
     return None
 
@@ -203,7 +204,9 @@ def _get_stale(key: str):
     return None
 
 def _set_cached(key: str, data):
-    _cache[key] = (data, datetime.now() + timedelta(seconds=CACHE_TTL_SECONDS))
+    # Keep an isolated snapshot so request-specific transforms stay local.
+    cached_data = data.copy(deep=True) if isinstance(data, pd.DataFrame) else data
+    _cache[key] = (cached_data, datetime.now() + timedelta(seconds=CACHE_TTL_SECONDS))
 
 
 # ── fetch_stock_data ──
@@ -427,6 +430,8 @@ def get_combined_stock_data(ticker: str, period: str = "2Y") -> Optional[pd.Data
     df = fetch_stock_data(ticker, period=period)
     if df is None or df.empty:
         return None
+    # The live-candle merge below is request-specific.
+    df = df.copy(deep=True)
 
     # Step 2: Get today's live tick synthetic OHLCV
     today_candle = get_live_tick_ohlcv(ticker)
