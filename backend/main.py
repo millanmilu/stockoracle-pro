@@ -345,13 +345,20 @@ def get_prediction(symbol: str):
     from backend.analysis.trainer import predict_future
     try:
         res = predict_future(symbol.upper())
+        predicted_return = (res['predicted_price'] - res['current_price']) / res['current_price']
+        signal = "buy" if res['predicted_price'] > res['current_price'] * 1.01 else ("sell" if res['predicted_price'] < res['current_price'] * 0.99 else "hold")
+        ai_score = 80 if signal == "buy" else (20 if signal == "sell" else 50)
+        
         return {
             "ticker": symbol.upper(),
             "current_price": res['current_price'],
             "predicted_price": res['predicted_price'],
+            "predicted_price_7d": res['predicted_price'],
+            "predicted_return_7d": predicted_return,
             "high_bound": res['high_bound'],
             "low_bound": res['low_bound'],
-            "signal": "buy" if res['predicted_price'] > res['current_price'] * 1.01 else ("sell" if res['predicted_price'] < res['current_price'] * 0.99 else "hold")
+            "ai_confidence_score": ai_score,
+            "signal": signal
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
