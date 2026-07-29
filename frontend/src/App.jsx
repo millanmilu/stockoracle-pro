@@ -23,7 +23,7 @@ function AIPredictionView() {
 }
 
 export default function App() {
-  const { activeView, trainingStatus } = useStore();
+  const { activeView, trainingStatus, selectedSymbol } = useStore();
 
   const renderView = () => {
     switch (activeView) {
