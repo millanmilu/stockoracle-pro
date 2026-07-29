@@ -8,7 +8,8 @@ from typing import Optional, Dict, Tuple
 from SmartApi import SmartConnect
 from backend.data.database import (
     save_historical_prices, get_historical_prices,
-    save_company_info, get_company_info, get_stale_company_info
+    save_company_info, get_company_info, get_stale_company_info,
+    get_live_tick_ohlcv
 )
 
 # ── API & Authentication Setup ──
@@ -406,3 +407,46 @@ def fetch_company_info(ticker: str) -> Optional[dict]:
     save_company_info(ticker, info)
     _set_cached(f"info_{ticker}", info)
     return info
+
+
+# ── Combined Historical + Live Data ───────────────────────────────────────────
+
+def get_combined_stock_data(ticker: str, period: str = "2Y") -> Optional[pd.DataFrame]:
+    """
+    Returns the most complete and current OHLCV DataFrame for a ticker by:
+      1. Fetching historical data from DB / Angel One API (fetch_stock_data)
+      2. Appending today's live tick data as a synthetic OHLCV candle if available
+         (or updating today's candle if it already exists in history)
+
+    This ensures prediction models always see today's price action even before
+    the official end-of-day candle is available.
+    """
+    ticker = ticker.upper()
+
+    # Step 1: Get base historical data
+    df = fetch_stock_data(ticker, period=period)
+    if df is None or df.empty:
+        return None
+
+    # Step 2: Get today's live tick synthetic OHLCV
+    today_candle = get_live_tick_ohlcv(ticker)
+    if today_candle is None:
+        return df  # No live ticks yet — return historical as-is
+
+    today_str = today_candle["date"]
+
+    # Step 3: Replace today's candle if it exists, otherwise append
+    if today_str in df["date"].values:
+        idx = df.index[df["date"] == today_str][0]
+        # Update close with latest live price; keep historical open; extend high/low
+        df.at[idx, "close"]  = today_candle["close"]
+        df.at[idx, "high"]   = max(float(df.at[idx, "high"]), today_candle["high"])
+        df.at[idx, "low"]    = min(float(df.at[idx, "low"]),  today_candle["low"])
+        df.at[idx, "volume"] = int(df.at[idx, "volume"]) + today_candle["volume"]
+    else:
+        # Append as a new row
+        new_row = pd.DataFrame([today_candle])
+        df = pd.concat([df, new_row], ignore_index=True)
+
+    print(f"📊 Combined data for {ticker}: {len(df)} rows (historical + live tick for {today_str})")
+    return df

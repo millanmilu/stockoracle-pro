@@ -271,3 +271,89 @@ def save_monte_carlo(ticker: str, data: dict, ttl_minutes: int = 30):
 
 def get_monte_carlo_cached(ticker: str, ttl_minutes: int = 30) -> Optional[dict]:
     return _get_json("monte_carlo", "ticker", ticker.upper(), ttl_minutes)
+
+
+# ── Live Tick Analytics ────────────────────────────────────────────────────────
+
+def get_recent_live_ticks(ticker: str, limit: int = 200) -> Optional[pd.DataFrame]:
+    """
+    Returns the most recent live tick records for a ticker as a DataFrame.
+    Columns: timestamp, price, change_pct
+    """
+    ticker = ticker.upper()
+    try:
+        with get_db_connection() as conn:
+            df = pd.read_sql_query(
+                """
+                SELECT timestamp, price, change_pct
+                FROM live_ticks
+                WHERE ticker = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+                """,
+                conn,
+                params=(ticker, limit),
+            )
+        return df if not df.empty else None
+    except Exception as e:
+        print(f"Error reading live ticks for {ticker}: {e}")
+        return None
+
+
+def get_live_tick_ohlcv(ticker: str) -> Optional[dict]:
+    """
+    Aggregates today's live ticks into a single synthetic OHLCV row.
+    Returns a dict with keys: date, open, high, low, close, volume
+    or None if no ticks exist for today.
+    """
+    ticker = ticker.upper()
+    today = datetime.now().strftime("%Y-%m-%d")
+    try:
+        with get_db_connection() as conn:
+            df = pd.read_sql_query(
+                """
+                SELECT price, timestamp
+                FROM live_ticks
+                WHERE ticker = ? AND timestamp >= ?
+                ORDER BY timestamp ASC
+                """,
+                conn,
+                params=(ticker, today),
+            )
+        if df.empty:
+            return None
+        return {
+            "date":   today,
+            "open":   float(df["price"].iloc[0]),
+            "high":   float(df["price"].max()),
+            "low":    float(df["price"].min()),
+            "close":  float(df["price"].iloc[-1]),
+            "volume": len(df),
+        }
+    except Exception as e:
+        print(f"Error building live OHLCV for {ticker}: {e}")
+        return None
+
+
+def get_db_stats() -> dict:
+    """Returns a summary of all DB table sizes for the /api/db/status endpoint."""
+    stats = {}
+    tables = ["historical_prices", "live_ticks", "company_info",
+              "predictions", "screener_results", "monte_carlo"]
+    try:
+        with get_db_connection() as conn:
+            for table in tables:
+                count = conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+                stats[table] = count
+            # Per-ticker historical rows
+            ticker_rows = conn.execute(
+                "SELECT ticker, count(*) as rows, min(date), max(date) "
+                "FROM historical_prices GROUP BY ticker ORDER BY ticker"
+            ).fetchall()
+            stats["historical_by_ticker"] = [
+                {"ticker": r[0], "rows": r[1], "from": r[2], "to": r[3]}
+                for r in ticker_rows
+            ]
+    except Exception as e:
+        stats["error"] = str(e)
+    return stats

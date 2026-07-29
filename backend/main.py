@@ -16,13 +16,14 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),
 # Import our custom modules
 from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, ensure_session,
-    get_session_status, reset_session
+    get_session_status, reset_session, get_combined_stock_data
 )
 from backend.data.database import (
     init_db, save_live_tick,
     save_prediction, get_prediction_cached,
     save_monte_carlo, get_monte_carlo_cached,
-    save_screener_results, get_screener_results
+    save_screener_results, get_screener_results,
+    get_db_stats
 )
 from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.monte_carlo import run_monte_carlo_simulation
@@ -34,10 +35,37 @@ from backend.analysis.backtester import run_backtest
 async def lifespan(app: FastAPI):
     # Initialize SQL database tables
     init_db()
-    # Authenticate with Angel One on startup so all requests are ready immediately
+    # Authenticate with Angel One on startup
     ensure_session()
+    # Start live price broadcast
     asyncio.create_task(websocket_price_broadcast_loop())
+    # Prefetch historical data for all popular tickers in background
+    asyncio.create_task(prefetch_all_tickers())
     yield
+
+
+async def prefetch_all_tickers():
+    """
+    Downloads 2-year historical OHLCV data for all popular tickers on startup
+    and saves it to the SQLite database. Runs once in the background so the
+    first prediction requests are served from DB (no API wait).
+    """
+    import asyncio as _asyncio
+    print("⏳ Starting background prefetch of historical data for all tickers...")
+    loop = _asyncio.get_event_loop()
+    for ticker in popular_tickers:
+        try:
+            # Run blocking fetch in thread pool to not block event loop
+            df = await loop.run_in_executor(None, lambda t=ticker: fetch_stock_data(t, period="2Y"))
+            if df is not None and not df.empty:
+                print(f"✅ Prefetched {len(df)} rows for {ticker}")
+            else:
+                print(f"⚠️  No data returned for {ticker} during prefetch")
+        except Exception as e:
+            print(f"❌ Prefetch failed for {ticker}: {e}")
+        # Small delay to be gentle on the Angel One rate limit
+        await _asyncio.sleep(1.5)
+    print("✅ Historical prefetch complete for all tickers.")
 
 
 app = FastAPI(
@@ -79,6 +107,12 @@ def read_root():
         "message": "StockOracle Pro Advanced AI Market Forecasting API live.",
         "version": "1.0.0"
     }
+
+@app.get("/api/db/status")
+def db_status():
+    """Returns a live snapshot of all SQLite table sizes and per-ticker historical coverage."""
+    return {"status": "ok", "database": get_db_stats(), "timestamp": datetime.now().isoformat()}
+
 
 @app.get("/api/health")
 def health_check():
@@ -203,7 +237,8 @@ def get_prediction(ticker: str):
     if cached is not None:
         return cached
 
-    df = fetch_stock_data(t_upper, period="2Y")
+    # Use combined historical + live tick data for most current prediction
+    df = get_combined_stock_data(t_upper, period="2Y")
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history found for {t_upper}.")
         
@@ -299,7 +334,8 @@ def get_prediction(ticker: str):
 @app.get("/api/stock/{ticker}/backtest")
 def get_backtest(ticker: str):
     t_upper = ticker.upper().strip()
-    df = fetch_stock_data(t_upper, period="2Y")
+    # Use combined data so backtest includes today's live prices
+    df = get_combined_stock_data(t_upper, period="2Y")
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history found for {t_upper} to run backtest.")
     
