@@ -49,7 +49,8 @@ export default function BacktestPanel({ ticker }) {
     })
   }, [ticker])
 
-  if (error) {
+  if (error || (data && data.error)) {
+    const errorMsg = error || data.error;
     return (
       <div style={{
         padding: '14px 16px', marginTop: 8,
@@ -57,7 +58,7 @@ export default function BacktestPanel({ ticker }) {
         border: '1px solid rgba(244,63,94,0.2)',
         borderRadius: 12, color: '#F43F5E', fontSize: '0.85rem'
       }}>
-        ❌ {error}
+        ❌ {errorMsg}
       </div>
     )
   }

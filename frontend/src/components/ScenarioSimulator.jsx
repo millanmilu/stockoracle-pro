@@ -19,12 +19,12 @@ export default function ScenarioSimulator() {
         });
         
         // Update the prediction data in the store so AIInsightCard reacts
-        setPredictionData(prev => ({
+        setPredictionData(prev => prev ? {
           ...prev,
           predicted_price: data.predicted_price,
           high_bound: data.high_bound,
           low_bound: data.low_bound
-        }));
+        } : prev);
       } catch (err) {
         console.error("Simulation failed", err);
       }
