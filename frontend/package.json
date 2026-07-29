@@ -14,7 +14,10 @@
     "chart.js": "^4.4.0",
     "react-chartjs-2": "^5.2.0",
     "axios": "^1.7.2",
-    "recharts": "^2.10.3"
+    "recharts": "^2.10.3",
+    "zustand": "^4.5.2",
+    "react-hot-toast": "^2.4.1",
+    "lucide-react": "^0.395.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

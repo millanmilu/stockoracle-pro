@@ -218,9 +218,16 @@ def get_stock_news(ticker: str, limit: int = 8):
                 "published_at": item.findtext("pubDate", ""),
                 "source": source.text if source is not None else "News",
             })
-        return {"ticker": t, "company": company, "items": items}
+            
+        try:
+            from backend.analysis.sentiment import fetch_and_score_sentiment
+            sentiment_score = fetch_and_score_sentiment(t)
+        except:
+            sentiment_score = 0.0
+            
+        return {"ticker": t, "company": company, "items": items, "sentiment": sentiment_score}
     except Exception as exc:
-        return {"ticker": t, "company": company, "items": [], "warning": f"News temporarily unavailable: {exc}"}
+        return {"ticker": t, "company": company, "items": [], "sentiment": 0.0, "warning": f"News temporarily unavailable: {exc}"}
 
 
 @app.get("/api/stock/{ticker}/patterns")
@@ -321,126 +328,91 @@ def background_train_task(ticker: str):
     except Exception as e:
         training_status[ticker] = {"status": "failed", "error": str(e)}
 
-@app.post("/api/train/{ticker}")
-def start_training(ticker: str, background_tasks: BackgroundTasks):
-    t_upper = ticker.upper()
-    status = training_status.get(t_upper, {}).get("status")
-    
-    if status == "training":
-        return {"status": "already_running", "message": f"Model training is already in progress for {t_upper}."}
-        
-    background_tasks.add_task(background_train_task, t_upper)
-    return {"status": "started", "message": f"Background training job queued for {t_upper}."}
+from pydantic import BaseModel
+import uuid
+import asyncio
 
-@app.get("/api/train/{ticker}/status")
-def get_training_status(ticker: str):
-    status = training_status.get(ticker.upper())
-    if not status:
-        return {"status": "idle", "message": "No model has been trained yet in this session."}
-    return status
+class SimulationRequest(BaseModel):
+    sentiment: float = 0.0
+    volatility_multiplier: float = 1.0
+    volume_multiplier: float = 1.0
 
-@app.get("/api/stock/{ticker}/predict")
-def get_prediction(ticker: str):
-    t_upper = ticker.upper()
+# Global tracking for training tasks
+training_tasks = {}
 
-    # Serve from DB cache (10-min TTL) if available
-    cached = get_prediction_cached(t_upper)
-    if cached is not None:
-        return cached
-
-    # Use combined historical + live tick data for most current prediction
-    df = get_combined_stock_data(t_upper, period="2Y")
-    if df is None or df.empty:
-        raise HTTPException(status_code=404, detail=f"No price history found for {t_upper}.")
-        
-    predictor = StockPredictor(window_size=20)
-    current_price = float(df["close"].iloc[-1])
-    
-    model_weights = {"bilstm": 0.333, "transformer": 0.333, "gbdt": 0.334}
-    predicted_upper_price = current_price
-    predicted_lower_price = current_price
-    confidence_std = 0.05
-
+@app.get("/api/stock/{symbol}/predict")
+def get_prediction(symbol: str):
+    from backend.analysis.trainer import predict_future
     try:
-        # Load saved PyTorch model and predict with full details
-        details = predictor.load_and_predict(df, t_upper, return_details=True)
-        pred_return = float(details["expected_return"])
-        predicted_price = current_price * (1.0 + pred_return)
-        predicted_upper_price = current_price * (1.0 + float(details["upper_return"]))
-        predicted_lower_price = current_price * (1.0 + float(details["lower_return"]))
-        confidence_std = float(details["confidence_std"])
-        model_weights = details["weights"]
-        model_trained = True
-    except FileNotFoundError:
-        # Fallback to rule-based engine if model is not trained yet
-        enriched = enrich_stock_dataframe(df)
-        last_row = enriched.iloc[-1]
+        res = predict_future(symbol.upper())
+        return {
+            "ticker": symbol.upper(),
+            "current_price": res['current_price'],
+            "predicted_price": res['predicted_price'],
+            "high_bound": res['high_bound'],
+            "low_bound": res['low_bound'],
+            "signal": "buy" if res['predicted_price'] > res['current_price'] * 1.01 else ("sell" if res['predicted_price'] < res['current_price'] * 0.99 else "hold")
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-        rsi_factor = (50 - float(last_row["rsi"])) / 500.0
-        macd_factor = float(last_row["macd_hist"]) / current_price * 0.1
-        pred_return = rsi_factor + macd_factor
-        predicted_price = current_price * (1.0 + pred_return)
-        predicted_upper_price = current_price * (1.0 + pred_return + 0.05)
-        predicted_lower_price = current_price * (1.0 + pred_return - 0.05)
-        model_trained = False
-    except (KeyError, RuntimeError) as e:
-        # Stale / incompatible .pt file — delete it so next call hits rule-based cleanly
-        import os as _os
-        from backend.ml.predictor import MODELS_DIR
-        stale_path = _os.path.join(MODELS_DIR, f"{t_upper}.pt")
-        if _os.path.exists(stale_path):
-            _os.remove(stale_path)
-            print(f"🗑️  Deleted stale model file for {t_upper}: {e}")
-        enriched = enrich_stock_dataframe(df)
-        last_row = enriched.iloc[-1]
+@app.get("/api/stock/{symbol}/explain")
+def get_explainability(symbol: str):
+    from backend.analysis.explainer import get_top_features
+    try:
+        top_features = get_top_features(symbol.upper(), top_n=3)
+        return top_features
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-        rsi_factor = (50 - float(last_row["rsi"])) / 500.0
-        macd_factor = float(last_row["macd_hist"]) / current_price * 0.1
-        pred_return = rsi_factor + macd_factor
-        predicted_price = current_price * (1.0 + pred_return)
-        predicted_upper_price = current_price * (1.0 + pred_return + 0.05)
-        predicted_lower_price = current_price * (1.0 + pred_return - 0.05)
-        model_trained = False
+@app.post("/api/stock/{symbol}/simulate")
+def simulate_prediction(symbol: str, req: SimulationRequest):
+    from backend.analysis.trainer import predict_future
+    try:
+        from backend.analysis.feature_engineer import get_features
+        df = get_features(symbol.upper())
+        if df.empty:
+            raise ValueError("No data")
+        latest = df.iloc[-1]
         
-    # Standard technical analysis signals
-    df_enriched = enrich_stock_dataframe(df)
-    last = df_enriched.iloc[-1]
-    
-    bullish_signals = 0
-    bearish_signals = 0
-    
-    if last["rsi"] < 30: bullish_signals += 2
-    elif last["rsi"] > 70: bearish_signals += 2
-    if last["macd_hist"] > 0: bullish_signals += 1
-    else: bearish_signals += 1
-    if last["close"] > last["sma_20"]: bullish_signals += 1
-    else: bearish_signals += 1
-    
-    bull_ratio = bullish_signals / (bullish_signals + bearish_signals)
-    ai_score = int(60 + (bull_ratio - 0.5) * 40)
-    
-    signal = "hold"
-    if bull_ratio >= 0.75: signal = "strong-buy"
-    elif bull_ratio >= 0.58: signal = "buy"
-    elif bull_ratio <= 0.25: signal = "strong-sell"
-    elif bull_ratio <= 0.42: signal = "sell"
-    
-    result = {
-        "ticker": t_upper,
-        "current_price": current_price,
-        "predicted_price_7d": float(predicted_price),
-        "predicted_upper_price_7d": float(predicted_upper_price),
-        "predicted_lower_price_7d": float(predicted_lower_price),
-        "predicted_return_7d": float(pred_return),
-        "confidence_std": float(confidence_std),
-        "model_weights": model_weights,
-        "ai_confidence_score": ai_score,
-        "signal": signal,
-        "model_trained": model_trained
-    }
-    # Persist prediction to DB (10-min TTL)
-    save_prediction(t_upper, result)
-    return result
+        overrides = {
+            "sentiment": req.sentiment,
+            "volume": latest['volume'] * req.volume_multiplier,
+            "atr_14": latest['atr_14'] * req.volatility_multiplier,
+            "roll_std_20": latest['roll_std_20'] * req.volatility_multiplier
+        }
+        
+        res = predict_future(symbol.upper(), override_features=overrides)
+        return {
+            "predicted_price": res['predicted_price'],
+            "high_bound": res['high_bound'],
+            "low_bound": res['low_bound']
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+def background_train_job(task_id: str, symbol: str):
+    from backend.analysis.trainer import train_pipeline
+    try:
+        training_tasks[task_id] = {"status": "training", "progress": 50, "mape": None}
+        result = train_pipeline(symbol)
+        training_tasks[task_id] = {"status": "completed", "progress": 100, "mape": result['validation_mape']}
+    except Exception as e:
+        training_tasks[task_id] = {"status": "failed", "error": str(e), "progress": 0}
+
+@app.post("/api/stock/{symbol}/train")
+def start_training(symbol: str, background_tasks: BackgroundTasks):
+    task_id = str(uuid.uuid4())
+    training_tasks[task_id] = {"status": "queued", "progress": 0, "mape": None}
+    background_tasks.add_task(background_train_job, task_id, symbol.upper())
+    return {"task_id": task_id, "message": "Training started"}
+
+@app.get("/api/task/{task_id}/status")
+def get_task_status(task_id: str):
+    task = training_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
 
 @app.get("/api/stock/{ticker}/backtest")
 def get_backtest(ticker: str):
@@ -601,12 +573,4 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-@app.post("/api/stock/{symbol}/train")
-def train_model_endpoint(symbol: str):
-    """Runs the lightweight CPU-only feature generation, tuning, and XGBoost/ElasticNet ensemble training pipeline."""
-    try:
-        from backend.analysis.predictor import train_pipeline
-        result = train_pipeline(symbol)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+

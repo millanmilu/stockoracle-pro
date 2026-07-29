@@ -105,3 +105,81 @@ def train_pipeline(symbol: str) -> dict:
         "validation_mape": float(val_mape),
         "top_features": top_features
     }
+
+def predict_future(symbol: str, override_features: dict = None) -> dict:
+    """
+    Loads the trained bundle (XGBoost + ElasticNet).
+    Fetches the latest row of features.
+    Applies any override_features (for simulation).
+    Returns the predicted price and high/low confidence bounds.
+    """
+    model_path = os.path.join(MODEL_DIR, f"{symbol}.json")
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model for {symbol} not trained yet.")
+        
+    with open(model_path, 'r') as f:
+        bundle = json.load(f)
+        
+    # Get latest features
+    df = get_features(symbol)
+    if df.empty:
+        raise ValueError("Could not fetch latest data.")
+        
+    latest_row = df.iloc[[-1]].copy()
+    current_price = float(latest_row['close'].iloc[0])
+    
+    # Apply overrides for simulation
+    if override_features:
+        for k, v in override_features.items():
+            if k in latest_row.columns:
+                latest_row[k] = v
+                
+    # ElasticNet features must match what it was trained on
+    en_features = bundle['elasticnet']['features']
+    # Filter latest_row to match training columns
+    try:
+        X_latest = latest_row[en_features]
+    except KeyError:
+        # Re-fetch features if columns mismatched, might happen if cache is old
+        df = get_features(symbol)
+        latest_row = df.iloc[[-1]].copy()
+        if override_features:
+            for k, v in override_features.items():
+                if k in latest_row.columns:
+                    latest_row[k] = v
+        X_latest = latest_row[en_features]
+        
+    # Predict with XGBoost
+    xgb_json = bundle.get("xgboost")
+    booster = xgb.Booster()
+    
+    import tempfile
+    with tempfile.NamedTemporaryFile('w', delete=False) as tf:
+        json.dump(xgb_json, tf)
+        temp_name = tf.name
+    try:
+        booster.load_model(temp_name)
+    finally:
+        os.remove(temp_name)
+        
+    # XGBoost requires DMatrix for booster inference
+    dtest = xgb.DMatrix(X_latest)
+    xgb_pred = booster.predict(dtest)[0]
+    
+    # Predict with ElasticNet (dot product + intercept manually since we just saved coef)
+    coef = np.array(bundle['elasticnet']['coef'])
+    intercept = bundle['elasticnet']['intercept']
+    en_pred = np.dot(X_latest.values, coef)[0] + intercept
+    
+    final_pred = float(xgb_pred + (0.15 * en_pred))
+    
+    # Simple confidence bounds (e.g. +/- 1.5% of predicted price based on typical MAPE)
+    confidence_margin = final_pred * 0.015
+    
+    return {
+        "current_price": current_price,
+        "predicted_price": round(final_pred, 2),
+        "high_bound": round(final_pred + confidence_margin, 2),
+        "low_bound": round(final_pred - confidence_margin, 2)
+    }
+
