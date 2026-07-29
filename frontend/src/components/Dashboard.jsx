@@ -8,6 +8,7 @@ import TechnicalPanel from './TechnicalPanel'
 import MonteCarlo from './MonteCarlo'
 import AITraining from './AITraining'
 import Screener from './Screener'
+import BacktestPanel from './BacktestPanel'
 
 const API = import.meta.env.VITE_API_URL || ''
 
@@ -296,6 +297,7 @@ export default function Dashboard() {
                 { id: 'technical',  label: '📐 Technical'     },
                 { id: 'montecarlo', label: '🎲 Monte Carlo'   },
                 { id: 'anomalies',  label: '⚡ Anomalies'     },
+                { id: 'backtest',   label: '📉 Backtest'      },
               ].map(t => (
                 <button
                   key={t.id}
@@ -329,6 +331,9 @@ export default function Dashboard() {
                   )}
                   {overlayTab === 'anomalies' && (
                     <AnomalyTab ticker={selected} />
+                  )}
+                  {overlayTab === 'backtest' && (
+                    <BacktestPanel ticker={selected} />
                   )}
                 </>
               )

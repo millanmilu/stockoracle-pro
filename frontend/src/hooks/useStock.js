@@ -68,5 +68,12 @@ export function useStock() {
     } catch (e) { return null }
   }, [])
 
-  return { loading, error, fetchInfo, fetchHistory, fetchPredict, fetchMonteCarlo, fetchAnomalies, fetchScreener, startTraining, fetchTrainingStatus }
+  const fetchBacktest = useCallback(async (ticker) => {
+    try {
+      const { data } = await api.get(`/api/stock/${ticker}/backtest`)
+      return data
+    } catch (e) { return null }
+  }, [])
+
+  return { loading, error, fetchInfo, fetchHistory, fetchPredict, fetchMonteCarlo, fetchAnomalies, fetchScreener, fetchBacktest, startTraining, fetchTrainingStatus }
 }

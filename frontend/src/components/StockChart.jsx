@@ -92,7 +92,7 @@ export default function StockChart({ history, prediction, timeframe, onTimeframe
         titleColor: '#F0F0FF',
         bodyColor: '#9CA3AF',
         callbacks: {
-          label: ctx => ` ${ctx.dataset.label}: $${Number(ctx.raw).toFixed(2)}`
+          label: ctx => ` ${ctx.dataset.label}: ₹${Number(ctx.raw).toFixed(2)}`
         }
       }
     },
@@ -108,7 +108,7 @@ export default function StockChart({ history, prediction, timeframe, onTimeframe
         ticks: {
           color: '#4B5563',
           font: { size: 10, family: 'JetBrains Mono' },
-          callback: v => `$${v.toFixed(0)}`
+          callback: v => `₹${v.toFixed(0)}`
         },
         grid: { color: 'rgba(99,102,241,0.06)' },
       }

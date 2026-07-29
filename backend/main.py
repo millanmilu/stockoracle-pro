@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 import os
@@ -24,10 +25,21 @@ from backend.analysis.anomaly import detect_anomalies
 from backend.ml.predictor import StockPredictor
 from backend.analysis.backtester import run_backtest
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize SQL database tables
+    init_db()
+    # Authenticate with Angel One on startup so all requests are ready immediately
+    ensure_session()
+    asyncio.create_task(websocket_price_broadcast_loop())
+    yield
+
+
 app = FastAPI(
     title="StockOracle Pro API",
     description="Production-grade AI stock forecasting API using PyTorch and FastAPI",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS configuration
@@ -131,7 +143,7 @@ def background_train_task(ticker: str):
     try:
         training_status[ticker] = {"status": "training", "epoch": 0, "total_epochs": 60, "loss": 0.0, "val_loss": 0.0}
         
-        df = fetch_stock_data(ticker, period="2y")
+        df = fetch_stock_data(ticker, period="2Y")
         if df is None or df.empty:
             training_status[ticker] = {"status": "failed", "error": "No historical data to train."}
             return
@@ -176,7 +188,7 @@ def get_training_status(ticker: str):
 @app.get("/api/stock/{ticker}/predict")
 def get_prediction(ticker: str):
     t_upper = ticker.upper()
-    df = fetch_stock_data(t_upper, period="2y")
+    df = fetch_stock_data(t_upper, period="2Y")
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history found for {t_upper}.")
         
@@ -251,7 +263,7 @@ def get_prediction(ticker: str):
 @app.get("/api/stock/{ticker}/backtest")
 def get_backtest(ticker: str):
     t_upper = ticker.upper().strip()
-    df = fetch_stock_data(t_upper, period="2y")
+    df = fetch_stock_data(t_upper, period="2Y")
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history found for {t_upper} to run backtest.")
     
@@ -261,31 +273,37 @@ def get_backtest(ticker: str):
     return results
 
 @app.get("/api/screener")
-def get_screener_list(signal: str = "", min_score: int = 0):
+async def get_screener_list(signal: str = "", min_score: int = 0):
     global _screener_cache
 
-    # Refresh cache only if expired (every 5 minutes) to avoid blocking the server
+    # Refresh cache only if expired (every 5 minutes).
+    # Heavy work runs in a thread-pool executor so we don't block the event loop.
     if datetime.now() > _screener_cache["expires"]:
-        fresh_results = []
-        for t in popular_tickers:
-            try:
-                info = fetch_company_info(t)
-                if not info:
+        def _build_screener_cache():
+            fresh_results = []
+            for t in popular_tickers:
+                try:
+                    info = fetch_company_info(t)
+                    if not info:
+                        continue
+                    pred = get_prediction(t)
+                    prev = info["previous_close"] or 1.0
+                    change_pct = ((info["current_price"] - prev) / prev) * 100
+                    fresh_results.append({
+                        "ticker":        t,
+                        "name":          info["name"],
+                        "price":         info["current_price"],
+                        "change":        round(change_pct, 3),
+                        "ai_score":      pred["ai_confidence_score"],
+                        "signal":        pred["signal"],
+                        "predicted_pct": round(pred["predicted_return_7d"] * 100, 3),
+                    })
+                except Exception:
                     continue
-                pred = get_prediction(t)
-                prev = info["previous_close"] or 1.0
-                change_pct = ((info["current_price"] - prev) / prev) * 100
-                fresh_results.append({
-                    "ticker":        t,
-                    "name":          info["name"],
-                    "price":         info["current_price"],
-                    "change":        round(change_pct, 3),
-                    "ai_score":      pred["ai_confidence_score"],
-                    "signal":        pred["signal"],
-                    "predicted_pct": round(pred["predicted_return_7d"] * 100, 3),
-                })
-            except Exception:
-                continue
+            return fresh_results
+
+        loop = asyncio.get_event_loop()
+        fresh_results = await loop.run_in_executor(None, _build_screener_cache)
         _screener_cache = {"data": fresh_results, "expires": datetime.now() + timedelta(minutes=5)}
 
     results = _screener_cache["data"]
@@ -385,14 +403,7 @@ async def websocket_price_broadcast_loop():
         await asyncio.sleep(5.0)
 
 
-# Start background broadcast loop on startup
-@app.on_event("startup")
-async def startup_event():
-    # Initialize SQL database tables
-    init_db()
-    # Authenticate with Angel One on startup so all requests are ready immediately
-    ensure_session()
-    asyncio.create_task(websocket_price_broadcast_loop())
+# Startup is now handled by the lifespan context manager above.
 
 @app.websocket("/ws/prices")
 async def websocket_endpoint(websocket: WebSocket):
