@@ -18,7 +18,12 @@ from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, ensure_session,
     get_session_status, reset_session
 )
-from backend.data.database import init_db, save_live_tick
+from backend.data.database import (
+    init_db, save_live_tick,
+    save_prediction, get_prediction_cached,
+    save_monte_carlo, get_monte_carlo_cached,
+    save_screener_results, get_screener_results
+)
 from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.monte_carlo import run_monte_carlo_simulation
 from backend.analysis.anomaly import detect_anomalies
@@ -64,9 +69,6 @@ app.add_middleware(
 # Global in-memory status stores
 training_status: Dict[str, Dict[str, Any]] = {}
 popular_tickers = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL"]
-
-# Screener results cache — refreshed every 5 minutes to avoid blocking API requests
-_screener_cache: Dict[str, Any] = {"data": [], "expires": datetime(2000, 1, 1)}
 
 # ── REST API ROUTES ──
 
@@ -118,6 +120,12 @@ def get_stock_history(ticker: str, timeframe: str = "3M"):
 @app.get("/api/stock/{ticker}/montecarlo")
 def get_monte_carlo(ticker: str):
     t = ticker.upper().strip()
+
+    # Serve from DB cache (30-min TTL) if available
+    cached = get_monte_carlo_cached(t)
+    if cached is not None:
+        return cached
+
     df = fetch_stock_data(t, period="1Y")
     if df is None or df.empty:
         if not get_session_status():
@@ -125,6 +133,7 @@ def get_monte_carlo(ticker: str):
         raise HTTPException(status_code=404, detail=f"No price history found for '{t}' to run Monte Carlo simulation.")
     closes = df["close"].tolist()
     mc_results = run_monte_carlo_simulation(closes, simulations=150, horizon=30)
+    save_monte_carlo(t, mc_results)
     return mc_results
 
 @app.get("/api/stock/{ticker}/anomalies")
@@ -188,6 +197,12 @@ def get_training_status(ticker: str):
 @app.get("/api/stock/{ticker}/predict")
 def get_prediction(ticker: str):
     t_upper = ticker.upper()
+
+    # Serve from DB cache (10-min TTL) if available
+    cached = get_prediction_cached(t_upper)
+    if cached is not None:
+        return cached
+
     df = fetch_stock_data(t_upper, period="2Y")
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history found for {t_upper}.")
@@ -214,7 +229,25 @@ def get_prediction(ticker: str):
         # Fallback to rule-based engine if model is not trained yet
         enriched = enrich_stock_dataframe(df)
         last_row = enriched.iloc[-1]
-        
+
+        rsi_factor = (50 - float(last_row["rsi"])) / 500.0
+        macd_factor = float(last_row["macd_hist"]) / current_price * 0.1
+        pred_return = rsi_factor + macd_factor
+        predicted_price = current_price * (1.0 + pred_return)
+        predicted_upper_price = current_price * (1.0 + pred_return + 0.05)
+        predicted_lower_price = current_price * (1.0 + pred_return - 0.05)
+        model_trained = False
+    except (KeyError, RuntimeError) as e:
+        # Stale / incompatible .pt file — delete it so next call hits rule-based cleanly
+        import os as _os
+        from backend.ml.predictor import MODELS_DIR
+        stale_path = _os.path.join(MODELS_DIR, f"{t_upper}.pt")
+        if _os.path.exists(stale_path):
+            _os.remove(stale_path)
+            print(f"🗑️  Deleted stale model file for {t_upper}: {e}")
+        enriched = enrich_stock_dataframe(df)
+        last_row = enriched.iloc[-1]
+
         rsi_factor = (50 - float(last_row["rsi"])) / 500.0
         macd_factor = float(last_row["macd_hist"]) / current_price * 0.1
         pred_return = rsi_factor + macd_factor
@@ -246,7 +279,7 @@ def get_prediction(ticker: str):
     elif bull_ratio <= 0.25: signal = "strong-sell"
     elif bull_ratio <= 0.42: signal = "sell"
     
-    return {
+    result = {
         "ticker": t_upper,
         "current_price": current_price,
         "predicted_price_7d": float(predicted_price),
@@ -259,6 +292,9 @@ def get_prediction(ticker: str):
         "signal": signal,
         "model_trained": model_trained
     }
+    # Persist prediction to DB (10-min TTL)
+    save_prediction(t_upper, result)
+    return result
 
 @app.get("/api/stock/{ticker}/backtest")
 def get_backtest(ticker: str):
@@ -274,11 +310,11 @@ def get_backtest(ticker: str):
 
 @app.get("/api/screener")
 async def get_screener_list(signal: str = "", min_score: int = 0):
-    global _screener_cache
+    # Try DB cache first (5-min TTL — persists across restarts)
+    cached_results = get_screener_results(ttl_minutes=5)
 
-    # Refresh cache only if expired (every 5 minutes).
-    # Heavy work runs in a thread-pool executor so we don't block the event loop.
-    if datetime.now() > _screener_cache["expires"]:
+    if cached_results is None:
+        # Cache miss — rebuild in thread pool so we don't block the event loop
         def _build_screener_cache():
             fresh_results = []
             for t in popular_tickers:
@@ -303,12 +339,11 @@ async def get_screener_list(signal: str = "", min_score: int = 0):
             return fresh_results
 
         loop = asyncio.get_event_loop()
-        fresh_results = await loop.run_in_executor(None, _build_screener_cache)
-        _screener_cache = {"data": fresh_results, "expires": datetime.now() + timedelta(minutes=5)}
+        cached_results = await loop.run_in_executor(None, _build_screener_cache)
+        save_screener_results(cached_results)
 
-    results = _screener_cache["data"]
-
-    # Apply optional filters on the cached snapshot
+    # Apply optional filters
+    results = cached_results
     if signal:
         results = [r for r in results if r["signal"] == signal.lower()]
     if min_score:

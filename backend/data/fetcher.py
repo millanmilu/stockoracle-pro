@@ -6,7 +6,10 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Tuple
 from SmartApi import SmartConnect
-from backend.data.database import save_historical_prices, get_historical_prices
+from backend.data.database import (
+    save_historical_prices, get_historical_prices,
+    save_company_info, get_company_info, get_stale_company_info
+)
 
 # ── API & Authentication Setup ──
 ANGEL_API_KEY     = os.getenv("ANGEL_API_KEY",     "").strip()
@@ -313,19 +316,21 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
 def fetch_company_info(ticker: str) -> Optional[dict]:
     """
     Fetches real-time LTP, daily stats, and 52-week data from Angel One SmartAPI.
-    Falls back to stale cache when Angel One is temporarily unavailable.
+    Results are cached in SQLite for 5 minutes and survive server restarts.
+    Falls back to stale DB cache when Angel One is temporarily unavailable.
     """
     ensure_session()
-    cache_key = f"info_{ticker}"
+    ticker = ticker.upper()
 
     if not _session_active:
-        stale = _get_stale(cache_key)
+        stale = get_stale_company_info(ticker)
         if stale is not None:
-            print(f"⚠️  Using stale cache for {ticker} info (Angel One unavailable).")
+            print(f"⚠️  Using stale DB cache for {ticker} info (Angel One unavailable).")
             return stale
         return None
 
-    fresh = _get_cached(cache_key)
+    # Check fresh DB cache
+    fresh = get_company_info(ticker)
     if fresh is not None:
         return fresh
 
@@ -342,9 +347,9 @@ def fetch_company_info(ticker: str) -> Optional[dict]:
         token_info["token"]
     )
     if not (ltp_response and ltp_response.get("status") and ltp_response.get("data")):
-        stale = _get_stale(cache_key)
+        stale = get_stale_company_info(ticker)
         if stale:
-            print(f"⚠️  Using stale cache for {ticker} LTP.")
+            print(f"⚠️  Using stale DB cache for {ticker} LTP.")
             return stale
         msg = ltp_response.get("message", "Unknown") if ltp_response else "No response"
         print(f"❌ LTP fetch failed for {ticker}: {msg}")
@@ -397,5 +402,7 @@ def fetch_company_info(ticker: str) -> Optional[dict]:
         "fifty_two_week_low":  fifty_two_week_low,
         "fifty_two_week_high": fifty_two_week_high,
     }
-    _set_cached(cache_key, info)
+    # Persist to DB (survives server restarts) and in-memory cache
+    save_company_info(ticker, info)
+    _set_cached(f"info_{ticker}", info)
     return info
