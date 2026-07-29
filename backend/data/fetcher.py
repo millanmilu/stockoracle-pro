@@ -9,7 +9,7 @@ from SmartApi import SmartConnect
 from backend.data.database import (
     save_historical_prices, get_historical_prices,
     save_company_info, get_company_info, get_stale_company_info,
-    get_live_tick_ohlcv
+    get_live_tick_ohlcv, save_stock_universe, search_stock_universe
 )
 
 # ── API & Authentication Setup ──
@@ -160,6 +160,16 @@ def _load_scrip_master(force: bool = False):
         for item in data:
             if item.get("exch_seg") == "NSE" and item.get("instrumenttype", "") == "":
                 _scrip_map[item["symbol"]] = item
+        save_stock_universe([
+            {
+                "ticker": item["symbol"].removesuffix("-EQ"),
+                "name": item.get("name") or item["symbol"].removesuffix("-EQ"),
+                "symbol": item["symbol"],
+                "token": item.get("token", ""),
+                "exchange": item.get("exch_seg", "NSE"),
+            }
+            for item in _scrip_map.values()
+        ])
         print(f"✅ ScripMaster loaded — {len(_scrip_map)} NSE equity symbols indexed.")
         _scrip_map_failed = False
     except Exception as e:
@@ -181,6 +191,12 @@ def get_token_info(ticker: str) -> Optional[dict]:
             _load_scrip_master(force=True)
             info = _scrip_map.get(key)
     return info
+
+
+def search_nse_stocks(query: str, limit: int = 12) -> list[dict]:
+    """Search every locally stored NSE listing by ticker or company name."""
+    _load_scrip_master()
+    return search_stock_universe(query, limit)
 
 
 # ── Simple TTL In-Memory Cache ──

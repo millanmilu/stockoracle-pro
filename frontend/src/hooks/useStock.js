@@ -103,10 +103,24 @@ export function useStock() {
     } catch (e) { return { found: false, ticker: query.toUpperCase(), name: query.toUpperCase() } }
   }, [])
 
+  const searchStocks = useCallback(async (query) => {
+    try {
+      const { data } = await api.get('/api/stocks/search', { params: { query, limit: 12 } })
+      return data
+    } catch (_) { return [] }
+  }, [])
+
+  const fetchNews = useCallback(async (ticker) => {
+    try {
+      const { data } = await api.get(`/api/stock/${ticker}/news`)
+      return data
+    } catch (_) { return { items: [] } }
+  }, [])
+
   return {
     loading, error,
     fetchInfo, fetchHistory, fetchPredict, fetchMonteCarlo, fetchAnomalies,
     fetchScreener, fetchBacktest, fetchPatterns, fetchLevels, fetchVolatility,
-    searchStock, startTraining, fetchTrainingStatus
+    searchStock, searchStocks, fetchNews, startTraining, fetchTrainingStatus
   }
 }

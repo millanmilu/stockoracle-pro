@@ -41,6 +41,23 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date)"
         )
 
+        # 1b. Searchable NSE universe, populated from Angel One ScripMaster.
+        # This is deliberately separate from historical prices: downloading two
+        # years for every NSE listing would be slow and exceed broker limits.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS stock_universe (
+                ticker      TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                symbol      TEXT NOT NULL,
+                token       TEXT,
+                exchange    TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_universe_name ON stock_universe (name)"
+        )
+
         # 2. Live Ticks Table (WebSocket streaming records)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS live_ticks (
@@ -145,6 +162,51 @@ def get_historical_prices(ticker: str, start_date: str, end_date: str) -> Option
         df = pd.read_sql_query(query, conn, params=(ticker, start_date, end_date))
 
     return df if not df.empty else None
+
+
+def save_stock_universe(records: list[dict]):
+    """Persists the searchable NSE symbol master without fetching price history."""
+    if not records:
+        return
+    now = datetime.now().isoformat()
+    rows = [
+        (
+            item["ticker"], item["name"], item["symbol"],
+            item.get("token", ""), item.get("exchange", "NSE"), now,
+        )
+        for item in records
+    ]
+    with get_db_connection() as conn:
+        conn.executemany(
+            """
+            INSERT INTO stock_universe (ticker, name, symbol, token, exchange, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticker) DO UPDATE SET
+                name=excluded.name, symbol=excluded.symbol, token=excluded.token,
+                exchange=excluded.exchange, updated_at=excluded.updated_at
+            """,
+            rows,
+        )
+
+
+def search_stock_universe(query: str, limit: int = 12) -> list[dict]:
+    """Returns ticker/name matches from the locally stored NSE symbol master."""
+    text = query.strip().upper()
+    if not text:
+        return []
+    like = f"%{text}%"
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT ticker, name, exchange
+            FROM stock_universe
+            WHERE ticker LIKE ? OR name LIKE ?
+            ORDER BY CASE WHEN ticker = ? THEN 0 WHEN ticker LIKE ? THEN 1 ELSE 2 END, ticker
+            LIMIT ?
+            """,
+            (like, like, text, f"{text}%", max(1, min(limit, 30))),
+        ).fetchall()
+    return [dict(row) for row in rows]
 
 
 # ── Live Ticks ─────────────────────────────────────────────────────────────────
@@ -338,7 +400,7 @@ def get_live_tick_ohlcv(ticker: str) -> Optional[dict]:
 def get_db_stats() -> dict:
     """Returns a summary of all DB table sizes for the /api/db/status endpoint."""
     stats = {}
-    tables = ["historical_prices", "live_ticks", "company_info",
+    tables = ["historical_prices", "stock_universe", "live_ticks", "company_info",
               "predictions", "screener_results", "monte_carlo"]
     try:
         with get_db_connection() as conn:

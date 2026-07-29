@@ -490,6 +490,23 @@ body {
   padding-left: 20px;
 }
 
+/* Stock workspace pages */
+.overview-grid, .details-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(300px, 0.9fr);
+  gap: 18px;
+}
+.company-name { font-family: 'Space Grotesk', sans-serif; font-size: 1.12rem; font-weight: 700; }
+.company-meta { color: var(--text-muted); font-size: 0.78rem; margin: 2px 0 16px; }
+.details-list { display: grid; gap: 1px; }
+.detail-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid rgba(99,102,241,0.09); color: var(--text-secondary); font-size: 0.82rem; }
+.detail-row strong { color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; text-align: right; }
+.news-list { display: grid; gap: 8px; }
+.news-item { display: grid; gap: 4px; padding: 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-secondary); color: var(--text-primary); text-decoration: none; transition: border-color .2s, background .2s; }
+.news-item:hover { border-color: var(--border-hover); background: rgba(99,102,241,.08); }
+.news-item strong { font-size: .86rem; line-height: 1.4; }
+.news-item span { color: var(--text-muted); font-size: .72rem; }
+
 .h-ticker {
   font-family: 'JetBrains Mono', monospace;
   font-weight: 700;
@@ -515,4 +532,5 @@ body {
     grid-template-rows: minmax(400px, 1fr) auto;
     height: auto;
   }
+  .overview-grid, .details-grid { grid-template-columns: 1fr; }
 }

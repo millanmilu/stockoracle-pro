@@ -4,6 +4,9 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Back
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import json
+import xml.etree.ElementTree as ET
+from urllib.parse import quote_plus
+from urllib.request import Request, urlopen
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
@@ -16,7 +19,7 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)),
 # Import our custom modules
 from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, ensure_session,
-    get_session_status, reset_session, get_combined_stock_data
+    get_session_status, reset_session, get_combined_stock_data, search_nse_stocks
 )
 from backend.data.database import (
     init_db, save_live_tick,
@@ -185,6 +188,39 @@ def search_stock(query: str):
         return {"found": True, "ticker": t, "name": info.get("name", t), "exchange": info.get("exchange", "NSE")}
 
     return {"found": False, "ticker": t, "name": t, "exchange": "NSE"}
+
+
+@app.get("/api/stocks/search")
+def search_stocks(query: str, limit: int = 12):
+    """Autocomplete across the full NSE ScripMaster cached in SQLite."""
+    if not query.strip():
+        return []
+    return search_nse_stocks(query, limit)
+
+
+@app.get("/api/stock/{ticker}/news")
+def get_stock_news(ticker: str, limit: int = 8):
+    """Returns recent public news headlines without requiring a paid news API key."""
+    t = ticker.upper().strip()
+    token = __import__("backend.data.fetcher", fromlist=["get_token_info"]).get_token_info(t)
+    company = token.get("name", t) if token else t
+    url = f"https://news.google.com/rss/search?q={quote_plus(company + ' stock NSE')}&hl=en-IN&gl=IN&ceid=IN:en"
+    try:
+        request = Request(url, headers={"User-Agent": "StockOracle/1.0"})
+        with urlopen(request, timeout=8) as response:
+            root = ET.fromstring(response.read())
+        items = []
+        for item in root.findall("./channel/item")[:max(1, min(limit, 15))]:
+            source = item.find("source")
+            items.append({
+                "title": item.findtext("title", ""),
+                "link": item.findtext("link", ""),
+                "published_at": item.findtext("pubDate", ""),
+                "source": source.text if source is not None else "News",
+            })
+        return {"ticker": t, "company": company, "items": items}
+    except Exception as exc:
+        return {"ticker": t, "company": company, "items": [], "warning": f"News temporarily unavailable: {exc}"}
 
 
 @app.get("/api/stock/{ticker}/patterns")
