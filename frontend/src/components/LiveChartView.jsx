@@ -2,11 +2,18 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { createChart, ColorType, LineStyle, CrosshairMode } from 'lightweight-charts';
 import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
+import { 
+  Maximize2, Minimize2, Camera, Bell, Search, 
+  TrendingUp, Activity, BarChart2, Eye, EyeOff 
+} from 'lucide-react';
+import toast from 'react-hot-toast';
 
 /* ─── Constants ─────────────────────────────────────────────────────────────── */
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
 const WS_BASE  = API_BASE.replace(/^https/, 'wss').replace(/^http(?!s)/, 'ws');
+
+const POPULAR_STOCKS = ['RELIANCE', 'TATAMOTORS', 'INFY', 'TCS', 'HDFCBANK', 'NIFTY50', 'BANKNIFTY'];
 
 const INTERVALS = [
   { label: '1m',  value: '1m'  },
@@ -38,19 +45,64 @@ const SIG = {
   hold : { label: '◆ HOLD', color: '#F59E0B', bg: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.28)' },
 };
 
+/* ─── Math Indicators ───────────────────────────────────────────────────────── */
+
+/** Simple Moving Average */
+function calculateSMA(data, period) {
+  const result = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) continue;
+    let sum = 0;
+    for (let j = 0; j < period; j++) {
+      sum += data[i - j].close;
+    }
+    result.push({ time: data[i].time, value: sum / period });
+  }
+  return result;
+}
+
+/** Exponential Moving Average */
+function calculateEMA(data, period) {
+  const result = [];
+  const k = 2 / (period + 1);
+  let ema = data[0]?.close || 0;
+  for (let i = 0; i < data.length; i++) {
+    const val = data[i].close;
+    ema = i === 0 ? val : val * k + ema * (1 - k);
+    if (i >= period - 1) {
+      result.push({ time: data[i].time, value: ema });
+    }
+  }
+  return result;
+}
+
+/** Bollinger Bands (20, 2) */
+function calculateBollingerBands(data, period = 20, multiplier = 2) {
+  const upper = [];
+  const lower = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i < period - 1) continue;
+    let sum = 0;
+    for (let j = 0; j < period; j++) sum += data[i - j].close;
+    const mean = sum / period;
+    let variance = 0;
+    for (let j = 0; j < period; j++) {
+      variance += Math.pow(data[i - j].close - mean, 2);
+    }
+    const stdDev = Math.sqrt(variance / period);
+    upper.push({ time: data[i].time, value: mean + multiplier * stdDev });
+    lower.push({ time: data[i].time, value: mean - multiplier * stdDev });
+  }
+  return { upper, lower };
+}
+
 /* ─── Helpers ────────────────────────────────────────────────────────────────── */
 
-/** Convert backend ISO/space-separated date to lightweight-charts time format */
 function toChartTime(dateStr, isIntraday) {
-  // Backend may return "2024-07-31 09:15:00" (space) or "2024-07-31T09:15:00" (T)
   const normalized = String(dateStr).replace(' ', 'T');
-  if (!isIntraday) {
-    // lightweight-charts requires exactly 'YYYY-MM-DD'
-    return normalized.substring(0, 10);
-  }
-  // For intraday: unix timestamp in seconds
+  if (!isIntraday) return normalized.substring(0, 10);
   const ms = new Date(normalized).getTime();
-  if (isNaN(ms)) return null; // guard against bad dates
+  if (isNaN(ms)) return null;
   return Math.floor(ms / 1000);
 }
 
@@ -65,7 +117,7 @@ function addBusinessDays(dateStr, days) {
   return d.toISOString().split('T')[0];
 }
 
-/* ─── Lightweight Charts theme ───────────────────────────────────────────────── */
+/* ─── Lightweight Charts options ─────────────────────────────────────────────── */
 
 const CHART_OPTIONS = {
   layout: {
@@ -86,15 +138,13 @@ const CHART_OPTIONS = {
   rightPriceScale: {
     borderColor     : 'rgba(168,85,247,0.10)',
     textColor       : '#6B7280',
-    scaleMargins    : { top: 0.12, bottom: 0.08 },
+    scaleMargins    : { top: 0.08, bottom: 0.22 },
   },
   timeScale: {
     borderColor   : 'rgba(168,85,247,0.10)',
     textColor     : '#6B7280',
     timeVisible   : true,
     secondsVisible: false,
-    fixLeftEdge   : false,
-    fixRightEdge  : false,
   },
   handleScroll : { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
   handleScale  : { mouseWheel: true, pinch: true },
@@ -108,11 +158,11 @@ const CANDLE_STYLE = {
   wickDownColor  : '#EF5350',
 };
 
-/* ─── Component ──────────────────────────────────────────────────────────────── */
+/* ─── Main Component ─────────────────────────────────────────────────────────── */
 
 export default function LiveChartView() {
-  const { selectedSymbol }             = useStore();
-  const { fetchHistory, fetchPredict } = useStock();
+  const { selectedSymbol, setSelectedSymbol } = useStore();
+  const { fetchHistory, fetchPredict, searchStock } = useStock();
 
   const [period,      setPeriod]      = useState('3M');
   const [interval,    setInterval]    = useState('1d');
@@ -124,10 +174,30 @@ export default function LiveChartView() {
   const [loading,     setLoading]     = useState(true);
   const [predLoading, setPredLoading] = useState(true);
 
-  // Chart DOM refs
+  // Indicator Toggles
+  const [showVolume, setShowVolume] = useState(true);
+  const [showSMA,    setShowSMA]    = useState(false);
+  const [showEMA,    setShowEMA]    = useState(false);
+  const [showBB,     setShowBB]     = useState(false);
+
+  // Search & Alert State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
+  const [showAlertModal, setShowAlertModal] = useState(false);
+  const [targetAlertPrice, setTargetAlertPrice] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Refs
+  const cardContainerRef = useRef(null);
   const containerRef   = useRef(null);
   const chartRef       = useRef(null);
   const candleRef      = useRef(null);
+  const volumeRef      = useRef(null);
+  const smaRef         = useRef(null);
+  const emaRef         = useRef(null);
+  const bbUpperRef     = useRef(null);
+  const bbLowerRef     = useRef(null);
+
   const predLineRef    = useRef(null);
   const upperLineRef   = useRef(null);
   const lowerLineRef   = useRef(null);
@@ -136,7 +206,7 @@ export default function LiveChartView() {
 
   const isDaily = interval === '1d';
 
-  /* ── Period / Interval changes ────────────────────────────── */
+  /* ── Period / Interval Handlers ───────────────────────────── */
 
   const handlePeriodChange = useCallback((p) => {
     const iv = DEFAULT_INTERVAL[p] || '1d';
@@ -148,7 +218,7 @@ export default function LiveChartView() {
     setInterval(iv);
   }, []);
 
-  /* ── Create chart (once on mount) ────────────────────────── */
+  /* ── Chart Init (mount once) ──────────────────────────────── */
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -156,51 +226,51 @@ export default function LiveChartView() {
     const chart = createChart(containerRef.current, {
       ...CHART_OPTIONS,
       width : containerRef.current.clientWidth,
-      height: 480,
+      height: 500,
     });
     chartRef.current = chart;
 
-    // Candlestick series
+    // 1. Candlesticks
     const candle = chart.addCandlestickSeries(CANDLE_STYLE);
     candleRef.current = candle;
 
-    // AI Prediction dashed line
+    // 2. Volume Histogram Sub-chart
+    const volume = chart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: '',
+      scaleMargins: { top: 0.78, bottom: 0 },
+    });
+    volumeRef.current = volume;
+
+    // 3. Technical Indicators
+    const sma = chart.addLineSeries({ color: '#00E5FF', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
+    smaRef.current = sma;
+
+    const ema = chart.addLineSeries({ color: '#FF9100', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
+    emaRef.current = ema;
+
+    const bbUpper = chart.addLineSeries({ color: '#E040FB', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
+    bbUpperRef.current = bbUpper;
+
+    const bbLower = chart.addLineSeries({ color: '#E040FB', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
+    bbLowerRef.current = bbLower;
+
+    // 4. AI Prediction Lines
     const predLine = chart.addLineSeries({
-      color                  : '#A855F7',
-      lineWidth              : 2.5,
-      lineStyle              : LineStyle.Dashed,
-      crosshairMarkerVisible : true,
-      crosshairMarkerRadius  : 6,
-      crosshairMarkerBorderColor: '#A855F7',
-      crosshairMarkerBackgroundColor: 'rgba(168,85,247,0.3)',
-      priceLineVisible       : false,
-      lastValueVisible       : false,
+      color: '#A855F7', lineWidth: 2.5, lineStyle: LineStyle.Dashed,
+      crosshairMarkerVisible: true, crosshairMarkerRadius: 6,
+      crosshairMarkerBorderColor: '#A855F7', crosshairMarkerBackgroundColor: 'rgba(168,85,247,0.3)',
+      priceLineVisible: false, lastValueVisible: false,
     });
     predLineRef.current = predLine;
 
-    // Upper confidence bound (dotted green)
-    const upperLine = chart.addLineSeries({
-      color                : 'rgba(38,166,154,0.5)',
-      lineWidth            : 1,
-      lineStyle            : LineStyle.Dotted,
-      crosshairMarkerVisible: false,
-      priceLineVisible     : false,
-      lastValueVisible     : false,
-    });
+    const upperLine = chart.addLineSeries({ color: 'rgba(38,166,154,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     upperLineRef.current = upperLine;
 
-    // Lower confidence bound (dotted red)
-    const lowerLine = chart.addLineSeries({
-      color                : 'rgba(239,83,80,0.5)',
-      lineWidth            : 1,
-      lineStyle            : LineStyle.Dotted,
-      crosshairMarkerVisible: false,
-      priceLineVisible     : false,
-      lastValueVisible     : false,
-    });
+    const lowerLine = chart.addLineSeries({ color: 'rgba(239,83,80,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     lowerLineRef.current = lowerLine;
 
-    // ResizeObserver for responsive width
+    // ResizeObserver
     const ro = new ResizeObserver(entries => {
       if (entries[0] && chartRef.current) {
         chartRef.current.applyOptions({ width: entries[0].contentRect.width });
@@ -213,14 +283,19 @@ export default function LiveChartView() {
       chart.remove();
       chartRef.current = null;
       candleRef.current = null;
+      volumeRef.current = null;
+      smaRef.current = null;
+      emaRef.current = null;
+      bbUpperRef.current = null;
+      bbLowerRef.current = null;
       predLineRef.current = null;
       upperLineRef.current = null;
       lowerLineRef.current = null;
       livePriceLineRef.current = null;
     };
-  }, []); // once
+  }, []);
 
-  /* ── Fetch data when symbol / period / interval changes ──── */
+  /* ── Data Fetch ───────────────────────────────────────────── */
 
   useEffect(() => {
     setLoading(true);
@@ -246,7 +321,7 @@ export default function LiveChartView() {
     }
   }, [selectedSymbol, period, interval]);
 
-  /* ── WebSocket for live prices ───────────────────────────── */
+  /* ── WebSocket Feed ───────────────────────────────────────── */
 
   useEffect(() => {
     if (wsRef.current) wsRef.current.close();
@@ -263,6 +338,12 @@ export default function LiveChartView() {
         if (ticker === selectedSymbol) {
           setLivePrice(price);
           setLiveChange(change_pct);
+
+          // Check Price Alert trigger
+          if (targetAlertPrice && Math.abs(price - Number(targetAlertPrice)) < 1) {
+            toast.success(`🔔 ALERT TRIGGERED: ${selectedSymbol} hit target ₹${price}`);
+            setTargetAlertPrice('');
+          }
         }
       } catch {}
     };
@@ -272,22 +353,30 @@ export default function LiveChartView() {
     }, 20_000);
 
     return () => { clearInterval(ping); ws.close(); };
-  }, [selectedSymbol]);
+  }, [selectedSymbol, targetAlertPrice]);
 
-  /* ── Push candle data to chart ───────────────────────────── */
+  /* ── Data Binding to Chart & Indicators ───────────────────── */
 
   useEffect(() => {
-    // Clear chart when no data (range switching)
     if (!candleRef.current) return;
     if (!rawHistory?.length) {
-      try { candleRef.current.setData([]); } catch {}
-      try { predLineRef.current?.setData([]); upperLineRef.current?.setData([]); lowerLineRef.current?.setData([]); } catch {}
+      try {
+        candleRef.current.setData([]);
+        volumeRef.current?.setData([]);
+        smaRef.current?.setData([]);
+        emaRef.current?.setData([]);
+        bbUpperRef.current?.setData([]);
+        bbLowerRef.current?.setData([]);
+        predLineRef.current?.setData([]);
+        upperLineRef.current?.setData([]);
+        lowerLineRef.current?.setData([]);
+      } catch {}
       return;
     }
 
     const intraday = !isDaily;
 
-    // Build candle data — filter bad values and null times
+    // 1. Build Candles
     const candles = rawHistory
       .filter(d => d.open != null && d.high != null && d.low != null && d.close != null)
       .map(d => ({
@@ -297,21 +386,53 @@ export default function LiveChartView() {
         low   : Number(d.low),
         close : Number(d.close),
       }))
-      .filter(d => d.time != null && !isNaN(d.time) && !isNaN(d.open)); // remove bad rows
+      .filter(d => d.time != null && !isNaN(d.time) && !isNaN(d.open));
 
-    // Sort: numeric for intraday timestamps, lexicographic for date strings
     candles.sort((a, b) => intraday ? a.time - b.time : a.time < b.time ? -1 : 1);
 
-    // Deduplicate by time (keep last occurrence per timestamp)
     const seen = new Map();
     candles.forEach(c => seen.set(c.time, c));
     const dedupedCandles = Array.from(seen.values());
 
-    try {
-      candleRef.current.setData(dedupedCandles);
-    } catch (e) { console.warn('setData error:', e); }
+    try { candleRef.current.setData(dedupedCandles); } catch (e) {}
 
-    // ── Prediction lines (daily only) ──
+    // 2. Volume Bars
+    if (showVolume && volumeRef.current) {
+      const volumeData = rawHistory
+        .map(d => ({
+          time: toChartTime(d.date, intraday),
+          value: Number(d.volume || 0),
+          color: Number(d.close) >= Number(d.open) ? 'rgba(38,166,154,0.35)' : 'rgba(239,83,80,0.35)',
+        }))
+        .filter(d => d.time != null && !isNaN(d.time));
+      
+      const vSeen = new Map();
+      volumeData.forEach(v => vSeen.set(v.time, v));
+      try { volumeRef.current.setData(Array.from(vSeen.values())); } catch {}
+    } else {
+      try { volumeRef.current?.setData([]); } catch {}
+    }
+
+    // 3. Technical Indicators (SMA, EMA, BB)
+    if (showSMA && smaRef.current && dedupedCandles.length > 20) {
+      try { smaRef.current.setData(calculateSMA(dedupedCandles, 20)); } catch {}
+    } else { try { smaRef.current?.setData([]); } catch {} }
+
+    if (showEMA && emaRef.current && dedupedCandles.length > 20) {
+      try { emaRef.current.setData(calculateEMA(dedupedCandles, 20)); } catch {}
+    } else { try { emaRef.current?.setData([]); } catch {} }
+
+    if (showBB && bbUpperRef.current && bbLowerRef.current && dedupedCandles.length > 20) {
+      const { upper, lower } = calculateBollingerBands(dedupedCandles, 20, 2);
+      try {
+        bbUpperRef.current.setData(upper);
+        bbLowerRef.current.setData(lower);
+      } catch {}
+    } else {
+      try { bbUpperRef.current?.setData([]); bbLowerRef.current?.setData([]); } catch {}
+    }
+
+    // 4. AI Prediction Lines (Daily only)
     if (isDaily && prediction?.predicted_price_7d && rawHistory.length > 0) {
       const lastD    = rawHistory[rawHistory.length - 1];
       const lastTime = toChartTime(lastD.date, false);
@@ -334,9 +455,8 @@ export default function LiveChartView() {
           { time: lastTime, value: lastClose },
           { time: futureTime, value: lowerVal },
         ]);
-      } catch (e) { console.warn('Prediction line error:', e); }
+      } catch {}
     } else {
-      // Clear prediction lines
       try {
         predLineRef.current?.setData([]);
         upperLineRef.current?.setData([]);
@@ -344,16 +464,10 @@ export default function LiveChartView() {
       } catch {}
     }
 
-    // ── Live price line ──
-    if (livePriceLineRef.current) {
-      try { candleRef.current.removePriceLine(livePriceLineRef.current); } catch {}
-      livePriceLineRef.current = null;
-    }
-
     chartRef.current?.timeScale().fitContent();
-  }, [rawHistory, prediction, interval]);
+  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB]);
 
-  /* ── Real-time live price update (last candle) ───────────── */
+  /* ── Real-time Update ─────────────────────────────────────── */
 
   useEffect(() => {
     if (!candleRef.current || !livePrice || !rawHistory?.length) return;
@@ -364,14 +478,13 @@ export default function LiveChartView() {
     try {
       candleRef.current.update({
         time  : toChartTime(last.date, intraday),
-        open  : last.open,
-        high  : Math.max(last.high, livePrice),
-        low   : Math.min(last.low,  livePrice),
+        open  : Number(last.open),
+        high  : Math.max(Number(last.high), livePrice),
+        low   : Math.min(Number(last.low),  livePrice),
         close : livePrice,
       });
     } catch {}
 
-    // Update / create live price line
     if (livePriceLineRef.current) {
       try { candleRef.current.removePriceLine(livePriceLineRef.current); } catch {}
     }
@@ -387,7 +500,49 @@ export default function LiveChartView() {
     });
   }, [livePrice, interval]);
 
-  /* ── Derived values for header / stats ──────────────────── */
+  /* ── Header Search Handler ────────────────────────────────── */
+
+  const handleSearchSubmit = async (e) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    setIsSearching(true);
+    const res = await searchStock(searchQuery.trim());
+    setIsSearching(false);
+    if (res?.ticker) {
+      setSelectedSymbol(res.ticker);
+      setSearchQuery('');
+      toast.success(`Loaded ${res.ticker}`);
+    } else {
+      toast.error('Stock not found');
+    }
+  };
+
+  /* ── Snapshot Handler ─────────────────────────────────────── */
+
+  const handleSnapshot = () => {
+    if (!chartRef.current) return;
+    const canvas = containerRef.current.querySelector('canvas');
+    if (!canvas) return;
+    const image = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = `StockOracle_${selectedSymbol}_${period}.png`;
+    link.href = image;
+    link.click();
+    toast.success('Chart Snapshot Downloaded 📸');
+  };
+
+  /* ── Fullscreen Toggle ────────────────────────────────────── */
+
+  const toggleFullscreen = () => {
+    if (!cardContainerRef.current) return;
+    if (!document.fullscreenElement) {
+      cardContainerRef.current.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  };
+
+  /* ── Derived Header & Stats values ────────────────────────── */
 
   const lastCandleClose = rawHistory?.length ? rawHistory[rawHistory.length - 1]?.close : null;
   const curPrice  = livePrice ?? lastCandleClose ?? prediction?.current_price;
@@ -397,12 +552,10 @@ export default function LiveChartView() {
   const score     = prediction?.ai_confidence_score ?? 0;
   const scoreColor = score >= 70 ? '#26A69A' : score >= 50 ? '#F59E0B' : '#EF5350';
 
-  /* ──────────────────────────────────────────────────────────── */
-
   return (
-    <div style={{ padding:'20px', display:'flex', flexDirection:'column', gap:16, minHeight:'100vh', background:'#090C18' }}>
+    <div ref={cardContainerRef} style={{ padding:'20px', display:'flex', flexDirection:'column', gap:16, minHeight:'100vh', background:'#090C18' }}>
 
-      {/* ── CSS ── */}
+      {/* ── CSS Animations & Styles ── */}
       <style>{`
         @keyframes livePulse {
           0%,100% { box-shadow:0 0 0 0 rgba(38,166,154,0.5); }
@@ -416,19 +569,65 @@ export default function LiveChartView() {
         .lc-stat:hover { border-color:rgba(168,85,247,0.28)!important; background:rgba(168,85,247,0.05)!important; }
         .lc-btn  { transition:all 0.15s; }
         .lc-btn:hover { opacity:1!important; }
+        .pill-btn { transition:all 0.2s; cursor:pointer; }
+        .pill-btn:hover { background:rgba(168,85,247,0.2)!important; color:#C084FC!important; }
       `}</style>
 
-      {/* ── Header ── */}
+      {/* ── Top Bar: Quick Stock Watchlist & Search ── */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap', background:'rgba(255,255,255,0.02)', padding:'10px 16px', borderRadius:14, border:'1px solid rgba(168,85,247,0.1)' }}>
+        
+        {/* Watchlist Pills */}
+        <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
+          <span style={{ fontSize:'0.65rem', color:'#4B5563', letterSpacing:'0.08em', fontWeight:700, marginRight:4 }}>WATCHLIST</span>
+          {POPULAR_STOCKS.map(sym => (
+            <button
+              key={sym}
+              onClick={() => setSelectedSymbol(sym)}
+              className="pill-btn"
+              style={{
+                padding:'4px 10px', borderRadius:20, fontSize:'0.72rem', fontWeight:700,
+                border: selectedSymbol === sym ? '1px solid #A855F7' : '1px solid rgba(75,85,99,0.3)',
+                background: selectedSymbol === sym ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.03)',
+                color: selectedSymbol === sym ? '#C084FC' : '#9CA3AF',
+              }}
+            >
+              {sym}
+            </button>
+          ))}
+        </div>
+
+        {/* Search Bar */}
+        <form onSubmit={handleSearchSubmit} style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
+            <Search size={14} style={{ position:'absolute', left:10, color:'#6B7280' }} />
+            <input
+              type="text"
+              placeholder="Search ticker (e.g. INFY)..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{
+                padding:'5px 10px 5px 30px', borderRadius:8, border:'1px solid rgba(168,85,247,0.2)',
+                background:'rgba(15,23,42,0.8)', color:'#F0F0FF', fontSize:'0.75rem', width:180, outline:'none',
+              }}
+            />
+          </div>
+          <button type="submit" style={{ padding:'5px 12px', borderRadius:8, border:'none', background:'#A855F7', color:'#fff', fontSize:'0.72rem', fontWeight:700, cursor:'pointer' }}>
+            {isSearching ? '...' : 'Go'}
+          </button>
+        </form>
+      </div>
+
+      {/* ── Main Header ── */}
       <div style={{ display:'flex', alignItems:'flex-start', gap:16, flexWrap:'wrap' }}>
 
-        {/* Left: ticker + price */}
+        {/* Ticker & Live Price */}
         <div>
           <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <h2 style={{ margin:0, fontSize:'1.55rem', fontWeight:800, color:'#F0F0FF', letterSpacing:'-0.02em' }}>
+            <h2 style={{ margin:0, fontSize:'1.65rem', fontWeight:800, color:'#F0F0FF', letterSpacing:'-0.02em' }}>
               {selectedSymbol}
             </h2>
 
-            {/* LIVE / OFFLINE pill */}
+            {/* LIVE Badge */}
             <div style={{
               display:'flex', alignItems:'center', gap:5,
               background: wsConnected ? 'rgba(38,166,154,0.10)' : 'rgba(75,85,99,0.10)',
@@ -443,6 +642,31 @@ export default function LiveChartView() {
               <span style={{ fontSize:'0.67rem', fontWeight:700, letterSpacing:'0.07em', color: wsConnected ? '#26A69A' : '#4B5563' }}>
                 {wsConnected ? 'LIVE' : 'OFFLINE'}
               </span>
+            </div>
+
+            {/* Action Buttons: Alert, Snapshot, Fullscreen */}
+            <div style={{ display:'flex', gap:6, marginLeft:10 }}>
+              <button
+                onClick={() => setShowAlertModal(true)}
+                title="Set Price Alert"
+                style={{ padding:'5px 8px', borderRadius:6, border:'1px solid rgba(168,85,247,0.3)', background:'rgba(168,85,247,0.1)', color:'#C084FC', cursor:'pointer' }}
+              >
+                <Bell size={14} />
+              </button>
+              <button
+                onClick={handleSnapshot}
+                title="Take Chart Snapshot"
+                style={{ padding:'5px 8px', borderRadius:6, border:'1px solid rgba(38,166,154,0.3)', background:'rgba(38,166,154,0.1)', color:'#26A69A', cursor:'pointer' }}
+              >
+                <Camera size={14} />
+              </button>
+              <button
+                onClick={toggleFullscreen}
+                title="Toggle Fullscreen"
+                style={{ padding:'5px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.05)', color:'#fff', cursor:'pointer' }}
+              >
+                {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
             </div>
           </div>
 
@@ -460,10 +684,10 @@ export default function LiveChartView() {
           )}
         </div>
 
-        {/* Right: interval + period selectors */}
+        {/* Right: Interval + Period Selectors */}
         <div style={{ marginLeft:'auto', display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end' }}>
 
-          {/* CANDLE row */}
+          {/* CANDLE Row */}
           <div style={{ display:'flex', alignItems:'center', gap:4 }}>
             <span style={{ fontSize:'0.62rem', color:'#374151', letterSpacing:'0.08em', marginRight:4 }}>CANDLE</span>
             {INTERVALS.map(iv => (
@@ -476,7 +700,7 @@ export default function LiveChartView() {
             ))}
           </div>
 
-          {/* RANGE row */}
+          {/* RANGE Row */}
           <div style={{ display:'flex', alignItems:'center', gap:4 }}>
             <span style={{ fontSize:'0.62rem', color:'#374151', letterSpacing:'0.08em', marginRight:4 }}>RANGE</span>
             {PERIODS.map(p => (
@@ -491,7 +715,7 @@ export default function LiveChartView() {
         </div>
       </div>
 
-      {/* ── Chart card ── */}
+      {/* ── Chart Container ── */}
       <div style={{
         background:'rgba(255,255,255,0.015)',
         border:'1px solid rgba(168,85,247,0.10)',
@@ -499,27 +723,76 @@ export default function LiveChartView() {
         position:'relative',
       }}>
 
-        {/* Legend */}
-        <div style={{ display:'flex', gap:18, padding:'12px 18px 0', fontSize:'0.71rem', color:'#4B5563', flexWrap:'wrap' }}>
-          <span><span style={{ color:'#26A69A' }}>█</span> Bullish</span>
-          <span><span style={{ color:'#EF5350' }}>█</span> Bearish</span>
-          {isDaily && prediction && (
-            <>
-              <span>
-                <span style={{ display:'inline-block', width:14, borderBottom:'2px dashed #A855F7', verticalAlign:'middle', marginRight:4 }} />
-                AI Prediction
-              </span>
-              <span style={{ color:'rgba(38,166,154,0.8)' }}>···· Upper bound</span>
-              <span style={{ color:'rgba(239,83,80,0.8)'  }}>···· Lower bound</span>
-            </>
-          )}
-          {wsConnected && <span style={{ color:'rgba(38,166,154,0.6)' }}>– – Live price line</span>}
-          <span style={{ marginLeft:'auto', color:'#374151', fontSize:'0.65rem' }}>
-            Scroll to zoom · Drag to pan
-          </span>
+        {/* Toolbar & Indicators Bar */}
+        <div style={{ display:'flex', gap:12, padding:'10px 16px 0', fontSize:'0.71rem', color:'#4B5563', flexWrap:'wrap', alignItems:'center', borderBottom:'1px solid rgba(255,255,255,0.03)', paddingBottom:10 }}>
+          
+          <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+            <span style={{ fontSize:'0.65rem', color:'#6B7280', fontWeight:700, marginRight:2 }}>INDICATORS:</span>
+            
+            {/* Volume Toggle */}
+            <button
+              onClick={() => setShowVolume(!showVolume)}
+              style={{
+                padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer',
+                border: showVolume ? '1px solid #26A69A' : '1px solid rgba(75,85,99,0.3)',
+                background: showVolume ? 'rgba(38,166,154,0.15)' : 'transparent',
+                color: showVolume ? '#26A69A' : '#6B7280',
+              }}
+            >
+              VOL {showVolume ? <Eye size={10} style={{ display:'inline', marginLeft:3 }} /> : <EyeOff size={10} style={{ display:'inline', marginLeft:3 }} />}
+            </button>
+
+            {/* SMA 20 Toggle */}
+            <button
+              onClick={() => setShowSMA(!showSMA)}
+              style={{
+                padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer',
+                border: showSMA ? '1px solid #00E5FF' : '1px solid rgba(75,85,99,0.3)',
+                background: showSMA ? 'rgba(0,229,255,0.15)' : 'transparent',
+                color: showSMA ? '#00E5FF' : '#6B7280',
+              }}
+            >
+              SMA 20
+            </button>
+
+            {/* EMA 20 Toggle */}
+            <button
+              onClick={() => setShowEMA(!showEMA)}
+              style={{
+                padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer',
+                border: showEMA ? '1px solid #FF9100' : '1px solid rgba(75,85,99,0.3)',
+                background: showEMA ? 'rgba(255,145,0,0.15)' : 'transparent',
+                color: showEMA ? '#FF9100' : '#6B7280',
+              }}
+            >
+              EMA 20
+            </button>
+
+            {/* Bollinger Bands Toggle */}
+            <button
+              onClick={() => setShowBB(!showBB)}
+              style={{
+                padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer',
+                border: showBB ? '1px solid #E040FB' : '1px solid rgba(75,85,99,0.3)',
+                background: showBB ? 'rgba(224,64,251,0.15)' : 'transparent',
+                color: showBB ? '#E040FB' : '#6B7280',
+              }}
+            >
+              BOLL (20,2)
+            </button>
+          </div>
+
+          {/* Legend Items */}
+          <div style={{ marginLeft:'auto', display:'flex', gap:14, alignItems:'center' }}>
+            <span><span style={{ color:'#26A69A' }}>█</span> Bullish</span>
+            <span><span style={{ color:'#EF5350' }}>█</span> Bearish</span>
+            {isDaily && prediction && (
+              <span style={{ borderBottom:'2px dashed #A855F7', paddingBottom:1 }}>── AI Target</span>
+            )}
+          </div>
         </div>
 
-        {/* Loading spinner overlay */}
+        {/* Loading Spinner Overlay */}
         {loading && (
           <div style={{
             position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center',
@@ -535,14 +808,48 @@ export default function LiveChartView() {
           </div>
         )}
 
-        {/* Lightweight Charts mounts here */}
-        <div ref={containerRef} style={{ width:'100%', height:480 }} />
+        {/* Chart Mounting Div */}
+        <div ref={containerRef} style={{ width:'100%', height:500 }} />
       </div>
 
-      {/* ── Stats bar (daily only) ── */}
+      {/* ── Price Alert Modal ── */}
+      {showAlertModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100 }}>
+          <div style={{ background:'#121629', border:'1px solid #A855F7', borderRadius:16, padding:24, width:320, display:'flex', flexDirection:'column', gap:14 }}>
+            <h3 style={{ margin:0, color:'#F0F0FF', fontSize:'1.1rem', display:'flex', alignItems:'center', gap:8 }}>
+              <Bell size={18} color="#A855F7" /> Set Price Alert for {selectedSymbol}
+            </h3>
+            <p style={{ margin:0, color:'#9CA3AF', fontSize:'0.78rem' }}>
+              Notify me when live price reaches or crosses this target price:
+            </p>
+            <input
+              type="number"
+              placeholder={`Current: ₹${curPrice || '0'}`}
+              value={targetAlertPrice}
+              onChange={e => setTargetAlertPrice(e.target.value)}
+              style={{ padding:'8px 12px', borderRadius:8, border:'1px solid rgba(168,85,247,0.3)', background:'#090C18', color:'#fff', fontSize:'0.9rem', outline:'none' }}
+            />
+            <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+              <button onClick={() => setShowAlertModal(false)} style={{ padding:'6px 12px', borderRadius:8, border:'none', background:'#374151', color:'#fff', cursor:'pointer' }}>Cancel</button>
+              <button
+                onClick={() => {
+                  if (targetAlertPrice) {
+                    toast.success(`Alert set for ${selectedSymbol} at ₹${targetAlertPrice}`);
+                    setShowAlertModal(false);
+                  }
+                }}
+                style={{ padding:'6px 14px', borderRadius:8, border:'none', background:'#A855F7', color:'#fff', fontWeight:700, cursor:'pointer' }}
+              >
+                Save Alert
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Stats Bar (Daily Only) ── */}
       {isDaily && (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(138px, 1fr))', gap:10 }}>
-
           {[
             { label:'CURRENT PRICE',   value: curPrice ? `₹${curPrice.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : '—', color:'#F0F0FF', delay:'0ms' },
             { label:'AI TARGET (7D)',  value: prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : predLoading ? 'Loading…' : '—', color:'#A855F7', delay:'40ms' },
@@ -561,7 +868,7 @@ export default function LiveChartView() {
             </div>
           ))}
 
-          {/* Signal pill */}
+          {/* Signal Pill */}
           <div className="lc-stat" style={{
             background:sigMeta.bg, border:`1px solid ${sigMeta.border}`,
             borderRadius:12, padding:'11px 14px', animationDelay:'240ms',
@@ -575,7 +882,7 @@ export default function LiveChartView() {
         </div>
       )}
 
-      {/* ── Confidence bar (daily only) ── */}
+      {/* ── Confidence Score Bar (Daily Only) ── */}
       {isDaily && prediction?.ai_confidence_score != null && (
         <div style={{
           background:'rgba(255,255,255,0.018)', border:'1px solid rgba(168,85,247,0.08)',
@@ -595,14 +902,13 @@ export default function LiveChartView() {
         </div>
       )}
 
-      {/* ── Intraday note ── */}
+      {/* ── Intraday Note ── */}
       {!isDaily && (
         <div style={{
           background:'rgba(99,102,241,0.06)', border:'1px solid rgba(99,102,241,0.15)',
           borderRadius:10, padding:'10px 14px', fontSize:'0.76rem', color:'#818CF8',
         }}>
-          🔵 Intraday mode — AI prediction available on <strong>1D</strong> candle interval only.
-          Switch to <strong>1D</strong> candle to see the 7-day AI forecast.
+          🔵 Intraday mode — Technical indicators (SMA, EMA, Volume) active. Switch to <strong>1D</strong> candle interval for 7-day AI forecasts.
         </div>
       )}
 
