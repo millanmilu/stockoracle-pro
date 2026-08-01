@@ -32,11 +32,12 @@ const PERIODS = [
   { label: '6M', value: '6M' },
   { label: '1Y', value: '1Y' },
   { label: '2Y', value: '2Y' },
+  { label: '5Y', value: '5Y' },
 ];
 
 const DEFAULT_INTERVAL = {
   '1D': '5m', '5D': '15m', '1W': '1h',
-  '1M': '1d', '3M': '1d', '6M': '1d', '1Y': '1d', '2Y': '1d',
+  '1M': '1d', '3M': '1d', '6M': '1d', '1Y': '1d', '2Y': '1d', '5Y': '1d',
 };
 
 const SIG = {

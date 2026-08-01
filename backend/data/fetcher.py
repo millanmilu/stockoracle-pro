@@ -251,9 +251,15 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
         "2D":  2,   "7D":  7,   "10D": 10,  "1W":  7,
         "45D": 45,  "1M":  30,  "120D": 120, "3M": 90,
         "200D": 200, "6M": 180, "370D": 370, "1Y": 365,
-        "2Y":  730,
+        "2Y":  730, "5Y": 1825,
     }
     days = period_map.get(period.upper(), 120)
+
+    # Trigger 5Y backfill if requested and missing from DB
+    if period.upper() == "5Y" and not interval.lower() in ["1m", "5m", "15m", "1h"]:
+        backfilled = backfill_5y_history(ticker)
+        if backfilled is not None and not backfilled.empty:
+            return backfilled
     todate = datetime.now()
     fromdate = todate - timedelta(days=days)
 
@@ -475,3 +481,46 @@ def get_combined_stock_data(ticker: str, period: str = "2Y") -> Optional[pd.Data
 
     print(f"📊 Combined data for {ticker}: {len(df)} rows (historical + live tick for {today_str})")
     return df
+
+
+def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
+    """
+    Downloads 5 years (1,825 days) of daily historical OHLCV data for a ticker
+    using yfinance and bulk saves it into the SQLite database.
+    Live WebSocket ticks automatically update and append to this DB dataset.
+    """
+    ticker = ticker.upper().strip()
+    print(f"📥 Fetching 5-year historical data for {ticker}...")
+
+    # Check if DB already has 5Y history (> 1000 records)
+    todate = datetime.now()
+    fromdate = todate - timedelta(days=1825)
+    existing_df = get_historical_prices(ticker, fromdate.strftime("%Y-%m-%d"), todate.strftime("%Y-%m-%d"))
+    if existing_df is not None and len(existing_df) >= 1000:
+        print(f"✅ Found existing {len(existing_df)} 5-year records in SQLite DB for {ticker}.")
+        return existing_df
+
+    try:
+        import yfinance as yf
+        yf_symbol = f"{ticker}.NS" if not ticker.endswith(".NS") and not ticker.endswith(".BO") else ticker
+        print(f"Downloading 5Y history from yfinance for {yf_symbol}...")
+        stock = yf.Ticker(yf_symbol)
+        df = stock.history(period="5y")
+
+        if df is not None and not df.empty:
+            df = df.reset_index()
+            df["date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
+            df["open"] = df["Open"].astype(float)
+            df["high"] = df["High"].astype(float)
+            df["low"] = df["Low"].astype(float)
+            df["close"] = df["Close"].astype(float)
+            df["volume"] = df["Volume"].astype(int)
+
+            clean_df = df[["date", "open", "high", "low", "close", "volume"]]
+            save_historical_prices(ticker, clean_df)
+            print(f"✅ Stored {len(clean_df)} 5-year records into SQLite DB for {ticker}.")
+            return clean_df
+    except Exception as e:
+        print(f"⚠️ yfinance 5y download error for {ticker}: {e}")
+
+    return existing_df

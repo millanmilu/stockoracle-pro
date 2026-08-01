@@ -161,12 +161,13 @@ def get_stock_history(ticker: str, timeframe: str = "3M", interval: str = "1d"):
         "6M":  "200D",
         "1Y":  "370D",
         "2Y":  "2Y",
+        "5Y":  "5Y",
     }
     period = days_map.get(timeframe.upper())
     if not period:
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid timeframe '{timeframe}'. Valid: 1D, 5D, 1W, 1M, 3M, 6M, 1Y, 2Y."
+            detail=f"Invalid timeframe '{timeframe}'. Valid: 1D, 5D, 1W, 1M, 3M, 6M, 1Y, 2Y, 5Y."
         )
 
     # Validate interval
