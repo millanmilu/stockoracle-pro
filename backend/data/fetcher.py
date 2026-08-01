@@ -158,7 +158,7 @@ def _load_scrip_master(force: bool = False):
         response.raise_for_status()
         data = response.json()
         for item in data:
-            if item.get("exch_seg") == "NSE" and item.get("instrumenttype", "") == "":
+            if item.get("exch_seg") == "NSE" and (not item.get("instrumenttype") or item.get("instrumenttype") in ["", "EQ", "AMX"]):
                 _scrip_map[item["symbol"]] = item
         save_stock_universe([
             {

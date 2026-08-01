@@ -368,9 +368,9 @@ training_tasks = {}
 def get_prediction(symbol: str):
     from backend.analysis.trainer import predict_future
     try:
-        res = predict_future(symbol.upper())
-        predicted_return = (res['predicted_price'] - res['current_price']) / res['current_price']
-        signal = "buy" if res['predicted_price'] > res['current_price'] * 1.01 else ("sell" if res['predicted_price'] < res['current_price'] * 0.99 else "hold")
+        cur_price = res.get('current_price', 0.0) or 1.0
+        predicted_return = (res['predicted_price'] - cur_price) / cur_price if cur_price > 0 else 0.0
+        signal = "buy" if res['predicted_price'] > cur_price * 1.01 else ("sell" if res['predicted_price'] < cur_price * 0.99 else "hold")
         ai_score = 80 if signal == "buy" else (20 if signal == "sell" else 50)
         
         return {
