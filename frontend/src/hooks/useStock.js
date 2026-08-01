@@ -22,8 +22,8 @@ export function useStock() {
   const fetchHistory = useCallback(async (ticker, timeframe = '3M', interval = '1d') => {
     try {
       const { data } = await api.get(`/api/stock/${ticker}/history`, { params: { timeframe, interval } })
-      return data
-    } catch (e) { return null }
+      return Array.isArray(data) ? data : []
+    } catch (e) { return [] }
   }, [])
 
   const fetchPredict = useCallback(async (ticker) => {

@@ -105,10 +105,11 @@ def get_features(symbol: str, end_date: str = None) -> pd.DataFrame:
     
     # We now have 5 (OHLCV) + 20 (Engineered) = 25 Features.
     
-    # Fetch and attach sentiment
-    # We broadcast the current sentiment score to all rows so the model can train on it
-    # (Since we only have current RSS feed, this is a proxy for the sentiment state)
-    sentiment_score = fetch_and_score_sentiment(symbol)
+    try:
+        sentiment_score = fetch_and_score_sentiment(symbol)
+    except Exception as exc:
+        sentiment_score = 0.0
+        print(f"⚠️ Sentiment fetch failed for {symbol}: {exc}")
     df['sentiment'] = sentiment_score
     
     # Drop rows with NaNs caused by lagging/rolling (mainly first 50 days)

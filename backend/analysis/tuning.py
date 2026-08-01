@@ -19,15 +19,14 @@ def tune_xgboost(X: pd.DataFrame, y: pd.Series) -> dict:
     # Using n_estimators=100 for speed as requested (lightweight)
     base_model = xgb.XGBRegressor(n_estimators=100, objective='reg:squarederror', random_state=42)
     
-    # Setup RandomizedSearchCV
-    # 10 iterations, 3-fold CV
+    # Setup RandomizedSearchCV (lightweight: 5 iterations, 2-fold CV, n_jobs=1 for CPU safety)
     random_search = RandomizedSearchCV(
         estimator=base_model,
         param_distributions=param_dist,
-        n_iter=10,
-        cv=3,
+        n_iter=5,
+        cv=2,
         scoring='neg_mean_absolute_error',
-        n_jobs=-1,  # Use all available CPU cores
+        n_jobs=1,  # Safe CPU utilization
         random_state=42,
         verbose=0
     )

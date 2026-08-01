@@ -717,8 +717,11 @@ export default function LiveChartView() {
   /* ── Real-time Price Update ───────────────────────────────── */
 
   useEffect(() => {
+    if (!candleRef.current || !rawHistory || !Array.isArray(rawHistory) || !rawHistory.length || livePrice == null) return;
+
     const last      = rawHistory[rawHistory.length - 1];
-    const lastClose = Number(last.close);
+    if (!last || last.close == null) return;
+    const lastClose = parseNum(last.close);
     const intraday  = !isDaily;
 
     // Sanity check: ignore out-of-range live ticks (> 20% deviation) to prevent abnormal candle spikes
@@ -791,7 +794,7 @@ export default function LiveChartView() {
 
   /* ── Derived Header & Stats values ────────────────────────── */
 
-  const lastCandleClose = rawHistory?.length ? rawHistory[rawHistory.length - 1]?.close : null;
+  const lastCandleClose = Array.isArray(rawHistory) && rawHistory.length ? rawHistory[rawHistory.length - 1]?.close : null;
   const curPrice  = livePrice ?? lastCandleClose ?? prediction?.current_price;
   const changeUp  = (liveChange ?? 0) >= 0;
   const sig       = prediction?.signal;
