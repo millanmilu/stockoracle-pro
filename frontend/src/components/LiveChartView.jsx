@@ -549,9 +549,9 @@ export default function LiveChartView() {
         low   : Number(d.low),
         close : Number(d.close),
       }))
-      .filter(d => d.time != null && !isNaN(d.time) && !isNaN(d.open));
+      .filter(d => d.time != null && d.time !== '' && !isNaN(d.open));
 
-    candles.sort((a, b) => intraday ? a.time - b.time : a.time < b.time ? -1 : 1);
+    candles.sort((a, b) => (typeof a.time === 'number' ? a.time - b.time : String(a.time).localeCompare(String(b.time))));
 
     const seen = new Map();
     candles.forEach(c => seen.set(c.time, c));
@@ -577,7 +577,7 @@ export default function LiveChartView() {
           value: Number(d.volume || 0),
           color: Number(d.close) >= Number(d.open) ? 'rgba(38,166,154,0.35)' : 'rgba(239,83,80,0.35)',
         }))
-        .filter(d => d.time != null && !isNaN(d.time));
+        .filter(d => d.time != null && d.time !== '' && !isNaN(d.value));
       
       const vSeen = new Map();
       volumeData.forEach(v => vSeen.set(v.time, v));
@@ -675,9 +675,9 @@ export default function LiveChartView() {
         low   : Number(d.low),
         close : Number(d.close),
       }))
-      .filter(d => d.time != null && !isNaN(d.time) && !isNaN(d.open));
+      .filter(d => d.time != null && d.time !== '' && !isNaN(d.open));
 
-    candles2.sort((a, b) => intraday ? a.time - b.time : a.time < b.time ? -1 : 1);
+    candles2.sort((a, b) => (typeof a.time === 'number' ? a.time - b.time : String(a.time).localeCompare(String(b.time))));
 
     const seen2 = new Map();
     candles2.forEach(c => seen2.set(c.time, c));

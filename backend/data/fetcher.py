@@ -310,7 +310,10 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
         )
         df = df.astype({"open": float, "high": float, "low": float,
                         "close": float, "volume": int})
-        df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+        if interval.lower() in ["1m", "5m", "15m", "1h"]:
+            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
         
         # Save to local database (UPSERT)
         save_historical_prices(ticker, df)
