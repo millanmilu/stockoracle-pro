@@ -706,17 +706,21 @@ export default function LiveChartView() {
   /* ── Real-time Price Update ───────────────────────────────── */
 
   useEffect(() => {
-    if (!candleRef.current || !livePrice || !rawHistory?.length) return;
+    const last      = rawHistory[rawHistory.length - 1];
+    const lastClose = Number(last.close);
+    const intraday  = !isDaily;
 
-    const last     = rawHistory[rawHistory.length - 1];
-    const intraday = !isDaily;
+    // Sanity check: ignore out-of-range live ticks (> 20% deviation) to prevent abnormal candle spikes
+    if (lastClose > 0 && Math.abs(livePrice - lastClose) / lastClose > 0.20) {
+      return;
+    }
 
     try {
       candleRef.current.update({
         time  : toChartTime(last.date, intraday),
         open  : Number(last.open),
-        high  : Math.max(Number(last.high), livePrice),
-        low   : Math.min(Number(last.low),  livePrice),
+        high  : Math.max(Number(last.high), Number(last.open), livePrice),
+        low   : Math.min(Number(last.low),  Number(last.open), livePrice),
         close : livePrice,
       });
     } catch {}

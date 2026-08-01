@@ -579,14 +579,23 @@ async def websocket_price_broadcast_loop():
                 print(f"Error fetching live tick for {t}: {e}")
 
             if not fetched:
-                # Broadcast static cached price without simulated changes or database writes
-                base_price = prices_cache.get(t, 1000.0)
-                payload = {
-                    "ticker": t,
-                    "price": round(base_price, 2),
-                    "change_pct": 0.0
-                }
-                await manager.broadcast(payload)
+                base_price = prices_cache.get(t)
+                if not base_price:
+                    try:
+                        from backend.data.fetcher import fetch_company_info
+                        info = fetch_company_info(t)
+                        if info and info.get("current_price"):
+                            base_price = float(info["current_price"])
+                            prices_cache[t] = base_price
+                    except Exception: pass
+                
+                if base_price and base_price > 0:
+                    payload = {
+                        "ticker": t,
+                        "price": round(base_price, 2),
+                        "change_pct": 0.0
+                    }
+                    await manager.broadcast(payload)
 
         # Broadcast interval: 5 seconds to be gentle on connections
         await asyncio.sleep(5.0)
