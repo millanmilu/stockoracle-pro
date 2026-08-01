@@ -152,6 +152,9 @@ def get_historical_prices(ticker: str, start_date: str, end_date: str) -> Option
     Returns a Pandas DataFrame, or None if no records exist.
     """
     ticker = ticker.upper()
+    if len(end_date) == 10:
+        end_date = end_date + " 23:59:59"
+
     query = """
         SELECT date, open, high, low, close, volume
         FROM historical_prices

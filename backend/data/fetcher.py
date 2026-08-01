@@ -320,7 +320,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
         
         # Query again from database to get a complete/merged historical set
         merged_df = get_historical_prices(ticker, fromdate_str, todate_str)
-        final_df = merged_df if merged_df is not None else df
+        final_df = merged_df if (merged_df is not None and not merged_df.empty) else df
         
         _set_cached(cache_key, final_df)
         return final_df

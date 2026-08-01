@@ -657,7 +657,10 @@ export default function LiveChartView() {
       } catch {}
     }
 
-    chartRef.current?.timeScale().fitContent();
+    const timer = setTimeout(() => {
+      try { chartRef.current?.timeScale().fitContent(); } catch {}
+    }, 50);
+    return () => clearTimeout(timer);
   }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showPatterns]);
 
   /* ── Secondary Comparison Chart Data Binding ───────────────── */
