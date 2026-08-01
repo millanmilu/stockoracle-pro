@@ -348,12 +348,10 @@ export default function LiveChartView() {
     const candle = chart.addCandlestickSeries(CANDLE_STYLE);
     candleRef.current = candle;
 
-    // Volume Sub-chart (isolated overlay scale so it never compresses candlesticks)
+    // Volume Sub-chart (overlay scale with scaleMargins)
     const volume = chart.addHistogramSeries({
       priceFormat: { type: 'volume' },
-      priceScaleId: 'volume',
-    });
-    chart.priceScale('volume').applyOptions({
+      priceScaleId: '',
       scaleMargins: { top: 0.8, bottom: 0 },
     });
     volumeRef.current = volume;
@@ -371,21 +369,19 @@ export default function LiveChartView() {
     const bbLower = chart.addLineSeries({ color: '#E040FB', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     bbLowerRef.current = bbLower;
 
-    // RSI Sub-chart (isolated overlay scale so 0-100 values never corrupt main price scale)
+    // RSI Sub-chart (overlay scale with scaleMargins)
     const rsi = chart.addLineSeries({
       color: '#F43F5E', lineWidth: 1.5,
-      priceScaleId: 'rsi',
-      priceLineVisible: false, lastValueVisible: true,
-    });
-    chart.priceScale('rsi').applyOptions({
+      priceScaleId: '',
       scaleMargins: { top: 0.82, bottom: 0 },
+      priceLineVisible: false, lastValueVisible: true,
     });
     rsiRef.current = rsi;
 
-    const rsi70 = chart.addLineSeries({ color: 'rgba(239,83,80,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: 'rsi', priceLineVisible: false, lastValueVisible: false });
+    const rsi70 = chart.addLineSeries({ color: 'rgba(239,83,80,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: '', scaleMargins: { top: 0.82, bottom: 0 }, priceLineVisible: false, lastValueVisible: false });
     rsiLine70Ref.current = rsi70;
 
-    const rsi30 = chart.addLineSeries({ color: 'rgba(38,166,154,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: 'rsi', priceLineVisible: false, lastValueVisible: false });
+    const rsi30 = chart.addLineSeries({ color: 'rgba(38,166,154,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: '', scaleMargins: { top: 0.82, bottom: 0 }, priceLineVisible: false, lastValueVisible: false });
     rsiLine30Ref.current = rsi30;
 
     // AI Predictions
