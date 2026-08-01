@@ -364,12 +364,14 @@ export default function LiveChartView() {
     const bbLower = chart.addLineSeries({ color: '#E040FB', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     bbLowerRef.current = bbLower;
 
-    // RSI Sub-chart
+    // RSI Sub-chart (isolated overlay scale so 0-100 values never corrupt main price scale)
     const rsi = chart.addLineSeries({
       color: '#F43F5E', lineWidth: 1.5,
       priceScaleId: 'rsi',
-      scaleMargins: { top: 0.82, bottom: 0 },
       priceLineVisible: false, lastValueVisible: true,
+    });
+    chart.priceScale('rsi').applyOptions({
+      scaleMargins: { top: 0.82, bottom: 0 },
     });
     rsiRef.current = rsi;
 
@@ -636,11 +638,11 @@ export default function LiveChartView() {
       } catch {}
     }
 
-    // 5. AI Predictions
-    if (isDaily && prediction?.predicted_price_7d && rawHistory.length > 0) {
+    // 5. AI Predictions (Daily only, valid target price)
+    if (isDaily && prediction?.predicted_price_7d > 0 && rawHistory.length > 0 && Number(rawHistory[rawHistory.length - 1]?.close) > 0) {
       const lastD    = rawHistory[rawHistory.length - 1];
       const lastTime = toChartTime(lastD.date, false);
-      const lastClose = lastD.close;
+      const lastClose = Number(lastD.close);
       const futureTime = addBusinessDays(lastD.date, 7);
 
       const upperVal = prediction.predicted_upper_price_7d ?? prediction.high_bound ?? prediction.predicted_price_7d * 1.025;
