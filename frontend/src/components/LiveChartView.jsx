@@ -186,6 +186,13 @@ function detectPatterns(data) {
   return markers.slice(-12);
 }
 
+function parseNum(val) {
+  if (val == null) return NaN;
+  if (typeof val === 'number') return isNaN(val) ? NaN : val;
+  const n = Number(String(val).replace(/,/g, ''));
+  return isNaN(n) ? NaN : n;
+}
+
 /* ─── Helpers ────────────────────────────────────────────────────────────────── */
 
 function toChartTime(dateStr, isIntraday) {
@@ -525,7 +532,7 @@ export default function LiveChartView() {
 
   useEffect(() => {
     if (!candleRef.current) return;
-    if (!rawHistory?.length) {
+    if (!Array.isArray(rawHistory) || !rawHistory.length) {
       try {
         candleRef.current.setData([]);
         candleRef.current.setMarkers([]);
@@ -546,21 +553,22 @@ export default function LiveChartView() {
 
     const intraday = !isDaily;
 
-    // 1. Build Candles with high/low validity safety
-    const validRaw = rawHistory.filter(d => d.open != null && d.high != null && d.low != null && d.close != null && Number(d.close) > 0);
-    
+    // 1. Build Candles with high/low validity safety & parseNum
+    const validRaw = rawHistory.filter(d => d && d.date && !isNaN(parseNum(d.close)) && parseNum(d.close) > 0);
+    if (!validRaw.length) return;
+
     // Calculate median price to filter out corrupted legacy rows (< 30% of median)
-    const sortedCloses = validRaw.map(d => Number(d.close)).sort((a, b) => a - b);
+    const sortedCloses = validRaw.map(d => parseNum(d.close)).sort((a, b) => a - b);
     const medianPrice  = sortedCloses[Math.floor(sortedCloses.length / 2)] || 0;
     const minThreshold = medianPrice * 0.3;
 
     const candles = validRaw
-      .filter(d => Number(d.close) >= minThreshold)
+      .filter(d => parseNum(d.close) >= minThreshold)
       .map(d => {
-        const o = Number(d.open);
-        const h = Number(d.high);
-        const l = Number(d.low);
-        const c = Number(d.close);
+        const o = parseNum(d.open);
+        const h = parseNum(d.high);
+        const l = parseNum(d.low);
+        const c = parseNum(d.close);
         return {
           time  : toChartTime(d.date, intraday),
           open  : o,
