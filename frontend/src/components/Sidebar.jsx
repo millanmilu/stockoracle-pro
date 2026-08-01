@@ -66,13 +66,13 @@ export default function Sidebar() {
         StockOracle Pro
       </div>
       
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '5px', padding: '10px' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px', padding: '8px', overflowY: 'auto' }}>
         {NAV_ITEMS.map(item => (
           <div 
             key={item.name}
             onClick={() => setActiveView(item.name)}
             style={{
-              padding: '10px 15px',
+              padding: '9px 12px',
               borderRadius: '8px',
               cursor: 'pointer',
               display: 'flex',
@@ -80,10 +80,12 @@ export default function Sidebar() {
               gap: '10px',
               color: activeView === item.name ? '#fff' : '#888',
               backgroundColor: activeView === item.name ? '#333' : 'transparent',
-              transition: 'all 0.2s'
+              transition: 'all 0.2s',
+              fontSize: '0.9rem',
+              flexShrink: 0,
             }}
           >
-            <item.icon size={20} />
+            <item.icon size={18} />
             <span>{item.name}</span>
           </div>
         ))}
