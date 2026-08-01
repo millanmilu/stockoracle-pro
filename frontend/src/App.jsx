@@ -13,6 +13,8 @@ import BacktestPanel from './components/BacktestPanel';
 import AIInsightCard from './components/AIInsightCard';
 import ScenarioSimulator from './components/ScenarioSimulator';
 
+import ErrorBoundary from './components/ErrorBoundary';
+
 // We create a temporary AI Prediction view housing the components
 function AIPredictionView() {
   return (
@@ -66,7 +68,9 @@ export default function App() {
 
         {/* Content Area */}
         <div style={{ paddingTop: trainingStatus ? '40px' : '0' }}>
-          {renderView()}
+          <ErrorBoundary key={activeView}>
+            {renderView()}
+          </ErrorBoundary>
         </div>
       </div>
     </div>

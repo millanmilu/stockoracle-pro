@@ -31,8 +31,9 @@ def tune_xgboost(X: pd.DataFrame, y: pd.Series) -> dict:
         verbose=0
     )
     
-    # Fit the search
-    random_search.fit(X, y)
-    
-    # Return the best parameters
-    return random_search.best_params_
+    try:
+        random_search.fit(X, y)
+        return random_search.best_params_
+    except Exception as e:
+        print(f"⚠️ Hyperparameter tuning failed ({e}) — falling back to default XGBoost parameters.")
+        return {'max_depth': 6, 'learning_rate': 0.1, 'subsample': 0.8}

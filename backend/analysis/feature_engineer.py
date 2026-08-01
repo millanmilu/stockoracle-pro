@@ -30,19 +30,19 @@ def get_features(symbol: str, end_date: str = None) -> pd.DataFrame:
     Fetches historical OHLCV data, computes 25 features (OHLCV + 20 engineered),
     and caches the result for fast access.
     """
-    if end_date is None:
-        end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.strptime(end_date, '%Y-%m-%d') - timedelta(days=365*2)).strftime('%Y-%m-%d')
-    
-    # Fetch historical data (which should hit the DB cache)
-    df = fetch_stock_data(symbol, period="2Y")
-    if df is None or df.empty:
-        return pd.DataFrame()
+    try:
+        if end_date is None:
+            end_date = datetime.now().strftime('%Y-%m-%d')
+
+        # Fetch historical data (which should hit the DB cache)
+        df = fetch_stock_data(symbol, period="2Y")
+        if df is None or df.empty:
+            return pd.DataFrame()
+            
+        df = df.copy()
         
-    df = df.copy()
-    
-    # Ensure datetime index safely parsing mixed formats (daily & intraday timestamps)
-    df['date'] = pd.to_datetime(df['date'], format='mixed', errors='coerce')
+        # Ensure datetime index safely parsing mixed formats (daily & intraday timestamps)
+        df['date'] = pd.to_datetime(df['date'], format='mixed', errors='coerce')
     df = df.sort_values('date').set_index('date')
     
     # Base 5 Features: open, high, low, close, volume
@@ -114,5 +114,7 @@ def get_features(symbol: str, end_date: str = None) -> pd.DataFrame:
     
     # Drop rows with NaNs caused by lagging/rolling (mainly first 50 days)
     df = df.dropna()
-    
     return df
+  except Exception as e:
+    print(f"❌ Error computing features for {symbol}: {e}")
+    return pd.DataFrame()
