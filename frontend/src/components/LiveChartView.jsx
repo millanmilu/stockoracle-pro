@@ -10,13 +10,42 @@ import { useStock } from '../hooks/useStock';
 const API_BASE = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
 const WS_BASE  = API_BASE.replace(/^https/, 'wss').replace(/^http(?!s)/, 'ws');
 
-const TIMEFRAMES = ['1W', '1M', '3M', '6M', '1Y'];
+// Interval buttons (candle size)
+const INTERVALS = [
+  { label: '1m',  value: '1m'  },
+  { label: '5m',  value: '5m'  },
+  { label: '15m', value: '15m' },
+  { label: '1H',  value: '1h'  },
+  { label: '1D',  value: '1d'  },
+];
+
+// Period buttons (date range)
+const PERIODS = [
+  { label: '1D', value: '1D' },
+  { label: '5D', value: '5D' },
+  { label: '1W', value: '1W' },
+  { label: '1M', value: '1M' },
+  { label: '3M', value: '3M' },
+  { label: '6M', value: '6M' },
+  { label: '1Y', value: '1Y' },
+  { label: '2Y', value: '2Y' },
+];
+
+// Default interval for each period
+const DEFAULT_INTERVAL = {
+  '1D': '5m', '5D': '15m', '1W': '1h',
+  '1M': '1d', '3M': '1d', '6M': '1d', '1Y': '1d', '2Y': '1d',
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtLabel(dateStr) {
+function fmtLabel(dateStr, interval = '1d') {
   if (!dateStr) return '';
   const d = new Date(dateStr);
+  // Intraday intervals → show time
+  if (['1m','5m','15m','1h'].includes(interval)) {
+    return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  }
   return `${d.getDate()} ${d.toLocaleString('en', { month: 'short' })}`;
 }
 
@@ -157,7 +186,8 @@ export default function LiveChartView() {
   const { selectedSymbol }          = useStore();
   const { fetchHistory, fetchPredict } = useStock();
 
-  const [timeframe,    setTimeframe]    = useState('3M');
+  const [period,       setPeriod]       = useState('3M');
+  const [interval,     setInterval]     = useState('1d');
   const [rawHistory,   setRawHistory]   = useState(null);
   const [prediction,   setPrediction]   = useState(null);
   const [livePrice,    setLivePrice]    = useState(null);
@@ -165,6 +195,12 @@ export default function LiveChartView() {
   const [wsConnected,  setWsConnected]  = useState(false);
   const [loading,      setLoading]      = useState(true);
   const [predLoading,  setPredLoading]  = useState(true);
+
+  // When period changes, auto-switch to a sensible default interval
+  const handlePeriodChange = (p) => {
+    setPeriod(p);
+    setInterval(DEFAULT_INTERVAL[p] || '1d');
+  };
 
   const wsRef = useRef(null);
 
@@ -177,16 +213,22 @@ export default function LiveChartView() {
     setLivePrice(null);
     setLiveChange(null);
 
-    fetchHistory(selectedSymbol, timeframe).then(hist => {
+    fetchHistory(selectedSymbol, period, interval).then(hist => {
       setRawHistory(hist);
       setLoading(false);
     });
 
-    fetchPredict(selectedSymbol).then(pred => {
-      setPrediction(pred);
+    // Only fetch prediction for daily intervals (intraday pred not supported)
+    if (interval === '1d') {
+      fetchPredict(selectedSymbol).then(pred => {
+        setPrediction(pred);
+        setPredLoading(false);
+      });
+    } else {
+      setPrediction(null);
       setPredLoading(false);
-    });
-  }, [selectedSymbol, timeframe]);
+    }
+  }, [selectedSymbol, period, interval]);
 
   // ── WebSocket ──
   useEffect(() => {
@@ -223,7 +265,7 @@ export default function LiveChartView() {
 
     const hist = rawHistory.map(d => ({
       date      : d.date,
-      label     : fmtLabel(d.date),
+      label     : fmtLabel(d.date, interval),
       open      : d.open,
       high      : d.high,
       low       : d.low,
@@ -373,23 +415,46 @@ export default function LiveChartView() {
           )}
         </div>
 
-        {/* Timeframe switcher */}
-        <div style={{ marginLeft:'auto', display:'flex', gap:6, alignSelf:'center' }}>
-          {TIMEFRAMES.map(t => (
-            <button
-              key={t}
-              className="tf-btn"
-              onClick={() => setTimeframe(t)}
-              style={{
-                padding     :'6px 16px', borderRadius:8,
-                fontSize    :'0.78rem',  fontWeight:600,
-                cursor      :'pointer',
-                border      : timeframe === t ? '1px solid rgba(168,85,247,0.55)' : '1px solid rgba(75,85,99,0.3)',
-                background  : timeframe === t ? 'rgba(168,85,247,0.13)'           : 'transparent',
-                color       : timeframe === t ? '#C084FC'                          : '#6B7280',
-              }}
-            >{t}</button>
-          ))}
+        {/* Timeframe + Interval selector */}
+        <div style={{ marginLeft:'auto', display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end' }}>
+          {/* Interval row */}
+          <div style={{ display:'flex', gap:4, alignItems:'center' }}>
+            <span style={{ fontSize:'0.65rem', color:'#374151', marginRight:4, letterSpacing:'0.06em' }}>CANDLE</span>
+            {INTERVALS.map(iv => (
+              <button
+                key={iv.value}
+                className="tf-btn"
+                onClick={() => setInterval(iv.value)}
+                style={{
+                  padding   :'4px 10px', borderRadius:6,
+                  fontSize  :'0.72rem', fontWeight:600,
+                  cursor    :'pointer',
+                  border    : interval === iv.value ? '1px solid rgba(99,102,241,0.55)' : '1px solid rgba(75,85,99,0.25)',
+                  background: interval === iv.value ? 'rgba(99,102,241,0.15)'           : 'transparent',
+                  color     : interval === iv.value ? '#818CF8'                          : '#4B5563',
+                }}
+              >{iv.label}</button>
+            ))}
+          </div>
+          {/* Period row */}
+          <div style={{ display:'flex', gap:4, alignItems:'center' }}>
+            <span style={{ fontSize:'0.65rem', color:'#374151', marginRight:4, letterSpacing:'0.06em' }}>RANGE</span>
+            {PERIODS.map(p => (
+              <button
+                key={p.value}
+                className="tf-btn"
+                onClick={() => handlePeriodChange(p.value)}
+                style={{
+                  padding   :'4px 10px', borderRadius:6,
+                  fontSize  :'0.72rem', fontWeight:600,
+                  cursor    :'pointer',
+                  border    : period === p.value ? '1px solid rgba(168,85,247,0.55)' : '1px solid rgba(75,85,99,0.25)',
+                  background: period === p.value ? 'rgba(168,85,247,0.13)'           : 'transparent',
+                  color     : period === p.value ? '#C084FC'                          : '#4B5563',
+                }}
+              >{p.label}</button>
+            ))}
+          </div>
         </div>
       </div>
 

@@ -19,9 +19,9 @@ export function useStock() {
     } finally { setLoading(false) }
   }, [])
 
-  const fetchHistory = useCallback(async (ticker, timeframe = '3M') => {
+  const fetchHistory = useCallback(async (ticker, timeframe = '3M', interval = '1d') => {
     try {
-      const { data } = await api.get(`/api/stock/${ticker}/history`, { params: { timeframe } })
+      const { data } = await api.get(`/api/stock/${ticker}/history`, { params: { timeframe, interval } })
       return data
     } catch (e) { return null }
   }, [])

@@ -148,14 +148,37 @@ def get_stock_info(ticker: str):
     return info
 
 @app.get("/api/stock/{ticker}/history")
-def get_stock_history(ticker: str, timeframe: str = "3M"):
+def get_stock_history(ticker: str, timeframe: str = "3M", interval: str = "1d"):
     t = ticker.upper().strip()
-    days_map = {"1W": "10D", "1M": "45D", "3M": "120D", "6M": "200D", "1Y": "370D"}
+
+    # Map frontend timeframe label → internal period string
+    days_map = {
+        "1D":  "2D",   # intraday: fetch 2 days worth so we get today fully
+        "5D":  "7D",
+        "1W":  "10D",
+        "1M":  "45D",
+        "3M":  "120D",
+        "6M":  "200D",
+        "1Y":  "370D",
+        "2Y":  "2Y",
+    }
     period = days_map.get(timeframe.upper())
     if not period:
-        raise HTTPException(status_code=422, detail=f"Invalid timeframe '{timeframe}'. Valid: 1W, 1M, 3M, 6M, 1Y.")
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid timeframe '{timeframe}'. Valid: 1D, 5D, 1W, 1M, 3M, 6M, 1Y, 2Y."
+        )
 
-    df = fetch_stock_data(t, period=period)
+    # Validate interval
+    valid_intervals = {"1m", "5m", "15m", "1h", "1d"}
+    iv = interval.lower()
+    if iv not in valid_intervals:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid interval '{interval}'. Valid: 1m, 5m, 15m, 1h, 1d."
+        )
+
+    df = fetch_stock_data(t, period=period, interval=iv)
     if df is None or df.empty:
         if not get_session_status():
             raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
