@@ -196,10 +196,18 @@ export default function LiveChartView() {
   const [loading,      setLoading]      = useState(true);
   const [predLoading,  setPredLoading]  = useState(true);
 
-  // When period changes, auto-switch to a sensible default interval
+  // Batch period + interval change → one single fetch
+  const pendingRef = useRef(null);
   const handlePeriodChange = (p) => {
+    const iv = DEFAULT_INTERVAL[p] || '1d';
+    pendingRef.current = { period: p, interval: iv };
     setPeriod(p);
-    setInterval(DEFAULT_INTERVAL[p] || '1d');
+    setInterval(iv);
+  };
+  // Direct interval change keeps current period
+  const handleIntervalChange = (iv) => {
+    pendingRef.current = null; // no batch needed
+    setInterval(iv);
   };
 
   const wsRef = useRef(null);
@@ -229,6 +237,14 @@ export default function LiveChartView() {
       setPredLoading(false);
     }
   }, [selectedSymbol, period, interval]);
+
+  // Derive current price: WS live price > last candle close > prediction current_price
+  const lastCandleClose = useMemo(() => {
+    if (!rawHistory?.length) return null;
+    return rawHistory[rawHistory.length - 1]?.close ?? null;
+  }, [rawHistory]);
+
+  const isDaily = interval === '1d';
 
   // ── WebSocket ──
   useEffect(() => {
@@ -329,7 +345,7 @@ export default function LiveChartView() {
 
   const sig      = prediction?.signal;
   const sigMeta  = SIG[sig] ?? SIG.hold;
-  const curPrice = livePrice ?? prediction?.current_price;
+  const curPrice = livePrice ?? lastCandleClose ?? prediction?.current_price;
   const score    = prediction?.ai_confidence_score ?? 0;
   const scoreColor = score >= 70 ? '#26A69A' : score >= 50 ? '#F59E0B' : '#EF5350';
   const changeUp = (liveChange ?? 0) >= 0;
@@ -424,7 +440,7 @@ export default function LiveChartView() {
               <button
                 key={iv.value}
                 className="tf-btn"
-                onClick={() => setInterval(iv.value)}
+                onClick={() => handleIntervalChange(iv.value)}
                 style={{
                   padding   :'4px 10px', borderRadius:6,
                   fontSize  :'0.72rem', fontWeight:600,
@@ -475,10 +491,14 @@ export default function LiveChartView() {
           display:'flex', gap:20, paddingLeft:16, marginBottom:12,
           fontSize:'0.72rem', color:'#4B5563',
         }}>
-          <span><span style={{ color:'#26A69A' }}>█</span> Bullish candle</span>
-          <span><span style={{ color:'#EF5350' }}>█</span> Bearish candle</span>
-          <span style={{ borderBottom:'2px dashed #A855F7', paddingBottom:1 }}>── AI Prediction</span>
-          <span style={{ background:'rgba(168,85,247,0.15)', padding:'0 6px', borderRadius:4 }}>░ Confidence band</span>
+          <span><span style={{ color:'#26A69A' }}>█</span> Bullish</span>
+          <span><span style={{ color:'#EF5350' }}>█</span> Bearish</span>
+          {isDaily && prediction && (
+            <>
+              <span style={{ borderBottom:'2px dashed #A855F7', paddingBottom:1 }}>── AI Prediction</span>
+              <span style={{ background:'rgba(168,85,247,0.15)', padding:'0 6px', borderRadius:4 }}>░ Confidence band</span>
+            </>
+          )}
           {wsConnected && (
             <span style={{ color:'rgba(38,166,154,0.6)' }}>─ ─  Live price</span>
           )}
@@ -609,8 +629,8 @@ export default function LiveChartView() {
         )}
       </div>
 
-      {/* ── Stats bar ── */}
-      <div style={{
+      {/* ── Stats bar — only for daily interval ── */}
+      {isDaily && (<div style={{
         display            :'grid',
         gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))',
         gap                :10,
@@ -712,9 +732,10 @@ export default function LiveChartView() {
         </div>
 
       </div>
+      )}
 
-      {/* ── Confidence score bar ── */}
-      {prediction?.ai_confidence_score != null && (
+      {/* ── Confidence score bar — only for daily ── */}
+      {isDaily && prediction?.ai_confidence_score != null && (
         <div style={{
           background  :'rgba(255,255,255,0.02)',
           border      :'1px solid rgba(168,85,247,0.08)',
