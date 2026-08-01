@@ -243,7 +243,9 @@ const CHART_OPTIONS = {
 const CANDLE_STYLE = {
   upColor        : '#26A69A',
   downColor      : '#EF5350',
-  borderVisible  : false,
+  borderVisible  : true,
+  borderUpColor  : '#26A69A',
+  borderDownColor: '#EF5350',
   wickUpColor    : '#26A69A',
   wickDownColor  : '#EF5350',
 };
@@ -339,11 +341,13 @@ export default function LiveChartView() {
     const candle = chart.addCandlestickSeries(CANDLE_STYLE);
     candleRef.current = candle;
 
-    // Volume Sub-chart
+    // Volume Sub-chart (isolated overlay scale so it never compresses candlesticks)
     const volume = chart.addHistogramSeries({
       priceFormat: { type: 'volume' },
-      priceScaleId: '',
-      scaleMargins: { top: 0.76, bottom: 0.12 },
+      priceScaleId: 'volume',
+    });
+    chart.priceScale('volume').applyOptions({
+      scaleMargins: { top: 0.8, bottom: 0 },
     });
     volumeRef.current = volume;
 
@@ -540,16 +544,22 @@ export default function LiveChartView() {
 
     const intraday = !isDaily;
 
-    // 1. Build Candles
+    // 1. Build Candles with high/low validity safety
     const candles = rawHistory
       .filter(d => d.open != null && d.high != null && d.low != null && d.close != null)
-      .map(d => ({
-        time  : toChartTime(d.date, intraday),
-        open  : Number(d.open),
-        high  : Number(d.high),
-        low   : Number(d.low),
-        close : Number(d.close),
-      }))
+      .map(d => {
+        const o = Number(d.open);
+        const h = Number(d.high);
+        const l = Number(d.low);
+        const c = Number(d.close);
+        return {
+          time  : toChartTime(d.date, intraday),
+          open  : o,
+          high  : Math.max(h, o, c),
+          low   : Math.min(l, o, c),
+          close : c,
+        };
+      })
       .filter(d => d.time != null && d.time !== '' && !isNaN(d.open));
 
     candles.sort((a, b) => (typeof a.time === 'number' ? a.time - b.time : String(a.time).localeCompare(String(b.time))));
