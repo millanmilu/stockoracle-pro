@@ -273,7 +273,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
     if not is_intraday:
         db_df = get_historical_prices(ticker, fromdate_str, todate_str)
         if db_df is not None and not db_df.empty:
-            latest_db_date = pd.to_datetime(db_df["date"].max())
+            latest_db_date = pd.to_datetime(db_df["date"].max(), format='mixed', errors='coerce')
             is_up_to_date = (todate - latest_db_date).days <= 4
             expected_trading_days = int(days * (5/7))
             if is_up_to_date and len(db_df) >= expected_trading_days * 0.8:
@@ -317,9 +317,9 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
         df = df.astype({"open": float, "high": float, "low": float,
                         "close": float, "volume": int})
         if interval.lower() in ["1m", "5m", "15m", "1h"]:
-            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
+            df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d %H:%M:%S")
         else:
-            df["date"] = pd.to_datetime(df["date"]).dt.strftime("%Y-%m-%d")
+            df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")
         
         # Save to local database (UPSERT)
         save_historical_prices(ticker, df)
@@ -537,7 +537,7 @@ def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
                     columns=["date", "open", "high", "low", "close", "volume"]
                 )
                 cdf = cdf.astype({"open": float, "high": float, "low": float, "close": float, "volume": int})
-                cdf["date"] = pd.to_datetime(cdf["date"]).dt.strftime("%Y-%m-%d")
+                cdf["date"] = pd.to_datetime(cdf["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")
                 all_chunks.append(cdf)
         except Exception as e:
             print(f"⚠️ Chunk fetch error ({chunk_start} to {chunk_end}): {e}")

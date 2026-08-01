@@ -41,8 +41,8 @@ def get_features(symbol: str, end_date: str = None) -> pd.DataFrame:
         
     df = df.copy()
     
-    # Ensure datetime index
-    df['date'] = pd.to_datetime(df['date'])
+    # Ensure datetime index safely parsing mixed formats (daily & intraday timestamps)
+    df['date'] = pd.to_datetime(df['date'], format='mixed', errors='coerce')
     df = df.sort_values('date').set_index('date')
     
     # Base 5 Features: open, high, low, close, volume
