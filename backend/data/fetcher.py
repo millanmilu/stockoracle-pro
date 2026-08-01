@@ -492,7 +492,6 @@ def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
     ticker = ticker.upper().strip()
     print(f"📥 Fetching 5-year historical data for {ticker}...")
 
-    # Check if DB already has 5Y history (> 1000 records)
     todate = datetime.now()
     fromdate = todate - timedelta(days=1825)
     existing_df = get_historical_prices(ticker, fromdate.strftime("%Y-%m-%d"), todate.strftime("%Y-%m-%d"))
@@ -502,25 +501,40 @@ def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
 
     try:
         import yfinance as yf
-        yf_symbol = f"{ticker}.NS" if not ticker.endswith(".NS") and not ticker.endswith(".BO") else ticker
+        yf_symbol = f"{ticker}.NS" if not (ticker.endswith(".NS") or ticker.endswith(".BO")) else ticker
         print(f"Downloading 5Y history from yfinance for {yf_symbol}...")
-        stock = yf.Ticker(yf_symbol)
-        df = stock.history(period="5y")
+        
+        df = yf.download(yf_symbol, period="5y", progress=False)
 
         if df is not None and not df.empty:
             df = df.reset_index()
-            df["date"] = pd.to_datetime(df["Date"]).dt.strftime("%Y-%m-%d")
-            df["open"] = df["Open"].astype(float)
-            df["high"] = df["High"].astype(float)
-            df["low"] = df["Low"].astype(float)
-            df["close"] = df["Close"].astype(float)
-            df["volume"] = df["Volume"].astype(int)
+            # Handle MultiIndex column headers if returned by newer yfinance versions
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = [col[0] for col in df.columns]
 
-            clean_df = df[["date", "open", "high", "low", "close", "volume"]]
-            save_historical_prices(ticker, clean_df)
-            print(f"✅ Stored {len(clean_df)} 5-year records into SQLite DB for {ticker}.")
-            return clean_df
+            date_col = next((c for c in df.columns if str(c).lower() in ["date", "datetime", "index"]), None)
+            open_col = next((c for c in df.columns if str(c).lower() == "open"), None)
+            high_col = next((c for c in df.columns if str(c).lower() == "high"), None)
+            low_col  = next((c for c in df.columns if str(c).lower() == "low"), None)
+            close_col= next((c for c in df.columns if str(c).lower() in ["close", "adj close"]), None)
+            vol_col  = next((c for c in df.columns if str(c).lower() == "volume"), None)
+
+            if date_col and open_col and close_col:
+                df["date"]   = pd.to_datetime(df[date_col]).dt.strftime("%Y-%m-%d")
+                df["open"]   = df[open_col].astype(float)
+                df["high"]   = df[high_col].astype(float)
+                df["low"]    = df[low_col].astype(float)
+                df["close"]  = df[close_col].astype(float)
+                df["volume"] = df[vol_col].fillna(0).astype(int)
+
+                clean_df = df[["date", "open", "high", "low", "close", "volume"]].dropna()
+                if not clean_df.empty:
+                    save_historical_prices(ticker, clean_df)
+                    print(f"✅ Stored {len(clean_df)} 5-year records into SQLite DB for {ticker}.")
+                    return clean_df
     except Exception as e:
         print(f"⚠️ yfinance 5y download error for {ticker}: {e}")
 
-    return existing_df
+    if existing_df is not None and not existing_df.empty:
+        return existing_df
+    return fetch_stock_data(ticker, period="370D")
