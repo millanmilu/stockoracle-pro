@@ -9,13 +9,15 @@ import {
   Activity, 
   Dices, 
   History,
-  RefreshCw
+  RefreshCw,
+  CandlestickChart
 } from 'lucide-react';
 import axios from 'axios';
 import toast from 'react-hot-toast';
 
 const NAV_ITEMS = [
   { name: 'Dashboard', icon: LayoutDashboard },
+  { name: 'Live Chart', icon: CandlestickChart },
   { name: 'AI Prediction', icon: BrainCircuit },
   { name: 'News', icon: Newspaper },
   { name: 'Patterns', icon: TrendingUp },

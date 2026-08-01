@@ -3,6 +3,7 @@ import { Toaster } from 'react-hot-toast';
 import useStore from './store/useStore';
 import Sidebar from './components/Sidebar';
 import Dashboard from './components/Dashboard';
+import LiveChartView from './components/LiveChartView';
 import NewsPanel from './components/NewsPanel';
 import PatternsPanel from './components/PatternsPanel';
 import LevelsPanel from './components/LevelsPanel';
@@ -28,6 +29,7 @@ export default function App() {
   const renderView = () => {
     switch (activeView) {
       case 'Dashboard': return <Dashboard />;
+      case 'Live Chart': return <LiveChartView />;
       case 'AI Prediction': return <AIPredictionView />;
       case 'News': return <NewsPanel ticker={selectedSymbol} />;
       case 'Patterns': return <PatternsPanel ticker={selectedSymbol} />;
