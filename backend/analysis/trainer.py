@@ -33,7 +33,7 @@ def train_pipeline(symbol: str) -> dict:
     df['target'] = df['close'].shift(-1)
     df = df.dropna()
     
-    X = df.drop(columns=['target'])
+    X = df.select_dtypes(include=[np.number]).drop(columns=['target'], errors='ignore')
     y = df['target']
     
     # Train/Val split (80/20 time series split)
