@@ -248,9 +248,10 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
 
     # Map period to days count
     period_map = {
-        "10D": 10, "1W": 7,   "45D": 45,  "1M": 30,  "120D": 120,
-        "3M":  90, "200D": 200, "6M": 180, "370D": 370,
-        "1Y":  365, "2Y": 730,
+        "2D":  2,   "7D":  7,   "10D": 10,  "1W":  7,
+        "45D": 45,  "1M":  30,  "120D": 120, "3M": 90,
+        "200D": 200, "6M": 180, "370D": 370, "1Y": 365,
+        "2Y":  730,
     }
     days = period_map.get(period.upper(), 120)
     todate = datetime.now()

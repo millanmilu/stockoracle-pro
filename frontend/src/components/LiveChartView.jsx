@@ -40,10 +40,18 @@ const SIG = {
 
 /* ─── Helpers ────────────────────────────────────────────────────────────────── */
 
-/** Convert ISO date string to lightweight-charts time format */
+/** Convert backend ISO/space-separated date to lightweight-charts time format */
 function toChartTime(dateStr, isIntraday) {
-  if (!isIntraday) return dateStr.split('T')[0]; // 'YYYY-MM-DD'
-  return Math.floor(new Date(dateStr).getTime() / 1000); // unix seconds
+  // Backend may return "2024-07-31 09:15:00" (space) or "2024-07-31T09:15:00" (T)
+  const normalized = String(dateStr).replace(' ', 'T');
+  if (!isIntraday) {
+    // lightweight-charts requires exactly 'YYYY-MM-DD'
+    return normalized.substring(0, 10);
+  }
+  // For intraday: unix timestamp in seconds
+  const ms = new Date(normalized).getTime();
+  if (isNaN(ms)) return null; // guard against bad dates
+  return Math.floor(ms / 1000);
 }
 
 function addBusinessDays(dateStr, days) {
@@ -269,23 +277,32 @@ export default function LiveChartView() {
   /* ── Push candle data to chart ───────────────────────────── */
 
   useEffect(() => {
-    if (!candleRef.current || !rawHistory?.length) return;
+    // Clear chart when no data (range switching)
+    if (!candleRef.current) return;
+    if (!rawHistory?.length) {
+      try { candleRef.current.setData([]); } catch {}
+      try { predLineRef.current?.setData([]); upperLineRef.current?.setData([]); lowerLineRef.current?.setData([]); } catch {}
+      return;
+    }
 
     const intraday = !isDaily;
 
-    // Build + sort candle data
+    // Build candle data — filter bad values and null times
     const candles = rawHistory
       .filter(d => d.open != null && d.high != null && d.low != null && d.close != null)
       .map(d => ({
         time  : toChartTime(d.date, intraday),
-        open  : d.open,
-        high  : d.high,
-        low   : d.low,
-        close : d.close,
+        open  : Number(d.open),
+        high  : Number(d.high),
+        low   : Number(d.low),
+        close : Number(d.close),
       }))
-      .sort((a, b) => (a.time > b.time ? 1 : -1));
+      .filter(d => d.time != null && !isNaN(d.time) && !isNaN(d.open)); // remove bad rows
 
-    // Deduplicate by time (keep last occurrence)
+    // Sort: numeric for intraday timestamps, lexicographic for date strings
+    candles.sort((a, b) => intraday ? a.time - b.time : a.time < b.time ? -1 : 1);
+
+    // Deduplicate by time (keep last occurrence per timestamp)
     const seen = new Map();
     candles.forEach(c => seen.set(c.time, c));
     const dedupedCandles = Array.from(seen.values());
