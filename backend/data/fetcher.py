@@ -260,25 +260,21 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
     fromdate_str = fromdate.strftime("%Y-%m-%d")
     todate_str = todate.strftime("%Y-%m-%d")
 
-    # 2. Check SQLite local database
-    db_df = get_historical_prices(ticker, fromdate_str, todate_str)
-    
-    # Check if DB has sufficient up-to-date data
-    # (data exists and the latest record is within the last 4 days to account for weekends/holidays)
-    if db_df is not None and not db_df.empty:
-        latest_db_date = pd.to_datetime(db_df["date"].max())
-        is_up_to_date = (todate - latest_db_date).days <= 4
-        
-        if is_up_to_date:
-            # Check if we have roughly the expected number of records (e.g. 5 trading days per week)
-            # A 1-year request has ~250 trading days. If we have > 80% of expected days, return it.
+    is_intraday = interval.lower() in ["1m", "5m", "15m", "1h"]
+
+    # 2. Check SQLite local database (ONLY FOR DAILY INTERVAL '1d')
+    db_df = None
+    if not is_intraday:
+        db_df = get_historical_prices(ticker, fromdate_str, todate_str)
+        if db_df is not None and not db_df.empty:
+            latest_db_date = pd.to_datetime(db_df["date"].max())
+            is_up_to_date = (todate - latest_db_date).days <= 4
             expected_trading_days = int(days * (5/7))
-            if len(db_df) >= expected_trading_days * 0.8:
-                # Cache in-memory and return
+            if is_up_to_date and len(db_df) >= expected_trading_days * 0.8:
                 _set_cached(cache_key, db_df)
                 return db_df
 
-    # 3. Fetch from Angel One (database is missing or stale)
+    # 3. Fetch from Angel One (database is missing, stale, or intraday request)
     ensure_session()
     if not _session_active:
         # Fallback to whatever stale data we have in SQLite
@@ -293,11 +289,15 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
     }
     api_interval = interval_map.get(interval.lower(), "ONE_DAY")
 
+    # Angel One API limits: max 30 days for intraday, max 365 days per call for daily
+    max_days = 30 if is_intraday else 365
+    api_fromdate = todate - timedelta(days=min(days, max_days))
+
     historicParam = {
         "exchange":    token_info["exch_seg"],
         "symboltoken": token_info["token"],
         "interval":    api_interval,
-        "fromdate":    fromdate.strftime("%Y-%m-%d %H:%M"),
+        "fromdate":    api_fromdate.strftime("%Y-%m-%d %H:%M"),
         "todate":      todate.strftime("%Y-%m-%d %H:%M"),
     }
 
