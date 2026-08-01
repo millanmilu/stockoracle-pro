@@ -18,6 +18,5 @@ pyotp
 logzero
 websocket-client
 xgboost
-yfinance
 nltk
 statsmodels

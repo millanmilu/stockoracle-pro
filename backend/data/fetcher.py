@@ -485,58 +485,77 @@ def get_combined_stock_data(ticker: str, period: str = "2Y") -> Optional[pd.Data
 
 def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
     """
-    Downloads 5 years (1,825 days) of daily historical OHLCV data for a ticker
-    using yfinance and bulk saves it into the SQLite database.
-    Live WebSocket ticks automatically update and append to this DB dataset.
+    Downloads 5 years of daily historical OHLCV data for a ticker
+    using Angel One SmartAPI in 1-year chunks and bulk saves into SQLite DB.
     """
     ticker = ticker.upper().strip()
-    print(f"📥 Fetching 5-year historical data for {ticker}...")
+    print(f"📥 Fetching 5-year historical data via Angel One SmartAPI for {ticker}...")
 
     todate = datetime.now()
     fromdate = todate - timedelta(days=1825)
-    existing_df = get_historical_prices(ticker, fromdate.strftime("%Y-%m-%d"), todate.strftime("%Y-%m-%d"))
+    fromdate_str = fromdate.strftime("%Y-%m-%d")
+    todate_str   = todate.strftime("%Y-%m-%d")
+
+    # Check if DB already has 5Y history (> 1000 records)
+    existing_df = get_historical_prices(ticker, fromdate_str, todate_str)
     if existing_df is not None and len(existing_df) >= 1000:
         print(f"✅ Found existing {len(existing_df)} 5-year records in SQLite DB for {ticker}.")
         return existing_df
 
-    try:
-        import yfinance as yf
-        yf_symbol = f"{ticker}.NS" if not (ticker.endswith(".NS") or ticker.endswith(".BO")) else ticker
-        print(f"Downloading 5Y history from yfinance for {yf_symbol}...")
-        
-        df = yf.download(yf_symbol, period="5y", progress=False)
-
-        if df is not None and not df.empty:
-            df = df.reset_index()
-            # Handle MultiIndex column headers if returned by newer yfinance versions
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = [col[0] for col in df.columns]
-
-            date_col = next((c for c in df.columns if str(c).lower() in ["date", "datetime", "index"]), None)
-            open_col = next((c for c in df.columns if str(c).lower() == "open"), None)
-            high_col = next((c for c in df.columns if str(c).lower() == "high"), None)
-            low_col  = next((c for c in df.columns if str(c).lower() == "low"), None)
-            close_col= next((c for c in df.columns if str(c).lower() in ["close", "adj close"]), None)
-            vol_col  = next((c for c in df.columns if str(c).lower() == "volume"), None)
-
-            if date_col and open_col and close_col:
-                df["date"]   = pd.to_datetime(df[date_col]).dt.strftime("%Y-%m-%d")
-                df["open"]   = df[open_col].astype(float)
-                df["high"]   = df[high_col].astype(float)
-                df["low"]    = df[low_col].astype(float)
-                df["close"]  = df[close_col].astype(float)
-                df["volume"] = df[vol_col].fillna(0).astype(int)
-
-                clean_df = df[["date", "open", "high", "low", "close", "volume"]].dropna()
-                if not clean_df.empty:
-                    from backend.data.database import clear_ticker_history
-                    clear_ticker_history(ticker)
-                    save_historical_prices(ticker, clean_df)
-                    print(f"✅ Cleared old rows and stored {len(clean_df)} 5-year records into SQLite DB for {ticker}.")
-                    return clean_df
-    except Exception as e:
-        print(f"⚠️ yfinance 5y download error for {ticker}: {e}")
-
-    if existing_df is not None and not existing_df.empty:
+    token_info = get_token_info(ticker)
+    if not token_info:
+        print(f"❌ Token not found for '{ticker}'.")
         return existing_df
-    return fetch_stock_data(ticker, period="370D")
+
+    ensure_session()
+    if not _session_active or not smartApi:
+        print(f"⚠️ Angel One session inactive — returning current DB history for {ticker}.")
+        return existing_df
+
+    # Chunk 5 years into 365-day blocks (Angel One max per request)
+    all_chunks = []
+    chunk_end = todate
+
+    for i in range(5):
+        chunk_start = chunk_end - timedelta(days=365)
+        if chunk_start < fromdate:
+            chunk_start = fromdate
+
+        historicParam = {
+            "exchange":    token_info["exch_seg"],
+            "symboltoken": token_info["token"],
+            "interval":    "ONE_DAY",
+            "fromdate":    chunk_start.strftime("%Y-%m-%d 00:00"),
+            "todate":      chunk_end.strftime("%Y-%m-%d 23:59"),
+        }
+
+        try:
+            response = _call_api(smartApi.getCandleData, historicParam)
+            if response and response.get("status") and response.get("data"):
+                cdf = pd.DataFrame(
+                    response["data"],
+                    columns=["date", "open", "high", "low", "close", "volume"]
+                )
+                cdf = cdf.astype({"open": float, "high": float, "low": float, "close": float, "volume": int})
+                cdf["date"] = pd.to_datetime(cdf["date"]).dt.strftime("%Y-%m-%d")
+                all_chunks.append(cdf)
+        except Exception as e:
+            print(f"⚠️ Chunk fetch error ({chunk_start} to {chunk_end}): {e}")
+
+        chunk_end = chunk_start - timedelta(days=1)
+        if chunk_end <= fromdate:
+            break
+
+    if all_chunks:
+        merged = pd.concat(all_chunks, ignore_index=True)
+        merged = merged.drop_duplicates(subset=["date"]).sort_values("date")
+        clean_df = merged[["date", "open", "high", "low", "close", "volume"]].dropna()
+
+        if not clean_df.empty:
+            from backend.data.database import clear_ticker_history
+            clear_ticker_history(ticker)
+            save_historical_prices(ticker, clean_df)
+            print(f"✅ Stored {len(clean_df)} 5-year Angel One records in SQLite for {ticker}.")
+            return clean_df
+
+    return existing_df
