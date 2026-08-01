@@ -549,17 +549,19 @@ export default function LiveChartView() {
 
     const intraday = !isDaily;
 
-    // 1. Build Candles with high/low validity safety & parseNum
+    // 1. Build Candles with IQR Outlier Filtering & High/Low validity safety
     const validRaw = rawHistory.filter(d => d && d.date && !isNaN(parseNum(d.close)) && parseNum(d.close) > 0);
     if (!validRaw.length) return;
 
-    // Calculate median price to filter out corrupted legacy rows (< 30% of median)
-    const sortedCloses = validRaw.map(d => parseNum(d.close)).sort((a, b) => a - b);
-    const medianPrice  = sortedCloses[Math.floor(sortedCloses.length / 2)] || 0;
-    const minThreshold = medianPrice * 0.3;
+    // Collect closes & compute IQR bounds (Q1, Q3, IQR)
+    const closes = validRaw.map(d => parseNum(d.close)).sort((a, b) => a - b);
+    const q1 = closes[Math.floor((closes.length - 1) * 0.25)] || closes[0];
+    const q3 = closes[Math.floor((closes.length - 1) * 0.75)] || closes[closes.length - 1];
+    const iqr = q3 - q1;
+    const lowerBound = Math.max(0, q1 - 2.5 * iqr);
+    const upperBound = iqr > 0 ? q3 + 2.5 * iqr : closes[closes.length - 1] * 3;
 
     const candles = validRaw
-      .filter(d => parseNum(d.close) >= minThreshold)
       .map(d => {
         const o = parseNum(d.open);
         const h = parseNum(d.high);
@@ -573,7 +575,8 @@ export default function LiveChartView() {
           close : c,
         };
       })
-      .filter(d => d.time != null && d.time !== '' && !isNaN(d.open));
+      .filter(d => d.time != null && d.time !== '' && !isNaN(d.open) && !isNaN(d.close))
+      .filter(d => d.close >= lowerBound && d.close <= upperBound);
 
     candles.sort((a, b) => (typeof a.time === 'number' ? a.time - b.time : String(a.time).localeCompare(String(b.time))));
 
@@ -724,8 +727,9 @@ export default function LiveChartView() {
     const lastClose = parseNum(last.close);
     const intraday  = !isDaily;
 
-    // Sanity check: ignore out-of-range live ticks (> 20% deviation) to prevent abnormal candle spikes
-    if (lastClose > 0 && Math.abs(livePrice - lastClose) / lastClose > 0.20) {
+    // Sanity check: ignore out-of-range live ticks (> 10% deviation) to prevent abnormal candle spikes
+    if (lastClose > 0 && Math.abs(livePrice - lastClose) / lastClose > 0.10) {
+      console.warn(`⚠️ [LiveTick] Dropping live price tick spike ${livePrice} for ${selectedSymbol} (last close: ${lastClose})`);
       return;
     }
 

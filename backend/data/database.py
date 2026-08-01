@@ -125,27 +125,80 @@ def clear_ticker_history(ticker: str):
     print(f"🧹 Cleared old historical DB records for {ticker}.")
 
 
+def _normalize_price(v):
+    try:
+        val = float(v)
+        if np.isnan(val) or val <= 0:
+            return None
+        # Heuristic: convert paise (> 100,000) to rupees
+        if val > 100000:
+            return round(val / 100.0, 2)
+        return round(val, 2)
+    except Exception:
+        return None
+
+
+def clean_paise_and_outliers(ticker: str = None):
+    """
+    Scans historical_prices table in SQLite, auto-corrects paise-to-rupee unit mismatches
+    (close > 50 * median), and deletes corrupt/non-positive price rows.
+    """
+    with get_db_connection() as conn:
+        query = "SELECT rowid, ticker, close FROM historical_prices"
+        params = []
+        if ticker:
+            query += " WHERE ticker = ?"
+            params.append(ticker.upper())
+
+        df = pd.read_sql_query(query, conn, params=params)
+        if df.empty:
+            return
+
+        for t, group in df.groupby("ticker"):
+            median_val = group["close"].median()
+            if not median_val or median_val <= 0:
+                continue
+
+            # Identify candidates (> 50x median, likely paise mismatch)
+            paise_candidates = group[group["close"] > median_val * 50]
+            if not paise_candidates.empty:
+                for rid, old_val in zip(paise_candidates["rowid"], paise_candidates["close"]):
+                    conn.execute("UPDATE historical_prices SET open = open/100.0, high = high/100.0, low = low/100.0, close = close/100.0 WHERE rowid = ?", (rid,))
+                print(f"🛠️ Normalized {len(paise_candidates)} paise records to rupees for {t}.")
+
+        # Delete invalid <= 0 rows
+        conn.execute("DELETE FROM historical_prices WHERE close <= 0 OR high <= 0 OR open <= 0 OR low <= 0")
+        conn.commit()
+
+
 def save_historical_prices(ticker: str, df: pd.DataFrame):
     """
     Saves a DataFrame of historical prices into the SQLite database.
-    Uses executemany (bulk insert) for fast writes.
+    Uses executemany (bulk insert) for fast writes with unit normalization.
     """
     if df is None or df.empty:
         return
 
     ticker = ticker.upper()
-    rows = [
-        (
-            ticker,
-            str(row["date"]),
-            float(row["open"]),
-            float(row["high"]),
-            float(row["low"]),
-            float(row["close"]),
-            int(row["volume"]),
-        )
-        for _, row in df.iterrows()
-    ]
+    rows = []
+    for _, row in df.iterrows():
+        try:
+            d_str = str(row["date"])
+            o_val = _normalize_price(row["open"])
+            h_val = _normalize_price(row["high"])
+            l_val = _normalize_price(row["low"])
+            c_val = _normalize_price(row["close"])
+            vol   = int(row.get("volume", 0) or 0)
+
+            if not all([o_val, h_val, l_val, c_val]):
+                continue
+            rows.append((ticker, d_str, o_val, max(h_val, o_val, c_val), min(l_val, o_val, c_val), c_val, vol))
+        except Exception:
+            continue
+
+    if not rows:
+        return
+
     with get_db_connection() as conn:
         conn.executemany(
             """
