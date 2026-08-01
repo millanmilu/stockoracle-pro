@@ -529,8 +529,10 @@ def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
 
                 clean_df = df[["date", "open", "high", "low", "close", "volume"]].dropna()
                 if not clean_df.empty:
+                    from backend.data.database import clear_ticker_history
+                    clear_ticker_history(ticker)
                     save_historical_prices(ticker, clean_df)
-                    print(f"✅ Stored {len(clean_df)} 5-year records into SQLite DB for {ticker}.")
+                    print(f"✅ Cleared old rows and stored {len(clean_df)} 5-year records into SQLite DB for {ticker}.")
                     return clean_df
     except Exception as e:
         print(f"⚠️ yfinance 5y download error for {ticker}: {e}")

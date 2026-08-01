@@ -547,8 +547,15 @@ export default function LiveChartView() {
     const intraday = !isDaily;
 
     // 1. Build Candles with high/low validity safety
-    const candles = rawHistory
-      .filter(d => d.open != null && d.high != null && d.low != null && d.close != null)
+    const validRaw = rawHistory.filter(d => d.open != null && d.high != null && d.low != null && d.close != null && Number(d.close) > 0);
+    
+    // Calculate median price to filter out corrupted legacy rows (< 30% of median)
+    const sortedCloses = validRaw.map(d => Number(d.close)).sort((a, b) => a - b);
+    const medianPrice  = sortedCloses[Math.floor(sortedCloses.length / 2)] || 0;
+    const minThreshold = medianPrice * 0.3;
+
+    const candles = validRaw
+      .filter(d => Number(d.close) >= minThreshold)
       .map(d => {
         const o = Number(d.open);
         const h = Number(d.high);

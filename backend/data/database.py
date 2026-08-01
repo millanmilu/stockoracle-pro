@@ -114,6 +114,17 @@ def init_db():
 
 # ── Historical Prices ──────────────────────────────────────────────────────────
 
+def clear_ticker_history(ticker: str):
+    """Deletes all historical price records for a specific ticker to clean stale/corrupted data."""
+    if not ticker:
+        return
+    ticker = ticker.upper()
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM historical_prices WHERE ticker = ?", (ticker,))
+        conn.commit()
+    print(f"🧹 Cleared old historical DB records for {ticker}.")
+
+
 def save_historical_prices(ticker: str, df: pd.DataFrame):
     """
     Saves a DataFrame of historical prices into the SQLite database.
