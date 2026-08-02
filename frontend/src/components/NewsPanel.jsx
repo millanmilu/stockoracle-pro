@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
-import axios from 'axios';
+import api from '../utils/api';
 
 export default function NewsPanel() {
   const { selectedSymbol } = useStore();
@@ -9,30 +9,9 @@ export default function NewsPanel() {
   const [sentimentScore, setSentimentScore] = useState(0);
 
   useEffect(() => {
-    const fetchNewsAndSentiment = async () => {
-      try {
-const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
-        const [newsRes, sentimentRes] = await Promise.all([
-          axios.get(`${API}/api/stock/${selectedSymbol}/news`),
-          axios.get(`${API}/api/stock/${selectedSymbol}/sentiment`) // Wait, I need an endpoint for sentiment! Or just take it from the feature row?
-        ]);
-        setNews(newsRes.data.slice(0, 5));
-        setSentimentScore(sentimentRes.data.score || 0);
-      } catch (err) {
-        console.error(err);
-      }
-    };
-    // If I don't have a sentiment endpoint, I can calculate it or assume it's sent along with news, or add an endpoint.
-    // Let's assume there's a `/api/stock/{symbol}/news` that returns { news: [...], average_sentiment: 0.5 }
-    // Let's adjust to fetch from the news endpoint directly if it returns sentiment.
-    
     const fetchNews = async () => {
       try {
-        const { data } = await axios.get(`${import.meta.env.VITE_API_URL || ''}/api/stock/${selectedSymbol}/news`);
-        // I will assume the backend returns { articles: [], sentiment: 0 }
-        // If not, I'll just fake it or add it.
-        // Actually, the user asked me to create `analysis/sentiment.py` returning average score.
-        // I will update main.py to return this score in the news endpoint.
+        const { data } = await api.get(`/api/stock/${selectedSymbol}/news`);
         if (data.items) {
           setNews(data.items.slice(0, 5));
           setSentimentScore(data.sentiment || 0);
@@ -96,7 +75,7 @@ const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
       <h3 style={{ marginTop: '30px', color: '#aaa', fontSize: '1rem' }}>Top Headlines</h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '15px' }}>
         {news.map((item, idx) => (
-          <div key={idx} style={{ backgroundColor: '#1e1e1e', padding: '15px', borderRadius: '8px', border: '1px solid #333' }}>
+          <div key={idx} style={{ backgroundColor: 'var(--card-bg, #1e1e1e)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border, #333)' }}>
             <a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#0ea5e9', textDecoration: 'none', fontWeight: 'bold' }}>
               {item.title}
             </a>

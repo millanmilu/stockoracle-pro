@@ -3,17 +3,46 @@ import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
 import StockChart from './StockChart';
 import AIInsightCard from './AIInsightCard';
-import axios from 'axios';
+
+// Skeleton shimmer component
+function SkeletonChart() {
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '12px', padding: '8px' }}>
+      <style>{`
+        @keyframes shimmer {
+          0% { background-position: -400px 0; }
+          100% { background-position: 400px 0; }
+        }
+        .skeleton {
+          background: linear-gradient(90deg, #1e1e1e 25%, #2a2a2a 50%, #1e1e1e 75%);
+          background-size: 800px 100%;
+          animation: shimmer 1.4s infinite;
+          border-radius: 6px;
+        }
+      `}</style>
+      <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <div className="skeleton" style={{ width: 90, height: 20 }} />
+        <div className="skeleton" style={{ width: 60, height: 20 }} />
+      </div>
+      <div className="skeleton" style={{ flex: 1, minHeight: 300 }} />
+    </div>
+  );
+}
 
 export default function Dashboard() {
-  const { selectedSymbol, setSelectedSymbol } = useStore();
+  const { selectedSymbol, setSelectedSymbol, historyCache, setHistoryCache } = useStore();
   const { searchStocks, fetchHistory } = useStock();
-  const [history, setHistory] = useState(null);
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [timeframe, setTimeframe] = useState('3M');
+  const [localLoading, setLocalLoading] = useState(false);
 
-  // Search logic
+  // Build cache key from selected symbol + timeframe
+  const cacheKey = `${selectedSymbol}_${timeframe}_1d`;
+  const history = historyCache[cacheKey] || null;
+
+  // Debounced search
   useEffect(() => {
     if (!search.trim()) { setResults([]); return; }
     const timer = setTimeout(() => {
@@ -25,12 +54,14 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, [search, searchStocks]);
 
-  const [timeframe, setTimeframe] = useState('3M');
-
-  // Load history logic
+  // Load history — uses cache to avoid re-fetching on view switch
   useEffect(() => {
-    setHistory(null);
-    fetchHistory(selectedSymbol, timeframe).then(setHistory);
+    if (historyCache[cacheKey]) return;   // Already cached
+    setLocalLoading(true);
+    fetchHistory(selectedSymbol, timeframe).then(data => {
+      if (data && data.length > 0) setHistoryCache(cacheKey, data);
+      setLocalLoading(false);
+    });
   }, [selectedSymbol, timeframe]);
 
   const selectStock = ticker => {
@@ -42,10 +73,11 @@ export default function Dashboard() {
   const currentPrice = history && history.length > 0 ? history[history.length - 1].close : null;
   const priceChange = history && history.length > 1 ? currentPrice - history[history.length - 2].close : null;
   const pctChange = priceChange && currentPrice ? (priceChange / history[history.length - 2].close) * 100 : null;
+  const isLoading = localLoading && !history;
 
   return (
     <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      
+
       {/* Search Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '20px', position: 'relative' }}>
         <div>
@@ -58,33 +90,41 @@ export default function Dashboard() {
               </span>
             </div>
           )}
+          {isLoading && !currentPrice && (
+            <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
+              <div className="skeleton" style={{ width: 110, height: 28, borderRadius: 6, background: 'linear-gradient(90deg,#1e1e1e 25%,#2a2a2a 50%,#1e1e1e 75%)', backgroundSize: '800px 100%', animation: 'shimmer 1.4s infinite' }} />
+              <div className="skeleton" style={{ width: 80, height: 28, borderRadius: 6, background: 'linear-gradient(90deg,#1e1e1e 25%,#2a2a2a 50%,#1e1e1e 75%)', backgroundSize: '800px 100%', animation: 'shimmer 1.4s infinite' }} />
+            </div>
+          )}
         </div>
         <div style={{ position: 'relative', width: '400px', marginLeft: 'auto' }}>
-          <input 
-            type="text" 
-            placeholder="Search any NSE stock..." 
-            value={search} 
-            onChange={e => setSearch(e.target.value)} 
+          <input
+            type="text"
+            placeholder="Search any NSE stock..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
             onFocus={() => results.length && setShowDropdown(true)}
             onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
-            style={{ 
-              width: '100%', padding: '10px 15px', borderRadius: '8px', 
-              border: '1px solid #333', backgroundColor: '#1e1e1e', color: '#fff'
+            style={{
+              width: '100%', padding: '10px 15px', borderRadius: '8px',
+              border: '1px solid var(--border, #333)', backgroundColor: 'var(--card-bg, #1e1e1e)', color: 'var(--text, #fff)',
+              boxSizing: 'border-box',
             }}
           />
           {showDropdown && (
-            <div style={{ 
-              position: 'absolute', top: '45px', left: 0, width: '100%', 
-              backgroundColor: '#1e1e1e', border: '1px solid #333', 
+            <div style={{
+              position: 'absolute', top: '45px', left: 0, width: '100%',
+              backgroundColor: 'var(--card-bg, #1e1e1e)', border: '1px solid var(--border, #333)',
               borderRadius: '8px', zIndex: 10, maxHeight: '300px', overflowY: 'auto'
             }}>
               {results.length > 0 ? results.map(item => (
-                <div 
-                  key={item.ticker} 
+                <div
+                  key={item.ticker}
                   onMouseDown={() => selectStock(item.ticker)}
-                  style={{ padding: '10px 15px', cursor: 'pointer', borderBottom: '1px solid #333' }}
+                  style={{ padding: '10px 15px', cursor: 'pointer', borderBottom: '1px solid var(--border, #333)' }}
                 >
-                  <strong style={{ color: '#0ea5e9' }}>{item.ticker}</strong> <span style={{ color: '#888', fontSize: '0.9rem' }}>{item.name}</span>
+                  <strong style={{ color: '#0ea5e9' }}>{item.ticker}</strong>{' '}
+                  <span style={{ color: '#888', fontSize: '0.9rem' }}>{item.name}</span>
                 </div>
               )) : (
                 <div style={{ padding: '10px 15px', color: '#888' }}>No matches found</div>
@@ -94,9 +134,14 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Main Chart */}
-      <div style={{ height: '400px', backgroundColor: '#1e1e1e', padding: '15px', borderRadius: '12px', border: '1px solid #333' }}>
-        {history ? <StockChart history={history} timeframe={timeframe} onTimeframeChange={setTimeframe} /> : <div style={{ color: '#888', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>Loading Chart...</div>}
+      {/* Main Chart — skeleton while loading */}
+      <div style={{ height: '400px', backgroundColor: 'var(--card-bg, #1e1e1e)', padding: '15px', borderRadius: '12px', border: '1px solid var(--border, #333)' }}>
+        {isLoading
+          ? <SkeletonChart />
+          : history
+            ? <StockChart history={history} timeframe={timeframe} onTimeframeChange={setTimeframe} />
+            : <div style={{ color: '#888', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>No chart data available.</div>
+        }
       </div>
 
       {/* AI Insight Card below chart */}

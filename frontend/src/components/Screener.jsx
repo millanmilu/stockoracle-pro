@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react'
-import axios from 'axios'
+import api from '../utils/api'
 import { fmt, signalLabel, signalColor } from '../utils/formatters'
-
-const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
 
 export default function Screener({ onSelect }) {
   const [rows, setRows]       = useState([])
@@ -12,7 +10,7 @@ export default function Screener({ onSelect }) {
   const [sigFilter, setSigFilter] = useState('all')
 
   useEffect(() => {
-    axios.get(`${API}/api/screener`)
+    api.get('/api/screener')
       .then(r => setRows(r.data))
       .catch(() => setError('Failed to load screener data.'))
       .finally(() => setLoading(false))

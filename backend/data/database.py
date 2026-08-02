@@ -2,6 +2,7 @@ import os
 import json
 import sqlite3
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional, Any
 
@@ -107,6 +108,23 @@ def init_db():
                 fetched_at  TEXT NOT NULL
             )
         """)
+
+        # 7. Training Task Status (persists background job state across restarts)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS task_status (
+                task_id     TEXT PRIMARY KEY,
+                ticker      TEXT NOT NULL,
+                status      TEXT NOT NULL DEFAULT 'queued',
+                progress    INTEGER NOT NULL DEFAULT 0,
+                mape        REAL,
+                error       TEXT,
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_task_ticker ON task_status (ticker)"
+        )
 
         conn.commit()
     print("✅ SQLite database initialization complete.")
@@ -392,6 +410,56 @@ def get_screener_results(ttl_minutes: int = 5) -> Optional[list]:
     return _get_json("screener_results", "id", "1", ttl_minutes)
 
 
+# ── Training Task Status ────────────────────────────────────────────────────────
+
+def save_task_status(task_id: str, ticker: str, status: str, progress: int,
+                     mape: Optional[float] = None, error: Optional[str] = None):
+    """Creates or updates a training task record in the database."""
+    now = datetime.now().isoformat()
+    try:
+        with get_db_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO task_status (task_id, ticker, status, progress, mape, error, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(task_id) DO UPDATE SET
+                    status=excluded.status, progress=excluded.progress,
+                    mape=excluded.mape, error=excluded.error, updated_at=excluded.updated_at
+                """,
+                (task_id, ticker.upper(), status, progress, mape, error, now, now),
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"Error saving task status for {task_id}: {e}")
+
+
+def get_task_status(task_id: str) -> Optional[dict]:
+    """Returns task status dict for the given task_id, or None if not found."""
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute(
+                "SELECT task_id, ticker, status, progress, mape, error, created_at, updated_at "
+                "FROM task_status WHERE task_id = ?",
+                (task_id,),
+            ).fetchone()
+        if row:
+            return dict(row)
+    except Exception as e:
+        print(f"Error reading task status for {task_id}: {e}")
+    return None
+
+
+def cleanup_old_tasks(max_age_hours: int = 24):
+    """Deletes task records older than max_age_hours to keep the table small."""
+    cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
+    try:
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM task_status WHERE updated_at < ?", (cutoff,))
+            conn.commit()
+    except Exception as e:
+        print(f"Error cleaning old tasks: {e}")
+
+
 # ── Monte Carlo ────────────────────────────────────────────────────────────────
 
 def save_monte_carlo(ticker: str, data: dict, ttl_minutes: int = 30):
@@ -468,7 +536,7 @@ def get_db_stats() -> dict:
     """Returns a summary of all DB table sizes for the /api/db/status endpoint."""
     stats = {}
     tables = ["historical_prices", "stock_universe", "live_ticks", "company_info",
-              "predictions", "screener_results", "monte_carlo"]
+              "predictions", "screener_results", "monte_carlo", "task_status"]
     try:
         with get_db_connection() as conn:
             for table in tables:

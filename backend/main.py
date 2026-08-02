@@ -1,6 +1,12 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager, suppress
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Request, Security
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security.api_key import APIKeyHeader
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import json
@@ -10,6 +16,9 @@ from urllib.request import Request, urlopen
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
+
+logger = logging.getLogger("stockoracle")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 # Load the local development credentials before importing ``fetcher``: that
 # module constructs the Angel One client at import time. In production,
@@ -26,7 +35,8 @@ from backend.data.database import (
     save_prediction, get_prediction_cached,
     save_monte_carlo, get_monte_carlo_cached,
     save_screener_results, get_screener_results,
-    get_db_stats
+    get_db_stats,
+    save_task_status, get_task_status, cleanup_old_tasks
 )
 from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.monte_carlo import run_monte_carlo_simulation
@@ -39,8 +49,10 @@ from backend.analysis.backtester import run_backtest
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize SQL database tables
+    # Initialize SQL database tables (including new task_status table)
     init_db()
+    # Clean up stale task records from previous runs
+    cleanup_old_tasks(max_age_hours=48)
     # Authenticate with Angel One on startup
     ensure_session()
     # Start live price broadcast
@@ -88,6 +100,21 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Rate limiter (uses client IP by default)
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# Optional API key auth — only enforced when API_KEY env var is set
+_API_KEY_NAME = "X-API-Key"
+_api_key_header = APIKeyHeader(name=_API_KEY_NAME, auto_error=False)
+SERVER_API_KEY = os.getenv("API_KEY", "").strip()
+
+def verify_api_key(key: str = Security(_api_key_header)):
+    """If SERVER_API_KEY is set, reject requests that don't include the correct key."""
+    if SERVER_API_KEY and key != SERVER_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid or missing X-API-Key header.")
+
 # CORS configuration
 origins = [
     "http://localhost:5173",
@@ -101,7 +128,7 @@ if env_origins:
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,   # Fixed: was ["*"] — now uses the configured origins list
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -246,7 +273,8 @@ def get_stock_news(ticker: str, limit: int = 8):
         try:
             from backend.analysis.sentiment import fetch_and_score_sentiment
             sentiment_score = fetch_and_score_sentiment(t)
-        except:
+        except Exception as e:
+            logger.warning("Sentiment scoring failed for %s: %s", t, e)
             sentiment_score = 0.0
             
         return {"ticker": t, "company": company, "items": items, "sentiment": sentiment_score}
@@ -308,6 +336,8 @@ def get_monte_carlo(ticker: str):
             raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
         raise HTTPException(status_code=404, detail=f"No price history found for '{t}' to run Monte Carlo simulation.")
     closes = df["close"].tolist()
+    if len(closes) < 30:
+        raise HTTPException(status_code=400, detail="Insufficient price history to run Monte Carlo simulation. Need at least 30 sessions of data.")
     mc_results = run_monte_carlo_simulation(closes, simulations=150, horizon=30)
     save_monte_carlo(t, mc_results)
     return mc_results
@@ -364,28 +394,54 @@ class SimulationRequest(BaseModel):
 # Global tracking for training tasks
 training_tasks = {}
 
-@app.get("/api/stock/{symbol}/predict")
-def get_prediction(symbol: str):
+def _get_prediction_logic(symbol: str) -> dict:
     from backend.analysis.trainer import predict_future
+    res = predict_future(symbol.upper())
+    cur_price = res.get('current_price', 0.0) or 1.0
+    predicted_return = (res['predicted_price'] - cur_price) / cur_price if cur_price > 0 else 0.0
+    signal = "buy" if res['predicted_price'] > cur_price * 1.01 else ("sell" if res['predicted_price'] < cur_price * 0.99 else "hold")
+
+    # Real confidence score: based on prediction spread width relative to price.
+    # Narrow spread = high confidence. Formula: 100 - (spread% * 10), clamped 0-100.
+    spread_pct = (res['high_bound'] - res['low_bound']) / (cur_price + 1e-9) * 100.0
+    ai_score = int(max(0, min(100, round(100.0 - spread_pct * 10.0))))
+
+    return {
+        "ticker": symbol.upper(),
+        "current_price": res['current_price'],
+        "predicted_price": res['predicted_price'],
+        "predicted_price_7d": res['predicted_price'],
+        "predicted_return_7d": predicted_return,
+        "high_bound": res['high_bound'],
+        "low_bound": res['low_bound'],
+        "ai_confidence_score": ai_score,
+        "signal": signal
+    }
+
+@app.get("/api/stock/{symbol}/predict")
+@limiter.limit("10/minute")
+def get_prediction(request: Request, symbol: str, background_tasks: BackgroundTasks):
     try:
-        res = predict_future(symbol.upper())
-        cur_price = res.get('current_price', 0.0) or 1.0
-        predicted_return = (res['predicted_price'] - cur_price) / cur_price if cur_price > 0 else 0.0
-        signal = "buy" if res['predicted_price'] > cur_price * 1.01 else ("sell" if res['predicted_price'] < cur_price * 0.99 else "hold")
-        ai_score = 80 if signal == "buy" else (20 if signal == "sell" else 50)
-        
-        return {
-            "ticker": symbol.upper(),
-            "current_price": res['current_price'],
-            "predicted_price": res['predicted_price'],
-            "predicted_price_7d": res['predicted_price'],
-            "predicted_return_7d": predicted_return,
-            "high_bound": res['high_bound'],
-            "low_bound": res['low_bound'],
-            "ai_confidence_score": ai_score,
-            "signal": signal
-        }
+        # Check staleness of model in background
+        model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", f"{symbol.upper()}.json")
+        if os.path.exists(model_path):
+            try:
+                with open(model_path, 'r') as f:
+                    bundle = json.load(f)
+                trained_at_str = bundle.get("trained_at")
+                if trained_at_str:
+                    trained_at = datetime.fromisoformat(trained_at_str)
+                    if datetime.now() - trained_at > timedelta(days=7):
+                        logger.info("Model for %s is stale (> 7 days old). Triggering auto-retrain.", symbol)
+                        task_id = str(uuid.uuid4())
+                        save_task_status(task_id, symbol.upper(), "queued", 0)
+                        background_tasks.add_task(background_train_job, task_id, symbol.upper())
+            except Exception as se:
+                logger.warning("Failed to check model staleness: %s", se)
+
+        return _get_prediction_logic(symbol)
     except Exception as e:
+        logger.error("Prediction failed for %s: %s", symbol, e)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/stock/{symbol}/explain")
@@ -398,7 +454,8 @@ def get_explainability(symbol: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/stock/{symbol}/simulate")
-def simulate_prediction(symbol: str, req: SimulationRequest):
+@limiter.limit("15/minute")
+def simulate_prediction(request: Request, symbol: str, req: SimulationRequest):
     from backend.analysis.trainer import predict_future
     try:
         from backend.analysis.feature_engineer import get_features
@@ -406,14 +463,14 @@ def simulate_prediction(symbol: str, req: SimulationRequest):
         if df.empty:
             raise ValueError("No data")
         latest = df.iloc[-1]
-        
+
         overrides = {
             "sentiment": req.sentiment,
             "volume": latest['volume'] * req.volume_multiplier,
             "atr_14": latest['atr_14'] * req.volatility_multiplier,
             "roll_std_20": latest['roll_std_20'] * req.volatility_multiplier
         }
-        
+
         res = predict_future(symbol.upper(), override_features=overrides)
         return {
             "predicted_price": res['predicted_price'],
@@ -421,46 +478,59 @@ def simulate_prediction(symbol: str, req: SimulationRequest):
             "low_bound": res['low_bound']
         }
     except Exception as e:
+        logger.error("Simulation failed for %s: %s", symbol, e)
         raise HTTPException(status_code=500, detail=str(e))
 
 def background_train_job(task_id: str, symbol: str):
     from backend.analysis.trainer import train_pipeline
     try:
+        # Persist initial state to DB so it survives server restarts
+        save_task_status(task_id, symbol, "training", 50)
         training_tasks[task_id] = {"status": "training", "progress": 50, "mape": None}
         result = train_pipeline(symbol)
+        save_task_status(task_id, symbol, "completed", 100, mape=result['validation_mape'])
         training_tasks[task_id] = {"status": "completed", "progress": 100, "mape": result['validation_mape']}
     except Exception as e:
+        logger.error("Training job failed for %s: %s", symbol, e)
+        save_task_status(task_id, symbol, "failed", 0, error=str(e))
         training_tasks[task_id] = {"status": "failed", "error": str(e), "progress": 0}
 
 @app.post("/api/stock/{symbol}/train")
-def start_training(symbol: str, background_tasks: BackgroundTasks):
+@limiter.limit("3/minute")
+def start_training(request: Request, symbol: str, background_tasks: BackgroundTasks):
     task_id = str(uuid.uuid4())
+    save_task_status(task_id, symbol.upper(), "queued", 0)
     training_tasks[task_id] = {"status": "queued", "progress": 0, "mape": None}
     background_tasks.add_task(background_train_job, task_id, symbol.upper())
     return {"task_id": task_id, "message": "Training started"}
 
 @app.get("/api/task/{task_id}/status")
-def get_task_status(task_id: str):
+def get_task_status_endpoint(task_id: str):
+    # Check in-memory first (fastest), then fall back to DB (survives restarts)
     task = training_tasks.get(task_id)
+    if not task:
+        task = get_task_status(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task
 
 @app.get("/api/stock/{ticker}/backtest")
-def get_backtest(ticker: str):
+@limiter.limit("5/minute")
+def get_backtest(request: Request, ticker: str):
     t_upper = ticker.upper().strip()
     # Use combined data so backtest includes today's live prices
     df = get_combined_stock_data(t_upper, period="2Y")
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history found for {t_upper} to run backtest.")
-    
+
     results = run_backtest(df, t_upper)
     if "error" in results:
         raise HTTPException(status_code=400, detail=results["error"])
     return results
 
 @app.get("/api/screener")
-async def get_screener_list(signal: str = "", min_score: int = 0):
+@limiter.limit("20/minute")
+async def get_screener_list(request: Request, signal: str = "", min_score: int = 0):
     # Try DB cache first (5-min TTL — persists across restarts)
     cached_results = get_screener_results(ttl_minutes=5)
 
@@ -473,7 +543,7 @@ async def get_screener_list(signal: str = "", min_score: int = 0):
                     info = fetch_company_info(t)
                     if not info:
                         continue
-                    pred = get_prediction(t)
+                    pred = _get_prediction_logic(t)
                     prev = info["previous_close"] or 1.0
                     change_pct = ((info["current_price"] - prev) / prev) * 100
                     fresh_results.append({
@@ -505,27 +575,41 @@ async def get_screener_list(signal: str = "", min_score: int = 0):
 # ── WEBSOCKET LIVE PRICE FEED MANAGER ──
 
 class ConnectionManager:
+    """WebSocket manager with per-client ticker subscriptions."""
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
-        
+        # Map of websocket -> set of subscribed ticker symbols
+        self.connections: Dict[WebSocket, set] = {}
+
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections.append(websocket)
-        
+        # Default: subscribe to all popular tickers on connect
+        self.connections[websocket] = set(popular_tickers)
+
     def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-        
+        self.connections.pop(websocket, None)
+
+    def subscribe(self, websocket: WebSocket, tickers: List[str]):
+        """Update the set of tickers a specific client is interested in."""
+        if websocket in self.connections:
+            self.connections[websocket] = {t.upper() for t in tickers}
+
     async def broadcast(self, message: dict):
+        """Sends the message only to clients subscribed to that ticker."""
+        ticker = message.get("ticker", "")
         disconnected = []
-        for connection in self.active_connections:
+        for ws, subscriptions in list(self.connections.items()):
+            if ticker not in subscriptions:
+                continue
             try:
-                await connection.send_json(message)
+                await ws.send_json(message)
             except Exception:
-                # Connection might have closed without clean handshake
-                disconnected.append(connection)
-        for connection in disconnected:
-            self.disconnect(connection)
+                disconnected.append(ws)
+        for ws in disconnected:
+            self.disconnect(ws)
+
+    @property
+    def active_connections(self) -> List[WebSocket]:
+        return list(self.connections.keys())
 
 manager = ConnectionManager()
 
@@ -609,8 +693,15 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Keep socket alive by receiving dummy messages
-            await websocket.receive_text()
+            # Listen for subscription control messages from client
+            # Expected format: {"subscribe": ["RELIANCE", "TCS", ...]}
+            raw = await websocket.receive_text()
+            try:
+                msg = json.loads(raw)
+                if "subscribe" in msg and isinstance(msg["subscribe"], list):
+                    manager.subscribe(websocket, msg["subscribe"])
+            except (json.JSONDecodeError, Exception):
+                pass  # Ignore non-JSON keep-alive pings
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 

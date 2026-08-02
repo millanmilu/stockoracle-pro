@@ -24,7 +24,36 @@
   --radius:       12px;
   --radius-lg:    18px;
   --shadow:       0 8px 32px rgba(0,0,0,0.5);
+
+  /* Semantic theme tokens (used in App.jsx / Sidebar.jsx) */
+  --bg:           #121212;
+  --text:         #f0f0ff;
+  --card-bg:      #1e1e1e;
+  --sidebar-bg:   #1a1a1a;
+  --text-muted:   #888;
 }
+
+/* ── Light Theme Overrides ─────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg-primary:   #f0f2f8;
+  --bg-secondary: #e4e8f2;
+  --bg-card:      #ffffff;
+  --bg-glass:     rgba(255, 255, 255, 0.85);
+  --border:       rgba(99, 102, 241, 0.2);
+  --border-hover: rgba(99, 102, 241, 0.5);
+  --text-primary: #0F172A;
+  --text-secondary: #374151;
+  --text-muted:   #6B7280;
+  --shadow:       0 8px 32px rgba(0,0,0,0.12);
+
+  /* Semantic tokens */
+  --bg:           #f0f2f8;
+  --text:         #0f172a;
+  --card-bg:      #ffffff;
+  --sidebar-bg:   #e4e8f2;
+  --text-muted:   #555;
+}
+
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 

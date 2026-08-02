@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
-import axios from 'axios';
+import api from '../utils/api';
 
 export default function AIInsightCard() {
   const { selectedSymbol, predictionData, setPredictionData } = useStore();
@@ -12,12 +12,11 @@ export default function AIInsightCard() {
     setLoading(true);
     setErrorMsg(null);
     try {
-      const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
-      const predRes = await axios.get(`${API}/api/stock/${selectedSymbol}/predict`);
+      const predRes = await api.get(`/api/stock/${selectedSymbol}/predict`);
       setPredictionData(predRes.data);
 
       try {
-        const expRes = await axios.get(`${API}/api/stock/${selectedSymbol}/explain`);
+        const expRes = await api.get(`/api/stock/${selectedSymbol}/explain`);
         if (expRes.data && typeof expRes.data === 'object' && !expRes.data.detail) {
           setExplainData(expRes.data);
         } else {
@@ -40,7 +39,7 @@ export default function AIInsightCard() {
 
   if (loading) {
     return (
-      <div style={{ backgroundColor: '#1e1e1e', padding: '24px', borderRadius: '12px', border: '1px solid #333', color: '#0ea5e9', display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ backgroundColor: 'var(--card-bg, #1e1e1e)', padding: '24px', borderRadius: '12px', border: '1px solid var(--border, #333)', color: '#0ea5e9', display: 'flex', alignItems: 'center', gap: 12 }}>
         <div style={{ width: 20, height: 20, borderRadius: '50%', border: '2px solid #0ea5e9', borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite' }} />
         <span>Loading AI Insights & Predictions for {selectedSymbol}...</span>
         <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -50,9 +49,9 @@ export default function AIInsightCard() {
 
   if (errorMsg || !predictionData) {
     return (
-      <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444' }}>
+      <div style={{ backgroundColor: 'var(--card-bg, #1e1e1e)', padding: '20px', borderRadius: '12px', border: '1px solid rgba(239,68,68,0.3)', color: '#ef4444' }}>
         <div style={{ fontWeight: 'bold', marginBottom: 8 }}>⚠️ AI Model Initializing</div>
-        <div style={{ fontSize: '0.85rem', color: '#aaa', marginBottom: 12 }}>{errorMsg || "Unable to load prediction data."}</div>
+        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary, #aaa)', marginBottom: 12 }}>{errorMsg || "Unable to load prediction data."}</div>
         <button onClick={fetchInsights} style={{ padding: '6px 14px', borderRadius: '6px', background: '#0ea5e9', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 700 }}>
           Retry Loading AI Insights
         </button>
@@ -73,7 +72,7 @@ export default function AIInsightCard() {
   };
 
   return (
-    <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '12px', border: '1px solid #333', display: 'flex', gap: '30px' }}>
+    <div style={{ backgroundColor: 'var(--card-bg, #1e1e1e)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border, #333)', display: 'flex', gap: '30px' }}>
       
       {/* Left side: Price */}
       <div style={{ flex: 1 }}>
@@ -98,7 +97,7 @@ export default function AIInsightCard() {
               <span style={{ color: '#ddd' }}>{feature.replace('_', ' ').toUpperCase()}</span>
               <span style={{ color: '#888' }}>{pct}%</span>
             </div>
-            <div style={{ width: '100%', backgroundColor: '#333', height: '6px', borderRadius: '3px' }}>
+            <div style={{ width: '100%', backgroundColor: 'var(--border, #333)', height: '6px', borderRadius: '3px' }}>
               <div style={{ width: `${pct}%`, backgroundColor: '#0ea5e9', height: '100%', borderRadius: '3px' }} />
             </div>
           </div>

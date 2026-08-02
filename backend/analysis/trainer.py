@@ -1,6 +1,7 @@
 import os
 import json
 import time
+from datetime import datetime
 import pandas as pd
 import numpy as np
 import xgboost as xgb
@@ -83,8 +84,11 @@ def train_pipeline(symbol: str) -> dict:
         xgb_json_str = f.read()
     os.remove(temp_xgb_path)
     
-    # Bundle into a single JSON
+    # Bundle into a single JSON, including training metadata
     model_bundle = {
+        "trained_at": datetime.now().isoformat(),
+        "symbol": symbol,
+        "validation_mape": float(val_mape),
         "xgboost": json.loads(xgb_json_str),
         "elasticnet": {
             "coef": en_model.coef_.tolist(),

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import axios from 'axios'
+import api from '../utils/api'
 import {
   Chart as ChartJS, CategoryScale, LinearScale,
   PointElement, LineElement, Title, Tooltip, Legend
@@ -7,8 +7,6 @@ import {
 import { Line } from 'react-chartjs-2'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend)
-
-const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
 
 export default function MonteCarlo({ ticker }) {
   const [mc, setMc]       = useState(null)
@@ -18,7 +16,7 @@ export default function MonteCarlo({ ticker }) {
   useEffect(() => {
     if (!ticker) return
     setLoading(true); setError(null); setMc(null)
-    axios.get(`${API}/api/stock/${ticker}/montecarlo`)
+    api.get(`/api/stock/${ticker}/montecarlo`)
       .then(r => setMc(r.data))
       .catch(() => setError('Failed to fetch Monte Carlo data'))
       .finally(() => setLoading(false))

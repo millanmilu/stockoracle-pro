@@ -499,7 +499,14 @@ export default function LiveChartView() {
     const ws = new WebSocket(`${WS_BASE}/ws/prices`);
     wsRef.current = ws;
 
-    ws.onopen  = () => setWsConnected(true);
+    ws.onopen  = () => {
+      setWsConnected(true);
+      const subs = [selectedSymbol];
+      if (isSplitView && compareSymbol) {
+        subs.push(compareSymbol);
+      }
+      ws.send(JSON.stringify({ subscribe: subs }));
+    };
     ws.onclose = () => setWsConnected(false);
     ws.onerror = () => setWsConnected(false);
     ws.onmessage = e => {
@@ -522,7 +529,7 @@ export default function LiveChartView() {
     }, 20_000);
 
     return () => { clearInterval(ping); ws.close(); };
-  }, [selectedSymbol, targetAlertPrice]);
+  }, [selectedSymbol, targetAlertPrice, compareSymbol, isSplitView]);
 
   /* ── Primary Chart Data Binding & Pattern Markers ─────────── */
 

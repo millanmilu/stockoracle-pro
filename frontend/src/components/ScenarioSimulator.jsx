@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import useStore from '../store/useStore';
-import axios from 'axios';
+import api from '../utils/api';
 
 export default function ScenarioSimulator() {
-  const { selectedSymbol, setPredictionData } = useStore();
+  const { selectedSymbol, predictionData, setPredictionData } = useStore();
   const [sentiment, setSentiment] = useState(0);
   const [volatility, setVolatility] = useState(1);
   const [volume, setVolume] = useState(1);
@@ -18,19 +18,21 @@ export default function ScenarioSimulator() {
     }
     const timer = setTimeout(async () => {
       try {
-        const { data } = await axios.post(`${import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org'}/api/stock/${selectedSymbol}/simulate`, {
+        const { data } = await api.post(`/api/stock/${selectedSymbol}/simulate`, {
           sentiment: parseFloat(sentiment),
           volatility_multiplier: parseFloat(volatility),
           volume_multiplier: parseFloat(volume)
         });
         
         // Update the prediction data in the store so AIInsightCard reacts
-        setPredictionData(prev => prev ? {
-          ...prev,
-          predicted_price: data.predicted_price,
-          high_bound: data.high_bound,
-          low_bound: data.low_bound
-        } : prev);
+        if (predictionData) {
+          setPredictionData({
+            ...predictionData,
+            predicted_price: data.predicted_price,
+            high_bound: data.high_bound,
+            low_bound: data.low_bound
+          });
+        }
       } catch (err) {
         console.error("Simulation failed", err);
       }
@@ -40,8 +42,8 @@ export default function ScenarioSimulator() {
   }, [sentiment, volatility, volume, selectedSymbol]);
 
   return (
-    <div style={{ backgroundColor: '#1e1e1e', padding: '20px', borderRadius: '12px', border: '1px solid #333', marginTop: '20px' }}>
-      <h3 style={{ margin: '0 0 20px 0', color: '#fff' }}>Scenario Simulator</h3>
+    <div style={{ backgroundColor: 'var(--card-bg, #1e1e1e)', padding: '20px', borderRadius: '12px', border: '1px solid var(--border, #333)', marginTop: '20px' }}>
+      <h3 style={{ margin: '0 0 20px 0', color: 'var(--text, #fff)' }}>Scenario Simulator</h3>
       
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         
