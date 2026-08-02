@@ -12,7 +12,7 @@ import os
 import json
 import xml.etree.ElementTree as ET
 from urllib.parse import quote_plus
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrllibRequest, urlopen
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
@@ -257,7 +257,7 @@ def get_stock_news(ticker: str, limit: int = 8):
     company = token.get("name", t) if token else t
     url = f"https://news.google.com/rss/search?q={quote_plus(company + ' stock NSE')}&hl=en-IN&gl=IN&ceid=IN:en"
     try:
-        request = Request(url, headers={"User-Agent": "StockOracle/1.0"})
+        request = UrllibRequest(url, headers={"User-Agent": "StockOracle/1.0"})
         with urlopen(request, timeout=8) as response:
             root = ET.fromstring(response.read())
         items = []
