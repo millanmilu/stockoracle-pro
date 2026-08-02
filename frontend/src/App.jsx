@@ -12,7 +12,6 @@ import MonteCarlo from './components/MonteCarlo';
 import BacktestPanel from './components/BacktestPanel';
 import AIInsightCard from './components/AIInsightCard';
 import ScenarioSimulator from './components/ScenarioSimulator';
-import Portfolio from './components/Portfolio';
 import PriceAlerts from './components/PriceAlerts';
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -39,7 +38,6 @@ export default function App() {
       case 'Volatility':   return <VolatilityPanel ticker={selectedSymbol} />;
       case 'Monte Carlo':  return <MonteCarlo ticker={selectedSymbol} />;
       case 'Backtest':     return <BacktestPanel ticker={selectedSymbol} />;
-      case 'Portfolio':    return <Portfolio />;
       case 'Price Alerts': return <PriceAlerts />;
       default:             return <Dashboard />;
     }

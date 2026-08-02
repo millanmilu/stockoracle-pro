@@ -396,7 +396,33 @@ training_tasks = {}
 
 def _get_prediction_logic(symbol: str) -> dict:
     from backend.analysis.trainer import predict_future
-    res = predict_future(symbol.upper())
+    try:
+        res = predict_future(symbol.upper())
+        model_trained = True
+    except FileNotFoundError:
+        # Fallback rule-based prediction if model is not trained yet
+        from backend.data.fetcher import fetch_stock_data
+        df = fetch_stock_data(symbol.upper(), period="45D")
+        if df is not None and not df.empty and len(df) >= 20:
+            cur_price = float(df["close"].iloc[-1])
+            ma20 = float(df["close"].rolling(20).mean().iloc[-1])
+            predicted_price = cur_price * 1.005 if cur_price > ma20 else cur_price * 0.995
+            high_bound = predicted_price * 1.02
+            low_bound = predicted_price * 0.98
+        else:
+            cur_price = 100.0
+            predicted_price = 100.0
+            high_bound = 105.0
+            low_bound = 95.0
+
+        res = {
+            "current_price": cur_price,
+            "predicted_price": round(predicted_price, 2),
+            "high_bound": round(high_bound, 2),
+            "low_bound": round(low_bound, 2)
+        }
+        model_trained = False
+
     cur_price = res.get('current_price', 0.0) or 1.0
     predicted_return = (res['predicted_price'] - cur_price) / cur_price if cur_price > 0 else 0.0
     signal = "buy" if res['predicted_price'] > cur_price * 1.01 else ("sell" if res['predicted_price'] < cur_price * 0.99 else "hold")
@@ -415,14 +441,15 @@ def _get_prediction_logic(symbol: str) -> dict:
         "high_bound": res['high_bound'],
         "low_bound": res['low_bound'],
         "ai_confidence_score": ai_score,
-        "signal": signal
+        "signal": signal,
+        "model_trained": model_trained
     }
 
 @app.get("/api/stock/{symbol}/predict")
 @limiter.limit("10/minute")
 def get_prediction(request: Request, symbol: str, background_tasks: BackgroundTasks):
     try:
-        # Check staleness of model in background
+        # Check staleness or existence of model
         model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", f"{symbol.upper()}.json")
         if os.path.exists(model_path):
             try:
@@ -438,6 +465,12 @@ def get_prediction(request: Request, symbol: str, background_tasks: BackgroundTa
                         background_tasks.add_task(background_train_job, task_id, symbol.upper())
             except Exception as se:
                 logger.warning("Failed to check model staleness: %s", se)
+        else:
+            # Trigger automatic initial training since model doesn't exist
+            logger.info("Model for %s does not exist. Triggering automatic initial training.", symbol)
+            task_id = str(uuid.uuid4())
+            save_task_status(task_id, symbol.upper(), "queued", 0)
+            background_tasks.add_task(background_train_job, task_id, symbol.upper())
 
         return _get_prediction_logic(symbol)
     except Exception as e:

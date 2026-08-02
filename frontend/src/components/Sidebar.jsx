@@ -29,7 +29,6 @@ const NAV_ITEMS = [
   { name: 'Volatility',   icon: Activity },
   { name: 'Monte Carlo',  icon: Dices },
   { name: 'Backtest',     icon: History },
-  { name: 'Portfolio',    icon: Wallet },
   { name: 'Price Alerts', icon: Bell },
 ];
 
