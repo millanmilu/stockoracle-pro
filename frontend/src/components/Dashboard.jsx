@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
-import StockChart, { TIMEFRAMES } from './StockChart';
+import StockChart from './StockChart';
 import AIInsightCard from './AIInsightCard';
 
 // Skeleton shimmer component
@@ -35,15 +35,11 @@ export default function Dashboard() {
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [timeframe, setTimeframe] = useState('1day');
+  const [timeframe, setTimeframe] = useState('3M');
   const [localLoading, setLocalLoading] = useState(false);
 
-  // Resolve period + interval from the TIMEFRAMES config
-  const tfObj = TIMEFRAMES.find(t => t.label === timeframe) || TIMEFRAMES[7];
-  const { period, interval } = tfObj;
-
-  // Build cache key
-  const cacheKey = `${selectedSymbol}_${period}_${interval}`;
+  // Build cache key from selected symbol + timeframe
+  const cacheKey = `${selectedSymbol}_${timeframe}_1d`;
   const history = historyCache[cacheKey] || null;
 
   // Debounced search
@@ -62,7 +58,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (historyCache[cacheKey]) return;   // Already cached
     setLocalLoading(true);
-    fetchHistory(selectedSymbol, period, interval).then(data => {
+    fetchHistory(selectedSymbol, timeframe).then(data => {
       if (data && data.length > 0) setHistoryCache(cacheKey, data);
       setLocalLoading(false);
     });

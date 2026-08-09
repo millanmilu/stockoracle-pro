@@ -1,7 +1,6 @@
 import os
 import json
 import time
-import base64
 from datetime import datetime
 import pandas as pd
 import numpy as np
@@ -75,18 +74,22 @@ def train_pipeline(symbol: str) -> dict:
     importance = xgb_model.get_booster().get_score(importance_type='gain')
     sorted_importance = sorted(importance.items(), key=lambda x: x[1], reverse=True)[:5]
     top_features = {k: float(v) for k, v in sorted_importance}
-
-    # Serialize XGBoost model in-memory using bytearray (no temp files, thread-safe)
-    xgb_bytearray = bytearray()
-    xgb_model.get_booster().save_model(xgb_bytearray)
-    xgb_b64 = base64.b64encode(bytes(xgb_bytearray)).decode("utf-8")
-
+    
+    # Save XGBoost natively to a temp file then bundle with EN params
+    import uuid
+    temp_xgb_path = os.path.join(MODEL_DIR, f"{symbol}_temp_{uuid.uuid4().hex}.json")
+    xgb_model.save_model(temp_xgb_path)
+    
+    with open(temp_xgb_path, 'r') as f:
+        xgb_json_str = f.read()
+    os.remove(temp_xgb_path)
+    
     # Bundle into a single JSON, including training metadata
     model_bundle = {
         "trained_at": datetime.now().isoformat(),
         "symbol": symbol,
         "validation_mape": float(val_mape),
-        "xgboost_b64": xgb_b64,
+        "xgboost": json.loads(xgb_json_str),
         "elasticnet": {
             "coef": en_model.coef_.tolist(),
             "intercept": float(en_model.intercept_),
@@ -109,17 +112,10 @@ def train_pipeline(symbol: str) -> dict:
 
 def predict_future(symbol: str, override_features: dict = None) -> dict:
     """
-    Loads the trained XGBoost + ElasticNet bundle and produces a next-day price prediction.
-
-    Uses base64-encoded in-memory XGBoost deserialization (no temp files).
-    Confidence bounds are derived from the stored validation MAPE, not a hardcoded margin.
-
-    Args:
-        symbol:            NSE ticker symbol (e.g. 'RELIANCE').
-        override_features: Optional dict of feature overrides for scenario simulation.
-
-    Returns:
-        Dict with current_price, predicted_price, high_bound, low_bound.
+    Loads the trained bundle (XGBoost + ElasticNet).
+    Fetches the latest row of features.
+    Applies any override_features (for simulation).
+    Returns the predicted price and high/low confidence bounds.
     """
     model_path = os.path.join(MODEL_DIR, f"{symbol}.json")
     if not os.path.exists(model_path):
@@ -128,27 +124,28 @@ def predict_future(symbol: str, override_features: dict = None) -> dict:
         )
     with open(model_path, 'r') as f:
         bundle = json.load(f)
-
+        
     # Get latest features
     df = get_features(symbol)
     if df.empty:
         raise ValueError("Could not fetch latest data.")
-
+        
     latest_row = df.iloc[[-1]].copy()
     current_price = float(latest_row['close'].iloc[0])
-
+    
     # Apply overrides for simulation
     if override_features:
         for k, v in override_features.items():
             if k in latest_row.columns:
                 latest_row[k] = v
-
+                
     # ElasticNet features must match what it was trained on
     en_features = bundle['elasticnet']['features']
+    # Filter latest_row to match training columns
     try:
         X_latest = latest_row[en_features]
     except KeyError:
-        # Re-fetch features if columns mismatched (stale cache)
+        # Re-fetch features if columns mismatched, might happen if cache is old
         df = get_features(symbol)
         latest_row = df.iloc[[-1]].copy()
         if override_features:
@@ -156,42 +153,38 @@ def predict_future(symbol: str, override_features: dict = None) -> dict:
                 if k in latest_row.columns:
                     latest_row[k] = v
         X_latest = latest_row[en_features]
-
-    # Load XGBoost from in-memory base64 bytes (thread-safe, no temp files)
+        
+    # Predict with XGBoost
+    xgb_json = bundle.get("xgboost")
     booster = xgb.Booster()
-    if "xgboost_b64" in bundle:
-        xgb_bytes = base64.b64decode(bundle["xgboost_b64"])
-        booster.load_model(bytearray(xgb_bytes))
-    else:
-        # Legacy fallback: old bundles stored raw JSON — temp file still needed once
-        import tempfile, uuid
-        tmp = os.path.join(MODEL_DIR, f"{symbol}_legacy_{uuid.uuid4().hex}.json")
-        try:
-            with open(tmp, 'w') as tf:
-                json.dump(bundle["xgboost"], tf)
-            booster.load_model(tmp)
-        finally:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-
+    
+    import tempfile
+    with tempfile.NamedTemporaryFile('w', delete=False) as tf:
+        json.dump(xgb_json, tf)
+        temp_name = tf.name
+    try:
+        booster.load_model(temp_name)
+    finally:
+        os.remove(temp_name)
+        
+    # XGBoost requires DMatrix for booster inference
     dtest = xgb.DMatrix(X_latest)
     xgb_pred = booster.predict(dtest)[0]
-
-    # Predict with ElasticNet
+    
+    # Predict with ElasticNet (dot product + intercept manually since we just saved coef)
     coef = np.array(bundle['elasticnet']['coef'])
     intercept = bundle['elasticnet']['intercept']
     en_pred = np.dot(X_latest.values, coef)[0] + intercept
-
+    
     final_pred = float(xgb_pred + (0.15 * en_pred))
-
-    # Dynamic confidence bounds: use stored validation MAPE (capped at 5%)
-    # MAPE is stored as a fraction (e.g. 0.025 = 2.5%). Cap at 5% for realism.
-    val_mape = float(bundle.get("validation_mape", 0.015))
-    confidence_margin = final_pred * min(val_mape, 0.05)
-
+    
+    # Simple confidence bounds (e.g. +/- 1.5% of predicted price based on typical MAPE)
+    confidence_margin = final_pred * 0.015
+    
     return {
-        "current_price":  current_price,
+        "current_price": current_price,
         "predicted_price": round(final_pred, 2),
-        "high_bound":     round(final_pred + confidence_margin, 2),
-        "low_bound":      round(final_pred - confidence_margin, 2),
+        "high_bound": round(final_pred + confidence_margin, 2),
+        "low_bound": round(final_pred - confidence_margin, 2)
     }
+

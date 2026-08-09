@@ -125,23 +125,3 @@ def fetch_and_score_sentiment(symbol: str) -> float:
     except Exception as e:
         logger.error("Error fetching sentiment for %s: %s", symbol, e)
         return 0.0
-
-
-def warmup_finbert() -> None:
-    """
-    Pre-loads the FinBERT model in a background daemon thread so the first real
-    `/news` request is not slowed down by a cold-start model download.
-
-    Safe to call multiple times — the singleton guard in `_get_finbert_pipeline`
-    ensures the model is only loaded once.
-    """
-    def _load():
-        logger.info("Warming up FinBERT in background thread...")
-        pipe = _get_finbert_pipeline()
-        if pipe is not None:
-            logger.info("✅ FinBERT warm-up complete.")
-        else:
-            logger.warning("FinBERT warm-up failed — VADER fallback will be used.")
-
-    t = threading.Thread(target=_load, daemon=True, name="finbert-warmup")
-    t.start()
