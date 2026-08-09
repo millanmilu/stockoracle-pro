@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
-import StockChart, { TIMEFRAMES } from './StockChart';
+import StockChart from './StockChart';
 import AIInsightCard from './AIInsightCard';
 
 // Skeleton shimmer component
@@ -35,15 +35,11 @@ export default function Dashboard() {
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [timeframe, setTimeframe] = useState('1day');
+  const [timeframe, setTimeframe] = useState('3M');
   const [localLoading, setLocalLoading] = useState(false);
 
-  // Resolve period + interval from the TIMEFRAMES config
-  const tfObj = TIMEFRAMES.find(t => t.label === timeframe) || TIMEFRAMES[7];
-  const { period, interval } = tfObj;
-
-  // Build cache key
-  const cacheKey = `${selectedSymbol}_${period}_${interval}`;
+  // Build cache key from selected symbol + timeframe
+  const cacheKey = `${selectedSymbol}_${timeframe}_1d`;
   const history = historyCache[cacheKey] || null;
 
   // Debounced search
@@ -62,7 +58,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (historyCache[cacheKey]) return;   // Already cached
     setLocalLoading(true);
-    fetchHistory(selectedSymbol, period, interval).then(data => {
+    fetchHistory(selectedSymbol, timeframe).then(data => {
       if (data && data.length > 0) setHistoryCache(cacheKey, data);
       setLocalLoading(false);
     });
@@ -74,14 +70,9 @@ export default function Dashboard() {
     setShowDropdown(false);
   };
 
-  const lastBar = history && history.length > 0 ? history[history.length - 1] : null;
-  const prevBar = history && history.length > 1 ? history[history.length - 2] : null;
-
-  const currentPrice = lastBar && typeof lastBar.close === 'number' ? lastBar.close : null;
-  const prevClose = prevBar && typeof prevBar.close === 'number' ? prevBar.close : null;
-
-  const priceChange = currentPrice !== null && prevClose !== null ? currentPrice - prevClose : null;
-  const pctChange = priceChange !== null && prevClose ? (priceChange / prevClose) * 100 : null;
+  const currentPrice = history && history.length > 0 ? history[history.length - 1].close : null;
+  const priceChange = history && history.length > 1 ? currentPrice - history[history.length - 2].close : null;
+  const pctChange = priceChange && currentPrice ? (priceChange / history[history.length - 2].close) * 100 : null;
   const isLoading = localLoading && !history;
 
   return (
@@ -91,14 +82,12 @@ export default function Dashboard() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '20px', position: 'relative' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: '1.8rem', color: '#fff' }}>{selectedSymbol}</h1>
-          {currentPrice !== null && (
+          {currentPrice && (
             <div style={{ display: 'flex', gap: '10px', alignItems: 'baseline', marginTop: '5px' }}>
               <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>₹{currentPrice.toFixed(2)}</span>
-              {priceChange !== null && pctChange !== null && (
-                <span style={{ color: priceChange >= 0 ? '#10B981' : '#F43F5E', fontWeight: 'bold' }}>
-                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({pctChange >= 0 ? '+' : ''}{pctChange.toFixed(2)}%)
-                </span>
-              )}
+              <span style={{ color: priceChange >= 0 ? '#10B981' : '#F43F5E', fontWeight: 'bold' }}>
+                {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({pctChange >= 0 ? '+' : ''}{pctChange.toFixed(2)}%)
+              </span>
             </div>
           )}
           {isLoading && !currentPrice && (

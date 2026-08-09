@@ -1,10 +1,10 @@
 import os
 import json
-import base64
 import numpy as np
 import pandas as pd
 from typing import Dict, Any
 import xgboost as xgb
+import tempfile
 from backend.analysis.feature_engineer import get_features
 from backend.analysis.trainer import train_pipeline
 
@@ -48,23 +48,17 @@ def run_backtest(df: pd.DataFrame, ticker: str, initial_capital: float = 100000.
 
     sub_df = features_df.iloc[-backtest_len:].copy()
 
-    # 3. Vectorized Prediction — load XGBoost from in-memory base64 bytes (thread-safe)
+    # 3. Vectorized Prediction
+    # XGBoost
+    xgb_json = bundle.get("xgboost")
     booster = xgb.Booster()
-    if "xgboost_b64" in bundle:
-        xgb_bytes = base64.b64decode(bundle["xgboost_b64"])
-        booster.load_model(bytearray(xgb_bytes))
-    else:
-        # Legacy fallback: old bundles stored raw JSON — use temp file once
-        import tempfile, uuid
-        xgb_json = bundle.get("xgboost")
-        tmp = os.path.join(MODEL_DIR, f"{ticker}_backtest_legacy_{uuid.uuid4().hex}.json")
-        try:
-            with open(tmp, 'w') as tf:
-                json.dump(xgb_json, tf)
-            booster.load_model(tmp)
-        finally:
-            if os.path.exists(tmp):
-                os.remove(tmp)
+    with tempfile.NamedTemporaryFile('w', delete=False, suffix='.json') as tf:
+        json.dump(xgb_json, tf)
+        temp_name = tf.name
+    try:
+        booster.load_model(temp_name)
+    finally:
+        os.remove(temp_name)
 
     X_matrix = sub_df[en_features]
     dtest = xgb.DMatrix(X_matrix)

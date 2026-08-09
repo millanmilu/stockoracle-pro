@@ -60,16 +60,14 @@ export default function AIInsightCard() {
   }
 
   const { current_price, predicted_price, high_bound, low_bound } = predictionData;
-  const pct_change = (current_price && predicted_price && typeof current_price === 'number' && typeof predicted_price === 'number')
-    ? ((predicted_price - current_price) / current_price) * 100
-    : null;
-
+  const pct_change = ((predicted_price - current_price) / current_price) * 100;
+  
   let color = '#eab308'; // yellow
-  if (pct_change !== null && pct_change > 1) color = '#22c55e'; // green
-  if (pct_change !== null && pct_change < -1) color = '#ef4444'; // red
+  if (pct_change > 1) color = '#22c55e'; // green
+  if (pct_change < -1) color = '#ef4444'; // red
 
   const formatPrice = (p) => {
-    if (p == null || isNaN(p)) return '₹—';
+    if (p == null) return '₹—';
     return `₹${Number(p).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
   };
 
@@ -83,7 +81,7 @@ export default function AIInsightCard() {
           {formatPrice(predicted_price)}
         </div>
         <div style={{ color: '#888', marginTop: '5px' }}>
-          Current: {formatPrice(current_price)} {pct_change !== null && !isNaN(pct_change) ? `(${pct_change > 0 ? '+' : ''}${pct_change.toFixed(2)}%)` : ''}
+          Current: {formatPrice(current_price)} ({pct_change > 0 ? '+' : ''}{pct_change.toFixed(2)}%)
         </div>
         <div style={{ color: '#888', marginTop: '5px' }}>
           Confidence Range: {formatPrice(low_bound)} - {formatPrice(high_bound)}
