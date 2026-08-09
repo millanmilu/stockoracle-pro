@@ -74,9 +74,14 @@ export default function Dashboard() {
     setShowDropdown(false);
   };
 
-  const currentPrice = history && history.length > 0 ? history[history.length - 1].close : null;
-  const priceChange = history && history.length > 1 ? currentPrice - history[history.length - 2].close : null;
-  const pctChange = priceChange && currentPrice ? (priceChange / history[history.length - 2].close) * 100 : null;
+  const lastBar = history && history.length > 0 ? history[history.length - 1] : null;
+  const prevBar = history && history.length > 1 ? history[history.length - 2] : null;
+
+  const currentPrice = lastBar && typeof lastBar.close === 'number' ? lastBar.close : null;
+  const prevClose = prevBar && typeof prevBar.close === 'number' ? prevBar.close : null;
+
+  const priceChange = currentPrice !== null && prevClose !== null ? currentPrice - prevClose : null;
+  const pctChange = priceChange !== null && prevClose ? (priceChange / prevClose) * 100 : null;
   const isLoading = localLoading && !history;
 
   return (
@@ -86,12 +91,14 @@ export default function Dashboard() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '20px', position: 'relative' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: '1.8rem', color: '#fff' }}>{selectedSymbol}</h1>
-          {currentPrice && (
+          {currentPrice !== null && (
             <div style={{ display: 'flex', gap: '10px', alignItems: 'baseline', marginTop: '5px' }}>
               <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>₹{currentPrice.toFixed(2)}</span>
-              <span style={{ color: priceChange >= 0 ? '#10B981' : '#F43F5E', fontWeight: 'bold' }}>
-                {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({pctChange >= 0 ? '+' : ''}{pctChange.toFixed(2)}%)
-              </span>
+              {priceChange !== null && pctChange !== null && (
+                <span style={{ color: priceChange >= 0 ? '#10B981' : '#F43F5E', fontWeight: 'bold' }}>
+                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({pctChange >= 0 ? '+' : ''}{pctChange.toFixed(2)}%)
+                </span>
+              )}
             </div>
           )}
           {isLoading && !currentPrice && (
