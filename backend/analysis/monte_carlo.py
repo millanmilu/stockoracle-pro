@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 
 def run_monte_carlo_simulation(prices: List[float], simulations: int = 150, horizon: int = 30) -> Dict[str, Any]:
     """
@@ -34,25 +34,20 @@ def run_monte_carlo_simulation(prices: List[float], simulations: int = 150, hori
     paths = np.zeros((simulations, horizon + 1))
     paths[:, 0] = S0
     
-    # Vectorized GBM simulation
+    # Vectorized GBM simulation — generate all random shocks at once
+    z_matrix = np.random.normal(size=(simulations, horizon))  # [sims, horizon]
+    drift = (mu - 0.5 * sigma**2)
     for t in range(1, horizon + 1):
-        z = np.random.normal(size=simulations)
-        paths[:, t] = paths[:, t-1] * np.exp((mu - 0.5 * sigma**2) + sigma * z)
-        
-    # Calculate percentiles at each timestep
-    p10 = []
-    p25 = []
-    p50 = []
-    p75 = []
-    p90 = []
-    
-    for t in range(horizon + 1):
-        sorted_vals = np.sort(paths[:, t])
-        p10.append(float(sorted_vals[int(simulations * 0.10)]))
-        p25.append(float(sorted_vals[int(simulations * 0.25)]))
-        p50.append(float(sorted_vals[int(simulations * 0.50)]))
-        p75.append(float(sorted_vals[int(simulations * 0.75)]))
-        p90.append(float(sorted_vals[int(simulations * 0.90)]))
+        paths[:, t] = paths[:, t - 1] * np.exp(drift + sigma * z_matrix[:, t - 1])
+
+    # Vectorized percentile extraction across all timesteps at once
+    # Result shape: [5, horizon+1] — far faster than per-timestep loops
+    pcts = np.percentile(paths, [10, 25, 50, 75, 90], axis=0)  # axis=0 → over simulations
+    p10 = [round(float(v), 4) for v in pcts[0]]
+    p25 = [round(float(v), 4) for v in pcts[1]]
+    p50 = [round(float(v), 4) for v in pcts[2]]
+    p75 = [round(float(v), 4) for v in pcts[3]]
+    p90 = [round(float(v), 4) for v in pcts[4]]
         
     # Risk Metrics at the terminal day
     final_prices = paths[:, -1]

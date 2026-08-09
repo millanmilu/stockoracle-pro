@@ -7,7 +7,9 @@ frontend:
         - npm install
     build:
       commands:
-        - VITE_API_URL=https://stockoracle.duckdns.org npm run build
+        # VITE_API_URL must be set in Amplify Console → App settings → Environment variables.
+        # Do NOT hardcode it here — that prevents staging/production environment separation.
+        - npm run build
   artifacts:
     baseDirectory: frontend/dist
     files:
