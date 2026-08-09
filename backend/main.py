@@ -36,7 +36,9 @@ from backend.data.database import (
     save_monte_carlo, get_monte_carlo_cached,
     save_screener_results, get_screener_results,
     get_db_stats,
-    save_task_status, get_task_status, cleanup_old_tasks
+    save_task_status, get_task_status, cleanup_old_tasks,
+    save_portfolio_item, get_portfolio, delete_portfolio_item,
+    save_price_alert, get_price_alerts, delete_price_alert,
 )
 from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.monte_carlo import run_monte_carlo_simulation
@@ -46,15 +48,18 @@ from backend.analysis.levels import calculate_support_resistance
 from backend.analysis.volatility_forecast import calculate_volatility_forecast
 from backend.ml.predictor import StockPredictor
 from backend.analysis.backtester import run_backtest
+from backend.analysis.sentiment import warmup_finbert
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize SQL database tables (including new task_status table)
+    # Initialize SQL database tables
     init_db()
     # Clean up stale task records from previous runs
     cleanup_old_tasks(max_age_hours=48)
     # Authenticate with Angel One on startup
     ensure_session()
+    # Pre-warm FinBERT so the first /news request is not slowed by a cold start
+    warmup_finbert()
     # Start live price broadcast
     price_task = asyncio.create_task(websocket_price_broadcast_loop())
     # Prefetch historical data for all popular tickers in background
@@ -353,18 +358,27 @@ def get_anomalies(ticker: str):
     anoms = detect_anomalies(df, window=20, threshold=2.2)
     return anoms
 
-# Background task for model training
-def background_train_task(ticker: str):
+# ── BACKGROUND TRAINING TASKS ──
+
+def deep_learning_train_task(ticker: str):
+    """
+    Trains the deep-learning ensemble (BiLSTM + Transformer + Gradient Boosting).
+
+    Runs in a background thread triggered by the manual /api/stock/{ticker}/train
+    endpoint. Saves the trained model to ml/saved_models/{ticker}.pt.
+    Progress is tracked in the in-memory `training_status` dict so the
+    global training progress bar in the UI can be updated in real-time.
+    """
     try:
         training_status[ticker] = {"status": "training", "epoch": 0, "total_epochs": 60, "loss": 0.0, "val_loss": 0.0}
-        
+
         df = fetch_stock_data(ticker, period="2Y")
         if df is None or df.empty:
             training_status[ticker] = {"status": "failed", "error": "No historical data to train."}
             return
-            
+
         predictor = StockPredictor(window_size=20)
-        
+
         def progress_callback(epoch, total, loss, val_loss):
             training_status[ticker] = {
                 "status": "training",
@@ -373,7 +387,7 @@ def background_train_task(ticker: str):
                 "loss": loss,
                 "val_loss": val_loss
             }
-            
+
         results = predictor.train_model(df, ticker, epochs=60, callback=progress_callback)
         training_status[ticker] = {
             "status": "completed",
@@ -395,54 +409,112 @@ class SimulationRequest(BaseModel):
 training_tasks = {}
 
 def _get_prediction_logic(symbol: str) -> dict:
+    """
+    Shared prediction logic used by both /predict and /screener.
+
+    Source priority:
+      1. Deep-learning ensemble (BiLSTM + Transformer + GBDT) — most accurate.
+         Requires a trained .pt model in ml/saved_models/.
+      2. XGBoost + ElasticNet — fast, classical ML fallback.
+         Requires a trained .json model in models/.
+      3. Rule-based fallback — simple moving-average momentum signal.
+         Used when neither model is trained yet.
+    """
+    from backend.data.fetcher import fetch_stock_data as _fetch
+    sym = symbol.upper()
+
+    # ── Attempt 1: Deep-learning ensemble (primary, most accurate) ─────────────
+    dl_model_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "ml", "saved_models", f"{sym}.pt"
+    )
+    if os.path.exists(dl_model_path):
+        try:
+            df = _fetch(sym, period="45D")
+            if df is not None and not df.empty and len(df) >= 20:
+                predictor = StockPredictor(window_size=20)
+                details = predictor.load_and_predict(df, sym, return_details=True)
+                cur_price = float(df["close"].iloc[-1])
+                expected_return = float(details["expected_return"])
+                predicted_price = round(cur_price * (1.0 + expected_return), 2)
+                upper_return = float(details["upper_return"])
+                lower_return = float(details["lower_return"])
+                high_bound = round(cur_price * (1.0 + upper_return), 2)
+                low_bound  = round(cur_price * (1.0 + lower_return), 2)
+                signal = "buy" if expected_return > 0.01 else (
+                    "sell" if expected_return < -0.01 else "hold"
+                )
+                # Narrow spread = high confidence; 95% CI spread → score
+                spread_pct = (high_bound - low_bound) / (cur_price + 1e-9) * 100.0
+                ai_score = int(max(0, min(100, round(100.0 - spread_pct * 10.0))))
+                return {
+                    "ticker":               sym,
+                    "current_price":        cur_price,
+                    "predicted_price":      predicted_price,
+                    "predicted_price_7d":   predicted_price,
+                    "predicted_return_7d":  expected_return,
+                    "high_bound":           high_bound,
+                    "low_bound":            low_bound,
+                    "ai_confidence_score":  ai_score,
+                    "signal":               signal,
+                    "model_trained":        True,
+                    "model_source":         "deep_learning",
+                    "model_weights":        details.get("weights", {}),
+                }
+        except Exception as dl_err:
+            logger.warning("Deep-learning prediction failed for %s (%s) — falling back to XGBoost.", sym, dl_err)
+
+    # ── Attempt 2: XGBoost + ElasticNet (classical ML fallback) ───────────────
     from backend.analysis.trainer import predict_future
     try:
-        res = predict_future(symbol.upper())
+        res = predict_future(sym)
         model_trained = True
+        model_source  = "xgboost"
     except FileNotFoundError:
-        # Fallback rule-based prediction if model is not trained yet
-        from backend.data.fetcher import fetch_stock_data
-        df = fetch_stock_data(symbol.upper(), period="45D")
+        # ── Attempt 3: Rule-based fallback ─────────────────────────────────────
+        df = _fetch(sym, period="45D")
         if df is not None and not df.empty and len(df) >= 20:
             cur_price = float(df["close"].iloc[-1])
             ma20 = float(df["close"].rolling(20).mean().iloc[-1])
             predicted_price = cur_price * 1.005 if cur_price > ma20 else cur_price * 0.995
             high_bound = predicted_price * 1.02
-            low_bound = predicted_price * 0.98
+            low_bound  = predicted_price * 0.98
         else:
-            cur_price = 100.0
+            cur_price       = 100.0
             predicted_price = 100.0
-            high_bound = 105.0
-            low_bound = 95.0
+            high_bound      = 105.0
+            low_bound       = 95.0
 
         res = {
-            "current_price": cur_price,
+            "current_price":   cur_price,
             "predicted_price": round(predicted_price, 2),
-            "high_bound": round(high_bound, 2),
-            "low_bound": round(low_bound, 2)
+            "high_bound":      round(high_bound, 2),
+            "low_bound":       round(low_bound, 2)
         }
         model_trained = False
+        model_source  = "rule_based"
 
     cur_price = res.get('current_price', 0.0) or 1.0
     predicted_return = (res['predicted_price'] - cur_price) / cur_price if cur_price > 0 else 0.0
-    signal = "buy" if res['predicted_price'] > cur_price * 1.01 else ("sell" if res['predicted_price'] < cur_price * 0.99 else "hold")
+    signal = "buy" if res['predicted_price'] > cur_price * 1.01 else (
+        "sell" if res['predicted_price'] < cur_price * 0.99 else "hold"
+    )
 
-    # Real confidence score: based on prediction spread width relative to price.
-    # Narrow spread = high confidence. Formula: 100 - (spread% * 10), clamped 0-100.
+    # Confidence score: narrow spread = high confidence
     spread_pct = (res['high_bound'] - res['low_bound']) / (cur_price + 1e-9) * 100.0
     ai_score = int(max(0, min(100, round(100.0 - spread_pct * 10.0))))
 
     return {
-        "ticker": symbol.upper(),
-        "current_price": res['current_price'],
-        "predicted_price": res['predicted_price'],
-        "predicted_price_7d": res['predicted_price'],
+        "ticker":              sym,
+        "current_price":       res['current_price'],
+        "predicted_price":     res['predicted_price'],
+        "predicted_price_7d":  res['predicted_price'],
         "predicted_return_7d": predicted_return,
-        "high_bound": res['high_bound'],
-        "low_bound": res['low_bound'],
+        "high_bound":          res['high_bound'],
+        "low_bound":           res['low_bound'],
         "ai_confidence_score": ai_score,
-        "signal": signal,
-        "model_trained": model_trained
+        "signal":              signal,
+        "model_trained":       model_trained,
+        "model_source":        model_source,
     }
 
 @app.get("/api/stock/{symbol}/predict")
@@ -462,7 +534,7 @@ def get_prediction(request: Request, symbol: str, background_tasks: BackgroundTa
                         logger.info("Model for %s is stale (> 7 days old). Triggering auto-retrain.", symbol)
                         task_id = str(uuid.uuid4())
                         save_task_status(task_id, symbol.upper(), "queued", 0)
-                        background_tasks.add_task(background_train_job, task_id, symbol.upper())
+                        background_tasks.add_task(xgboost_train_job, task_id, symbol.upper())
             except Exception as se:
                 logger.warning("Failed to check model staleness: %s", se)
         else:
@@ -470,7 +542,7 @@ def get_prediction(request: Request, symbol: str, background_tasks: BackgroundTa
             logger.info("Model for %s does not exist. Triggering automatic initial training.", symbol)
             task_id = str(uuid.uuid4())
             save_task_status(task_id, symbol.upper(), "queued", 0)
-            background_tasks.add_task(background_train_job, task_id, symbol.upper())
+            background_tasks.add_task(xgboost_train_job, task_id, symbol.upper())
 
         return _get_prediction_logic(symbol)
     except Exception as e:
@@ -514,19 +586,27 @@ def simulate_prediction(request: Request, symbol: str, req: SimulationRequest):
         logger.error("Simulation failed for %s: %s", symbol, e)
         raise HTTPException(status_code=500, detail=str(e))
 
-def background_train_job(task_id: str, symbol: str):
+def xgboost_train_job(task_id: str, symbol: str):
+    """
+    Trains the XGBoost + ElasticNet classical ML model for `symbol`.
+
+    This is the fast, CPU-efficient training path triggered by the
+    /api/stock/{symbol}/train endpoint and by auto-retrain on staleness.
+    Saves the model to models/{symbol}.json.
+    Task progress is dual-tracked: in-memory dict + SQLite for restart-survival.
+    """
     from backend.analysis.trainer import train_pipeline
     try:
-        # Persist initial state to DB so it survives server restarts
         save_task_status(task_id, symbol, "training", 50)
         training_tasks[task_id] = {"status": "training", "progress": 50, "mape": None}
         result = train_pipeline(symbol)
         save_task_status(task_id, symbol, "completed", 100, mape=result['validation_mape'])
         training_tasks[task_id] = {"status": "completed", "progress": 100, "mape": result['validation_mape']}
     except Exception as e:
-        logger.error("Training job failed for %s: %s", symbol, e)
+        logger.error("XGBoost training job failed for %s: %s", symbol, e)
         save_task_status(task_id, symbol, "failed", 0, error=str(e))
         training_tasks[task_id] = {"status": "failed", "error": str(e), "progress": 0}
+
 
 @app.post("/api/stock/{symbol}/train")
 @limiter.limit("3/minute")
@@ -534,7 +614,7 @@ def start_training(request: Request, symbol: str, background_tasks: BackgroundTa
     task_id = str(uuid.uuid4())
     save_task_status(task_id, symbol.upper(), "queued", 0)
     training_tasks[task_id] = {"status": "queued", "progress": 0, "mape": None}
-    background_tasks.add_task(background_train_job, task_id, symbol.upper())
+    background_tasks.add_task(xgboost_train_job, task_id, symbol.upper())
     return {"task_id": task_id, "message": "Training started"}
 
 @app.get("/api/task/{task_id}/status")
@@ -739,3 +819,58 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
+# ── PORTFOLIO ENDPOINTS ────────────────────────────────────────────────────────
+
+class PortfolioItem(BaseModel):
+    ticker: str
+    quantity: float
+    buy_price: float
+    user_id: str = "default"
+
+class PriceAlertItem(BaseModel):
+    ticker: str
+    condition: str   # "above" | "below"
+    threshold: float
+    user_id: str = "default"
+
+@app.get("/api/portfolio")
+def get_portfolio_endpoint(user_id: str = "default"):
+    """Returns all portfolio positions for the given user_id."""
+    return get_portfolio(user_id)
+
+@app.post("/api/portfolio", status_code=201)
+def add_portfolio_item(item: PortfolioItem):
+    """Adds a new position to the portfolio."""
+    new_id = save_portfolio_item(item.user_id, item.ticker.upper(), item.quantity, item.buy_price)
+    return {"id": new_id, "ticker": item.ticker.upper(), "quantity": item.quantity, "buy_price": item.buy_price}
+
+@app.delete("/api/portfolio/{item_id}", status_code=200)
+def remove_portfolio_item(item_id: int, user_id: str = "default"):
+    """Removes a portfolio position by its database ID."""
+    deleted = delete_portfolio_item(item_id, user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Portfolio item {item_id} not found.")
+    return {"deleted": True, "id": item_id}
+
+# ── PRICE ALERT ENDPOINTS ──────────────────────────────────────────────────────
+
+@app.get("/api/alerts")
+def get_alerts_endpoint(user_id: str = "default"):
+    """Returns all active price alerts for the given user_id."""
+    return get_price_alerts(user_id)
+
+@app.post("/api/alerts", status_code=201)
+def add_alert(item: PriceAlertItem):
+    """Creates a new price alert."""
+    if item.condition not in ("above", "below"):
+        raise HTTPException(status_code=422, detail="condition must be 'above' or 'below'.")
+    new_id = save_price_alert(item.user_id, item.ticker.upper(), item.condition, item.threshold)
+    return {"id": new_id, "ticker": item.ticker.upper(), "condition": item.condition, "threshold": item.threshold}
+
+@app.delete("/api/alerts/{alert_id}", status_code=200)
+def remove_alert(alert_id: int, user_id: str = "default"):
+    """Deletes a price alert by its database ID."""
+    deleted = delete_price_alert(alert_id, user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found.")
+    return {"deleted": True, "id": alert_id}

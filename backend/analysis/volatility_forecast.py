@@ -1,11 +1,57 @@
 import numpy as np
 import pandas as pd
+import logging
 from typing import Dict, Any, List
+
+logger = logging.getLogger("stockoracle.volatility")
+
+
+def _fit_garch_arch(recent_rets: np.ndarray) -> Dict[str, float]:
+    """
+    Fits a GARCH(1,1) model using Maximum Likelihood Estimation via the `arch` library.
+    Returns dict with alpha, beta, omega. Raises on failure so caller can fall back.
+    """
+    from arch import arch_model
+    # Scale returns to percentage points for numerical stability in arch library
+    scaled = recent_rets * 100.0
+    am = arch_model(scaled, vol="GARCH", p=1, q=1, dist="normal", rescale=False)
+    res = am.fit(disp="off", show_warning=False)
+    params = res.params
+    omega_scaled = float(params.get("omega", params.iloc[1]))
+    alpha        = float(params.get("alpha[1]", params.iloc[2]))
+    beta         = float(params.get("beta[1]",  params.iloc[3]))
+    # omega was estimated on percentage-point returns; convert back to decimal variance
+    omega = omega_scaled / (100.0 ** 2)
+    return {"omega": omega, "alpha": alpha, "beta": beta,
+            "last_variance": float(res.conditional_volatility.iloc[-1] / 100.0) ** 2}
+
+
+def _fit_garch_mom(recent_rets: np.ndarray) -> Dict[str, float]:
+    """
+    Fallback GARCH(1,1) parameter estimation using Method of Moments.
+    Used when the `arch` library is unavailable or fails.
+    """
+    sigma2 = float(np.var(recent_rets))
+    sq_rets  = recent_rets ** 2
+    mean_sq  = np.mean(sq_rets)
+    autocov  = np.mean((sq_rets[1:] - mean_sq) * (sq_rets[:-1] - mean_sq))
+    autovar  = np.var(sq_rets)
+    alpha_beta = float(np.clip(autocov / (autovar + 1e-9), 0.05, 0.95))
+    alpha = float(np.clip(alpha_beta * 0.15, 0.05, 0.20))
+    beta  = float(np.clip(alpha_beta - alpha, 0.05, 0.85))
+    omega = float(sigma2 * (1 - alpha - beta))
+    if omega <= 0:
+        omega = sigma2 * 0.01
+    return {"omega": omega, "alpha": alpha, "beta": beta, "last_variance": sigma2}
 
 
 def calculate_volatility_forecast(df: pd.DataFrame, forecast_days: int = 30) -> Dict[str, Any]:
     """
-    Computes historical volatility analysis and GARCH(1,1)-style forecast.
+    Computes historical volatility analysis and GARCH(1,1) forward forecast.
+
+    GARCH parameters are estimated using MLE via the `arch` library (preferred).
+    Falls back gracefully to a Method-of-Moments estimator if `arch` is unavailable.
+
     Returns rolling volatility history + forward forecast with confidence bands.
     """
     closes = df["close"].values.astype(float)
@@ -30,34 +76,33 @@ def calculate_volatility_forecast(df: pd.DataFrame, forecast_days: int = 30) -> 
     # Keep last 60 points for chart readability
     rolling_vol = rolling_vol[-60:]
 
-    # ── GARCH(1,1) Parameter Estimation (Method of Moments) ──────────────────
-    # Simple MoM estimator: omega, alpha, beta from return autocorrelation
-    recent_rets = log_rets[-120:]  # Use last 6 months
-    sigma2 = np.var(recent_rets)
+    # ── GARCH(1,1) Parameter Estimation ──────────────────────────────────────
+    recent_rets = log_rets[-120:]  # Use last 6 months (~120 trading days)
 
-    # Estimate alpha + beta via squared-return autocorrelation at lag 1
-    sq_rets   = recent_rets ** 2
-    mean_sq   = np.mean(sq_rets)
-    autocov   = np.mean((sq_rets[1:] - mean_sq) * (sq_rets[:-1] - mean_sq))
-    autovar   = np.var(sq_rets)
-    alpha_beta = float(np.clip(autocov / (autovar + 1e-9), 0.05, 0.95))
+    garch_source = "arch_mle"
+    try:
+        garch_params = _fit_garch_arch(recent_rets)
+        logger.info("GARCH(1,1) fitted via arch MLE (alpha=%.4f, beta=%.4f)",
+                    garch_params["alpha"], garch_params["beta"])
+    except Exception as e:
+        logger.warning("arch library GARCH fitting failed (%s) — falling back to Method of Moments.", e)
+        garch_params = _fit_garch_mom(recent_rets)
+        garch_source = "mom_fallback"
 
-    # Typical split: alpha ~ 0.1 of persistence, beta gets the rest
-    alpha  = float(np.clip(alpha_beta * 0.15, 0.05, 0.20))
-    beta   = float(np.clip(alpha_beta - alpha, 0.05, 0.85))
-    omega  = float(sigma2 * (1 - alpha - beta))
-    if omega <= 0:
-        omega = sigma2 * 0.01
+    omega = garch_params["omega"]
+    alpha = garch_params["alpha"]
+    beta  = garch_params["beta"]
 
     # ── GARCH Forward Forecast ────────────────────────────────────────────────
-    h_t = sigma2  # Start from current variance
+    # Start from the last fitted conditional variance
+    h_t = garch_params["last_variance"]
     last_ret_sq = float(recent_rets[-1] ** 2)
 
     forecast: List[Dict[str, Any]] = []
     last_date = pd.to_datetime(dates[-1])
     for day in range(1, forecast_days + 1):
         h_t = omega + alpha * last_ret_sq + beta * h_t
-        vol_forecast_annual = float(np.sqrt(h_t) * np.sqrt(252) * 100)
+        vol_forecast_annual = float(np.sqrt(max(h_t, 0.0)) * np.sqrt(252) * 100)
 
         # Confidence band widens with horizon uncertainty
         uncertainty = vol_forecast_annual * 0.15 * np.sqrt(day / forecast_days)
@@ -86,11 +131,13 @@ def calculate_volatility_forecast(df: pd.DataFrame, forecast_days: int = 30) -> 
     )
 
     return {
-        "current_vol_pct":     round(current_vol, 2),
-        "avg_vol_pct":         round(avg_vol_1y,  2),
-        "vol_percentile":      round(vol_percentile, 1),
-        "regime":              regime,
-        "garch_params":        {"alpha": round(alpha, 4), "beta": round(beta, 4), "omega": round(omega, 8)},
-        "rolling_history":     rolling_vol,
-        "forecast":            forecast,
+        "current_vol_pct":  round(current_vol, 2),
+        "avg_vol_pct":      round(avg_vol_1y, 2),
+        "vol_percentile":   round(vol_percentile, 1),
+        "regime":           regime,
+        "garch_params":     {"alpha": round(alpha, 4), "beta": round(beta, 4),
+                             "omega": round(omega, 8)},
+        "garch_source":     garch_source,
+        "rolling_history":  rolling_vol,
+        "forecast":         forecast,
     }
