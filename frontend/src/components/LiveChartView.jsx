@@ -814,260 +814,336 @@ export default function LiveChartView() {
   const scoreColor = score >= 70 ? '#26A69A' : score >= 50 ? '#F59E0B' : '#EF5350';
 
   return (
-    <div ref={cardContainerRef} style={{ padding:'20px', display:'flex', flexDirection:'column', gap:16, minHeight:'100vh', background:'#090C18' }}>
+    <div ref={cardContainerRef} style={{ padding:'20px', display:'flex', flexDirection:'column', gap:16, minHeight:'100vh', background:'linear-gradient(160deg,#060810 0%,#090C1A 50%,#07090F 100%)' }}>
 
-      {/* ── CSS Styles ── */}
+      {/* ── Embedded Styles ── */}
       <style>{`
-        @keyframes livePulse {
-          0%,100% { box-shadow:0 0 0 0 rgba(38,166,154,0.5); }
-          50%      { box-shadow:0 0 0 6px rgba(38,166,154,0); }
+        @keyframes livePulse { 0%,100%{box-shadow:0 0 0 0 rgba(38,166,154,0.6);} 50%{box-shadow:0 0 0 8px rgba(38,166,154,0);} }
+        @keyframes fadeUp    { from{opacity:0;transform:translateY(8px);} to{opacity:1;transform:translateY(0);} }
+        @keyframes shimmer   { 0%{background-position:-600px 0;} 100%{background-position:600px 0;} }
+        @keyframes spin      { to{transform:rotate(360deg);} }
+        @keyframes priceIn   { from{opacity:0;transform:translateY(-4px) scale(0.96);} to{opacity:1;transform:translateY(0) scale(1);} }
+        @keyframes borderGlow{ 0%,100%{border-color:rgba(168,85,247,0.15);} 50%{border-color:rgba(168,85,247,0.38);} }
+
+        .lc-stat {
+          animation: fadeUp 0.4s ease both;
+          transition: transform 0.2s ease, border-color 0.25s, box-shadow 0.25s, background 0.25s;
         }
-        @keyframes fadeUp {
-          from { opacity:0; transform:translateY(6px); }
-          to   { opacity:1; transform:translateY(0); }
+        .lc-stat:hover {
+          transform: translateY(-2px);
+          border-color: rgba(168,85,247,0.35) !important;
+          box-shadow: 0 8px 24px rgba(168,85,247,0.12) !important;
+          background: rgba(168,85,247,0.07) !important;
         }
-        .lc-stat { animation:fadeUp 0.35s ease both; transition:border-color 0.2s, background 0.2s; }
-        .lc-stat:hover { border-color:rgba(168,85,247,0.28)!important; background:rgba(168,85,247,0.05)!important; }
-        .lc-btn  { transition:all 0.15s; }
-        .lc-btn:hover { opacity:1!important; }
-        .pill-btn { transition:all 0.2s; cursor:pointer; }
-        .pill-btn:hover { background:rgba(168,85,247,0.2)!important; color:#C084FC!important; }
+        .lc-btn { transition: all 0.18s ease; }
+        .lc-btn:hover { opacity: 1 !important; }
+
+        .pill-btn { transition: all 0.2s ease; }
+        .pill-btn:hover {
+          background: rgba(168,85,247,0.18) !important;
+          color: #C084FC !important;
+          border-color: rgba(168,85,247,0.4) !important;
+          transform: translateY(-1px);
+        }
+        .ind-btn { transition: all 0.18s ease; }
+        .ind-btn:hover { transform: translateY(-1px); filter: brightness(1.15); }
+
+        .chart-card {
+          background: rgba(255,255,255,0.018);
+          border: 1px solid rgba(168,85,247,0.12);
+          border-radius: 20px;
+          overflow: hidden;
+          transition: border-color 0.3s;
+          box-shadow: 0 4px 32px rgba(0,0,0,0.35);
+        }
+        .chart-card:hover { border-color: rgba(168,85,247,0.22); }
+
+        .watchlist-bar {
+          background: rgba(255,255,255,0.025);
+          backdrop-filter: blur(12px);
+          border: 1px solid rgba(255,255,255,0.06);
+          border-radius: 14px;
+          padding: 10px 16px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+        .action-btn {
+          padding: 6px 9px;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: all 0.18s ease;
+          display: flex; align-items: center;
+        }
+        .action-btn:hover { transform: translateY(-1px); filter: brightness(1.2); }
+
+        .shimmer-bar {
+          background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.07) 50%, rgba(255,255,255,0.03) 75%);
+          background-size: 600px 100%;
+          animation: shimmer 1.5s infinite;
+          border-radius: 8px;
+        }
       `}</style>
 
-      {/* ── Top Bar: Watchlist & Search ── */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap', background:'rgba(255,255,255,0.02)', padding:'10px 16px', borderRadius:14, border:'1px solid rgba(168,85,247,0.1)' }}>
-        
-        {/* Watchlist Pills */}
+      {/* ── TOP WATCHLIST BAR ── */}
+      <div className="watchlist-bar">
         <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
-          <span style={{ fontSize:'0.65rem', color:'#4B5563', letterSpacing:'0.08em', fontWeight:700, marginRight:4 }}>WATCHLIST</span>
+          <span style={{ fontSize:'0.6rem', color:'#4B5563', letterSpacing:'0.1em', fontWeight:700, marginRight:4, textTransform:'uppercase' }}>Watchlist</span>
           {POPULAR_STOCKS.map(sym => (
             <button
               key={sym}
               onClick={() => setSelectedSymbol(sym)}
               className="pill-btn"
               style={{
-                padding:'4px 10px', borderRadius:20, fontSize:'0.72rem', fontWeight:700,
-                border: selectedSymbol === sym ? '1px solid #A855F7' : '1px solid rgba(75,85,99,0.3)',
-                background: selectedSymbol === sym ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.03)',
-                color: selectedSymbol === sym ? '#C084FC' : '#9CA3AF',
+                padding:'4px 11px', borderRadius:20, fontSize:'0.71rem', fontWeight:700,
+                border: selectedSymbol === sym ? '1px solid rgba(168,85,247,0.7)' : '1px solid rgba(255,255,255,0.08)',
+                background: selectedSymbol === sym
+                  ? 'linear-gradient(135deg,rgba(168,85,247,0.25),rgba(99,102,241,0.15))'
+                  : 'rgba(255,255,255,0.03)',
+                color: selectedSymbol === sym ? '#C084FC' : '#6B7280',
+                cursor:'pointer',
               }}
-            >
-              {sym}
-            </button>
+            >{sym}</button>
           ))}
         </div>
 
-        {/* Search Bar */}
+        {/* Search */}
         <form onSubmit={handleSearchSubmit} style={{ display:'flex', alignItems:'center', gap:6 }}>
           <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
-            <Search size={14} style={{ position:'absolute', left:10, color:'#6B7280' }} />
+            <Search size={13} style={{ position:'absolute', left:9, color:'#4B5563', pointerEvents:'none' }} />
             <input
               type="text"
-              placeholder="Search ticker (e.g. INFY)..."
+              placeholder="Search NSE ticker…"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               style={{
-                padding:'5px 10px 5px 30px', borderRadius:8, border:'1px solid rgba(168,85,247,0.2)',
-                background:'rgba(15,23,42,0.8)', color:'#F0F0FF', fontSize:'0.75rem', width:180, outline:'none',
+                padding:'6px 10px 6px 28px', borderRadius:9, width:190,
+                border:'1px solid rgba(168,85,247,0.18)', outline:'none',
+                background:'rgba(15,23,42,0.85)', backdropFilter:'blur(8px)',
+                color:'#F0F0FF', fontSize:'0.74rem',
+                transition:'border-color 0.2s',
               }}
+              onFocus={e => e.target.style.borderColor='rgba(168,85,247,0.5)'}
+              onBlur={e => e.target.style.borderColor='rgba(168,85,247,0.18)'}
             />
           </div>
-          <button type="submit" style={{ padding:'5px 12px', borderRadius:8, border:'none', background:'#A855F7', color:'#fff', fontSize:'0.72rem', fontWeight:700, cursor:'pointer' }}>
-            {isSearching ? '...' : 'Go'}
+          <button type="submit" style={{
+            padding:'6px 13px', borderRadius:9, border:'none',
+            background:'linear-gradient(135deg,#A855F7,#7C3AED)',
+            color:'#fff', fontSize:'0.72rem', fontWeight:700, cursor:'pointer',
+            boxShadow:'0 2px 12px rgba(168,85,247,0.35)',
+            transition:'transform 0.15s, box-shadow 0.15s',
+          }}
+            onMouseEnter={e => { e.target.style.transform='translateY(-1px)'; e.target.style.boxShadow='0 4px 18px rgba(168,85,247,0.5)'; }}
+            onMouseLeave={e => { e.target.style.transform='translateY(0)'; e.target.style.boxShadow='0 2px 12px rgba(168,85,247,0.35)'; }}
+          >
+            {isSearching ? '…' : 'Go'}
           </button>
         </form>
       </div>
 
-      {/* ── Main Header ── */}
-      <div style={{ display:'flex', alignItems:'flex-start', gap:16, flexWrap:'wrap' }}>
+      {/* ── MAIN HEADER ── */}
+      <div style={{
+        background:'linear-gradient(135deg,rgba(168,85,247,0.07) 0%,rgba(99,102,241,0.04) 50%,rgba(6,182,212,0.03) 100%)',
+        border:'1px solid rgba(168,85,247,0.15)', borderRadius:20,
+        padding:'20px 24px', display:'flex', alignItems:'flex-start', gap:20, flexWrap:'wrap',
+        boxShadow:'0 4px 40px rgba(168,85,247,0.06)',
+      }}>
+        {/* Left: Ticker + Price */}
+        <div style={{ flex:1, minWidth:200 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+            {/* Ticker name */}
+            <h2 style={{
+              margin:0, fontSize:'1.75rem', fontWeight:900, letterSpacing:'-0.03em',
+              background:'linear-gradient(135deg,#F0F0FF 30%,#C084FC)',
+              WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent',
+            }}>{selectedSymbol}</h2>
 
-        {/* Ticker & Live Price */}
-        <div>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <h2 style={{ margin:0, fontSize:'1.65rem', fontWeight:800, color:'#F0F0FF', letterSpacing:'-0.02em' }}>
-              {selectedSymbol}
-            </h2>
-
-            {/* LIVE Badge */}
+            {/* LIVE badge */}
             <div style={{
               display:'flex', alignItems:'center', gap:5,
-              background: wsConnected ? 'rgba(38,166,154,0.10)' : 'rgba(75,85,99,0.10)',
-              border:`1px solid ${wsConnected ? 'rgba(38,166,154,0.28)' : 'rgba(75,85,99,0.2)'}`,
+              background: wsConnected ? 'rgba(38,166,154,0.1)' : 'rgba(75,85,99,0.1)',
+              border:`1px solid ${wsConnected ? 'rgba(38,166,154,0.35)' : 'rgba(75,85,99,0.25)'}`,
               borderRadius:20, padding:'3px 10px',
+              transition:'all 0.3s',
             }}>
               <div style={{
                 width:7, height:7, borderRadius:'50%',
                 background: wsConnected ? '#26A69A' : '#4B5563',
-                animation: wsConnected ? 'livePulse 2s infinite' : 'none',
+                animation: wsConnected ? 'livePulse 1.8s infinite' : 'none',
               }} />
-              <span style={{ fontSize:'0.67rem', fontWeight:700, letterSpacing:'0.07em', color: wsConnected ? '#26A69A' : '#4B5563' }}>
+              <span style={{ fontSize:'0.65rem', fontWeight:800, letterSpacing:'0.08em', color: wsConnected ? '#26A69A' : '#4B5563' }}>
                 {wsConnected ? 'LIVE' : 'OFFLINE'}
               </span>
             </div>
 
-            {/* Action Buttons: Split View, Alert, Snapshot, Fullscreen */}
-            <div style={{ display:'flex', gap:6, marginLeft:10 }}>
-              <button
-                onClick={() => setIsSplitView(!isSplitView)}
-                title="Toggle Dual Chart Split View"
+            {/* Action buttons */}
+            <div style={{ display:'flex', gap:5, marginLeft:4 }}>
+              <button className="action-btn" onClick={() => setIsSplitView(!isSplitView)} title="Toggle Split View"
                 style={{
-                  padding:'5px 10px', borderRadius:6,
-                  border: isSplitView ? '1px solid #3B82F6' : '1px solid rgba(75,85,99,0.3)',
-                  background: isSplitView ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
-                  color: isSplitView ? '#60A5FA' : '#9CA3AF',
-                  fontSize:'0.72rem', fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:4
-                }}
-              >
-                {isSplitView ? <Square size={13} /> : <Columns size={13} />}
-                {isSplitView ? 'Single View' : 'Split View'}
+                  border: isSplitView ? '1px solid rgba(59,130,246,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                  background: isSplitView ? 'rgba(59,130,246,0.15)' : 'rgba(255,255,255,0.04)',
+                  color: isSplitView ? '#60A5FA' : '#6B7280', gap:5, fontSize:'0.71rem', fontWeight:700,
+                }}>
+                {isSplitView ? <Square size={12}/> : <Columns size={12}/>}
+                {isSplitView ? 'Single' : 'Split'}
               </button>
-              <button
-                onClick={() => setShowAlertModal(true)}
-                title="Set Price Alert"
-                style={{ padding:'5px 8px', borderRadius:6, border:'1px solid rgba(168,85,247,0.3)', background:'rgba(168,85,247,0.1)', color:'#C084FC', cursor:'pointer' }}
-              >
-                <Bell size={14} />
+              <button className="action-btn" onClick={() => setShowAlertModal(true)} title="Set Price Alert"
+                style={{ border:'1px solid rgba(168,85,247,0.3)', background:'rgba(168,85,247,0.1)', color:'#C084FC' }}>
+                <Bell size={14}/>
               </button>
-              <button
-                onClick={handleSnapshot}
-                title="Take Chart Snapshot"
-                style={{ padding:'5px 8px', borderRadius:6, border:'1px solid rgba(38,166,154,0.3)', background:'rgba(38,166,154,0.1)', color:'#26A69A', cursor:'pointer' }}
-              >
-                <Camera size={14} />
+              <button className="action-btn" onClick={handleSnapshot} title="Chart Snapshot"
+                style={{ border:'1px solid rgba(38,166,154,0.3)', background:'rgba(38,166,154,0.1)', color:'#26A69A' }}>
+                <Camera size={14}/>
               </button>
-              <button
-                onClick={toggleFullscreen}
-                title="Toggle Fullscreen"
-                style={{ padding:'5px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.05)', color:'#fff', cursor:'pointer' }}
-              >
-                {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              <button className="action-btn" onClick={toggleFullscreen} title="Fullscreen"
+                style={{ border:'1px solid rgba(255,255,255,0.12)', background:'rgba(255,255,255,0.04)', color:'#9CA3AF' }}>
+                {isFullscreen ? <Minimize2 size={14}/> : <Maximize2 size={14}/>}
               </button>
             </div>
           </div>
 
-          {curPrice != null && (
-            <div style={{ display:'flex', alignItems:'baseline', gap:10, marginTop:5 }}>
-              <span style={{ fontSize:'1.9rem', fontWeight:800, color:'#F0F0FF', fontFamily:'JetBrains Mono, monospace' }}>
-                ₹{curPrice.toLocaleString('en-IN', { minimumFractionDigits:2, maximumFractionDigits:2 })}
+          {/* Live Price display */}
+          {curPrice != null ? (
+            <div style={{ display:'flex', alignItems:'baseline', gap:10, marginTop:8, animation:'priceIn 0.3s ease' }}>
+              <span style={{
+                fontSize:'2.2rem', fontWeight:900, fontFamily:'JetBrains Mono, monospace',
+                color:'#F0F0FF', letterSpacing:'-0.02em',
+                textShadow: changeUp ? '0 0 30px rgba(38,166,154,0.3)' : '0 0 30px rgba(239,83,80,0.3)',
+              }}>
+                ₹{curPrice.toLocaleString('en-IN',{ minimumFractionDigits:2, maximumFractionDigits:2 })}
               </span>
               {liveChange != null && (
-                <span style={{ fontSize:'0.9rem', fontWeight:700, color: changeUp ? '#26A69A' : '#EF5350', fontFamily:'JetBrains Mono, monospace' }}>
-                  {changeUp ? '+' : ''}{liveChange.toFixed(2)}%
+                <span style={{
+                  fontSize:'1rem', fontWeight:800, fontFamily:'JetBrains Mono, monospace',
+                  color: changeUp ? '#26A69A' : '#EF5350',
+                  background: changeUp ? 'rgba(38,166,154,0.1)' : 'rgba(239,83,80,0.1)',
+                  border: `1px solid ${changeUp ? 'rgba(38,166,154,0.25)' : 'rgba(239,83,80,0.25)'}`,
+                  borderRadius:8, padding:'2px 10px',
+                  transition:'color 0.3s, background 0.3s',
+                }}>
+                  {changeUp ? '▲' : '▼'} {changeUp ? '+' : ''}{liveChange.toFixed(2)}%
                 </span>
               )}
+            </div>
+          ) : (
+            <div style={{ display:'flex', gap:10, marginTop:8 }}>
+              <div className="shimmer-bar" style={{ width:180, height:36 }} />
+              <div className="shimmer-bar" style={{ width:90, height:36 }} />
             </div>
           )}
         </div>
 
-        {/* Right: Interval + Period Selectors */}
-        <div style={{ marginLeft:'auto', display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end' }}>
-
-          {/* CANDLE Row */}
+        {/* Right: Interval + Period selectors */}
+        <div style={{ display:'flex', flexDirection:'column', gap:8, alignItems:'flex-end' }}>
+          {/* CANDLE interval */}
           <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-            <span style={{ fontSize:'0.62rem', color:'#374151', letterSpacing:'0.08em', marginRight:4 }}>CANDLE</span>
-            {INTERVALS.map(iv => (
-              <button key={iv.value} className="lc-btn" onClick={() => handleIntervalChange(iv.value)} style={{
-                padding:'4px 11px', borderRadius:6, fontSize:'0.72rem', fontWeight:600, cursor:'pointer',
-                border    : interval === iv.value ? '1px solid rgba(99,102,241,0.6)' : '1px solid rgba(75,85,99,0.2)',
-                background: interval === iv.value ? 'rgba(99,102,241,0.15)'          : 'transparent',
-                color     : interval === iv.value ? '#818CF8'                         : '#4B5563',
-              }}>{iv.label}</button>
-            ))}
+            <span style={{ fontSize:'0.6rem', color:'#374151', letterSpacing:'0.1em', fontWeight:700, marginRight:4, textTransform:'uppercase' }}>Candle</span>
+            <div style={{ display:'flex', gap:3, background:'rgba(255,255,255,0.03)', borderRadius:10, padding:'3px' }}>
+              {INTERVALS.map(iv => (
+                <button key={iv.value} className="lc-btn" onClick={() => handleIntervalChange(iv.value)} style={{
+                  padding:'4px 10px', borderRadius:7, fontSize:'0.71rem', fontWeight:700, cursor:'pointer',
+                  border:'none',
+                  background: interval === iv.value ? 'rgba(99,102,241,0.3)' : 'transparent',
+                  color: interval === iv.value ? '#818CF8' : '#4B5563',
+                  boxShadow: interval === iv.value ? '0 0 12px rgba(99,102,241,0.25)' : 'none',
+                }}>{iv.label}</button>
+              ))}
+            </div>
           </div>
 
-          {/* RANGE Row */}
+          {/* RANGE period */}
           <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-            <span style={{ fontSize:'0.62rem', color:'#374151', letterSpacing:'0.08em', marginRight:4 }}>RANGE</span>
-            {PERIODS.map(p => (
-              <button key={p.value} className="lc-btn" onClick={() => handlePeriodChange(p.value)} style={{
-                padding:'4px 11px', borderRadius:6, fontSize:'0.72rem', fontWeight:600, cursor:'pointer',
-                border    : period === p.value ? '1px solid rgba(168,85,247,0.6)' : '1px solid rgba(75,85,99,0.2)',
-                background: period === p.value ? 'rgba(168,85,247,0.13)'          : 'transparent',
-                color     : period === p.value ? '#C084FC'                         : '#4B5563',
-              }}>{p.label}</button>
-            ))}
+            <span style={{ fontSize:'0.6rem', color:'#374151', letterSpacing:'0.1em', fontWeight:700, marginRight:4, textTransform:'uppercase' }}>Range</span>
+            <div style={{ display:'flex', gap:3, background:'rgba(255,255,255,0.03)', borderRadius:10, padding:'3px' }}>
+              {PERIODS.map(p => (
+                <button key={p.value} className="lc-btn" onClick={() => handlePeriodChange(p.value)} style={{
+                  padding:'4px 10px', borderRadius:7, fontSize:'0.71rem', fontWeight:700, cursor:'pointer',
+                  border:'none',
+                  background: period === p.value ? 'rgba(168,85,247,0.25)' : 'transparent',
+                  color: period === p.value ? '#C084FC' : '#4B5563',
+                  boxShadow: period === p.value ? '0 0 12px rgba(168,85,247,0.2)' : 'none',
+                }}>{p.label}</button>
+              ))}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ── Main Chart Area (Single or Split Grid) ── */}
+      {/* ── CHART AREA ── */}
       <div style={{ display:'grid', gridTemplateColumns: isSplitView ? '1fr 1fr' : '1fr', gap:16 }}>
-        
-        {/* Chart 1 Container */}
-        <div style={{
-          background:'rgba(255,255,255,0.015)',
-          border:'1px solid rgba(168,85,247,0.10)',
-          borderRadius:18, overflow:'hidden',
-          position:'relative',
-        }}>
 
-          {/* Indicators Bar */}
-          <div style={{ display:'flex', gap:8, padding:'10px 16px 0', fontSize:'0.71rem', color:'#4B5563', flexWrap:'wrap', alignItems:'center', borderBottom:'1px solid rgba(255,255,255,0.03)', paddingBottom:10 }}>
-            <span style={{ fontSize:'0.65rem', color:'#6B7280', fontWeight:700, marginRight:2 }}>INDICATORS:</span>
-            
-            <button onClick={() => setShowVolume(!showVolume)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showVolume ? '1px solid #26A69A' : '1px solid rgba(75,85,99,0.3)', background: showVolume ? 'rgba(38,166,154,0.15)' : 'transparent', color: showVolume ? '#26A69A' : '#6B7280' }}>
-              VOL {showVolume ? <Eye size={10} style={{ display:'inline', marginLeft:3 }} /> : <EyeOff size={10} style={{ display:'inline', marginLeft:3 }} />}
+        {/* Chart 1 */}
+        <div className="chart-card">
+          {/* Indicator pills bar */}
+          <div style={{
+            display:'flex', gap:6, padding:'11px 16px', flexWrap:'wrap', alignItems:'center',
+            borderBottom:'1px solid rgba(255,255,255,0.04)',
+            background:'rgba(255,255,255,0.012)',
+          }}>
+            <span style={{ fontSize:'0.6rem', color:'#4B5563', fontWeight:800, letterSpacing:'0.12em', marginRight:4, textTransform:'uppercase' }}>Indicators</span>
+
+            {[
+              { key:'vol',  label:'VOL',       active:showVolume,   toggle:()=>setShowVolume(!showVolume),   color:'#26A69A' },
+              { key:'sma',  label:'SMA 20',    active:showSMA,      toggle:()=>setShowSMA(!showSMA),         color:'#00E5FF' },
+              { key:'ema',  label:'EMA 20',    active:showEMA,      toggle:()=>setShowEMA(!showEMA),         color:'#FF9100' },
+              { key:'bb',   label:'BOLL(20,2)',active:showBB,       toggle:()=>setShowBB(!showBB),           color:'#E040FB' },
+              { key:'rsi',  label:'RSI 14',    active:showRSI,      toggle:()=>setShowRSI(!showRSI),         color:'#F43F5E' },
+            ].map(ind => (
+              <button key={ind.key} className="ind-btn" onClick={ind.toggle} style={{
+                padding:'3px 10px', borderRadius:7, fontSize:'0.68rem', fontWeight:700, cursor:'pointer',
+                border: ind.active ? `1px solid ${ind.color}60` : '1px solid rgba(75,85,99,0.25)',
+                background: ind.active ? `${ind.color}18` : 'rgba(255,255,255,0.03)',
+                color: ind.active ? ind.color : '#4B5563',
+                boxShadow: ind.active ? `0 0 10px ${ind.color}25` : 'none',
+              }}>{ind.label}</button>
+            ))}
+
+            <button className="ind-btn" onClick={() => setShowPatterns(!showPatterns)} style={{
+              padding:'3px 10px', borderRadius:7, fontSize:'0.68rem', fontWeight:700, cursor:'pointer',
+              border: showPatterns ? '1px solid rgba(16,185,129,0.5)' : '1px solid rgba(75,85,99,0.25)',
+              background: showPatterns ? 'rgba(16,185,129,0.15)' : 'rgba(255,255,255,0.03)',
+              color: showPatterns ? '#10B981' : '#4B5563',
+              display:'flex', alignItems:'center', gap:4,
+              boxShadow: showPatterns ? '0 0 10px rgba(16,185,129,0.2)' : 'none',
+            }}>
+              <Sparkles size={10}/> AI Patterns
             </button>
 
-            <button onClick={() => setShowSMA(!showSMA)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showSMA ? '1px solid #00E5FF' : '1px solid rgba(75,85,99,0.3)', background: showSMA ? 'rgba(0,229,255,0.15)' : 'transparent', color: showSMA ? '#00E5FF' : '#6B7280' }}>
-              SMA 20
-            </button>
-
-            <button onClick={() => setShowEMA(!showEMA)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showEMA ? '1px solid #FF9100' : '1px solid rgba(75,85,99,0.3)', background: showEMA ? 'rgba(255,145,0,0.15)' : 'transparent', color: showEMA ? '#FF9100' : '#6B7280' }}>
-              EMA 20
-            </button>
-
-            <button onClick={() => setShowBB(!showBB)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showBB ? '1px solid #E040FB' : '1px solid rgba(75,85,99,0.3)', background: showBB ? 'rgba(224,64,251,0.15)' : 'transparent', color: showBB ? '#E040FB' : '#6B7280' }}>
-              BOLL (20,2)
-            </button>
-
-            {/* RSI Toggle */}
-            <button onClick={() => setShowRSI(!showRSI)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showRSI ? '1px solid #F43F5E' : '1px solid rgba(75,85,99,0.3)', background: showRSI ? 'rgba(244,63,94,0.15)' : 'transparent', color: showRSI ? '#F43F5E' : '#6B7280' }}>
-              RSI 14 {showRSI ? <Eye size={10} style={{ display:'inline', marginLeft:3 }} /> : <EyeOff size={10} style={{ display:'inline', marginLeft:3 }} />}
-            </button>
-
-            {/* AI Pattern Markers Toggle */}
-            <button onClick={() => setShowPatterns(!showPatterns)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showPatterns ? '1px solid #10B981' : '1px solid rgba(75,85,99,0.3)', background: showPatterns ? 'rgba(16,185,129,0.15)' : 'transparent', color: showPatterns ? '#10B981' : '#6B7280', display:'flex', alignItems:'center', gap:3 }}>
-              <Sparkles size={10} /> PATTERNS
-            </button>
-
-            <div style={{ marginLeft:'auto', display:'flex', gap:10, alignItems:'center' }}>
-              <span><span style={{ color:'#26A69A' }}>█</span> Bull</span>
-              <span><span style={{ color:'#EF5350' }}>█</span> Bear</span>
+            <div style={{ marginLeft:'auto', display:'flex', gap:12, alignItems:'center', fontSize:'0.67rem', color:'#374151' }}>
+              <span><span style={{ color:'#26A69A', marginRight:4 }}>█</span>Bull</span>
+              <span><span style={{ color:'#EF5350', marginRight:4 }}>█</span>Bear</span>
               {isDaily && prediction && (
-                <span style={{ borderBottom:'2px dashed #A855F7', paddingBottom:1 }}>── AI Target</span>
+                <span style={{ color:'#A855F7', borderBottom:'1.5px dashed #A855F7', paddingBottom:1 }}>── AI Target</span>
               )}
             </div>
           </div>
 
+          {/* Loading overlay */}
           {loading && (
-            <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(9,12,24,0.75)', zIndex:10, borderRadius:18 }}>
-              <div style={{ width:38, height:38, borderRadius:'50%', border:'3px solid rgba(168,85,247,0.15)', borderTopColor:'#A855F7', animation:'spin 0.75s linear infinite' }} />
-              <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+            <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'rgba(6,8,16,0.82)', backdropFilter:'blur(4px)', zIndex:10, borderRadius:20, gap:14 }}>
+              <div style={{ width:40, height:40, borderRadius:'50%', border:'3px solid rgba(168,85,247,0.15)', borderTopColor:'#A855F7', animation:'spin 0.8s linear infinite' }} />
+              <span style={{ fontSize:'0.78rem', color:'#6B7280', letterSpacing:'0.05em' }}>Loading chart data…</span>
             </div>
           )}
 
           <div ref={containerRef} style={{ width:'100%', height:520 }} />
         </div>
 
-        {/* Chart 2 Container (Shown only when Split View is Active) */}
+        {/* Chart 2 — split view */}
         {isSplitView && (
-          <div style={{
-            background:'rgba(255,255,255,0.015)',
-            border:'1px solid rgba(59,130,246,0.2)',
-            borderRadius:18, overflow:'hidden',
-            position:'relative',
-          }}>
-            <div style={{ display:'flex', gap:8, padding:'10px 16px', fontSize:'0.75rem', color:'#60A5FA', fontWeight:700, alignItems:'center', borderBottom:'1px solid rgba(255,255,255,0.03)' }}>
-              <span>COMPARISON CHART:</span>
+          <div className="chart-card" style={{ border:'1px solid rgba(59,130,246,0.2)' }}>
+            <div style={{ display:'flex', gap:8, padding:'11px 16px', alignItems:'center', borderBottom:'1px solid rgba(255,255,255,0.04)', background:'rgba(255,255,255,0.012)' }}>
+              <TrendingUp size={13} style={{ color:'#60A5FA' }}/>
+              <span style={{ fontSize:'0.7rem', color:'#60A5FA', fontWeight:800, letterSpacing:'0.06em' }}>COMPARE</span>
               <select
                 value={compareSymbol}
                 onChange={e => setCompareSymbol(e.target.value)}
-                style={{ background:'#090C18', color:'#60A5FA', border:'1px solid rgba(59,130,246,0.3)', borderRadius:6, padding:'2px 8px', fontSize:'0.75rem', outline:'none', fontWeight:700 }}
+                style={{ background:'rgba(15,23,42,0.9)', color:'#60A5FA', border:'1px solid rgba(59,130,246,0.35)', borderRadius:7, padding:'3px 10px', fontSize:'0.74rem', outline:'none', fontWeight:700, cursor:'pointer' }}
               >
-                {POPULAR_STOCKS.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
+                {POPULAR_STOCKS.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
             <div ref={containerRef2} style={{ width:'100%', height:520 }} />
@@ -1075,33 +1151,40 @@ export default function LiveChartView() {
         )}
       </div>
 
-      {/* ── Price Alert Modal ── */}
+      {/* ── PRICE ALERT MODAL ── */}
       {showAlertModal && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100 }}>
-          <div style={{ background:'#121629', border:'1px solid #A855F7', borderRadius:16, padding:24, width:320, display:'flex', flexDirection:'column', gap:14 }}>
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:200 }}
+          onClick={e => e.target === e.currentTarget && setShowAlertModal(false)}>
+          <div style={{
+            background:'linear-gradient(135deg,#0F1629,#141B35)',
+            border:'1px solid rgba(168,85,247,0.5)', borderRadius:20, padding:28,
+            width:340, display:'flex', flexDirection:'column', gap:16,
+            boxShadow:'0 20px 60px rgba(168,85,247,0.2)',
+            animation:'fadeUp 0.25s ease',
+          }}>
             <h3 style={{ margin:0, color:'#F0F0FF', fontSize:'1.1rem', display:'flex', alignItems:'center', gap:8 }}>
-              <Bell size={18} color="#A855F7" /> Set Price Alert for {selectedSymbol}
+              <Bell size={18} color="#A855F7"/> Set Price Alert
+              <span style={{ fontSize:'0.85rem', color:'#6B7280', fontWeight:400 }}>for {selectedSymbol}</span>
             </h3>
-            <p style={{ margin:0, color:'#9CA3AF', fontSize:'0.78rem' }}>
-              Notify me when live price reaches or crosses this target price:
+            <p style={{ margin:0, color:'#6B7280', fontSize:'0.8rem', lineHeight:1.5 }}>
+              Get notified when the live price reaches your target:
             </p>
             <input
               type="number"
-              placeholder={`Current: ₹${curPrice || '0'}`}
+              placeholder={`Current: ₹${curPrice?.toFixed(2) || '—'}`}
               value={targetAlertPrice}
               onChange={e => setTargetAlertPrice(e.target.value)}
-              style={{ padding:'8px 12px', borderRadius:8, border:'1px solid rgba(168,85,247,0.3)', background:'#090C18', color:'#fff', fontSize:'0.9rem', outline:'none' }}
+              style={{ padding:'10px 14px', borderRadius:10, border:'1px solid rgba(168,85,247,0.35)', background:'rgba(9,12,24,0.8)', color:'#fff', fontSize:'0.95rem', outline:'none', transition:'border-color 0.2s' }}
+              onFocus={e => e.target.style.borderColor='rgba(168,85,247,0.7)'}
+              onBlur={e => e.target.style.borderColor='rgba(168,85,247,0.35)'}
             />
             <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
-              <button onClick={() => setShowAlertModal(false)} style={{ padding:'6px 12px', borderRadius:8, border:'none', background:'#374151', color:'#fff', cursor:'pointer' }}>Cancel</button>
+              <button onClick={() => setShowAlertModal(false)} style={{ padding:'8px 16px', borderRadius:10, border:'1px solid rgba(255,255,255,0.1)', background:'transparent', color:'#9CA3AF', cursor:'pointer', fontWeight:600 }}>
+                Cancel
+              </button>
               <button
-                onClick={() => {
-                  if (targetAlertPrice) {
-                    toast.success(`Alert set for ${selectedSymbol} at ₹${targetAlertPrice}`);
-                    setShowAlertModal(false);
-                  }
-                }}
-                style={{ padding:'6px 14px', borderRadius:8, border:'none', background:'#A855F7', color:'#fff', fontWeight:700, cursor:'pointer' }}
+                onClick={() => { if (targetAlertPrice) { toast.success(`🔔 Alert set for ${selectedSymbol} at ₹${targetAlertPrice}`); setShowAlertModal(false); } }}
+                style={{ padding:'8px 18px', borderRadius:10, border:'none', background:'linear-gradient(135deg,#A855F7,#7C3AED)', color:'#fff', fontWeight:700, cursor:'pointer', boxShadow:'0 4px 16px rgba(168,85,247,0.4)' }}
               >
                 Save Alert
               </button>
@@ -1110,57 +1193,74 @@ export default function LiveChartView() {
         </div>
       )}
 
-      {/* ── Stats Bar (Daily Only) ── */}
+      {/* ── STATS GRID (Daily only) ── */}
       {isDaily && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(138px, 1fr))', gap:10 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(142px, 1fr))', gap:10 }}>
           {[
-            { label:'CURRENT PRICE',   value: curPrice ? `₹${curPrice.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : '—', color:'#F0F0FF', delay:'0ms' },
-            { label:'AI TARGET (7D)',  value: prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : predLoading ? 'Loading…' : '—', color:'#A855F7', delay:'40ms' },
-            { label:'EXPECTED RETURN', value: prediction?.predicted_return_7d != null ? `${prediction.predicted_return_7d>=0?'+':''}${(prediction.predicted_return_7d*100).toFixed(2)}%` : predLoading ? 'Loading…' : '—',
-              color: prediction?.predicted_return_7d >= 0 ? '#26A69A' : '#EF5350', delay:'80ms' },
-            { label:'AI CONFIDENCE',   value: prediction?.ai_confidence_score != null ? `${prediction.ai_confidence_score}/100` : predLoading ? 'Loading…' : '—', color:scoreColor, delay:'120ms' },
-            { label:'95% UPPER',       value:(prediction?.predicted_upper_price_7d??prediction?.high_bound) ? `₹${(prediction.predicted_upper_price_7d??prediction.high_bound).toFixed(2)}` : predLoading?'Loading…':'—', color:'#26A69A', delay:'160ms' },
-            { label:'95% LOWER',       value:(prediction?.predicted_lower_price_7d??prediction?.low_bound)  ? `₹${(prediction.predicted_lower_price_7d??prediction.low_bound).toFixed(2)}`  : predLoading?'Loading…':'—', color:'#EF5350', delay:'200ms' },
-          ].map(({ label, value, color, delay }) => (
+            { label:'CURRENT PRICE',   value: curPrice ? `₹${curPrice.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : '—', color:'#F0F0FF', glow:'rgba(240,240,255,0.1)', delay:'0ms' },
+            { label:'AI TARGET (7D)',  value: prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : predLoading ? '…' : '—', color:'#C084FC', glow:'rgba(168,85,247,0.12)', delay:'50ms' },
+            { label:'EXPECTED RETURN', value: prediction?.predicted_return_7d != null ? `${prediction.predicted_return_7d>=0?'+':''}${(prediction.predicted_return_7d*100).toFixed(2)}%` : predLoading ? '…' : '—',
+              color: (prediction?.predicted_return_7d ?? 0) >= 0 ? '#26A69A' : '#EF5350',
+              glow: (prediction?.predicted_return_7d ?? 0) >= 0 ? 'rgba(38,166,154,0.12)' : 'rgba(239,83,80,0.12)',
+              delay:'100ms' },
+            { label:'AI CONFIDENCE',   value: prediction?.ai_confidence_score != null ? `${prediction.ai_confidence_score}/100` : predLoading ? '…' : '—', color:scoreColor, glow:`${scoreColor}20`, delay:'150ms' },
+            { label:'95% UPPER',       value:(prediction?.predicted_upper_price_7d??prediction?.high_bound) ? `₹${(prediction.predicted_upper_price_7d??prediction.high_bound).toFixed(2)}` : predLoading?'…':'—', color:'#26A69A', glow:'rgba(38,166,154,0.1)', delay:'200ms' },
+            { label:'95% LOWER',       value:(prediction?.predicted_lower_price_7d??prediction?.low_bound) ? `₹${(prediction.predicted_lower_price_7d??prediction.low_bound).toFixed(2)}` : predLoading?'…':'—', color:'#EF5350', glow:'rgba(239,83,80,0.1)', delay:'250ms' },
+          ].map(({ label, value, color, glow, delay }) => (
             <div key={label} className="lc-stat" style={{
-              background:'rgba(255,255,255,0.022)', border:'1px solid rgba(168,85,247,0.09)',
-              borderRadius:12, padding:'11px 14px', animationDelay:delay,
+              background:'rgba(255,255,255,0.025)', border:'1px solid rgba(168,85,247,0.1)',
+              borderRadius:14, padding:'13px 16px', animationDelay:delay,
+              boxShadow:`0 2px 16px ${glow}`,
             }}>
-              <div style={{ fontSize:'0.64rem', color:'#374151', letterSpacing:'0.09em', marginBottom:5 }}>{label}</div>
-              <div style={{ fontSize:'0.9rem', fontWeight:700, color, fontFamily:'JetBrains Mono, monospace' }}>{value}</div>
+              <div style={{ fontSize:'0.6rem', color:'#4B5563', letterSpacing:'0.1em', marginBottom:7, textTransform:'uppercase', fontWeight:700 }}>{label}</div>
+              <div style={{ fontSize:'0.95rem', fontWeight:800, color, fontFamily:'JetBrains Mono, monospace' }}>
+                {value === '…' ? <div className="shimmer-bar" style={{ width:80, height:18 }} /> : value}
+              </div>
             </div>
           ))}
 
-          {/* Signal Pill */}
+          {/* Signal pill card */}
           <div className="lc-stat" style={{
             background:sigMeta.bg, border:`1px solid ${sigMeta.border}`,
-            borderRadius:12, padding:'11px 14px', animationDelay:'240ms',
+            borderRadius:14, padding:'13px 16px', animationDelay:'300ms',
             display:'flex', flexDirection:'column', justifyContent:'center',
+            boxShadow:`0 4px 20px ${sigMeta.color}20`,
           }}>
-            <div style={{ fontSize:'0.64rem', color:'#374151', letterSpacing:'0.09em', marginBottom:5 }}>AI SIGNAL</div>
-            <div style={{ fontSize:'1rem', fontWeight:800, color:sigMeta.color, fontFamily:'JetBrains Mono, monospace' }}>
-              {predLoading ? 'Loading…' : sigMeta.label}
+            <div style={{ fontSize:'0.6rem', color:'#4B5563', letterSpacing:'0.1em', marginBottom:7, textTransform:'uppercase', fontWeight:700 }}>AI SIGNAL</div>
+            <div style={{ fontSize:'1.05rem', fontWeight:900, color:sigMeta.color, fontFamily:'JetBrains Mono, monospace', textShadow:`0 0 20px ${sigMeta.color}60` }}>
+              {predLoading ? <div className="shimmer-bar" style={{ width:70, height:20 }} /> : sigMeta.label}
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Confidence Score Bar (Daily Only) ── */}
+      {/* ── AI CONFIDENCE BAR (Daily only) ── */}
       {isDaily && prediction?.ai_confidence_score != null && (
         <div style={{
-          background:'rgba(255,255,255,0.018)', border:'1px solid rgba(168,85,247,0.08)',
-          borderRadius:12, padding:'11px 16px',
+          background:'rgba(255,255,255,0.022)', border:'1px solid rgba(168,85,247,0.1)',
+          borderRadius:14, padding:'14px 18px',
+          animation:'fadeUp 0.4s ease 320ms both',
         }}>
-          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:7, fontSize:'0.74rem' }}>
-            <span style={{ color:'#6B7280' }}>AI Confidence Score</span>
-            <span style={{ color:scoreColor, fontFamily:'JetBrains Mono, monospace', fontWeight:700 }}>{score} / 100</span>
+          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:9, fontSize:'0.74rem' }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+              <Sparkles size={13} color={scoreColor}/>
+              <span style={{ color:'#6B7280', fontWeight:600 }}>AI Confidence Score</span>
+            </div>
+            <span style={{ color:scoreColor, fontFamily:'JetBrains Mono, monospace', fontWeight:800, fontSize:'0.85rem' }}>
+              {score} <span style={{ color:'#4B5563', fontWeight:400 }}>/ 100</span>
+            </span>
           </div>
-          <div style={{ height:5, background:'rgba(255,255,255,0.05)', borderRadius:99, overflow:'hidden' }}>
+          <div style={{ height:6, background:'rgba(255,255,255,0.05)', borderRadius:99, overflow:'hidden' }}>
             <div style={{
               height:'100%', width:`${score}%`,
-              background:`linear-gradient(90deg,${scoreColor}99,${scoreColor})`,
-              borderRadius:99, transition:'width 0.6s ease',
+              background:`linear-gradient(90deg,${scoreColor}80,${scoreColor})`,
+              borderRadius:99, transition:'width 0.8s cubic-bezier(0.4,0,0.2,1)',
+              boxShadow:`0 0 12px ${scoreColor}60`,
             }} />
+          </div>
+          <div style={{ display:'flex', justifyContent:'space-between', marginTop:6, fontSize:'0.65rem', color:'#374151' }}>
+            <span>Low Confidence</span>
+            <span>High Confidence</span>
           </div>
         </div>
       )}
