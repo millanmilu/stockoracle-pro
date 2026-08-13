@@ -14,6 +14,11 @@ import AIInsightCard from './components/AIInsightCard';
 import ScenarioSimulator from './components/ScenarioSimulator';
 import PriceAlerts from './components/PriceAlerts';
 import ErrorBoundary from './components/ErrorBoundary';
+import SentimentDashboard from './components/SentimentDashboard';
+import AdvancedScreener from './components/AdvancedScreener';
+import MarketHeatmap from './components/MarketHeatmap';
+import MacroPanel from './components/MacroPanel';
+import SupplyChainPanel from './components/SupplyChainPanel';
 
 function AIPredictionView() {
   return (
@@ -29,17 +34,22 @@ export default function App() {
 
   const renderView = () => {
     switch (activeView) {
-      case 'Dashboard':    return <Dashboard />;
-      case 'Live Chart':   return <LiveChartView />;
-      case 'AI Prediction':return <AIPredictionView />;
-      case 'News':         return <NewsPanel ticker={selectedSymbol} />;
-      case 'Patterns':     return <PatternsPanel ticker={selectedSymbol} />;
-      case 'Levels':       return <LevelsPanel ticker={selectedSymbol} />;
-      case 'Volatility':   return <VolatilityPanel ticker={selectedSymbol} />;
-      case 'Monte Carlo':  return <MonteCarlo ticker={selectedSymbol} />;
-      case 'Backtest':     return <BacktestPanel ticker={selectedSymbol} />;
-      case 'Price Alerts': return <PriceAlerts />;
-      default:             return <Dashboard />;
+      case 'Dashboard':         return <Dashboard />;
+      case 'Live Chart':        return <LiveChartView />;
+      case 'AI Prediction':     return <AIPredictionView />;
+      case 'News':              return <NewsPanel ticker={selectedSymbol} />;
+      case 'Patterns':          return <PatternsPanel ticker={selectedSymbol} />;
+      case 'Levels':            return <LevelsPanel ticker={selectedSymbol} />;
+      case 'Volatility':        return <VolatilityPanel ticker={selectedSymbol} />;
+      case 'Monte Carlo':       return <MonteCarlo ticker={selectedSymbol} />;
+      case 'Backtest':          return <BacktestPanel ticker={selectedSymbol} />;
+      case 'Price Alerts':      return <PriceAlerts />;
+      case 'Sentiment':         return <SentimentDashboard />;
+      case 'Adv. Screener':     return <AdvancedScreener />;
+      case 'Heatmap':           return <MarketHeatmap />;
+      case 'Macro Data':        return <MacroPanel />;
+      case 'Supply Chain':      return <SupplyChainPanel />;
+      default:                  return <Dashboard />;
     }
   };
 

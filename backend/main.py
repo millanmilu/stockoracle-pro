@@ -46,6 +46,9 @@ from backend.analysis.levels import calculate_support_resistance
 from backend.analysis.volatility_forecast import calculate_volatility_forecast
 from backend.ml.predictor import StockPredictor
 from backend.analysis.backtester import run_backtest
+from backend.analysis.sentiment_market import get_market_sentiment
+from backend.analysis.macro import get_macro_data
+from backend.analysis.supply_chain import get_supply_chain
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -739,3 +742,248 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
 
 
+# ── NEW FEATURE ENDPOINTS ──────────────────────────────────────────────────
+
+@app.get("/api/sentiment/market")
+@limiter.limit("10/minute")
+async def get_market_sentiment_endpoint(request: Request):
+    """
+    Aggregates news sentiment for all popular tickers and returns a
+    composite Fear & Greed index plus per-ticker sentiment breakdown.
+    NOTE: This runs FinBERT/VADER for each ticker → can take 20-60s on cold start.
+    Results are served from a 30-minute in-memory cache on subsequent calls.
+    """
+    _cache_key = "_market_sentiment_cache"
+    _cache_ts_key = "_market_sentiment_ts"
+    from datetime import timedelta
+
+    # 30-minute in-memory cache
+    cached_val = getattr(app.state, _cache_key, None)
+    cached_ts  = getattr(app.state, _cache_ts_key, None)
+    if cached_val is not None and cached_ts is not None:
+        if datetime.now() - cached_ts < timedelta(minutes=30):
+            return cached_val
+
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, lambda: get_market_sentiment(popular_tickers))
+    setattr(app.state, _cache_key, result)
+    setattr(app.state, _cache_ts_key, datetime.now())
+    return result
+
+
+@app.get("/api/screener/advanced")
+@limiter.limit("20/minute")
+async def get_advanced_screener(
+    request: Request,
+    sector: str = "",
+    min_rsi: float = 0.0,
+    max_rsi: float = 100.0,
+    signal: str = "",
+    volume_spike: bool = False,
+    near_52w_high: bool = False,
+    near_52w_low: bool = False,
+    min_score: int = 0,
+    sort_by: str = "ai_score",
+    sort_dir: str = "desc",
+):
+    """
+    Advanced multi-filter screener. Extends the basic screener with:
+    RSI range, MACD signal, volume spike detection, 52W proximity, sector, sorting.
+    """
+    # Re-use or build screener base results
+    cached_results = get_screener_results(ttl_minutes=5)
+
+    if cached_results is None:
+        def _build():
+            fresh = []
+            for t in popular_tickers:
+                try:
+                    info = fetch_company_info(t)
+                    if not info:
+                        continue
+                    pred = _get_prediction_logic(t)
+                    df = fetch_stock_data(t, period="1Y")
+                    enriched = enrich_stock_dataframe(df) if df is not None and not df.empty else None
+
+                    prev = info.get("previous_close") or 1.0
+                    change_pct = ((info["current_price"] - prev) / prev) * 100
+
+                    # RSI & MACD from enriched dataframe
+                    rsi_val = None
+                    macd_sig = None
+                    volume_ratio = None
+                    high_52w = None
+                    low_52w = None
+
+                    if enriched is not None and len(enriched) > 0:
+                        last_row = enriched.iloc[-1]
+                        rsi_val = float(last_row.get("rsi", 50)) if "rsi" in last_row else None
+                        macd_sig = float(last_row.get("macd_signal", 0)) if "macd_signal" in last_row else None
+                        # Volume ratio: last volume / 20-day avg volume
+                        if "volume" in enriched.columns and len(enriched) >= 20:
+                            avg_vol = float(enriched["volume"].rolling(20).mean().iloc[-1])
+                            cur_vol = float(enriched["volume"].iloc[-1])
+                            volume_ratio = round(cur_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+                        if "close" in enriched.columns and len(enriched) >= 50:
+                            high_52w = float(enriched["close"].rolling(min(252, len(enriched))).max().iloc[-1])
+                            low_52w  = float(enriched["close"].rolling(min(252, len(enriched))).min().iloc[-1])
+
+                    # Sector mapping (simplified)
+                    sector_map = {
+                        "RELIANCE": "Energy", "ONGC": "Energy", "IOC": "Energy", "BPCL": "Energy",
+                        "TCS": "IT", "INFY": "IT", "WIPRO": "IT", "HCLTECH": "IT",
+                        "HDFCBANK": "Banking", "ICICIBANK": "Banking", "SBIN": "Banking", "AXISBANK": "Banking",
+                        "BHARTIARTL": "Telecom",
+                        "ITC": "FMCG", "HUL": "FMCG",
+                        "LT": "Infrastructure",
+                        "MARUTI": "Auto", "TATAMOTORS": "Auto",
+                        "SUNPHARMA": "Pharma", "DRREDDY": "Pharma",
+                    }
+
+                    fresh.append({
+                        "ticker":       t,
+                        "name":         info["name"],
+                        "price":        info["current_price"],
+                        "change":       round(change_pct, 3),
+                        "ai_score":     pred["ai_confidence_score"],
+                        "signal":       pred["signal"],
+                        "predicted_pct":round(pred["predicted_return_7d"] * 100, 3),
+                        "rsi":          round(rsi_val, 2) if rsi_val is not None else None,
+                        "macd_signal":  round(macd_sig, 4) if macd_sig is not None else None,
+                        "volume_ratio": volume_ratio,
+                        "high_52w":     round(high_52w, 2) if high_52w else None,
+                        "low_52w":      round(low_52w, 2) if low_52w else None,
+                        "sector":       sector_map.get(t, "Other"),
+                    })
+                except Exception:
+                    continue
+            return fresh
+
+        loop = asyncio.get_running_loop()
+        cached_results = await loop.run_in_executor(None, _build)
+        save_screener_results(cached_results)
+
+    results = cached_results
+
+    # Apply filters
+    if sector:
+        results = [r for r in results if r.get("sector", "").lower() == sector.lower()]
+    if signal:
+        results = [r for r in results if r.get("signal", "") == signal.lower()]
+    if min_score:
+        results = [r for r in results if r.get("ai_score", 0) >= min_score]
+    if min_rsi > 0 or max_rsi < 100:
+        results = [r for r in results if r.get("rsi") is not None and min_rsi <= r["rsi"] <= max_rsi]
+    if volume_spike:
+        results = [r for r in results if (r.get("volume_ratio") or 0) >= 1.5]
+    if near_52w_high:
+        results = [r for r in results if r.get("high_52w") and abs(r["price"] - r["high_52w"]) / r["high_52w"] <= 0.05]
+    if near_52w_low:
+        results = [r for r in results if r.get("low_52w") and abs(r["price"] - r["low_52w"]) / r["price"] <= 0.05]
+
+    # Sorting
+    valid_sort_keys = {"ai_score", "change", "predicted_pct", "rsi", "volume_ratio", "price"}
+    sk = sort_by if sort_by in valid_sort_keys else "ai_score"
+    reverse = sort_dir.lower() != "asc"
+    results = sorted(results, key=lambda r: (r.get(sk) or 0), reverse=reverse)
+
+    return results
+
+
+@app.get("/api/market/heatmap")
+@limiter.limit("20/minute")
+async def get_market_heatmap(request: Request):
+    """
+    Returns sector-grouped heatmap data: ticker, price, change%, sector, market cap tier.
+    All popular tickers enriched with sector and live price change.
+    """
+    # Extended ticker list with sector metadata
+    heatmap_tickers = [
+        {"t": "RELIANCE",   "sector": "Energy",          "mcap_tier": 3},
+        {"t": "TCS",        "sector": "IT",              "mcap_tier": 3},
+        {"t": "HDFCBANK",   "sector": "Banking",         "mcap_tier": 3},
+        {"t": "INFY",       "sector": "IT",              "mcap_tier": 3},
+        {"t": "ICICIBANK",  "sector": "Banking",         "mcap_tier": 3},
+        {"t": "SBIN",       "sector": "Banking",         "mcap_tier": 2},
+        {"t": "BHARTIARTL", "sector": "Telecom",         "mcap_tier": 2},
+        {"t": "ITC",        "sector": "FMCG",            "mcap_tier": 2},
+        {"t": "LT",         "sector": "Infrastructure",  "mcap_tier": 2},
+        {"t": "HUL",        "sector": "FMCG",            "mcap_tier": 2},
+    ]
+
+    def _build_heatmap():
+        rows = []
+        for item in heatmap_tickers:
+            t = item["t"]
+            try:
+                info = fetch_company_info(t)
+                if not info:
+                    continue
+                prev = info.get("previous_close") or 1.0
+                change_pct = ((info["current_price"] - prev) / prev) * 100
+                rows.append({
+                    "ticker":     t,
+                    "name":       info["name"],
+                    "price":      info["current_price"],
+                    "change_pct": round(change_pct, 3),
+                    "sector":     item["sector"],
+                    "mcap_tier":  item["mcap_tier"],
+                })
+            except Exception:
+                rows.append({
+                    "ticker":    t,
+                    "name":      t,
+                    "price":     0,
+                    "change_pct":0,
+                    "sector":    item["sector"],
+                    "mcap_tier": item["mcap_tier"],
+                })
+        return rows
+
+    loop = asyncio.get_running_loop()
+    rows = await loop.run_in_executor(None, _build_heatmap)
+
+    # Group by sector
+    sectors: Dict[str, List] = {}
+    for row in rows:
+        s = row["sector"]
+        sectors.setdefault(s, []).append(row)
+
+    # Sector summary
+    sector_summaries = []
+    for sname, items in sectors.items():
+        avg_change = sum(i["change_pct"] for i in items) / len(items) if items else 0
+        sector_summaries.append({
+            "sector": sname,
+            "avg_change_pct": round(avg_change, 3),
+            "stocks": items,
+        })
+
+    sector_summaries.sort(key=lambda x: x["avg_change_pct"], reverse=True)
+    return {"sectors": sector_summaries, "timestamp": datetime.now().isoformat()}
+
+
+@app.get("/api/macro")
+@limiter.limit("30/minute")
+async def get_macro_endpoint(request: Request):
+    """
+    Returns live macro-economic indicators:
+    RBI Repo Rate, India CPI, USD/INR, US10Y Yield, India VIX, FII/DII net flows.
+    Data is cached for 3 hours server-side.
+    """
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(None, get_macro_data)
+    return data
+
+
+@app.get("/api/stock/{ticker}/supply-chain")
+@limiter.limit("15/minute")
+async def get_supply_chain_endpoint(request: Request, ticker: str):
+    """
+    Returns the supply chain network for the given NSE ticker:
+    upstream suppliers, downstream customers, and rolling 60-day price correlations.
+    """
+    t = ticker.upper().strip()
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, lambda: get_supply_chain(t))
+    return result
