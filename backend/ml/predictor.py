@@ -260,7 +260,16 @@ class StockPredictor:
                 f"No trained model found for ticker: {ticker}. Train it first."
             )
 
-        checkpoint = torch.load(save_path, map_location=device)
+        try:
+            checkpoint = torch.load(save_path, map_location=device, weights_only=True)
+        except Exception as e:
+            print(f"❌ Error loading model for {ticker}: {e}")
+            # Delete corrupted model file
+            if os.path.exists(save_path):
+                os.remove(save_path)
+                print(f"🗑️  Deleted corrupted model file: {save_path}")
+            raise RuntimeError(f"Corrupted model file for {ticker}")
+
         self.window_size  = checkpoint["window_size"]
         self.feature_min  = checkpoint["feature_min"]
         self.feature_max  = checkpoint["feature_max"]

@@ -1,25 +1,50 @@
-# Secrets
-backend/.env
-.env
-.env.*
-!.env.example
-*.pem
-*.key
-
+```gitignore
 # Python
 __pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
-venv/
+*.pyc
+*.pyo
+*.pyd
+*.py~
+*.py.class
+*.py.obj
+*.py.out
+*.py.dll
+*.py.so
+*.py.a
+*.py.o
 
-# Node / build output
+# Dependencies
 node_modules/
-frontend/node_modules/
-frontend/dist/
 
-# Local runtime data
-*.db
-*.sqlite
-*.sqlite3
-backend/ml/saved_models/*.pt
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*
+
+# Editors
+.vscode/
+.idea/
+
+# Coverage
+.coverage
+coverage/
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+target/
+*.class
+*.exe
+*.dll
+*.so
+*.a
+*.obj
+*.out
+```

@@ -1,5 +1,6 @@
 import os
 import time
+import threading
 import requests
 import pyotp
 import pandas as pd
@@ -141,10 +142,11 @@ def _call_api(fn, *args, retries: int = 2, retry_delay: float = 1.5, **kwargs):
 SCRIP_MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 _scrip_map: Dict[str, dict] = {}
 _scrip_map_failed = False   # Prevents infinite retry loops on total failure
+_scrip_map_lock = threading.Lock()  # Thread-safe access to shared scrip map
 
 
 def _load_scrip_master(force: bool = False):
-    """Downloads the ScripMaster JSON and indexes NSE equity symbols."""
+    """Downloads the ScripMaster JSON and indexes NSE equity symbols with thread safety."""
     global _scrip_map, _scrip_map_failed
 
     if _scrip_map:          # Already loaded
@@ -157,9 +159,17 @@ def _load_scrip_master(force: bool = False):
         response = requests.get(SCRIP_MASTER_URL, timeout=30)
         response.raise_for_status()
         data = response.json()
+        new_map = {}
         for item in data:
             if item.get("exch_seg") == "NSE" and item.get("instrumenttype", "") == "":
-                _scrip_map[item["symbol"]] = item
+                new_map[item["symbol"]] = item
+        
+        # Thread-safe update of shared state
+        global _scrip_map_lock
+        with _scrip_map_lock:
+            _scrip_map.clear()
+            _scrip_map.update(new_map)
+        
         print(f"✅ ScripMaster loaded — {len(_scrip_map)} NSE equity symbols indexed.")
         _scrip_map_failed = False
     except Exception as e:

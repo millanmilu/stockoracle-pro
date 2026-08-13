@@ -1,17 +1,36 @@
 import asyncio
 from contextlib import asynccontextmanager, suppress
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 import os
 import json
+import threading
+import random
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
+import sentry_sdk
 
 # Load the local development credentials before importing ``fetcher``: that
 # module constructs the Angel One client at import time. In production,
 # systemd also supplies these variables through EnvironmentFile.
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+
+# Initialize Sentry for error tracking (if DSN is provided)
+sentry_dsn = os.getenv("SENTRY_DSN")
+if sentry_dsn:
+    sentry_sdk.init(
+        dsn=sentry_dsn,
+        traces_sample_rate=0.1,
+        profiles_sample_rate=0.1,
+        environment=os.getenv("ENVIRONMENT", "development")
+    )
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
 
 # Import our custom modules
 from backend.data.fetcher import (
@@ -85,6 +104,10 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Add rate limiter to app state
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # CORS configuration
 origins = [
     "http://localhost:5173",
@@ -94,7 +117,13 @@ origins = [
 ]
 env_origins = os.getenv("ALLOWED_ORIGINS")
 if env_origins:
-    origins.extend([o.strip() for o in env_origins.split(",") if o.strip()])
+    # Replace localhost origins with production origins when ALLOWED_ORIGINS is set
+    custom_origins = [o.strip() for o in env_origins.split(",") if o.strip()]
+    if custom_origins:
+        origins = custom_origins  # Override defaults completely for production
+else:
+    # Add default dev origins only in development
+    pass
 
 app.add_middleware(
     CORSMiddleware,
@@ -108,10 +137,15 @@ app.add_middleware(
 training_status: Dict[str, Dict[str, Any]] = {}
 popular_tickers = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL"]
 
+# Thread lock to prevent race conditions in scrip master loading and shared state updates
+scrip_master_lock = threading.Lock()
+training_status_lock = threading.Lock()
+
 # ── REST API ROUTES ──
 
 @app.get("/")
-def read_root():
+@limiter.limit("60/minute")
+def read_root(request: Request):
     return {
         "status": "online",
         "message": "StockOracle Pro Advanced AI Market Forecasting API live.",
@@ -119,13 +153,15 @@ def read_root():
     }
 
 @app.get("/api/db/status")
-def db_status():
+@limiter.limit("30/minute")
+def db_status(request: Request):
     """Returns a live snapshot of all SQLite table sizes and per-ticker historical coverage."""
     return {"status": "ok", "database": get_db_stats(), "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/api/health")
-def health_check():
+@limiter.limit("60/minute")
+def health_check(request: Request):
     return {
         "status": "healthy",
         "angel_one_session": get_session_status(),
@@ -133,7 +169,8 @@ def health_check():
     }
 
 @app.get("/api/stock/{ticker}/info")
-def get_stock_info(ticker: str):
+@limiter.limit("30/minute")
+def get_stock_info(request: Request, ticker: str):
     t = ticker.upper().strip()
     if not t.replace("-", "").isalpha() or len(t) > 20:
         raise HTTPException(status_code=422, detail=f"Invalid ticker format: '{ticker}'. Use NSE symbol like RELIANCE, TCS.")
@@ -145,7 +182,8 @@ def get_stock_info(ticker: str):
     return info
 
 @app.get("/api/stock/{ticker}/history")
-def get_stock_history(ticker: str, timeframe: str = "3M"):
+@limiter.limit("30/minute")
+def get_stock_history(request: Request, ticker: str, timeframe: str = "3M"):
     t = ticker.upper().strip()
     days_map = {"1W": "10D", "1M": "45D", "3M": "120D", "6M": "200D", "1Y": "370D"}
     period = days_map.get(timeframe.upper())
@@ -163,7 +201,8 @@ def get_stock_history(ticker: str, timeframe: str = "3M"):
 
 
 @app.get("/api/stock/search/{query}")
-def search_stock(query: str):
+@limiter.limit("60/minute")
+def search_stock(request: Request, query: str):
     """
     Validates an NSE ticker and returns basic info so the frontend can open
     any stock — not just the hardcoded popular 10.
@@ -188,7 +227,8 @@ def search_stock(query: str):
 
 
 @app.get("/api/stock/{ticker}/patterns")
-def get_patterns(ticker: str, days: int = 45):
+@limiter.limit("30/minute")
+def get_patterns(request: Request, ticker: str, days: int = 45):
     """Returns detected candlestick patterns for the last `days` sessions."""
     t = ticker.upper().strip()
     df = fetch_stock_data(t, period="6M")
@@ -200,7 +240,8 @@ def get_patterns(ticker: str, days: int = 45):
 
 
 @app.get("/api/stock/{ticker}/levels")
-def get_levels(ticker: str):
+@limiter.limit("30/minute")
+def get_levels(request: Request, ticker: str):
     """Returns support, resistance, pivot points, and Fibonacci retracement levels."""
     t = ticker.upper().strip()
     df = fetch_stock_data(t, period="1Y")
@@ -214,7 +255,8 @@ def get_levels(ticker: str):
 
 
 @app.get("/api/stock/{ticker}/volatility")
-def get_volatility(ticker: str):
+@limiter.limit("30/minute")
+def get_volatility(request: Request, ticker: str):
     """Returns GARCH(1,1) volatility forecast and rolling historical volatility."""
     t = ticker.upper().strip()
     df = fetch_stock_data(t, period="1Y")
@@ -227,7 +269,8 @@ def get_volatility(ticker: str):
     return calculate_volatility_forecast(df)
 
 @app.get("/api/stock/{ticker}/montecarlo")
-def get_monte_carlo(ticker: str):
+@limiter.limit("20/minute")
+def get_monte_carlo(request: Request, ticker: str):
     t = ticker.upper().strip()
 
     # Serve from DB cache (30-min TTL) if available
@@ -246,7 +289,8 @@ def get_monte_carlo(ticker: str):
     return mc_results
 
 @app.get("/api/stock/{ticker}/anomalies")
-def get_anomalies(ticker: str):
+@limiter.limit("30/minute")
+def get_anomalies(request: Request, ticker: str):
     t = ticker.upper().strip()
     df = fetch_stock_data(t, period="1Y")
     if df is None or df.empty:
@@ -286,7 +330,8 @@ def background_train_task(ticker: str):
         training_status[ticker] = {"status": "failed", "error": str(e)}
 
 @app.post("/api/train/{ticker}")
-def start_training(ticker: str, background_tasks: BackgroundTasks):
+@limiter.limit("10/minute")
+def start_training(request: Request, ticker: str, background_tasks: BackgroundTasks):
     t_upper = ticker.upper()
     status = training_status.get(t_upper, {}).get("status")
     
@@ -297,14 +342,16 @@ def start_training(ticker: str, background_tasks: BackgroundTasks):
     return {"status": "started", "message": f"Background training job queued for {t_upper}."}
 
 @app.get("/api/train/{ticker}/status")
-def get_training_status(ticker: str):
+@limiter.limit("30/minute")
+def get_training_status(request: Request, ticker: str):
     status = training_status.get(ticker.upper())
     if not status:
         return {"status": "idle", "message": "No model has been trained yet in this session."}
     return status
 
 @app.get("/api/stock/{ticker}/predict")
-def get_prediction(ticker: str):
+@limiter.limit("20/minute")
+def get_prediction(request: Request, ticker: str):
     t_upper = ticker.upper()
 
     # Serve from DB cache (10-min TTL) if available
@@ -324,6 +371,21 @@ def get_prediction(ticker: str):
     predicted_upper_price = current_price
     predicted_lower_price = current_price
     confidence_std = 0.05
+    model_trained = False  # Initialize before try block to avoid UnboundLocalError
+    predicted_price = current_price  # Initialize fallback price
+
+    def _fallback_prediction(dataframe, curr_price):
+        """Extracted fallback prediction logic to avoid code duplication."""
+        enriched = enrich_stock_dataframe(dataframe)
+        last_row = enriched.iloc[-1]
+        rsi_factor = (50 - float(last_row["rsi"])) / 500.0
+        macd_factor = float(last_row["macd_hist"]) / curr_price * 0.1
+        pred_return = rsi_factor + macd_factor
+        return (
+            curr_price * (1.0 + pred_return),
+            curr_price * (1.0 + pred_return + 0.05),
+            curr_price * (1.0 + pred_return - 0.05)
+        )
 
     try:
         # Load saved PyTorch model and predict with full details
@@ -337,15 +399,7 @@ def get_prediction(ticker: str):
         model_trained = True
     except FileNotFoundError:
         # Fallback to rule-based engine if model is not trained yet
-        enriched = enrich_stock_dataframe(df)
-        last_row = enriched.iloc[-1]
-
-        rsi_factor = (50 - float(last_row["rsi"])) / 500.0
-        macd_factor = float(last_row["macd_hist"]) / current_price * 0.1
-        pred_return = rsi_factor + macd_factor
-        predicted_price = current_price * (1.0 + pred_return)
-        predicted_upper_price = current_price * (1.0 + pred_return + 0.05)
-        predicted_lower_price = current_price * (1.0 + pred_return - 0.05)
+        predicted_price, predicted_upper_price, predicted_lower_price = _fallback_prediction(df, current_price)
         model_trained = False
     except (KeyError, RuntimeError) as e:
         # Stale / incompatible .pt file — delete it so next call hits rule-based cleanly
@@ -355,15 +409,7 @@ def get_prediction(ticker: str):
         if _os.path.exists(stale_path):
             _os.remove(stale_path)
             print(f"🗑️  Deleted stale model file for {t_upper}: {e}")
-        enriched = enrich_stock_dataframe(df)
-        last_row = enriched.iloc[-1]
-
-        rsi_factor = (50 - float(last_row["rsi"])) / 500.0
-        macd_factor = float(last_row["macd_hist"]) / current_price * 0.1
-        pred_return = rsi_factor + macd_factor
-        predicted_price = current_price * (1.0 + pred_return)
-        predicted_upper_price = current_price * (1.0 + pred_return + 0.05)
-        predicted_lower_price = current_price * (1.0 + pred_return - 0.05)
+        predicted_price, predicted_upper_price, predicted_lower_price = _fallback_prediction(df, current_price)
         model_trained = False
         
     # Standard technical analysis signals
@@ -407,7 +453,8 @@ def get_prediction(ticker: str):
     return result
 
 @app.get("/api/stock/{ticker}/backtest")
-def get_backtest(ticker: str):
+@limiter.limit("20/minute")
+def get_backtest(request: Request, ticker: str):
     t_upper = ticker.upper().strip()
     # Use combined data so backtest includes today's live prices
     df = get_combined_stock_data(t_upper, period="2Y")
@@ -420,7 +467,8 @@ def get_backtest(ticker: str):
     return results
 
 @app.get("/api/screener")
-async def get_screener_list(signal: str = "", min_score: int = 0):
+@limiter.limit("15/minute")
+async def get_screener_list(request: Request, signal: str = "", min_score: int = 0):
     # Try DB cache first (5-min TTL — persists across restarts)
     cached_results = get_screener_results(ttl_minutes=5)
 
@@ -491,21 +539,38 @@ manager = ConnectionManager()
 
 # Background price broadcaster loop
 async def websocket_price_broadcast_loop():
-    import random
-
-    # Accurate fallback prices (INR) — used until real LTP is fetched
+    # Initialize prices cache with default fallback values
     prices_cache = {
         "RELIANCE": 1420.0, "TCS": 3900.0, "HDFCBANK": 1900.0, "INFY": 1560.0,
         "ICICIBANK": 1390.0, "SBIN": 850.0, "BHARTIARTL": 1880.0, "ITC": 430.0,
         "LT": 3600.0, "HUL": 2320.0
     }
 
-    # Attempt to seed the cache with real LTP prices from Angel One
+    # Seed the cache with real LTP prices from database on startup
+    try:
+        from backend.data.database import get_stale_company_info
+        for ticker in popular_tickers:
+            info = get_stale_company_info(ticker)
+            if info and info.get("current_price"):
+                prices_cache[ticker] = float(info["current_price"])
+    except Exception as e:
+        print(f"⚠️  Could not seed prices from DB: {e}")
+
+    # Attempt to fetch fresh LTP from Angel One API
     try:
         from backend.data.fetcher import smartApi, get_token_info
         ensure_session()
-    except Exception:
-        pass
+        if get_session_status() and smartApi:
+            for ticker in popular_tickers:
+                tok = get_token_info(ticker)
+                if tok:
+                    ltp_resp = smartApi.ltpData(tok["exch_seg"], tok["symbol"], tok["token"])
+                    if ltp_resp and ltp_resp.get("status") and ltp_resp.get("data"):
+                        ltp = float(ltp_resp["data"].get("ltp", 0.0))
+                        if ltp > 0:
+                            prices_cache[ticker] = ltp
+    except Exception as e:
+        print(f"⚠️  Could not fetch initial LTP from API: {e}")
 
     while True:
         if manager.active_connections:
@@ -521,10 +586,12 @@ async def websocket_price_broadcast_loop():
                     if tok:
                         ltp_resp = smartApi.ltpData(tok["exch_seg"], tok["symbol"], tok["token"])
                         if ltp_resp and ltp_resp.get("status") and ltp_resp.get("data"):
-                            ltp = float(ltp_resp["data"].get("ltp", 0.0))
-                            prev_close = float(ltp_resp["data"].get("close", 0.0))
-                            if ltp > 0:
-                                change_pct = ((ltp - prev_close) / prev_close) if prev_close > 0 else 0.0
+                            ltp_data = ltp_resp["data"]
+                            ltp = float(ltp_data.get("ltp", 0.0))
+                            prev_close = float(ltp_data.get("close", 0.0))
+                            # Validate API response before using
+                            if ltp > 0 and prev_close > 0:
+                                change_pct = ((ltp - prev_close) / prev_close)
                                 prices_cache[t] = ltp
                                 
                                 payload = {
@@ -560,7 +627,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Keep socket alive by receiving dummy messages
-            await websocket.receive_text()
+            # Keep socket alive by receiving messages with validation
+            message = await websocket.receive_text()
+            # Optional: validate message format (e.g., expect JSON or specific commands)
+            # For now, just accept any text to keep connection alive
     except WebSocketDisconnect:
+        manager.disconnect(websocket)
+    except Exception as e:
+        print(f"WebSocket error: {e}")
         manager.disconnect(websocket)

@@ -13,7 +13,7 @@ import PatternsPanel from './PatternsPanel'
 import LevelsPanel from './LevelsPanel'
 import VolatilityPanel from './VolatilityPanel'
 
-const API = import.meta.env.VITE_API_URL || ''
+const API = import.meta.env.VITE_API_URL || window.location.origin
 
 const POPULAR = [
   { ticker: 'RELIANCE',   name: 'Reliance Industries' },

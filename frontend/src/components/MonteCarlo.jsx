@@ -8,7 +8,7 @@ import { Line } from 'react-chartjs-2'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend)
 
-const API = import.meta.env.VITE_API_URL || ''
+const API = import.meta.env.VITE_API_URL || window.location.origin
 
 export default function MonteCarlo({ ticker }) {
   const [mc, setMc]       = useState(null)

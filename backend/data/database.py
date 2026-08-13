@@ -10,11 +10,11 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stockoracle.
 
 
 def get_db_connection() -> sqlite3.Connection:
-    """Returns a connection to the SQLite database with row factory and WAL mode enabled."""
+    """Returns a connection to the SQLite database with row factory enabled.
+    PRAGMA settings are applied once during init_db() for persistence.
+    """
     conn = sqlite3.connect(DB_PATH, timeout=15.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
     return conn
 
 
@@ -92,6 +92,16 @@ def init_db():
         """)
 
         conn.commit()
+        
+    # Set PRAGMA settings once after schema creation (persistent for WAL mode)
+    # These settings persist across connections for the database
+    with get_db_connection() as conn:
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
+        conn.execute("PRAGMA cache_size=-64000;")  # 64MB cache
+        conn.execute("PRAGMA temp_store=MEMORY;")
+        conn.commit()
+        
     print("✅ SQLite database initialization complete.")
 
 
@@ -150,15 +160,24 @@ def get_historical_prices(ticker: str, start_date: str, end_date: str) -> Option
 # ── Live Ticks ─────────────────────────────────────────────────────────────────
 
 def save_live_tick(ticker: str, price: float, change_pct: float):
-    """Saves a single live tick update to the database."""
+    """Saves a single live tick update to the database with automatic pruning."""
     ticker = ticker.upper()
     timestamp = datetime.now().isoformat()
     try:
         with get_db_connection() as conn:
+            # Insert the new tick
             conn.execute(
                 "INSERT INTO live_ticks (ticker, timestamp, price, change_pct) VALUES (?, ?, ?, ?)",
                 (ticker, timestamp, price, change_pct),
             )
+            
+            # Prune old ticks (keep only last 24 hours)
+            cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
+            conn.execute(
+                "DELETE FROM live_ticks WHERE timestamp < ?",
+                (cutoff,)
+            )
+            
             conn.commit()
     except Exception as e:
         print(f"Error saving live tick to database: {e}")
