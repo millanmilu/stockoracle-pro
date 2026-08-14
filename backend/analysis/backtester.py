@@ -78,6 +78,7 @@ def run_backtest(df: pd.DataFrame, ticker: str, initial_capital: float = 100000.
     portfolio_value = []
     dates = []
     close_prices = []
+    actions = []      # NEW: track BUY/SELL/HOLD per day
 
     trades = 0
     wins = 0
@@ -91,6 +92,7 @@ def run_backtest(df: pd.DataFrame, ticker: str, initial_capital: float = 100000.
 
         pred_return = (pred_target_price - current_close) / (current_close + 1e-9)
 
+        day_action = "HOLD"
         if shares > 0:
             price_change = (current_close - buy_price) / (buy_price + 1e-9)
             # Exit on stop-loss (4%), take-profit (8%), or bearish signal
@@ -99,6 +101,7 @@ def run_backtest(df: pd.DataFrame, ticker: str, initial_capital: float = 100000.
                 cash = shares * current_close * (1.0 - TRANSACTION_COST_PCT)
                 shares = 0.0
                 trades += 1
+                day_action = "SELL"
                 if current_close > buy_price:
                     wins += 1
         else:
@@ -108,11 +111,13 @@ def run_backtest(df: pd.DataFrame, ticker: str, initial_capital: float = 100000.
                 shares = (cash * (1.0 - TRANSACTION_COST_PCT)) / (current_close + 1e-9)
                 cash = 0.0
                 buy_price = current_close
+                day_action = "BUY"
 
         equity = cash + (shares * current_close)
         portfolio_value.append(equity)
         dates.append(current_date)
         close_prices.append(current_close)
+        actions.append({"action": day_action, "price": current_close})
 
     # 5. Compute Portfolio Performance Analytics
     portfolio_value = np.array(portfolio_value)
@@ -154,7 +159,9 @@ def run_backtest(df: pd.DataFrame, ticker: str, initial_capital: float = 100000.
         equity_curve.append({
             "date": dates[i],
             "value": float(portfolio_value[i]),
-            "pct_change": float((portfolio_value[i] - initial_capital) / initial_capital * 100)
+            "pct_change": float((portfolio_value[i] - initial_capital) / initial_capital * 100),
+            "action": actions[i]["action"],
+            "price": actions[i]["price"],
         })
         benchmark_curve.append({
             "date": dates[i],

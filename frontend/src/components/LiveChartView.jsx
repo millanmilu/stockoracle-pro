@@ -6,7 +6,7 @@ import {
   Maximize2, Minimize2, Camera, Bell, Search, 
   Columns, Square, Eye, EyeOff, Sparkles, TrendingUp,
   ZoomIn, ZoomOut, Move, RotateCcw, Zap, Activity,
-  BarChart3, Layers, Target, ChevronRight, ChevronLeft, X
+  BarChart3, Layers, Target, ChevronRight, ChevronLeft, X, FlaskConical
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import DrawingTools from './chart-tools/DrawingTools';
@@ -253,11 +253,91 @@ const CANDLE_STYLE = {
   wickDownColor  : '#EF5350',
 };
 
+/* ─── Backtest Overlay Side Panel ────────────────────────────────────────────── */
+
+function BacktestOverlayPanel({ symbol, showBacktest, setShowBacktest, backtestData, backtestLoading }) {
+  const cr  = backtestData?.cumulative_return;
+  const br  = backtestData?.benchmark_return;
+  const alpha = cr != null && br != null ? (cr - br) : null;
+
+  const pct = v => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`;
+  const col = v => v >= 0 ? '#10B981' : '#EF5350';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Toggle Button */}
+      <button
+        onClick={() => setShowBacktest(p => !p)}
+        style={{
+          width: '100%', padding: '8px 10px',
+          borderRadius: 8, border: `1px solid ${showBacktest ? '#10B981' : 'rgba(99,102,241,0.3)'}`,
+          background: showBacktest ? 'rgba(16,185,129,0.12)' : 'rgba(99,102,241,0.08)',
+          color: showBacktest ? '#10B981' : '#8B5CF6',
+          fontWeight: 700, fontSize: '0.75rem', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+        }}
+      >
+        <FlaskConical size={13} />
+        {showBacktest ? '✓ Backtest ON — markers visible' : 'Enable Backtest Overlay'}
+      </button>
+
+      {/* Loading */}
+      {showBacktest && backtestLoading && (
+        <div style={{ textAlign: 'center', padding: 16 }}>
+          <div className="spinner" style={{ width: 20, height: 20, margin: '0 auto 8px' }} />
+          <div style={{ fontSize: '0.72rem', color: '#6B7280' }}>Running backtest…</div>
+        </div>
+      )}
+
+      {/* Legend */}
+      {showBacktest && !backtestLoading && (
+        <div style={{ display: 'flex', gap: 8, fontSize: '0.68rem' }}>
+          <span style={{ color: '#10B981', fontWeight: 700 }}>▲ BUY</span>
+          <span style={{ color: '#EF5350', fontWeight: 700 }}>▼ SELL</span>
+          <span style={{ color: '#6B7280' }}>shown on chart</span>
+        </div>
+      )}
+
+      {/* Metrics */}
+      {backtestData && !backtestLoading && (() => {
+        const { cumulative_return: cr, benchmark_return: br, sharpe_ratio, max_drawdown, win_rate, total_trades, cagr, initial_capital, final_value } = backtestData;
+        const alpha = cr - br;
+        const rows = [
+          { label: 'Strategy Return', value: pct(cr), color: col(cr) },
+          { label: 'Benchmark (B&H)', value: pct(br), color: col(br) },
+          { label: 'Alpha', value: pct(alpha), color: col(alpha) },
+          { label: 'CAGR', value: pct(cagr), color: col(cagr) },
+          { label: 'Sharpe', value: sharpe_ratio.toFixed(2), color: sharpe_ratio >= 1 ? '#10B981' : sharpe_ratio >= 0 ? '#F59E0B' : '#EF5350' },
+          { label: 'Max Drawdown', value: pct(max_drawdown), color: max_drawdown > -0.1 ? '#10B981' : '#EF5350' },
+          { label: 'Win Rate', value: `${(win_rate * 100).toFixed(1)}%`, color: win_rate >= 0.55 ? '#10B981' : '#F59E0B' },
+          { label: 'Trades', value: total_trades, color: '#9CA3AF' },
+        ];
+        return (
+          <>
+            <div style={{ borderTop: '1px solid rgba(99,102,241,0.1)', paddingTop: 8, fontSize: '0.68rem', color: '#6366F1', fontWeight: 700, letterSpacing: '0.06em' }}>
+              PERFORMANCE METRICS
+            </div>
+            {rows.map(r => (
+              <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                <span style={{ color: '#6B7280' }}>{r.label}</span>
+                <span style={{ color: r.color, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>{r.value}</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 6, padding: '6px 8px', background: 'rgba(99,102,241,0.06)', borderRadius: 8, fontSize: '0.68rem', color: '#4B5563', lineHeight: 1.5 }}>
+              📋 Buy when AI 7d return &gt; 1.5% · Stop-loss 4% · TP 8%
+            </div>
+          </>
+        );
+      })()}
+    </div>
+  );
+}
+
 /* ─── Main Component ─────────────────────────────────────────────────────────── */
 
 export default function LiveChartView() {
   const { selectedSymbol, setSelectedSymbol } = useStore();
-  const { fetchHistory, fetchPredict, searchStock } = useStock();
+  const { fetchHistory, fetchPredict, searchStock, fetchBacktest } = useStock();
 
   const [interval,    setInterval]    = useState('1d');
   const [rawHistory,  setRawHistory]  = useState(null);
@@ -293,6 +373,12 @@ export default function LiveChartView() {
   const [showDrawings, setShowDrawings] = useState(false);
   const [showAdvancedPanel, setShowAdvancedPanel] = useState(false);
   const [advancedPanelTab, setAdvancedPanelTab] = useState('volume');
+
+  // Backtest Overlay State
+  const [backtestData, setBacktestData] = useState(null);
+  const [backtestLoading, setBacktestLoading] = useState(false);
+  const [showBacktest, setShowBacktest] = useState(false);
+  const backtestEquityRef = useRef(null);
 
   // Search & Alert State
   const [searchQuery, setSearchQuery] = useState('');
@@ -469,8 +555,57 @@ export default function LiveChartView() {
       upperLineRef.current = null;
       lowerLineRef.current = null;
       livePriceLineRef.current = null;
+      backtestEquityRef.current = null;
     };
   }, []);
+
+  /* ── Backtest Fetch + Chart Markers ──────────────────────────── */
+
+  useEffect(() => {
+    if (!showBacktest || !selectedSymbol) return;
+    setBacktestData(null);
+    setBacktestLoading(true);
+    fetchBacktest(selectedSymbol).then(res => {
+      setBacktestLoading(false);
+      if (!res || res.error) { toast.error('Backtest failed. Train the model first.'); return; }
+      setBacktestData(res);
+
+      // ── Plot buy/sell markers on main candlestick chart ──
+      if (candleRef.current && res.equity_curve?.length) {
+        const markers = [];
+        res.equity_curve.forEach((pt, i) => {
+          if (pt.action === 'BUY') {
+            markers.push({
+              time: pt.date,
+              position: 'belowBar',
+              color: '#10B981',
+              shape: 'arrowUp',
+              text: `B ₹${pt.price ? Number(pt.price).toFixed(0) : ''}`,
+              size: 1,
+            });
+          } else if (pt.action === 'SELL') {
+            markers.push({
+              time: pt.date,
+              position: 'aboveBar',
+              color: '#EF5350',
+              shape: 'arrowDown',
+              text: `S ₹${pt.price ? Number(pt.price).toFixed(0) : ''}`,
+              size: 1,
+            });
+          }
+        });
+        if (markers.length) candleRef.current.setMarkers(markers);
+      }
+    });
+    return () => {
+      // Remove markers when backtest is toggled off
+      if (candleRef.current) candleRef.current.setMarkers([]);
+      if (backtestEquityRef.current && chartRef.current) {
+        chartRef.current.removeSeries(backtestEquityRef.current);
+        backtestEquityRef.current = null;
+      }
+    };
+  }, [showBacktest, selectedSymbol]);
 
   /* ── Comparison Chart Init (Dual Split View) ──────────────── */
 
@@ -1200,6 +1335,7 @@ export default function LiveChartView() {
                   { id: 'patterns', label: 'AI Patterns', icon: Zap },
                   { id: 'mtf', label: 'MTF Corr', icon: Target },
                   { id: 'draw', label: 'Drawings', icon: Layers },
+                  { id: 'backtest', label: 'Backtest', icon: FlaskConical },
                 ].map(tab => {
                   const Icon = tab.icon;
                   return (
@@ -1292,6 +1428,16 @@ export default function LiveChartView() {
                     chartRef={chartRef}
                     symbol={selectedSymbol}
                     interval={interval}
+                  />
+                )}
+
+                {advancedPanelTab === 'backtest' && (
+                  <BacktestOverlayPanel
+                    symbol={selectedSymbol}
+                    showBacktest={showBacktest}
+                    setShowBacktest={setShowBacktest}
+                    backtestData={backtestData}
+                    backtestLoading={backtestLoading}
                   />
                 )}
               </div>
