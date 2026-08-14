@@ -1206,6 +1206,8 @@ export default function LiveChartView() {
               <Move size={12} /> <span style={{fontSize:'0.65rem', fontWeight:600}}>{autoScroll ? 'Auto-Scroll ON' : 'OFF'}</span>
             </button>
           </div>
+        </div>
+
         {/* Right: Multi-Timeframe Candle Intervals */}
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:4 }}>
           {/* Candle Interval Selector (1m, 5m, 15m, 1H, 1D) */}
