@@ -124,6 +124,8 @@ origins = [
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://main.d3qrmvw6hu9g61.amplifyapp.com",
+    "https://stockoracle.duckdns.org",
 ]
 env_origins = os.getenv("ALLOWED_ORIGINS")
 if env_origins:
