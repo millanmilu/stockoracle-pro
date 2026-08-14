@@ -797,8 +797,14 @@ async def get_advanced_screener(
 
     if cached_results is None:
         def _build():
+            screener_universe = [
+                "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL",
+                "TATAMOTORS", "MARUTI", "AXISBANK", "WIPRO", "HCLTECH", "SUNPHARMA", "BAJFINANCE", "KOTAKBANK",
+                "TATASTEEL", "NTPC", "POWERGRID", "ONGC", "COALINDIA", "TITAN", "ULTRACEMCO", "ADANIENT",
+                "JSWSTEEL", "HDFCLIFE", "BPCL", "HEROMOTOCO"
+            ]
             fresh = []
-            for t in popular_tickers:
+            for t in screener_universe:
                 try:
                     info = fetch_company_info(t)
                     if not info:
@@ -816,11 +822,19 @@ async def get_advanced_screener(
                     volume_ratio = None
                     high_52w = None
                     low_52w = None
+                    trend = "NEUTRAL"
 
                     if enriched is not None and len(enriched) > 0:
                         last_row = enriched.iloc[-1]
                         rsi_val = float(last_row.get("rsi", 50)) if "rsi" in last_row else None
                         macd_sig = float(last_row.get("macd_signal", 0)) if "macd_signal" in last_row else None
+
+                        # EMA20 vs SMA50 Trend Crossover
+                        ema_20 = float(last_row.get("ema_20", 0)) if "ema_20" in last_row else 0
+                        sma_50 = float(last_row.get("sma_50", 0)) if "sma_50" in last_row else 0
+                        if ema_20 > 0 and sma_50 > 0:
+                            trend = "BULLISH" if ema_20 >= sma_50 else "BEARISH"
+
                         # Volume ratio: last volume / 20-day avg volume
                         if "volume" in enriched.columns and len(enriched) >= 20:
                             avg_vol = float(enriched["volume"].rolling(20).mean().iloc[-1])
@@ -830,32 +844,41 @@ async def get_advanced_screener(
                             high_52w = float(enriched["close"].rolling(min(252, len(enriched))).max().iloc[-1])
                             low_52w  = float(enriched["close"].rolling(min(252, len(enriched))).min().iloc[-1])
 
-                    # Sector mapping (simplified)
+                    # Expanded Sector Mapping
                     sector_map = {
-                        "RELIANCE": "Energy", "ONGC": "Energy", "IOC": "Energy", "BPCL": "Energy",
-                        "TCS": "IT", "INFY": "IT", "WIPRO": "IT", "HCLTECH": "IT",
-                        "HDFCBANK": "Banking", "ICICIBANK": "Banking", "SBIN": "Banking", "AXISBANK": "Banking",
+                        "RELIANCE": "Energy", "ONGC": "Energy", "IOC": "Energy", "BPCL": "Energy", "NTPC": "Energy", "POWERGRID": "Energy", "COALINDIA": "Energy",
+                        "TCS": "IT", "INFY": "IT", "WIPRO": "IT", "HCLTECH": "IT", "TECHM": "IT",
+                        "HDFCBANK": "Banking", "ICICIBANK": "Banking", "SBIN": "Banking", "AXISBANK": "Banking", "KOTAKBANK": "Banking", "BAJFINANCE": "Banking", "HDFCLIFE": "Banking",
                         "BHARTIARTL": "Telecom",
-                        "ITC": "FMCG", "HUL": "FMCG",
-                        "LT": "Infrastructure",
-                        "MARUTI": "Auto", "TATAMOTORS": "Auto",
-                        "SUNPHARMA": "Pharma", "DRREDDY": "Pharma",
+                        "ITC": "FMCG", "HUL": "FMCG", "NESTLEIND": "FMCG",
+                        "LT": "Infrastructure", "ULTRACEMCO": "Infrastructure", "ADANIENT": "Infrastructure",
+                        "MARUTI": "Auto", "TATAMOTORS": "Auto", "HEROMOTOCO": "Auto", "M&M": "Auto",
+                        "SUNPHARMA": "Pharma", "DRREDDY": "Pharma", "CIPLA": "Pharma",
+                        "TATASTEEL": "Metals", "JSWSTEEL": "Metals", "HINDALCO": "Metals",
+                        "TITAN": "Consumer",
                     }
 
+                    cur_price = info["current_price"]
+                    target_7d = pred.get("predicted_price_7d") or round(cur_price * (1.0 + pred.get("predicted_return_7d", 0.02)), 2)
+                    stop_loss = round(cur_price * 0.96, 2)
+
                     fresh.append({
-                        "ticker":       t,
-                        "name":         info["name"],
-                        "price":        info["current_price"],
-                        "change":       round(change_pct, 3),
-                        "ai_score":     pred["ai_confidence_score"],
-                        "signal":       pred["signal"],
-                        "predicted_pct":round(pred["predicted_return_7d"] * 100, 3),
-                        "rsi":          round(rsi_val, 2) if rsi_val is not None else None,
-                        "macd_signal":  round(macd_sig, 4) if macd_sig is not None else None,
-                        "volume_ratio": volume_ratio,
-                        "high_52w":     round(high_52w, 2) if high_52w else None,
-                        "low_52w":      round(low_52w, 2) if low_52w else None,
-                        "sector":       sector_map.get(t, "Other"),
+                        "ticker":          t,
+                        "name":            info["name"],
+                        "price":           cur_price,
+                        "change":          round(change_pct, 3),
+                        "ai_score":        pred["ai_confidence_score"],
+                        "signal":          pred["signal"],
+                        "predicted_pct":   round(pred["predicted_return_7d"] * 100, 3),
+                        "target_price_7d": round(target_7d, 2),
+                        "stop_loss":       stop_loss,
+                        "trend":           trend,
+                        "rsi":             round(rsi_val, 2) if rsi_val is not None else None,
+                        "macd_signal":     round(macd_sig, 4) if macd_sig is not None else None,
+                        "volume_ratio":    volume_ratio,
+                        "high_52w":        round(high_52w, 2) if high_52w else None,
+                        "low_52w":         round(low_52w, 2) if low_52w else None,
+                        "sector":          sector_map.get(t, "Other"),
                     })
                 except Exception:
                     continue
