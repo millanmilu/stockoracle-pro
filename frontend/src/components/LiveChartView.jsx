@@ -4,7 +4,8 @@ import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
 import { 
   Maximize2, Minimize2, Camera, Bell, Search, 
-  Columns, Square, Eye, EyeOff, Sparkles, TrendingUp
+  Columns, Square, Eye, EyeOff, Sparkles, TrendingUp,
+  ZoomIn, ZoomOut, Move, RotateCcw, Zap, Activity
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -219,15 +220,21 @@ const CHART_OPTIONS = {
     borderColor     : 'rgba(168,85,247,0.10)',
     textColor       : '#6B7280',
     scaleMargins    : { top: 0.08, bottom: 0.28 },
+    autoScale       : true,
+    lockVisibleRange: false,
   },
   timeScale: {
-    borderColor   : 'rgba(168,85,247,0.10)',
-    textColor     : '#6B7280',
-    timeVisible   : true,
-    secondsVisible: false,
+    borderColor     : 'rgba(168,85,247,0.10)',
+    textColor       : '#6B7280',
+    timeVisible     : true,
+    secondsVisible  : false,
+    fixLeftEdge     : false,
+    fixRightEdge    : false,
+    visible         : true,
   },
-  handleScroll : { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
-  handleScale  : { mouseWheel: true, pinch: true },
+  handleScroll : { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+  handleScale  : { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+  kineticScroll: { touch: true, mouse: true },
 };
 
 const CANDLE_STYLE = {
@@ -267,6 +274,10 @@ export default function LiveChartView() {
   const [showBB,       setShowBB]       = useState(false);
   const [showRSI,      setShowRSI]      = useState(false);
   const [showPatterns, setShowPatterns] = useState(true);
+  
+  // Chart Navigation State
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [autoScroll, setAutoScroll] = useState(true);
 
   // Search & Alert State
   const [searchQuery, setSearchQuery] = useState('');
@@ -306,6 +317,50 @@ export default function LiveChartView() {
 
   const handleIntervalChange = useCallback((iv) => {
     setInterval(iv);
+    // Reset zoom when changing interval for smooth transition
+    setTimeout(() => {
+      if (chartRef.current) {
+        chartRef.current.timeScale().fitContent();
+      }
+    }, 100);
+  }, []);
+
+  /* ── Chart Navigation Handlers ─────────────────────────────── */
+
+  const handleZoomIn = useCallback(() => {
+    if (!chartRef.current) return;
+    const visibleRange = chartRef.current.timeScale().getVisibleLogicalRange();
+    if (visibleRange) {
+      const rangeSize = visibleRange.to - visibleRange.from;
+      const newRangeSize = rangeSize * 0.7; // Zoom in by 30%
+      const center = (visibleRange.from + visibleRange.to) / 2;
+      chartRef.current.timeScale().setVisibleLogicalRange({
+        from: center - newRangeSize / 2,
+        to: center + newRangeSize / 2,
+      });
+      setZoomLevel(prev => Math.min(prev + 0.3, 3));
+    }
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    if (!chartRef.current) return;
+    const visibleRange = chartRef.current.timeScale().getVisibleLogicalRange();
+    if (visibleRange) {
+      const rangeSize = visibleRange.to - visibleRange.from;
+      const newRangeSize = rangeSize * 1.4; // Zoom out by 40%
+      const center = (visibleRange.from + visibleRange.to) / 2;
+      chartRef.current.timeScale().setVisibleLogicalRange({
+        from: center - newRangeSize / 2,
+        to: center + newRangeSize / 2,
+      });
+      setZoomLevel(prev => Math.max(prev - 0.3, 0.3));
+    }
+  }, []);
+
+  const handleResetView = useCallback(() => {
+    if (!chartRef.current) return;
+    chartRef.current.timeScale().fitContent();
+    setZoomLevel(1);
   }, []);
 
   /* ── Primary Chart Init ───────────────────────────────────── */
@@ -921,18 +976,42 @@ export default function LiveChartView() {
             </div>
           </div>
 
-          {curPrice != null && (
-            <div style={{ display:'flex', alignItems:'baseline', gap:10, marginTop:5 }}>
-              <span style={{ fontSize:'1.9rem', fontWeight:800, color:'#F0F0FF', fontFamily:'JetBrains Mono, monospace' }}>
-                ₹{curPrice.toLocaleString('en-IN', { minimumFractionDigits:2, maximumFractionDigits:2 })}
-              </span>
-              {liveChange != null && (
-                <span style={{ fontSize:'0.9rem', fontWeight:700, color: changeUp ? '#26A69A' : '#EF5350', fontFamily:'JetBrains Mono, monospace' }}>
-                  {changeUp ? '+' : ''}{liveChange.toFixed(2)}%
-                </span>
-              )}
-            </div>
-          )}
+          {/* Chart Navigation Controls */}
+          <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:8 }}>
+            <button
+              onClick={handleZoomIn}
+              title="Zoom In"
+              className="lc-btn"
+              style={{ padding:'4px 8px', borderRadius:6, border:'1px solid rgba(99,102,241,0.3)', background:'rgba(99,102,241,0.1)', color:'#818CF8', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
+            >
+              <ZoomIn size={12} /> <span style={{fontSize:'0.65rem', fontWeight:600}}>Zoom In</span>
+            </button>
+            <button
+              onClick={handleZoomOut}
+              title="Zoom Out"
+              className="lc-btn"
+              style={{ padding:'4px 8px', borderRadius:6, border:'1px solid rgba(99,102,241,0.3)', background:'rgba(99,102,241,0.1)', color:'#818CF8', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
+            >
+              <ZoomOut size={12} /> <span style={{fontSize:'0.65rem', fontWeight:600}}>Zoom Out</span>
+            </button>
+            <button
+              onClick={handleResetView}
+              title="Reset View"
+              className="lc-btn"
+              style={{ padding:'4px 8px', borderRadius:6, border:'1px solid rgba(168,85,247,0.3)', background:'rgba(168,85,247,0.1)', color:'#C084FC', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
+            >
+              <RotateCcw size={12} /> <span style={{fontSize:'0.65rem', fontWeight:600}}>Reset</span>
+            </button>
+            <div style={{ width:1, height:20, background:'rgba(75,85,99,0.3)', margin:'0 4px' }} />
+            <button
+              onClick={() => setAutoScroll(!autoScroll)}
+              title={autoScroll ? "Disable Auto Scroll" : "Enable Auto Scroll"}
+              className="lc-btn"
+              style={{ padding:'4px 8px', borderRadius:6, border: autoScroll ? '1px solid #26A69A' : '1px solid rgba(75,85,99,0.3)', background: autoScroll ? 'rgba(38,166,154,0.15)' : 'transparent', color: autoScroll ? '#26A69A' : '#6B7280', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
+            >
+              <Move size={12} /> <span style={{fontSize:'0.65rem', fontWeight:600}}>{autoScroll ? 'Auto-Scroll ON' : 'OFF'}</span>
+            </button>
+          </div>
         </div>
 
         {/* Right: Multi-Timeframe Candle Intervals */}
@@ -949,6 +1028,20 @@ export default function LiveChartView() {
         </div>
       </div>
 
+      {/* Price Display Section */}
+      {curPrice != null && (
+        <div style={{ display:'flex', alignItems:'baseline', gap:10, marginTop:5 }}>
+          <span style={{ fontSize:'1.9rem', fontWeight:800, color:'#F0F0FF', fontFamily:'JetBrains Mono, monospace' }}>
+            ₹{curPrice.toLocaleString('en-IN', { minimumFractionDigits:2, maximumFractionDigits:2 })}
+          </span>
+          {liveChange != null && (
+            <span style={{ fontSize:'0.9rem', fontWeight:700, color: changeUp ? '#26A69A' : '#EF5350', fontFamily:'JetBrains Mono, monospace' }}>
+              {changeUp ? '+' : ''}{liveChange.toFixed(2)}%
+            </span>
+          )}
+        </div>
+      )}
+
       {/* ── Main Chart Area (Single or Split Grid) ── */}
       <div style={{ display:'grid', gridTemplateColumns: isSplitView ? '1fr 1fr' : '1fr', gap:16 }}>
         
@@ -960,7 +1053,7 @@ export default function LiveChartView() {
           position:'relative',
         }}>
 
-          {/* Indicators Bar */}
+          {/* Enhanced Indicators Bar with Quick Stats */}
           <div style={{ display:'flex', gap:8, padding:'10px 16px 0', fontSize:'0.71rem', color:'#4B5563', flexWrap:'wrap', alignItems:'center', borderBottom:'1px solid rgba(255,255,255,0.03)', paddingBottom:10 }}>
             <span style={{ fontSize:'0.65rem', color:'#6B7280', fontWeight:700, marginRight:2 }}>INDICATORS:</span>
             
@@ -989,6 +1082,16 @@ export default function LiveChartView() {
             <button onClick={() => setShowPatterns(!showPatterns)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showPatterns ? '1px solid #10B981' : '1px solid rgba(75,85,99,0.3)', background: showPatterns ? 'rgba(16,185,129,0.15)' : 'transparent', color: showPatterns ? '#10B981' : '#6B7280', display:'flex', alignItems:'center', gap:3 }}>
               <Sparkles size={10} /> PATTERNS
             </button>
+
+            {/* Quick Trend Indicator */}
+            {rawHistory && rawHistory.length >= 20 && (
+              <div style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 8px', borderRadius:6, background:'rgba(168,85,247,0.08)', border:'1px solid rgba(168,85,247,0.2)' }}>
+                <Activity size={10} color="#A855F7" />
+                <span style={{ fontSize:'0.65rem', color:'#A855F7', fontWeight:700 }}>
+                  TREND: {Number(rawHistory[rawHistory.length-1]?.close) > Number(rawHistory[rawHistory.length-20]?.close) ? '▲ BULLISH' : '▼ BEARISH'}
+                </span>
+              </div>
+            )}
 
             <div style={{ marginLeft:'auto', display:'flex', gap:10, alignItems:'center' }}>
               <span><span style={{ color:'#26A69A' }}>█</span> Bull</span>
@@ -1069,7 +1172,7 @@ export default function LiveChartView() {
         </div>
       )}
 
-      {/* ── Stats Bar (Daily Only) ── */}
+      {/* ── Enhanced Stats Bar with Volatility & Momentum (Daily Only) ── */}
       {isDaily && (
         <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(138px, 1fr))', gap:10 }}>
           {[
@@ -1080,6 +1183,9 @@ export default function LiveChartView() {
             { label:'AI CONFIDENCE',   value: prediction?.ai_confidence_score != null ? `${prediction.ai_confidence_score}/100` : predLoading ? 'Loading…' : '—', color:scoreColor, delay:'120ms' },
             { label:'95% UPPER',       value:(prediction?.predicted_upper_price_7d??prediction?.high_bound) ? `₹${(prediction.predicted_upper_price_7d??prediction.high_bound).toFixed(2)}` : predLoading?'Loading…':'—', color:'#26A69A', delay:'160ms' },
             { label:'95% LOWER',       value:(prediction?.predicted_lower_price_7d??prediction?.low_bound)  ? `₹${(prediction.predicted_lower_price_7d??prediction.low_bound).toFixed(2)}`  : predLoading?'Loading…':'—', color:'#EF5350', delay:'200ms' },
+            // New: Volatility & Momentum Indicators
+            { label:'VOLATILITY',      value: rawHistory && rawHistory.length > 14 ? (() => { const closes = rawHistory.slice(-15).map(d => Number(d.close)); const changes = closes.map((c,i) => i>0 ? Math.abs(c-closes[i-1])/closes[i-1] : 0); const avgVol = changes.reduce((a,b)=>a+b,0)/changes.length*100; return avgVol.toFixed(2)+'%'; })() : predLoading?'Loading…':'—', color:'#F59E0B', delay:'240ms' },
+            { label:'MOMENTUM',        value: rawHistory && rawHistory.length > 5 ? (() => { const curr = Number(rawHistory[rawHistory.length-1]?.close); const prev = Number(rawHistory[rawHistory.length-6]?.close); const mom = ((curr-prev)/prev)*100; return (mom>=0?'+':'')+mom.toFixed(2)+'%'; })() : predLoading?'Loading…':'—', color: rawHistory && rawHistory.length > 5 ? (Number(rawHistory[rawHistory.length-1]?.close) >= Number(rawHistory[rawHistory.length-6]?.close) ? '#26A69A' : '#EF5350') : '#6B7280', delay:'280ms' },
           ].map(({ label, value, color, delay }) => (
             <div key={label} className="lc-stat" style={{
               background:'rgba(255,255,255,0.022)', border:'1px solid rgba(168,85,247,0.09)',
@@ -1104,7 +1210,7 @@ export default function LiveChartView() {
         </div>
       )}
 
-      {/* ── Confidence Score Bar (Daily Only) ── */}
+      {/* ── Enhanced Confidence Score Bar with Quick Insights (Daily Only) ── */}
       {isDaily && prediction?.ai_confidence_score != null && (
         <div style={{
           background:'rgba(255,255,255,0.018)', border:'1px solid rgba(168,85,247,0.08)',
@@ -1121,8 +1227,30 @@ export default function LiveChartView() {
               borderRadius:99, transition:'width 0.6s ease',
             }} />
           </div>
+          {/* Quick AI Insight */}
+          <div style={{ marginTop:10, display:'flex', alignItems:'center', gap:6, padding:'8px 10px', background:'rgba(168,85,247,0.06)', borderRadius:8, border:'1px solid rgba(168,85,247,0.12)' }}>
+            <Zap size={14} color="#A855F7" />
+            <span style={{ fontSize:'0.72rem', color:'#C084FC', fontWeight:600 }}>
+              {score >= 75 ? '🔥 HIGH CONFIDENCE TRADE SETUP' : score >= 50 ? '⚡ MODERATE OPPORTUNITY' : '⚠️ LOW CONFIDENCE - WAIT FOR SIGNAL'}
+            </span>
+          </div>
         </div>
       )}
+
+      {/* ── Keyboard Shortcuts Hint ── */}
+      <div style={{ 
+        display:'flex', justifyContent:'center', gap:12, 
+        padding:'10px 16px', 
+        background:'rgba(255,255,255,0.01)', 
+        borderRadius:10, 
+        border:'1px solid rgba(75,85,99,0.15)',
+        fontSize:'0.68rem',
+        color:'#4B5563'
+      }}>
+        <span><kbd style={{padding:'2px 6px',background:'rgba(255,255,255,0.05)',borderRadius:4,border:'1px solid rgba(75,85,99,0.3)'}}>Scroll</kbd> Zoom</span>
+        <span><kbd style={{padding:'2px 6px',background:'rgba(255,255,255,0.05)',borderRadius:4,border:'1px solid rgba(75,85,99,0.3)'}}>Drag</kbd> Pan</span>
+        <span><kbd style={{padding:'2px 6px',background:'rgba(255,255,255,0.05)',borderRadius:4,border:'1px solid rgba(75,85,99,0.3)'}}>Hover</kbd> Crosshair</span>
+      </div>
 
     </div>
   );
