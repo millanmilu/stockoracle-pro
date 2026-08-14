@@ -572,28 +572,43 @@ export default function LiveChartView() {
 
       // ── Plot buy/sell markers on main candlestick chart ──
       if (candleRef.current && res.equity_curve?.length) {
-        const markers = [];
-        res.equity_curve.forEach((pt, i) => {
-          if (pt.action === 'BUY') {
-            markers.push({
-              time: pt.date,
-              position: 'belowBar',
-              color: '#10B981',
-              shape: 'arrowUp',
-              text: `B ₹${pt.price ? Number(pt.price).toFixed(0) : ''}`,
-              size: 1,
-            });
-          } else if (pt.action === 'SELL') {
-            markers.push({
-              time: pt.date,
-              position: 'aboveBar',
-              color: '#EF5350',
-              shape: 'arrowDown',
-              text: `S ₹${pt.price ? Number(pt.price).toFixed(0) : ''}`,
-              size: 1,
-            });
+        const MIN_GAP_DAYS = 5; // minimum days between same-type markers
+        const MAX_EACH = 10;    // max 10 buy + 10 sell markers
+
+        const allBuys  = res.equity_curve.filter(p => p.action === 'BUY');
+        const allSells = res.equity_curve.filter(p => p.action === 'SELL');
+
+        // Deduplicate: keep markers at least MIN_GAP_DAYS apart
+        const dedupe = (list) => {
+          const out = [];
+          let lastDate = null;
+          for (const pt of list) {
+            if (!lastDate) { out.push(pt); lastDate = pt.date; continue; }
+            const diff = (new Date(pt.date) - new Date(lastDate)) / 86400000;
+            if (diff >= MIN_GAP_DAYS) { out.push(pt); lastDate = pt.date; }
           }
-        });
+          return out.slice(-MAX_EACH); // keep last N (most recent)
+        };
+
+        const markers = [
+          ...dedupe(allBuys).map(pt => ({
+            time: pt.date,
+            position: 'belowBar',
+            color: '#10B981',
+            shape: 'arrowUp',
+            text: `▲ ₹${Number(pt.price).toFixed(0)}`,
+            size: 1,
+          })),
+          ...dedupe(allSells).map(pt => ({
+            time: pt.date,
+            position: 'aboveBar',
+            color: '#EF5350',
+            shape: 'arrowDown',
+            text: `▼ ₹${Number(pt.price).toFixed(0)}`,
+            size: 1,
+          })),
+        ].sort((a, b) => a.time < b.time ? -1 : 1);
+
         if (markers.length) candleRef.current.setMarkers(markers);
       }
     });
