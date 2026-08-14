@@ -1324,8 +1324,8 @@ export default function LiveChartView() {
               {/* Tab Navigation */}
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(5, 1fr)',
-                gap: 2,
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: 4,
                 padding: 8,
                 borderBottom: '1px solid rgba(255,255,255,0.05)',
               }}>
