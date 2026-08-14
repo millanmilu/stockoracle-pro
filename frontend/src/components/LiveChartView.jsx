@@ -596,6 +596,24 @@ export default function LiveChartView() {
         });
         if (markers.length) candleRef.current.setMarkers(markers);
       }
+
+      // ── Plot equity curve as separate line series ──
+      if (chartRef.current && res.equity_curve?.length && !backtestEquityRef.current) {
+        const equityData = res.equity_curve.map(pt => ({
+          time: pt.date,
+          value: pt.equity || pt.portfolio_value,
+        }));
+        
+        backtestEquityRef.current = chartRef.current.addLineSeries({
+          color: '#8B5CF6',
+          lineWidth: 2,
+          title: 'Strategy Equity',
+          priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+          scaleMargins: { top: 0.1, bottom: 0.1 },
+        });
+        
+        backtestEquityRef.current.setData(equityData);
+      }
     });
     return () => {
       // Remove markers when backtest is toggled off
