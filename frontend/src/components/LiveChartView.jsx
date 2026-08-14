@@ -23,23 +23,6 @@ const INTERVALS = [
   { label: '1D',  value: '1d'  },
 ];
 
-const PERIODS = [
-  { label: '1D', value: '1D' },
-  { label: '5D', value: '5D' },
-  { label: '1W', value: '1W' },
-  { label: '1M', value: '1M' },
-  { label: '3M', value: '3M' },
-  { label: '6M', value: '6M' },
-  { label: '1Y', value: '1Y' },
-  { label: '2Y', value: '2Y' },
-  { label: '5Y', value: '5Y' },
-];
-
-const DEFAULT_INTERVAL = {
-  '1D': '5m', '5D': '15m', '1W': '1h',
-  '1M': '1d', '3M': '1d', '6M': '1d', '1Y': '1d', '2Y': '1d', '5Y': '1d',
-};
-
 const SIG = {
   buy  : { label: '▲ BUY',  color: '#10B981', bg: 'rgba(16,185,129,0.10)', border: 'rgba(16,185,129,0.28)' },
   sell : { label: '▼ SELL', color: '#EF5350', bg: 'rgba(239,83,80,0.10)',  border: 'rgba(239,83,80,0.28)' },
@@ -263,7 +246,6 @@ export default function LiveChartView() {
   const { selectedSymbol, setSelectedSymbol } = useStore();
   const { fetchHistory, fetchPredict, searchStock } = useStock();
 
-  const [period,      setPeriod]      = useState('3M');
   const [interval,    setInterval]    = useState('1d');
   const [rawHistory,  setRawHistory]  = useState(null);
   const [prediction,  setPrediction]  = useState(null);
@@ -320,13 +302,7 @@ export default function LiveChartView() {
   const wsRef          = useRef(null);
   const isDaily = interval === '1d';
 
-  /* ── Period / Interval Handlers ───────────────────────────── */
-
-  const handlePeriodChange = useCallback((p) => {
-    const iv = DEFAULT_INTERVAL[p] || '1d';
-    setPeriod(p);
-    setInterval(iv);
-  }, []);
+  /* ── Interval Handler ─────────────────────────────────────── */
 
   const handleIntervalChange = useCallback((iv) => {
     setInterval(iv);
@@ -466,7 +442,7 @@ export default function LiveChartView() {
     setLivePrice(null);
     setLiveChange(null);
 
-    fetchHistory(selectedSymbol, period, interval).then(hist => {
+    fetchHistory(selectedSymbol, interval).then(hist => {
       setRawHistory(hist);
       setLoading(false);
     });
@@ -480,16 +456,16 @@ export default function LiveChartView() {
       setPrediction(null);
       setPredLoading(false);
     }
-  }, [selectedSymbol, period, interval]);
+  }, [selectedSymbol, interval]);
 
   /* ── Comparison Stock Data Fetch ──────────────────────────── */
 
   useEffect(() => {
     if (!isSplitView) return;
-    fetchHistory(compareSymbol, period, interval).then(hist => {
+    fetchHistory(compareSymbol, interval).then(hist => {
       setRawHistoryCompare(hist);
     });
-  }, [isSplitView, compareSymbol, period, interval]);
+  }, [isSplitView, compareSymbol, interval]);
 
   /* ── WebSocket Feed ───────────────────────────────────────── */
 
@@ -788,7 +764,7 @@ export default function LiveChartView() {
     if (!canvas) return;
     const image = canvas.toDataURL('image/png');
     const link = document.createElement('a');
-    link.download = `StockOracle_${selectedSymbol}_${period}.png`;
+    link.download = `StockOracle_${selectedSymbol}_${interval}.png`;
     link.href = image;
     link.click();
     toast.success('Chart Snapshot Downloaded 📸');
@@ -959,34 +935,17 @@ export default function LiveChartView() {
           )}
         </div>
 
-        {/* Right: Interval + Period Selectors */}
-        <div style={{ marginLeft:'auto', display:'flex', flexDirection:'column', gap:6, alignItems:'flex-end' }}>
-
-          {/* CANDLE Row */}
-          <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-            <span style={{ fontSize:'0.62rem', color:'#374151', letterSpacing:'0.08em', marginRight:4 }}>CANDLE</span>
-            {INTERVALS.map(iv => (
-              <button key={iv.value} className="lc-btn" onClick={() => handleIntervalChange(iv.value)} style={{
-                padding:'4px 11px', borderRadius:6, fontSize:'0.72rem', fontWeight:600, cursor:'pointer',
-                border    : interval === iv.value ? '1px solid rgba(99,102,241,0.6)' : '1px solid rgba(75,85,99,0.2)',
-                background: interval === iv.value ? 'rgba(99,102,241,0.15)'          : 'transparent',
-                color     : interval === iv.value ? '#818CF8'                         : '#4B5563',
-              }}>{iv.label}</button>
-            ))}
-          </div>
-
-          {/* RANGE Row */}
-          <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-            <span style={{ fontSize:'0.62rem', color:'#374151', letterSpacing:'0.08em', marginRight:4 }}>RANGE</span>
-            {PERIODS.map(p => (
-              <button key={p.value} className="lc-btn" onClick={() => handlePeriodChange(p.value)} style={{
-                padding:'4px 11px', borderRadius:6, fontSize:'0.72rem', fontWeight:600, cursor:'pointer',
-                border    : period === p.value ? '1px solid rgba(168,85,247,0.6)' : '1px solid rgba(75,85,99,0.2)',
-                background: period === p.value ? 'rgba(168,85,247,0.13)'          : 'transparent',
-                color     : period === p.value ? '#C084FC'                         : '#4B5563',
-              }}>{p.label}</button>
-            ))}
-          </div>
+        {/* Right: Multi-Timeframe Candle Intervals */}
+        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:4 }}>
+          <span style={{ fontSize:'0.62rem', color:'#374151', letterSpacing:'0.08em', marginRight:4 }}>TIMEFRAME</span>
+          {INTERVALS.map(iv => (
+            <button key={iv.value} className="lc-btn" onClick={() => handleIntervalChange(iv.value)} style={{
+              padding:'4px 11px', borderRadius:6, fontSize:'0.72rem', fontWeight:600, cursor:'pointer',
+              border    : interval === iv.value ? '1px solid rgba(99,102,241,0.6)' : '1px solid rgba(75,85,99,0.2)',
+              background: interval === iv.value ? 'rgba(99,102,241,0.15)'          : 'transparent',
+              color     : interval === iv.value ? '#818CF8'                         : '#4B5563',
+            }}>{iv.label}</button>
+          ))}
         </div>
       </div>
 

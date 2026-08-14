@@ -7,9 +7,9 @@ import { Line } from 'react-chartjs-2'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler)
 
-const TIMEFRAMES = ['1W', '1M', '3M', '6M', '1Y']
+const INTERVALS = ['1m', '5m', '15m', '1h', '1d']
 
-export default function StockChart({ history, prediction, timeframe, onTimeframeChange }) {
+export default function StockChart({ history, prediction, interval, onIntervalChange }) {
   if (!history || history.length === 0) return <div className="spinner" />
 
   const labels = history.map(d => d.date)
@@ -118,13 +118,13 @@ export default function StockChart({ history, prediction, timeframe, onTimeframe
   return (
     <div>
       <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-        {TIMEFRAMES.map(t => (
+        {INTERVALS.map(tf => (
           <button
-            key={t}
-            className={`btn ${timeframe === t ? 'btn-primary' : 'btn-ghost'}`}
+            key={tf}
+            className={`btn ${interval === tf ? 'btn-primary' : 'btn-ghost'}`}
             style={{ padding: '5px 12px', fontSize: '0.78rem' }}
-            onClick={() => onTimeframeChange(t)}
-          >{t}</button>
+            onClick={() => onIntervalChange(tf)}
+          >{tf.toUpperCase()}</button>
         ))}
       </div>
       <div className="chart-wrap" style={{ height: 300 }}>
