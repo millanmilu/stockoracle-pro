@@ -340,6 +340,7 @@ export default function LiveChartView() {
   const { fetchHistory, fetchPredict, searchStock, fetchBacktest } = useStock();
 
   const [interval,    setInterval]    = useState('1d');
+  const [timeframe,   setTimeframe]   = useState('5Y');
   const [rawHistory,  setRawHistory]  = useState(null);
   const [prediction,  setPrediction]  = useState(null);
   const [livePrice,   setLivePrice]   = useState(null);
@@ -680,7 +681,7 @@ export default function LiveChartView() {
     setLivePrice(null);
     setLiveChange(null);
 
-    fetchHistory(selectedSymbol, interval).then(hist => {
+    fetchHistory(selectedSymbol, interval, timeframe).then(hist => {
       setRawHistory(hist);
       setLoading(false);
     });
@@ -694,16 +695,16 @@ export default function LiveChartView() {
       setPrediction(null);
       setPredLoading(false);
     }
-  }, [selectedSymbol, interval]);
+  }, [selectedSymbol, interval, timeframe]);
 
   /* ── Comparison Stock Data Fetch ──────────────────────────── */
 
   useEffect(() => {
     if (!isSplitView) return;
-    fetchHistory(compareSymbol, interval).then(hist => {
+    fetchHistory(compareSymbol, interval, timeframe).then(hist => {
       setRawHistoryCompare(hist);
     });
-  }, [isSplitView, compareSymbol, interval]);
+  }, [isSplitView, compareSymbol, interval, timeframe]);
 
   /* ── WebSocket Feed ───────────────────────────────────────── */
 
@@ -906,7 +907,17 @@ export default function LiveChartView() {
     }
 
     const timer = setTimeout(() => {
-      try { chartRef.current?.timeScale().fitContent(); } catch {}
+      try {
+        if (chartRef.current && dedupedCandles.length > 0) {
+          const total = dedupedCandles.length;
+          // Focus view on recent ~120 candles (full size), panning left reveals full 5-year history
+          const visibleCount = Math.min(total, 120);
+          chartRef.current.timeScale().setVisibleLogicalRange({
+            from: total - visibleCount,
+            to: total + 3,
+          });
+        }
+      } catch {}
     }, 50);
     return () => clearTimeout(timer);
   }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showPatterns]);
@@ -1195,19 +1206,20 @@ export default function LiveChartView() {
               <Move size={12} /> <span style={{fontSize:'0.65rem', fontWeight:600}}>{autoScroll ? 'Auto-Scroll ON' : 'OFF'}</span>
             </button>
           </div>
-        </div>
-
         {/* Right: Multi-Timeframe Candle Intervals */}
         <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:4 }}>
-          <span style={{ fontSize:'0.62rem', color:'#374151', letterSpacing:'0.08em', marginRight:4 }}>TIMEFRAME</span>
-          {INTERVALS.map(iv => (
-            <button key={iv.value} className="lc-btn" onClick={() => handleIntervalChange(iv.value)} style={{
-              padding:'4px 11px', borderRadius:6, fontSize:'0.72rem', fontWeight:600, cursor:'pointer',
-              border    : interval === iv.value ? '1px solid rgba(99,102,241,0.6)' : '1px solid rgba(75,85,99,0.2)',
-              background: interval === iv.value ? 'rgba(99,102,241,0.15)'          : 'transparent',
-              color     : interval === iv.value ? '#818CF8'                         : '#4B5563',
-            }}>{iv.label}</button>
-          ))}
+          {/* Candle Interval Selector (1m, 5m, 15m, 1H, 1D) */}
+          <div style={{ display:'flex', alignItems:'center', gap:3, background:'rgba(255,255,255,0.02)', padding:'2px 4px', borderRadius:8, border:'1px solid rgba(99,102,241,0.15)' }}>
+            <span style={{ fontSize:'0.58rem', color:'#6B7280', letterSpacing:'0.06em', marginRight:2 }}>INTERVAL</span>
+            {INTERVALS.map(iv => (
+              <button key={iv.value} className="lc-btn" onClick={() => handleIntervalChange(iv.value)} style={{
+                padding:'3px 8px', borderRadius:5, fontSize:'0.68rem', fontWeight:700, cursor:'pointer',
+                border    : interval === iv.value ? '1px solid rgba(99,102,241,0.6)' : '1px solid transparent',
+                background: interval === iv.value ? 'rgba(99,102,241,0.15)'          : 'transparent',
+                color     : interval === iv.value ? '#818CF8'                         : '#6B7280',
+              }}>{iv.label}</button>
+            ))}
+          </div>
         </div>
       </div>
 

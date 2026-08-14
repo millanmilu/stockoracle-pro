@@ -180,7 +180,7 @@ def get_stock_info(ticker: str):
     return info
 
 @app.get("/api/stock/{ticker}/history")
-def get_stock_history(ticker: str, timeframe: str = "3M", interval: str = "1d"):
+def get_stock_history(ticker: str, timeframe: str = "5Y", interval: str = "1d"):
     t = ticker.upper().strip()
 
     # Map frontend timeframe label → internal period string

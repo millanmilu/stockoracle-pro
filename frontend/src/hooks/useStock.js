@@ -16,9 +16,9 @@ export function useStock() {
     } finally { setLoading(false); }
   }, []);
 
-  const fetchHistory = useCallback(async (ticker, interval = '1d') => {
+  const fetchHistory = useCallback(async (ticker, interval = '1d', timeframe = '5Y') => {
     try {
-      const { data } = await api.get(`/api/stock/${ticker}/history`, { params: { interval } });
+      const { data } = await api.get(`/api/stock/${ticker}/history`, { params: { interval, timeframe } });
       return Array.isArray(data) ? data : [];
     } catch (e) { return []; }
   }, []);
