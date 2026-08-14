@@ -35,11 +35,11 @@ export default function Dashboard() {
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
-  const [timeframe, setTimeframe] = useState('3M');
+  const [interval, setInterval] = useState('1d');
   const [localLoading, setLocalLoading] = useState(false);
 
-  // Build cache key from selected symbol + timeframe
-  const cacheKey = `${selectedSymbol}_${timeframe}_1d`;
+  // Build cache key from selected symbol + interval
+  const cacheKey = `${selectedSymbol}_${interval}`;
   const history = historyCache[cacheKey] || null;
 
   // Debounced search
@@ -58,11 +58,11 @@ export default function Dashboard() {
   useEffect(() => {
     if (historyCache[cacheKey]) return;   // Already cached
     setLocalLoading(true);
-    fetchHistory(selectedSymbol, timeframe).then(data => {
+    fetchHistory(selectedSymbol, interval).then(data => {
       if (data && data.length > 0) setHistoryCache(cacheKey, data);
       setLocalLoading(false);
     });
-  }, [selectedSymbol, timeframe]);
+  }, [selectedSymbol, interval]);
 
   const selectStock = ticker => {
     setSelectedSymbol(ticker);
@@ -146,7 +146,7 @@ export default function Dashboard() {
         {isLoading
           ? <SkeletonChart />
           : history
-            ? <StockChart history={history} timeframe={timeframe} onTimeframeChange={setTimeframe} />
+            ? <StockChart history={history} interval={interval} onIntervalChange={setInterval} />
             : <div style={{ color: '#888', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>No chart data available.</div>
         }
       </div>

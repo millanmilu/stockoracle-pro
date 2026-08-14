@@ -1,25 +1,78 @@
-# Secrets
-backend/.env
-.env
-.env.*
-!.env.example
-*.pem
-*.key
+```gitignore
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+build/
+target/
 
 # Python
 __pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
+*.pyc
+*.pyo
+*.pyd
+*.py~
+*.py.class
+.Python
+env/
 venv/
+.venv/
+.ENV
+.python-version
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git/modules/
+*.sublime-workspace
+.pytest_cache/
+.hypothesis/
+.coverage*
+.pyup.yml
+.isort.cfg
+.mypy_cache/
+.venv.bak/
 
-# Node / build output
-node_modules/
-frontend/node_modules/
-frontend/dist/
+# Environment variables
+.env
+.env.local
+.env.*
 
-# Local runtime data
-*.db
-*.sqlite
-*.sqlite3
-backend/ml/saved_models/*.pt
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# Temporary folders
+tmp/
+temp/
+```
