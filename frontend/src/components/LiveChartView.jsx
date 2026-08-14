@@ -591,9 +591,10 @@ export default function LiveChartView() {
           return out.slice(-MAX_EACH); // keep last N (most recent)
         };
 
+        const intraday = !isDaily;
         const markers = [
           ...dedupe(allBuys).map(pt => ({
-            time: pt.date,
+            time: toChartTime(pt.date, intraday),
             position: 'belowBar',
             color: '#10B981',
             shape: 'arrowUp',
@@ -601,34 +602,41 @@ export default function LiveChartView() {
             size: 1,
           })),
           ...dedupe(allSells).map(pt => ({
-            time: pt.date,
+            time: toChartTime(pt.date, intraday),
             position: 'aboveBar',
             color: '#EF5350',
             shape: 'arrowDown',
             text: `▼ ₹${Number(pt.price).toFixed(0)}`,
             size: 1,
           })),
-        ].sort((a, b) => a.time < b.time ? -1 : 1);
+        ]
+        .filter(m => m.time != null)
+        .sort((a, b) => (typeof a.time === 'number' ? a.time - b.time : String(a.time).localeCompare(String(b.time))));
 
         if (markers.length) candleRef.current.setMarkers(markers);
       }
 
       // ── Plot equity curve as separate line series ──
       if (chartRef.current && res.equity_curve?.length && !backtestEquityRef.current) {
-        const equityData = res.equity_curve.map(pt => ({
-          time: pt.date,
-          value: pt.equity || pt.portfolio_value,
-        }));
+        const intraday = !isDaily;
+        const equityData = res.equity_curve
+          .map(pt => ({
+            time: toChartTime(pt.date, intraday),
+            value: Number(pt.value ?? pt.equity ?? pt.portfolio_value ?? 0),
+          }))
+          .filter(pt => pt.time != null && !isNaN(pt.value) && pt.value > 0);
         
-        backtestEquityRef.current = chartRef.current.addLineSeries({
-          color: '#8B5CF6',
-          lineWidth: 2,
-          title: 'Strategy Equity',
-          priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
-          scaleMargins: { top: 0.1, bottom: 0.1 },
-        });
-        
-        backtestEquityRef.current.setData(equityData);
+        if (equityData.length) {
+          backtestEquityRef.current = chartRef.current.addLineSeries({
+            color: '#8B5CF6',
+            lineWidth: 2,
+            title: 'Strategy Equity',
+            priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+            scaleMargins: { top: 0.1, bottom: 0.1 },
+          });
+          
+          backtestEquityRef.current.setData(equityData);
+        }
       }
     });
     return () => {
