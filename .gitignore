@@ -1,0 +1,3 @@
+Since the only file change is the addition of `.gitignore` itself and there are no other files listed that would suggest the presence of build artifacts, dependencies, or temporary files, there's no need to add any specific ignore rules.
+
+(empty — output nothing)
