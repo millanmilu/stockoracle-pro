@@ -256,7 +256,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
     days = period_map.get(period.upper(), 120)
 
     # Trigger 5Y backfill if requested and missing from DB
-    if period.upper() == "5Y" and not interval.lower() in ["1m", "5m", "15m", "1h"]:
+    if period.upper() == "5Y" and not interval.lower() in ["1m", "5m", "15m", "30m", "1h", "4h"]:
         backfilled = backfill_5y_history(ticker)
         if backfilled is not None and not backfilled.empty:
             return backfilled
@@ -266,7 +266,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
     fromdate_str = fromdate.strftime("%Y-%m-%d")
     todate_str = todate.strftime("%Y-%m-%d")
 
-    is_intraday = interval.lower() in ["1m", "5m", "15m", "1h"]
+    is_intraday = interval.lower() in ["1m", "5m", "15m", "30m", "1h", "4h"]
 
     # 2. Check SQLite local database (ONLY FOR DAILY INTERVAL '1d')
     db_df = None
@@ -291,7 +291,8 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
 
     interval_map = {
         "1m": "ONE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE",
-        "1h": "ONE_HOUR",   "1d": "ONE_DAY",
+        "30m": "THIRTY_MINUTE", "1h": "ONE_HOUR", "4h": "FOUR_HOUR",
+        "1d": "ONE_DAY", "1w": "ONE_WEEK",
     }
     api_interval = interval_map.get(interval.lower(), "ONE_DAY")
 
@@ -316,7 +317,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
         )
         df = df.astype({"open": float, "high": float, "low": float,
                         "close": float, "volume": int})
-        if interval.lower() in ["1m", "5m", "15m", "1h"]:
+        if interval.lower() in ["1m", "5m", "15m", "30m", "1h", "4h"]:
             df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d %H:%M:%S")
         else:
             df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")

@@ -177,7 +177,7 @@ def get_stock_info(ticker: str):
     return info
 
 @app.get("/api/stock/{ticker}/history")
-def get_stock_history(ticker: str, timeframe: str = "3M", interval: str = "1d"):
+def get_stock_history(ticker: str, timeframe: str = "1D", interval: str = "1d"):
     t = ticker.upper().strip()
 
     # Map frontend timeframe label → internal period string
@@ -200,12 +200,12 @@ def get_stock_history(ticker: str, timeframe: str = "3M", interval: str = "1d"):
         )
 
     # Validate interval
-    valid_intervals = {"1m", "5m", "15m", "1h", "1d"}
+    valid_intervals = {"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"}
     iv = interval.lower()
     if iv not in valid_intervals:
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid interval '{interval}'. Valid: 1m, 5m, 15m, 1h, 1d."
+            detail=f"Invalid interval '{interval}'. Valid: 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w."
         )
 
     df = fetch_stock_data(t, period=period, interval=iv)

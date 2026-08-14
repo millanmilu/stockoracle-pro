@@ -19,21 +19,14 @@ const INTERVALS = [
   { label: '1m',  value: '1m'  },
   { label: '5m',  value: '5m'  },
   { label: '15m', value: '15m' },
+  { label: '30m', value: '30m' },
   { label: '1H',  value: '1h'  },
+  { label: '4H',  value: '4h'  },
   { label: '1D',  value: '1d'  },
+  { label: '1W',  value: '1w'  },
 ];
 
-const PERIODS = [
-  { label: '1D', value: '1D' },
-  { label: '5D', value: '5D' },
-  { label: '1W', value: '1W' },
-  { label: '1M', value: '1M' },
-  { label: '3M', value: '3M' },
-  { label: '6M', value: '6M' },
-  { label: '1Y', value: '1Y' },
-  { label: '2Y', value: '2Y' },
-  { label: '5Y', value: '5Y' },
-];
+const PERIODS = [];
 
 const DEFAULT_INTERVAL = {
   '1D': '5m', '5D': '15m', '1W': '1h',
@@ -263,7 +256,7 @@ export default function LiveChartView() {
   const { selectedSymbol, setSelectedSymbol } = useStore();
   const { fetchHistory, fetchPredict, searchStock } = useStock();
 
-  const [period,      setPeriod]      = useState('3M');
+  const [period,      setPeriod]      = useState('1D');
   const [interval,    setInterval]    = useState('1d');
   const [rawHistory,  setRawHistory]  = useState(null);
   const [prediction,  setPrediction]  = useState(null);
@@ -975,16 +968,16 @@ export default function LiveChartView() {
             ))}
           </div>
 
-          {/* RANGE Row */}
+          {/* CANDLE Timeframe Row */}
           <div style={{ display:'flex', alignItems:'center', gap:4 }}>
-            <span style={{ fontSize:'0.62rem', color:'#374151', letterSpacing:'0.08em', marginRight:4 }}>RANGE</span>
-            {PERIODS.map(p => (
-              <button key={p.value} className="lc-btn" onClick={() => handlePeriodChange(p.value)} style={{
+            <span style={{ fontSize:'0.62rem', color:'#374151', letterSpacing:'0.08em', marginRight:4 }}>CANDLE</span>
+            {INTERVALS.map(iv => (
+              <button key={iv.value} className="lc-btn" onClick={() => handleIntervalChange(iv.value)} style={{
                 padding:'4px 11px', borderRadius:6, fontSize:'0.72rem', fontWeight:600, cursor:'pointer',
-                border    : period === p.value ? '1px solid rgba(168,85,247,0.6)' : '1px solid rgba(75,85,99,0.2)',
-                background: period === p.value ? 'rgba(168,85,247,0.13)'          : 'transparent',
-                color     : period === p.value ? '#C084FC'                         : '#4B5563',
-              }}>{p.label}</button>
+                border    : interval === iv.value ? '1px solid rgba(99,102,241,0.6)' : '1px solid rgba(75,85,99,0.2)',
+                background: interval === iv.value ? 'rgba(99,102,241,0.15)'          : 'transparent',
+                color     : interval === iv.value ? '#818CF8'                         : '#4B5563',
+              }}>{iv.label}</button>
             ))}
           </div>
         </div>
