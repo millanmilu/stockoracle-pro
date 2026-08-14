@@ -6,14 +6,10 @@ import {
   Maximize2, Minimize2, Camera, Bell, Search, 
   Columns, Square, Eye, EyeOff, Sparkles, TrendingUp,
   ZoomIn, ZoomOut, Move, RotateCcw, Zap, Activity,
-  BarChart3, Layers, Target, ChevronRight, ChevronLeft, X
+  BarChart3, Layers, Target, ChevronRight, ChevronLeft, X,
+  MousePointer2, Pencil, Eraser, Save, Download, Upload, Trash2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import DrawingTools from './chart-tools/DrawingTools';
-import VolumeProfile from './chart-tools/VolumeProfile';
-import OrderFlow from './chart-tools/OrderFlow';
-import AIPatternRecognition from './chart-tools/AIPatternRecognition';
-import MultiTimeframeCorrelation from './chart-tools/MultiTimeframeCorrelation';
 
 /* ─── Constants ─────────────────────────────────────────────────────────────── */
 
@@ -285,14 +281,17 @@ export default function LiveChartView() {
   const [zoomLevel, setZoomLevel] = useState(1);
   const [autoScroll, setAutoScroll] = useState(true);
 
-  // Advanced Features State
-  const [showVolumeProfile, setShowVolumeProfile] = useState(false);
-  const [showOrderFlow, setShowOrderFlow] = useState(false);
-  const [showAIPatterns, setShowAIPatterns] = useState(false);
-  const [showMTFCorrelation, setShowMTFCorrelation] = useState(false);
-  const [showDrawings, setShowDrawings] = useState(false);
-  const [showAdvancedPanel, setShowAdvancedPanel] = useState(false);
-  const [advancedPanelTab, setAdvancedPanelTab] = useState('volume');
+  // Drawing Tools State - Integrated with Chart
+  const [activeDrawingTool, setActiveDrawingTool] = useState(null);
+  const [drawings, setDrawings] = useState([]);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [drawingStartPoint, setDrawingStartPoint] = useState(null);
+  
+  // Chart Overlay Panels State
+  const [showVolumeProfileOverlay, setShowVolumeProfileOverlay] = useState(false);
+  const [showOrderFlowOverlay, setShowOrderFlowOverlay] = useState(false);
+  const [showAIPatternsOverlay, setShowAIPatternsOverlay] = useState(false);
+  const [showMTFCorrelationOverlay, setShowMTFCorrelationOverlay] = useState(false);
 
   // Search & Alert State
   const [searchQuery, setSearchQuery] = useState('');
@@ -377,6 +376,83 @@ export default function LiveChartView() {
     chartRef.current.timeScale().fitContent();
     setZoomLevel(1);
   }, []);
+
+  /* ── Drawing Tools Handlers ───────────────────────────────────── */
+
+  const handleToolSelect = useCallback((tool) => {
+    setActiveDrawingTool(activeDrawingTool === tool ? null : tool);
+    setIsDrawing(false);
+    setDrawingStartPoint(null);
+  }, [activeDrawingTool]);
+
+  const handleClearDrawings = useCallback(() => {
+    setDrawings([]);
+    const key = `chart_drawings_${selectedSymbol}_${interval}`;
+    localStorage.removeItem(key);
+    toast.success('All drawings cleared');
+  }, [selectedSymbol, interval]);
+
+  const handleSaveDrawings = useCallback(() => {
+    const key = `chart_drawings_${selectedSymbol}_${interval}`;
+    localStorage.setItem(key, JSON.stringify(drawings));
+    toast.success('Drawings saved locally');
+  }, [drawings, selectedSymbol, interval]);
+
+  const handleExportDrawings = useCallback(() => {
+    const dataStr = JSON.stringify(drawings, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `drawings_${selectedSymbol}_${interval}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success('Drawings exported');
+  }, [drawings, selectedSymbol, interval]);
+
+  const handleImportDrawings = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const imported = JSON.parse(e.target.result);
+        if (Array.isArray(imported)) {
+          setDrawings(imported);
+          const key = `chart_drawings_${selectedSymbol}_${interval}`;
+          localStorage.setItem(key, JSON.stringify(imported));
+          toast.success('Drawings imported successfully');
+        }
+      } catch (err) {
+        console.error('Failed to import drawings:', err);
+        toast.error('Invalid drawings file');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleDeleteDrawing = useCallback((id) => {
+    const newDrawings = drawings.filter(d => d.id !== id);
+    setDrawings(newDrawings);
+    const key = `chart_drawings_${selectedSymbol}_${interval}`;
+    localStorage.setItem(key, JSON.stringify(newDrawings));
+  }, [drawings, selectedSymbol, interval]);
+
+  // Load saved drawings on mount or symbol/interval change
+  useEffect(() => {
+    const key = `chart_drawings_${selectedSymbol}_${interval}`;
+    const saved = localStorage.getItem(key);
+    if (saved) {
+      try {
+        setDrawings(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to load drawings:', e);
+      }
+    } else {
+      setDrawings([]);
+    }
+  }, [selectedSymbol, interval]);
 
   /* ── Primary Chart Init ───────────────────────────────────── */
 
@@ -1026,6 +1102,76 @@ export default function LiveChartView() {
             >
               <Move size={12} /> <span style={{fontSize:'0.65rem', fontWeight:600}}>{autoScroll ? 'Auto-Scroll ON' : 'OFF'}</span>
             </button>
+            
+            {/* Drawing Tools - Integrated Toolbar */}
+            <div style={{ width:1, height:20, background:'rgba(75,85,99,0.3)', margin:'0 4px' }} />
+            <span style={{ fontSize:'0.62rem', color:'#374151', letterSpacing:'0.08em', marginRight:4 }}>DRAW:</span>
+            {[
+              { id: 'trendline', icon: TrendingUp, label: 'Trend' },
+              { id: 'horizontal', icon: MoveDown, label: 'H-Line' },
+              { id: 'rectangle', icon: Square, label: 'Rect' },
+              { id: 'circle', icon: Target, label: 'Circle' },
+              { id: 'text', icon: Pencil, label: 'Text' },
+            ].map(tool => {
+              const Icon = tool.icon;
+              const isActive = activeDrawingTool === tool.id;
+              return (
+                <button
+                  key={tool.id}
+                  onClick={() => handleToolSelect(tool.id)}
+                  title={tool.label}
+                  className="lc-btn"
+                  style={{ 
+                    padding:'4px 6px', 
+                    borderRadius:6, 
+                    border: isActive ? '1px solid #A855F7' : '1px solid rgba(75,85,99,0.2)', 
+                    background: isActive ? 'rgba(168,85,247,0.15)' : 'transparent', 
+                    color: isActive ? '#C084FC' : '#4B5563', 
+                    cursor:'pointer', 
+                    display:'flex', 
+                    alignItems:'center', 
+                    gap:3 
+                  }}
+                >
+                  <Icon size={11} />
+                </button>
+              );
+            })}
+            
+            {/* Drawing Actions */}
+            <div style={{ width:1, height:20, background:'rgba(75,85,99,0.3)', margin:'0 4px' }} />
+            <button
+              onClick={handleClearDrawings}
+              title="Clear All Drawings"
+              className="lc-btn"
+              style={{ padding:'4px 6px', borderRadius:6, border:'1px solid rgba(239,83,80,0.3)', background:'rgba(239,83,80,0.1)', color:'#EF5350', cursor:'pointer', display:'flex', alignItems:'center', gap:3 }}
+            >
+              <Trash2 size={11} />
+            </button>
+            <button
+              onClick={handleSaveDrawings}
+              title="Save Drawings"
+              className="lc-btn"
+              style={{ padding:'4px 6px', borderRadius:6, border:'1px solid rgba(168,85,247,0.3)', background:'rgba(168,85,247,0.1)', color:'#C084FC', cursor:'pointer', display:'flex', alignItems:'center', gap:3 }}
+            >
+              <Save size={11} />
+            </button>
+            <button
+              onClick={handleExportDrawings}
+              title="Export Drawings"
+              className="lc-btn"
+              disabled={drawings.length === 0}
+              style={{ padding:'4px 6px', borderRadius:6, border:'1px solid rgba(38,166,154,0.3)', background: drawings.length > 0 ? 'rgba(38,166,154,0.1)' : 'rgba(75,85,99,0.1)', color: drawings.length > 0 ? '#26A69A' : '#4B5563', cursor: drawings.length > 0 ? 'pointer' : 'not-allowed', display:'flex', alignItems:'center', gap:3 }}
+            >
+              <Download size={11} />
+            </button>
+            <label
+              title="Import Drawings"
+              style={{ padding:'4px 6px', borderRadius:6, border:'1px solid rgba(59,130,246,0.3)', background:'rgba(59,130,246,0.1)', color:'#60A5FA', cursor:'pointer', display:'flex', alignItems:'center', gap:3 }}
+            >
+              <Upload size={11} />
+              <input type="file" accept=".json" onChange={handleImportDrawings} style={{ display: 'none' }} />
+            </label>
           </div>
         </div>
 
@@ -1093,24 +1239,61 @@ export default function LiveChartView() {
               RSI 14 {showRSI ? <Eye size={10} style={{ display:'inline', marginLeft:3 }} /> : <EyeOff size={10} style={{ display:'inline', marginLeft:3 }} />}
             </button>
 
-            {/* AI Pattern Markers Toggle */}
-            <button onClick={() => setShowPatterns(!showPatterns)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showPatterns ? '1px solid #10B981' : '1px solid rgba(75,85,99,0.3)', background: showPatterns ? 'rgba(16,185,129,0.15)' : 'transparent', color: showPatterns ? '#10B981' : '#6B7280', display:'flex', alignItems:'center', gap:3 }}>
-              <Sparkles size={10} /> PATTERNS
-            </button>
-
-            {/* Advanced Tools Button */}
-            <button 
-              onClick={() => { setShowAdvancedPanel(!showAdvancedPanel); if (!showAdvancedPanel) setAdvancedPanelTab('volume'); }}
-              style={{ 
-                padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', 
-                border: showAdvancedPanel ? '1px solid #A855F7' : '1px solid rgba(75,85,99,0.3)', 
-                background: showAdvancedPanel ? 'rgba(168,85,247,0.15)' : 'transparent', 
-                color: showAdvancedPanel ? '#C084FC' : '#6B7280', 
-                display:'flex', alignItems:'center', gap:3 
-              }}
-            >
-              <Layers size={10} /> ADVANCED TOOLS
-            </button>
+            {/* Advanced Analysis Overlays */}
+            <div style={{ display:'flex', gap:4, marginLeft:'auto' }}>
+              <button 
+                onClick={() => setShowVolumeProfileOverlay(!showVolumeProfileOverlay)}
+                title="Volume Profile Overlay"
+                style={{ 
+                  padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', 
+                  border: showVolumeProfileOverlay ? '1px solid #26A69A' : '1px solid rgba(75,85,99,0.3)', 
+                  background: showVolumeProfileOverlay ? 'rgba(38,166,154,0.15)' : 'transparent', 
+                  color: showVolumeProfileOverlay ? '#26A69A' : '#6B7280', 
+                  display:'flex', alignItems:'center', gap:3 
+                }}
+              >
+                <BarChart3 size={10} /> VOL PROFILE
+              </button>
+              <button 
+                onClick={() => setShowOrderFlowOverlay(!showOrderFlowOverlay)}
+                title="Order Flow Overlay"
+                style={{ 
+                  padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', 
+                  border: showOrderFlowOverlay ? '1px solid #3B82F6' : '1px solid rgba(75,85,99,0.3)', 
+                  background: showOrderFlowOverlay ? 'rgba(59,130,246,0.15)' : 'transparent', 
+                  color: showOrderFlowOverlay ? '#3B82F6' : '#6B7280', 
+                  display:'flex', alignItems:'center', gap:3 
+                }}
+              >
+                <Activity size={10} /> ORDER FLOW
+              </button>
+              <button 
+                onClick={() => setShowAIPatternsOverlay(!showAIPatternsOverlay)}
+                title="AI Pattern Recognition"
+                style={{ 
+                  padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', 
+                  border: showAIPatternsOverlay ? '1px solid #F59E0B' : '1px solid rgba(75,85,99,0.3)', 
+                  background: showAIPatternsOverlay ? 'rgba(245,158,11,0.15)' : 'transparent', 
+                  color: showAIPatternsOverlay ? '#F59E0B' : '#6B7280', 
+                  display:'flex', alignItems:'center', gap:3 
+                }}
+              >
+                <Zap size={10} /> AI PATTERNS
+              </button>
+              <button 
+                onClick={() => setShowMTFCorrelationOverlay(!showMTFCorrelationOverlay)}
+                title="Multi-Timeframe Correlation"
+                style={{ 
+                  padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', 
+                  border: showMTFCorrelationOverlay ? '1px solid #EC4899' : '1px solid rgba(75,85,99,0.3)', 
+                  background: showMTFCorrelationOverlay ? 'rgba(236,72,153,0.15)' : 'transparent', 
+                  color: showMTFCorrelationOverlay ? '#EC4899' : '#6B7280', 
+                  display:'flex', alignItems:'center', gap:3 
+                }}
+              >
+                <Target size={10} /> MTF CORR
+              </button>
+            </div>
 
             {/* Quick Trend Indicator */}
             {rawHistory && rawHistory.length >= 20 && (
@@ -1140,161 +1323,257 @@ export default function LiveChartView() {
 
           <div ref={containerRef} style={{ width:'100%', height:520 }} />
           
-          {/* Advanced Tools Panel - Slide-in Sidebar */}
-          {showAdvancedPanel && (
+          {/* Chart Overlays - Integrated Display Panels */}
+          {showVolumeProfileOverlay && rawHistory && (
             <div style={{
               position: 'absolute',
-              top: 60,
-              right: 16,
-              width: 340,
-              maxHeight: 'calc(100% - 120px)',
-              background: 'rgba(9,12,24,0.98)',
-              border: '1px solid rgba(168,85,247,0.2)',
-              borderRadius: 12,
-              zIndex: 50,
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              bottom: 80,
+              left: 16,
+              width: 280,
+              background: 'rgba(9,12,24,0.95)',
+              border: '1px solid rgba(38,166,154,0.3)',
+              borderRadius: 10,
+              zIndex: 40,
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
             }}>
-              {/* Panel Header */}
               <div style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                padding: '10px 12px',
-                borderBottom: '1px solid rgba(168,85,247,0.2)',
-                background: 'rgba(168,85,247,0.05)',
+                padding: '8px 10px',
+                borderBottom: '1px solid rgba(38,166,154,0.2)',
+                background: 'rgba(38,166,154,0.05)',
               }}>
-                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#A855F7', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Layers size={12} />
-                  ADVANCED CHART TOOLS
-                </div>
-                <button
-                  onClick={() => setShowAdvancedPanel(false)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#6B7280',
-                    cursor: 'pointer',
-                    padding: 4,
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
-                >
-                  <X size={14} />
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#26A69A', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <BarChart3 size={11} /> VOLUME PROFILE
+                </span>
+                <button onClick={() => setShowVolumeProfileOverlay(false)} style={{ background: 'none', border: 'none', color: '#6B7280', cursor: 'pointer', padding: 2 }}>
+                  <X size={12} />
                 </button>
               </div>
-              
-              {/* Tab Navigation */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(5, 1fr)',
-                gap: 2,
-                padding: 8,
-                borderBottom: '1px solid rgba(255,255,255,0.05)',
-              }}>
-                {[
-                  { id: 'volume', label: 'Vol Profile', icon: BarChart3 },
-                  { id: 'order', label: 'Order Flow', icon: Activity },
-                  { id: 'patterns', label: 'AI Patterns', icon: Zap },
-                  { id: 'mtf', label: 'MTF Corr', icon: Target },
-                  { id: 'draw', label: 'Drawings', icon: Layers },
-                ].map(tab => {
-                  const Icon = tab.icon;
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => setAdvancedPanelTab(tab.id)}
-                      style={{
-                        padding: '6px 4px',
-                        borderRadius: 6,
-                        border: advancedPanelTab === tab.id ? '1px solid #A855F7' : '1px solid rgba(75,85,99,0.3)',
-                        background: advancedPanelTab === tab.id ? 'rgba(168,85,247,0.15)' : 'transparent',
-                        color: advancedPanelTab === tab.id ? '#C084FC' : '#6B7280',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: 3,
-                        fontSize: '0.55rem',
-                        fontWeight: 600,
-                      }}
-                    >
-                      <Icon size={12} />
-                      <span style={{ fontSize: '0.52rem' }}>{tab.label}</span>
-                    </button>
-                  );
-                })}
+              <div style={{ padding: 8 }}>
+                <VolumeProfile 
+                  candles={rawHistory.map(d => ({
+                    time: d.date,
+                    open: Number(d.open),
+                    high: Number(d.high),
+                    low: Number(d.low),
+                    close: Number(d.close),
+                    volume: Number(d.volume) || 0,
+                  }))}
+                  height={200}
+                />
               </div>
-              
-              {/* Panel Content */}
+            </div>
+          )}
+          
+          {showOrderFlowOverlay && rawHistory && (
+            <div style={{
+              position: 'absolute',
+              bottom: 80,
+              left: 310,
+              width: 280,
+              background: 'rgba(9,12,24,0.95)',
+              border: '1px solid rgba(59,130,246,0.3)',
+              borderRadius: 10,
+              zIndex: 40,
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+            }}>
               <div style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: 10,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '8px 10px',
+                borderBottom: '1px solid rgba(59,130,246,0.2)',
+                background: 'rgba(59,130,246,0.05)',
               }}>
-                {advancedPanelTab === 'volume' && rawHistory && (
-                  <VolumeProfile 
-                    candles={rawHistory.map(d => ({
-                      time: d.date,
-                      open: Number(d.open),
-                      high: Number(d.high),
-                      low: Number(d.low),
-                      close: Number(d.close),
-                      volume: Number(d.volume) || 0,
-                    }))}
-                    height={280}
-                  />
-                )}
-                
-                {advancedPanelTab === 'order' && rawHistory && (
-                  <OrderFlow 
-                    candles={rawHistory.map(d => ({
-                      time: d.date,
-                      open: Number(d.open),
-                      high: Number(d.high),
-                      low: Number(d.low),
-                      close: Number(d.close),
-                      volume: Number(d.volume) || 0,
-                    }))}
-                  />
-                )}
-                
-                {advancedPanelTab === 'patterns' && rawHistory && (
-                  <AIPatternRecognition 
-                    candles={rawHistory.map(d => ({
-                      time: d.date,
-                      open: Number(d.open),
-                      high: Number(d.high),
-                      low: Number(d.low),
-                      close: Number(d.close),
-                    }))}
-                    symbol={selectedSymbol}
-                  />
-                )}
-                
-                {advancedPanelTab === 'mtf' && rawHistory && (
-                  <MultiTimeframeCorrelation 
-                    candles={rawHistory.map(d => ({
-                      time: d.date,
-                      open: Number(d.open),
-                      high: Number(d.high),
-                      low: Number(d.low),
-                      close: Number(d.close),
-                    }))}
-                    symbol={selectedSymbol}
-                  />
-                )}
-                
-                {advancedPanelTab === 'draw' && (
-                  <DrawingTools 
-                    chartRef={chartRef}
-                    symbol={selectedSymbol}
-                    interval={interval}
-                  />
-                )}
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#3B82F6', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Activity size={11} /> ORDER FLOW
+                </span>
+                <button onClick={() => setShowOrderFlowOverlay(false)} style={{ background: 'none', border: 'none', color: '#6B7280', cursor: 'pointer', padding: 2 }}>
+                  <X size={12} />
+                </button>
               </div>
+              <div style={{ padding: 8 }}>
+                <OrderFlow 
+                  candles={rawHistory.map(d => ({
+                    time: d.date,
+                    open: Number(d.open),
+                    high: Number(d.high),
+                    low: Number(d.low),
+                    close: Number(d.close),
+                    volume: Number(d.volume) || 0,
+                  }))}
+                />
+              </div>
+            </div>
+          )}
+          
+          {showAIPatternsOverlay && rawHistory && (
+            <div style={{
+              position: 'absolute',
+              top: 80,
+              left: 16,
+              width: 300,
+              maxHeight: 350,
+              background: 'rgba(9,12,24,0.95)',
+              border: '1px solid rgba(245,158,11,0.3)',
+              borderRadius: 10,
+              zIndex: 40,
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+              overflowY: 'auto',
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '8px 10px',
+                borderBottom: '1px solid rgba(245,158,11,0.2)',
+                background: 'rgba(245,158,11,0.05)',
+              }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#F59E0B', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Zap size={11} /> AI PATTERN RECOGNITION
+                </span>
+                <button onClick={() => setShowAIPatternsOverlay(false)} style={{ background: 'none', border: 'none', color: '#6B7280', cursor: 'pointer', padding: 2 }}>
+                  <X size={12} />
+                </button>
+              </div>
+              <div style={{ padding: 8 }}>
+                <AIPatternRecognition 
+                  candles={rawHistory.map(d => ({
+                    time: d.date,
+                    open: Number(d.open),
+                    high: Number(d.high),
+                    low: Number(d.low),
+                    close: Number(d.close),
+                  }))}
+                  symbol={selectedSymbol}
+                />
+              </div>
+            </div>
+          )}
+          
+          {showMTFCorrelationOverlay && rawHistory && (
+            <div style={{
+              position: 'absolute',
+              top: 80,
+              right: 16,
+              width: 320,
+              maxHeight: 400,
+              background: 'rgba(9,12,24,0.95)',
+              border: '1px solid rgba(236,72,153,0.3)',
+              borderRadius: 10,
+              zIndex: 40,
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+              overflowY: 'auto',
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '8px 10px',
+                borderBottom: '1px solid rgba(236,72,153,0.2)',
+                background: 'rgba(236,72,153,0.05)',
+              }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#EC4899', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Target size={11} /> MULTI-TIMEFRAME CORRELATION
+                </span>
+                <button onClick={() => setShowMTFCorrelationOverlay(false)} style={{ background: 'none', border: 'none', color: '#6B7280', cursor: 'pointer', padding: 2 }}>
+                  <X size={12} />
+                </button>
+              </div>
+              <div style={{ padding: 8 }}>
+                <MultiTimeframeCorrelation 
+                  candles={rawHistory.map(d => ({
+                    time: d.date,
+                    open: Number(d.open),
+                    high: Number(d.high),
+                    low: Number(d.low),
+                    close: Number(d.close),
+                  }))}
+                  symbol={selectedSymbol}
+                />
+              </div>
+            </div>
+          )}
+          
+          {/* Drawing Status Indicator */}
+          {activeDrawingTool && (
+            <div style={{
+              position: 'absolute',
+              bottom: 16,
+              right: 16,
+              padding: '8px 12px',
+              borderRadius: 8,
+              background: 'rgba(168,85,247,0.15)',
+              border: '1px solid rgba(168,85,247,0.3)',
+              color: '#C084FC',
+              fontSize: '0.7rem',
+              fontWeight: 600,
+              zIndex: 45,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              boxShadow: '0 2px 12px rgba(0,0,0,0.2)',
+            }}>
+              <MousePointer2 size={12} />
+              Drawing: {activeDrawingTool.toUpperCase()} - Click & drag on chart
+              <button onClick={() => setActiveDrawingTool(null)} style={{ background: 'none', border: 'none', color: '#C084FC', cursor: 'pointer', padding: 0, marginLeft: 8 }}>
+                <X size={12} />
+              </button>
+            </div>
+          )}
+          
+          {/* Saved Drawings List */}
+          {drawings.length > 0 && !activeDrawingTool && (
+            <div style={{
+              position: 'absolute',
+              bottom: 16,
+              right: 16,
+              width: 200,
+              maxHeight: 150,
+              overflowY: 'auto',
+              background: 'rgba(9,12,24,0.9)',
+              border: '1px solid rgba(168,85,247,0.2)',
+              borderRadius: 8,
+              zIndex: 45,
+              padding: 8,
+            }}>
+              <div style={{ fontSize: '0.6rem', color: '#A855F7', fontWeight: 700, marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>SAVED DRAWINGS ({drawings.length})</span>
+                <button onClick={() => setDrawings([])} style={{ background: 'none', border: 'none', color: '#EF5350', cursor: 'pointer', padding: 0 }}>
+                  <Trash2 size={10} />
+                </button>
+              </div>
+              {drawings.slice(-5).reverse().map((d, idx) => (
+                <div
+                  key={d.id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '3px 4px',
+                    borderRadius: 3,
+                    background: 'rgba(255,255,255,0.02)',
+                    marginBottom: 2,
+                    fontSize: '0.58rem',
+                  }}
+                >
+                  <span style={{ color: '#9CA3AF' }}>{idx + 1}. {d.tool}</span>
+                  <button
+                    onClick={() => handleDeleteDrawing(d.id)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#EF5350',
+                      cursor: 'pointer',
+                      padding: 1,
+                    }}
+                  >
+                    <Trash2 size={8} />
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </div>
