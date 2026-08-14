@@ -5,9 +5,15 @@ import { useStock } from '../hooks/useStock';
 import { 
   Maximize2, Minimize2, Camera, Bell, Search, 
   Columns, Square, Eye, EyeOff, Sparkles, TrendingUp,
-  ZoomIn, ZoomOut, Move, RotateCcw, Zap, Activity
+  ZoomIn, ZoomOut, Move, RotateCcw, Zap, Activity,
+  BarChart3, Layers, Target, ChevronRight, ChevronLeft, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import DrawingTools from './chart-tools/DrawingTools';
+import VolumeProfile from './chart-tools/VolumeProfile';
+import OrderFlow from './chart-tools/OrderFlow';
+import AIPatternRecognition from './chart-tools/AIPatternRecognition';
+import MultiTimeframeCorrelation from './chart-tools/MultiTimeframeCorrelation';
 
 /* ─── Constants ─────────────────────────────────────────────────────────────── */
 
@@ -278,6 +284,15 @@ export default function LiveChartView() {
   // Chart Navigation State
   const [zoomLevel, setZoomLevel] = useState(1);
   const [autoScroll, setAutoScroll] = useState(true);
+
+  // Advanced Features State
+  const [showVolumeProfile, setShowVolumeProfile] = useState(false);
+  const [showOrderFlow, setShowOrderFlow] = useState(false);
+  const [showAIPatterns, setShowAIPatterns] = useState(false);
+  const [showMTFCorrelation, setShowMTFCorrelation] = useState(false);
+  const [showDrawings, setShowDrawings] = useState(false);
+  const [showAdvancedPanel, setShowAdvancedPanel] = useState(false);
+  const [advancedPanelTab, setAdvancedPanelTab] = useState('volume');
 
   // Search & Alert State
   const [searchQuery, setSearchQuery] = useState('');
@@ -1083,6 +1098,20 @@ export default function LiveChartView() {
               <Sparkles size={10} /> PATTERNS
             </button>
 
+            {/* Advanced Tools Button */}
+            <button 
+              onClick={() => { setShowAdvancedPanel(!showAdvancedPanel); if (!showAdvancedPanel) setAdvancedPanelTab('volume'); }}
+              style={{ 
+                padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', 
+                border: showAdvancedPanel ? '1px solid #A855F7' : '1px solid rgba(75,85,99,0.3)', 
+                background: showAdvancedPanel ? 'rgba(168,85,247,0.15)' : 'transparent', 
+                color: showAdvancedPanel ? '#C084FC' : '#6B7280', 
+                display:'flex', alignItems:'center', gap:3 
+              }}
+            >
+              <Layers size={10} /> ADVANCED TOOLS
+            </button>
+
             {/* Quick Trend Indicator */}
             {rawHistory && rawHistory.length >= 20 && (
               <div style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 8px', borderRadius:6, background:'rgba(168,85,247,0.08)', border:'1px solid rgba(168,85,247,0.2)' }}>
@@ -1110,6 +1139,164 @@ export default function LiveChartView() {
           )}
 
           <div ref={containerRef} style={{ width:'100%', height:520 }} />
+          
+          {/* Advanced Tools Panel - Slide-in Sidebar */}
+          {showAdvancedPanel && (
+            <div style={{
+              position: 'absolute',
+              top: 60,
+              right: 16,
+              width: 340,
+              maxHeight: 'calc(100% - 120px)',
+              background: 'rgba(9,12,24,0.98)',
+              border: '1px solid rgba(168,85,247,0.2)',
+              borderRadius: 12,
+              zIndex: 50,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+            }}>
+              {/* Panel Header */}
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '10px 12px',
+                borderBottom: '1px solid rgba(168,85,247,0.2)',
+                background: 'rgba(168,85,247,0.05)',
+              }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#A855F7', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Layers size={12} />
+                  ADVANCED CHART TOOLS
+                </div>
+                <button
+                  onClick={() => setShowAdvancedPanel(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: '#6B7280',
+                    cursor: 'pointer',
+                    padding: 4,
+                    display: 'flex',
+                    alignItems: 'center',
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              
+              {/* Tab Navigation */}
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(5, 1fr)',
+                gap: 2,
+                padding: 8,
+                borderBottom: '1px solid rgba(255,255,255,0.05)',
+              }}>
+                {[
+                  { id: 'volume', label: 'Vol Profile', icon: BarChart3 },
+                  { id: 'order', label: 'Order Flow', icon: Activity },
+                  { id: 'patterns', label: 'AI Patterns', icon: Zap },
+                  { id: 'mtf', label: 'MTF Corr', icon: Target },
+                  { id: 'draw', label: 'Drawings', icon: Layers },
+                ].map(tab => {
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setAdvancedPanelTab(tab.id)}
+                      style={{
+                        padding: '6px 4px',
+                        borderRadius: 6,
+                        border: advancedPanelTab === tab.id ? '1px solid #A855F7' : '1px solid rgba(75,85,99,0.3)',
+                        background: advancedPanelTab === tab.id ? 'rgba(168,85,247,0.15)' : 'transparent',
+                        color: advancedPanelTab === tab.id ? '#C084FC' : '#6B7280',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        gap: 3,
+                        fontSize: '0.55rem',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <Icon size={12} />
+                      <span style={{ fontSize: '0.52rem' }}>{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              
+              {/* Panel Content */}
+              <div style={{
+                flex: 1,
+                overflowY: 'auto',
+                padding: 10,
+              }}>
+                {advancedPanelTab === 'volume' && rawHistory && (
+                  <VolumeProfile 
+                    candles={rawHistory.map(d => ({
+                      time: d.date,
+                      open: Number(d.open),
+                      high: Number(d.high),
+                      low: Number(d.low),
+                      close: Number(d.close),
+                      volume: Number(d.volume) || 0,
+                    }))}
+                    height={280}
+                  />
+                )}
+                
+                {advancedPanelTab === 'order' && rawHistory && (
+                  <OrderFlow 
+                    candles={rawHistory.map(d => ({
+                      time: d.date,
+                      open: Number(d.open),
+                      high: Number(d.high),
+                      low: Number(d.low),
+                      close: Number(d.close),
+                      volume: Number(d.volume) || 0,
+                    }))}
+                  />
+                )}
+                
+                {advancedPanelTab === 'patterns' && rawHistory && (
+                  <AIPatternRecognition 
+                    candles={rawHistory.map(d => ({
+                      time: d.date,
+                      open: Number(d.open),
+                      high: Number(d.high),
+                      low: Number(d.low),
+                      close: Number(d.close),
+                    }))}
+                    symbol={selectedSymbol}
+                  />
+                )}
+                
+                {advancedPanelTab === 'mtf' && rawHistory && (
+                  <MultiTimeframeCorrelation 
+                    candles={rawHistory.map(d => ({
+                      time: d.date,
+                      open: Number(d.open),
+                      high: Number(d.high),
+                      low: Number(d.low),
+                      close: Number(d.close),
+                    }))}
+                    symbol={selectedSymbol}
+                  />
+                )}
+                
+                {advancedPanelTab === 'draw' && (
+                  <DrawingTools 
+                    chartRef={chartRef}
+                    symbol={selectedSymbol}
+                    interval={interval}
+                  />
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Chart 2 Container (Shown only when Split View is Active) */}
