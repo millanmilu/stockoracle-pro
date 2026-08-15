@@ -727,7 +727,7 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
             width: 'calc(100% - 44px)',
             height: '100%',
             zIndex: activeTool !== 'crosshair' ? 30 : 5,
-            pointerEvents: activeTool !== 'crosshair' || selectedDrawingId ? 'all' : 'none',
+            pointerEvents: activeTool !== 'crosshair' ? 'all' : 'none',
             cursor: activeTool === 'crosshair' ? 'default' : 'crosshair',
           }}
         >

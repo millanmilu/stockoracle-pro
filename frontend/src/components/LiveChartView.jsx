@@ -911,7 +911,10 @@ export default function LiveChartView() {
     candles.forEach(c => seen.set(c.time, c));
     const dedupedCandles = Array.from(seen.values());
 
-    try { candleRef.current.setData(dedupedCandles); } catch (e) {}
+    try { 
+      candleRef.current.setData(dedupedCandles); 
+      chartRef.current?.timeScale().fitContent();
+    } catch (e) {}
 
     // Pattern Badges Overlay
     if (showPatterns) {
