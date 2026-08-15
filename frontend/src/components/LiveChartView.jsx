@@ -1232,61 +1232,6 @@ export default function LiveChartView() {
           )}
         </div>
 
-        {/* Center: Quick Trade Widget (BUY @ ₹... | QTY 1 | SELL @ ₹...) */}
-        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <button
-            onClick={() => toast.success(`Simulated BUY Order for ${selectedSymbol} @ ₹${curPrice?.toFixed(2)}`)}
-            style={{
-              padding:'6px 14px',
-              borderRadius:6,
-              border:'none',
-              background:'#10B981',
-              color:'#fff',
-              fontWeight:800,
-              fontSize:'0.75rem',
-              cursor:'pointer',
-              boxShadow:'0 2px 8px rgba(16,185,129,0.3)',
-            }}
-          >
-            BUY @ ₹{curPrice?.toFixed(2)}
-          </button>
-
-          <input
-            type="number"
-            defaultValue={1}
-            min={1}
-            style={{
-              width:42,
-              padding:'5px',
-              textAlign:'center',
-              background:'#0A0D1A',
-              border:'1px solid #1E2538',
-              borderRadius:6,
-              color:'#F0F0FF',
-              fontSize:'0.75rem',
-              fontWeight:700,
-              outline:'none',
-            }}
-          />
-
-          <button
-            onClick={() => toast.success(`Simulated SELL Order for ${selectedSymbol} @ ₹${curPrice?.toFixed(2)}`)}
-            style={{
-              padding:'6px 14px',
-              borderRadius:6,
-              border:'none',
-              background:'#EF5350',
-              color:'#fff',
-              fontWeight:800,
-              fontSize:'0.75rem',
-              cursor:'pointer',
-              boxShadow:'0 2px 8px rgba(239,83,80,0.3)',
-            }}
-          >
-            SELL @ ₹{curPrice?.toFixed(2)}
-          </button>
-        </div>
-
         {/* Right: Interval Buttons & Scalper Mode */}
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           {/* Timeframe Interval Buttons */}
