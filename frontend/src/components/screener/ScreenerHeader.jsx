@@ -1,10 +1,28 @@
 import React from 'react';
 
 /**
- * Screener Header with Actions
- * @param {{ onExportCsv: () => void, onRefresh: () => void, loading: boolean }} props
+ * Screener Header with View Switcher, Live Auto-Scan Toggle, and Actions
+ * @param {{
+ *   onExportCsv: () => void,
+ *   onRefresh: () => void,
+ *   loading: boolean,
+ *   viewMode: 'table' | 'cards' | 'sectors',
+ *   setViewMode: (mode: 'table' | 'cards' | 'sectors') => void,
+ *   autoRefresh: boolean,
+ *   setAutoRefresh: React.Dispatch<React.SetStateAction<boolean>>,
+ *   autoRefreshTimer: number
+ * }} props
  */
-export default function ScreenerHeader({ onExportCsv, onRefresh, loading }) {
+export default function ScreenerHeader({
+  onExportCsv,
+  onRefresh,
+  loading,
+  viewMode,
+  setViewMode,
+  autoRefresh,
+  setAutoRefresh,
+  autoRefreshTimer
+}) {
   return (
     <div className="screener-header">
       <div>
@@ -12,10 +30,51 @@ export default function ScreenerHeader({ onExportCsv, onRefresh, loading }) {
           <span>⚡</span> Advanced AI Stock Screener
         </h2>
         <p className="screener-subtitle">
-          Real-time scanning across 30+ large-cap stocks for RSI divergences, volume surges, breakout trends & AI targets
+          Scanning 30+ large-cap stocks for RSI divergences, volume breakouts, 52W extremes & predictive AI targets
         </p>
       </div>
+
       <div className="screener-actions">
+        {/* View Mode Toggle */}
+        <div className="screener-view-toggle">
+          <button
+            type="button"
+            className={`screener-view-btn ${viewMode === 'table' ? 'active' : ''}`}
+            onClick={() => setViewMode('table')}
+            title="Table View"
+          >
+            📊 Table
+          </button>
+          <button
+            type="button"
+            className={`screener-view-btn ${viewMode === 'cards' ? 'active' : ''}`}
+            onClick={() => setViewMode('cards')}
+            title="Card Grid View"
+          >
+            🎴 Cards
+          </button>
+          <button
+            type="button"
+            className={`screener-view-btn ${viewMode === 'sectors' ? 'active' : ''}`}
+            onClick={() => setViewMode('sectors')}
+            title="Sector Sentiment Map"
+          >
+            🌡️ Sectors
+          </button>
+        </div>
+
+        {/* Live Auto-Refresh Switch */}
+        <button
+          type="button"
+          className={`screener-btn ${autoRefresh ? 'screener-btn-auto-active' : 'screener-btn-refresh'}`}
+          onClick={() => setAutoRefresh((prev) => !prev)}
+          title="Toggle Auto-Scan (every 30s)"
+        >
+          <span>{autoRefresh ? '🟢' : '⚪'}</span>
+          {autoRefresh ? `Auto-Scan (${autoRefreshTimer}s)` : 'Live Auto-Scan'}
+        </button>
+
+        {/* Manual Refresh */}
         <button
           type="button"
           className="screener-btn screener-btn-refresh"
@@ -28,6 +87,8 @@ export default function ScreenerHeader({ onExportCsv, onRefresh, loading }) {
           </span>
           {loading ? 'Scanning...' : 'Refresh'}
         </button>
+
+        {/* Export CSV */}
         <button
           type="button"
           className="screener-btn screener-btn-export"

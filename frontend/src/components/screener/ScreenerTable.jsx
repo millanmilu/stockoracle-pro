@@ -37,14 +37,17 @@ export default function ScreenerTable({ rows, loading, sortBy, sortDir, onSort, 
             <th>Signal</th>
             <SortHeader field="predicted_pct" label="7D Return" sortBy={sortBy} sortDir={sortDir} onClick={onSort} />
             <th>7D Target / Stop</th>
+            <th>Risk / Reward</th>
             <SortHeader field="rsi" label="RSI" sortBy={sortBy} sortDir={sortDir} onClick={onSort} />
             <SortHeader field="volume_ratio" label="Vol Ratio" sortBy={sortBy} sortDir={sortDir} onClick={onSort} />
+            <th>52W Range</th>
+            <th>Action</th>
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
-              <td colSpan={12}>
+              <td colSpan={15}>
                 <div className="empty-state">
                   <div className="empty-state-icon">📭</div>
                   <div className="empty-state-text">No stocks match your active filter criteria</div>

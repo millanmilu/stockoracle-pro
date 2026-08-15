@@ -42,6 +42,40 @@
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+/* View Switcher */
+.screener-view-toggle {
+  display: inline-flex;
+  background: #0C1022;
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 2px;
+}
+
+.screener-view-btn {
+  background: transparent;
+  border: none;
+  color: #9CA3AF;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.screener-view-btn:hover {
+  color: #E2E8F0;
+}
+
+.screener-view-btn.active {
+  background: linear-gradient(135deg, #6366F1, #8B5CF6);
+  color: #FFFFFF;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(99, 102, 241, 0.3);
 }
 
 .screener-btn {
@@ -49,8 +83,8 @@
   align-items: center;
   gap: 6px;
   border-radius: 10px;
-  padding: 8px 16px;
-  font-size: 0.8rem;
+  padding: 8px 14px;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -75,6 +109,13 @@
 .screener-btn-refresh:hover {
   background: rgba(99, 102, 241, 0.22);
   border-color: #6366F1;
+}
+
+.screener-btn-auto-active {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: #10B981;
+  color: #34D399;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.25);
 }
 
 /* KPI Metrics Cards */
@@ -331,6 +372,78 @@
 .screener-table tr:hover td {
   background: rgba(99, 102, 241, 0.06);
   cursor: pointer;
+}
+
+.screener-row-action-btn {
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.screener-row-action-btn:hover {
+  background: rgba(99, 102, 241, 0.3);
+  transform: scale(1.1);
+}
+
+/* Card Grid View */
+.screener-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.screener-stock-card {
+  background: linear-gradient(135deg, #0C1022, #10142a);
+  border: 1px solid rgba(99, 102, 241, 0.18);
+  border-radius: 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.screener-stock-card:hover {
+  transform: translateY(-3px);
+  border-color: #818CF8;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Sector Panel */
+.screener-sector-panel {
+  background: linear-gradient(135deg, #0C1022, #10142a);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 16px;
+  padding: 18px 20px;
+}
+
+.screener-sector-chips-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.screener-sector-item {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.screener-sector-item:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(168, 85, 247, 0.3);
+}
+
+.screener-sector-item.active {
+  border-color: #A855F7;
+  background: rgba(168, 85, 247, 0.15);
+  box-shadow: 0 0 12px rgba(168, 85, 247, 0.25);
 }
 
 /* Badges & Indicators */

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 import useStore from '../store/useStore';
@@ -14,6 +14,8 @@ import ScreenerKpiCards from './screener/ScreenerKpiCards';
 import ScreenerPresets from './screener/ScreenerPresets';
 import ScreenerFilters from './screener/ScreenerFilters';
 import ScreenerTable from './screener/ScreenerTable';
+import ScreenerCardGrid from './screener/ScreenerCardGrid';
+import ScreenerSectorChart from './screener/ScreenerSectorChart';
 import ScreenerPagination from './screener/ScreenerPagination';
 import './screener/Screener.css';
 
@@ -25,6 +27,14 @@ export default function AdvancedScreener() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // View Mode: 'table' | 'cards' | 'sectors'
+  const [viewMode, setViewMode] = useState('table');
+
+  // Auto Refresh State (every 30s)
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefreshTimer, setAutoRefreshTimer] = useState(30);
+  const timerRef = useRef(null);
 
   // Filter States
   const [preset, setPreset] = useState(DEFAULT_FILTERS.preset);
@@ -43,8 +53,8 @@ export default function AdvancedScreener() {
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   // Fetch screener data from API
-  const fetchData = useCallback(() => {
-    setLoading(true);
+  const fetchData = useCallback((isBackground = false) => {
+    if (!isBackground) setLoading(true);
     setError(null);
     const params = new URLSearchParams({
       ...(sector !== 'All' && { sector }),
@@ -62,19 +72,43 @@ export default function AdvancedScreener() {
     api.get(`/api/screener/advanced?${params}`)
       .then((r) => {
         setRows(Array.isArray(r.data) ? r.data : []);
-        setPage(1);
       })
       .catch((err) => {
         const msg = err.response?.data?.detail || 'Failed to load screener data.';
         setError(msg);
-        toast.error(msg);
+        if (!isBackground) toast.error(msg);
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!isBackground) setLoading(false);
+      });
   }, [sector, signal, minRsi, maxRsi, volumeSpike, near52High, near52Low, minScore, sortBy, sortDir]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Live Auto-Refresh polling interval
+  useEffect(() => {
+    if (!autoRefresh) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      setAutoRefreshTimer(30);
+      return;
+    }
+
+    timerRef.current = setInterval(() => {
+      setAutoRefreshTimer((prev) => {
+        if (prev <= 1) {
+          fetchData(true);
+          return 30;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [autoRefresh, fetchData]);
 
   // Preset Selection Handler
   const handleSelectPreset = useCallback((presetId) => {
@@ -152,9 +186,9 @@ export default function AdvancedScreener() {
       toast.error('No rows to export');
       return;
     }
-    const header = 'Ticker,Name,Sector,Price,Change%,Trend,AI Score,Signal,Target 7D,Stop Loss,RSI,Volume Ratio\n';
+    const header = 'Ticker,Name,Sector,Price,Change%,Trend,AI Score,Signal,Target 7D,Stop Loss,RSI,Volume Ratio,52W High,52W Low\n';
     const lines = rows.map((r) =>
-      `"${r.ticker || ''}","${r.name || ''}","${r.sector || ''}",${r.price || 0},${r.change || 0},"${r.trend || ''}",${r.ai_score || 0},"${r.signal || ''}",${r.target_price_7d || ''},${r.stop_loss || ''},${r.rsi ?? ''},${r.volume_ratio ?? ''}`
+      `"${r.ticker || ''}","${r.name || ''}","${r.sector || ''}",${r.price || 0},${r.change || 0},"${r.trend || ''}",${r.ai_score || 0},"${r.signal || ''}",${r.target_price_7d || ''},${r.stop_loss || ''},${r.rsi ?? ''},${r.volume_ratio ?? ''},${r.high_52w ?? ''},${r.low_52w ?? ''}`
     ).join('\n');
 
     const blob = new Blob([header + lines], { type: 'text/csv;charset=utf-8;' });
@@ -197,15 +231,29 @@ export default function AdvancedScreener() {
 
   return (
     <div className="screener-container">
-      {/* Header with Export & Refresh */}
+      {/* Header with View Switcher, Auto-Scan & Actions */}
       <ScreenerHeader
         onExportCsv={handleExportCsv}
-        onRefresh={fetchData}
+        onRefresh={() => fetchData(false)}
         loading={loading}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+        autoRefresh={autoRefresh}
+        setAutoRefresh={setAutoRefresh}
+        autoRefreshTimer={autoRefreshTimer}
       />
 
       {/* KPI Cards Bar */}
       <ScreenerKpiCards stats={stats} />
+
+      {/* Sector Distribution Panel (When selected or visible) */}
+      {viewMode === 'sectors' && (
+        <ScreenerSectorChart
+          rows={rows}
+          selectedSector={sector}
+          onSelectSector={setSector}
+        />
+      )}
 
       {/* 1-Click Presets */}
       <ScreenerPresets
@@ -244,27 +292,46 @@ export default function AdvancedScreener() {
         </div>
       )}
 
-      {/* Pagination Controls (Top & Bottom for convenience) */}
-      <ScreenerPagination
-        totalItems={filteredRows.length}
-        page={page}
-        setPage={setPage}
-        pageSize={pageSize}
-        setPageSize={setPageSize}
-      />
+      {/* Pagination Controls Top */}
+      {viewMode !== 'sectors' && (
+        <ScreenerPagination
+          totalItems={filteredRows.length}
+          page={page}
+          setPage={setPage}
+          pageSize={pageSize}
+          setPageSize={setPageSize}
+        />
+      )}
 
-      {/* Data Table */}
-      <ScreenerTable
-        rows={paginatedRows}
-        loading={loading}
-        sortBy={sortBy}
-        sortDir={sortDir}
-        onSort={handleSort}
-        onSelect={handleSelectStock}
-      />
+      {/* Main View: Table vs Card Grid vs Sector Chart */}
+      {viewMode === 'table' ? (
+        <ScreenerTable
+          rows={paginatedRows}
+          loading={loading}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSort={handleSort}
+          onSelect={handleSelectStock}
+        />
+      ) : viewMode === 'cards' ? (
+        <ScreenerCardGrid
+          rows={paginatedRows}
+          loading={loading}
+          onSelect={handleSelectStock}
+        />
+      ) : (
+        <ScreenerTable
+          rows={paginatedRows}
+          loading={loading}
+          sortBy={sortBy}
+          sortDir={sortDir}
+          onSort={handleSort}
+          onSelect={handleSelectStock}
+        />
+      )}
 
       {/* Bottom Pagination */}
-      {filteredRows.length > pageSize && (
+      {filteredRows.length > pageSize && viewMode !== 'sectors' && (
         <ScreenerPagination
           totalItems={filteredRows.length}
           page={page}

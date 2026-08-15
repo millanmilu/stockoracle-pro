@@ -2,10 +2,11 @@ import React, { memo } from 'react';
 import { THRESHOLDS } from '../../constants/screenerConfig';
 import RsiBar from './RsiBar';
 import VolumeChip from './VolumeChip';
+import FiftyTwoWeekBar from './FiftyTwoWeekBar';
+import RiskRewardBadge from './RiskRewardBadge';
 
 /**
- * Individual Stock Table Row Component (Memoized for high render performance)
- * @param {{ row: Object, onSelect: (ticker: string) => void }} props
+ * Enhanced Table Row Component with 52W Bar, Risk/Reward Ratio, and Action Icons
  */
 function ScreenerTableRowComponent({ row, onSelect }) {
   const changeUp = (row.change ?? 0) >= 0;
@@ -36,7 +37,7 @@ function ScreenerTableRowComponent({ row, onSelect }) {
       <td>
         <span className="screener-ticker">{row.ticker}</span>
       </td>
-      <td style={{ color: '#9CA3AF', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <td style={{ color: '#9CA3AF', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {row.name || '—'}
       </td>
       <td>
@@ -85,10 +86,29 @@ function ScreenerTableRowComponent({ row, onSelect }) {
         <div style={{ color: '#F43F5E', fontSize: '0.68rem' }}>🛡️ ₹{row.stop_loss || '—'}</div>
       </td>
       <td>
+        <RiskRewardBadge price={row.price} target={row.target_price_7d} stopLoss={row.stop_loss} />
+      </td>
+      <td>
         <RsiBar rsi={row.rsi} />
       </td>
       <td>
         <VolumeChip ratio={row.volume_ratio} />
+      </td>
+      <td>
+        <FiftyTwoWeekBar price={row.price} low52w={row.low_52w} high52w={row.high_52w} />
+      </td>
+      <td>
+        <button
+          type="button"
+          className="screener-row-action-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect(row.ticker);
+          }}
+          title="Open in Chart View"
+        >
+          📈
+        </button>
       </td>
     </tr>
   );
