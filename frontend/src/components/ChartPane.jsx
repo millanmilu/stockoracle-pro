@@ -118,12 +118,13 @@ export default function ChartPane({
   const [livePrice, setLivePrice] = useState(null);
 
   // Indicators state
-  const [showSMA, setShowSMA] = useState(true);
+  const [showSMA, setShowSMA] = useState(false);
   const [showEMA, setShowEMA] = useState(false);
   const [showBB, setShowBB] = useState(false);
-  const [showVolume, setShowVolume] = useState(true);
+  const [showVolume, setShowVolume] = useState(false);
   const [showAICone, setShowAICone] = useState(true);
   const [showSymbolPicker, setShowSymbolPicker] = useState(false);
+  const [paneSearchQuery, setPaneSearchQuery] = useState('');
 
   const isDaily = interval === '1d';
 
@@ -438,39 +439,77 @@ export default function ChartPane({
               {symbol} ▾
             </button>
 
-            {/* Quick Symbol Dropdown */}
+            {/* Quick Symbol Dropdown with Search */}
             {showSymbolPicker && (
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                marginTop: 4,
-                width: 140,
-                backgroundColor: '#0F172A',
-                border: '1px solid rgba(99, 102, 241, 0.3)',
-                borderRadius: 6,
-                zIndex: 100,
-                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6)',
-              }}>
-                {POPULAR_PANE_SYMBOLS.map((s) => (
-                  <div
-                    key={s}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onSymbolChange(paneId, s);
+              <div 
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  marginTop: 4,
+                  width: 170,
+                  backgroundColor: '#0F172A',
+                  border: '1px solid rgba(99, 102, 241, 0.35)',
+                  borderRadius: 6,
+                  zIndex: 100,
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.7)',
+                  padding: 6,
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  type="text"
+                  placeholder="Search ticker..."
+                  value={paneSearchQuery}
+                  onChange={(e) => setPaneSearchQuery(e.target.value)}
+                  autoFocus
+                  style={{
+                    width: '100%',
+                    padding: '4px 6px',
+                    borderRadius: 4,
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: '#090C18',
+                    color: '#fff',
+                    fontSize: '0.72rem',
+                    outline: 'none',
+                    marginBottom: 6,
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && paneSearchQuery.trim()) {
+                      onSymbolChange(paneId, paneSearchQuery.trim().toUpperCase());
                       setShowSymbolPicker(false);
-                    }}
-                    style={{
-                      padding: '6px 10px',
-                      fontSize: '0.75rem',
-                      color: s === symbol ? '#6366F1' : '#E2E8F0',
-                      cursor: 'pointer',
-                      borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-                    }}
-                  >
-                    {s}
-                  </div>
-                ))}
+                      setPaneSearchQuery('');
+                    }
+                  }}
+                />
+                <div style={{ maxHeight: 150, overflowY: 'auto' }}>
+                  {POPULAR_PANE_SYMBOLS
+                    .filter((s) => !paneSearchQuery || s.toLowerCase().includes(paneSearchQuery.toLowerCase()))
+                    .map((s) => (
+                      <div
+                        key={s}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSymbolChange(paneId, s);
+                          setShowSymbolPicker(false);
+                          setPaneSearchQuery('');
+                        }}
+                        style={{
+                          padding: '5px 8px',
+                          fontSize: '0.73rem',
+                          fontWeight: 600,
+                          color: s === symbol ? '#6366F1' : '#E2E8F0',
+                          backgroundColor: s === symbol ? 'rgba(99,102,241,0.15)' : 'transparent',
+                          cursor: 'pointer',
+                          borderRadius: 3,
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.1)'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = s === symbol ? 'rgba(99,102,241,0.15)' : 'transparent'}
+                      >
+                        {s}
+                      </div>
+                    ))}
+                </div>
               </div>
             )}
           </div>

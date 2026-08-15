@@ -5,7 +5,7 @@ import { useStock } from '../hooks/useStock';
 import { 
   Maximize2, Minimize2, Camera, Bell, Search, 
   Columns, Rows, Grid2X2, Square, Eye, EyeOff, Sparkles, TrendingUp,
-  ZoomIn, ZoomOut, Move, RotateCcw, Zap, Activity,
+  ZoomIn, ZoomOut, Move, RotateCcw, Zap, Activity, Check,
   BarChart3, Layers, Target, ChevronRight, ChevronLeft, X, FlaskConical
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -347,7 +347,7 @@ function BacktestOverlayPanel({ symbol, showBacktest, setShowBacktest, backtestD
 
 export default function LiveChartView() {
   const { selectedSymbol, setSelectedSymbol } = useStore();
-  const { fetchHistory, fetchPredict, searchStock, fetchBacktest } = useStock();
+  const { fetchHistory, fetchPredict, searchStock, searchStocks, fetchBacktest } = useStock();
 
   const [interval,    setInterval]    = useState('1d');
   const [timeframe,   setTimeframe]   = useState('5Y');
@@ -363,19 +363,23 @@ export default function LiveChartView() {
   const [chartLayout, setChartLayout] = useState('1x1');
   const [showSymbolModal, setShowSymbolModal] = useState(false);
   const [symbolModalFilter, setSymbolModalFilter] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Split View & Comparison State
   const [isSplitView, setIsSplitView] = useState(false);
   const [compareSymbol, setCompareSymbol] = useState('NIFTY50');
   const [rawHistoryCompare, setRawHistoryCompare] = useState(null);
 
-  // Indicator Toggles
-  const [showVolume,   setShowVolume]   = useState(true);
+  // Indicator Toggles (Volume and Pattern Recognition OFF by default as requested)
+  const [showIndicatorDropdown, setShowIndicatorDropdown] = useState(false);
+  const [showVolume,   setShowVolume]   = useState(false);
   const [showSMA,      setShowSMA]      = useState(false);
   const [showEMA,      setShowEMA]      = useState(false);
   const [showBB,       setShowBB]       = useState(false);
   const [showRSI,      setShowRSI]      = useState(false);
-  const [showPatterns, setShowPatterns] = useState(true);
+  const [showPatterns, setShowPatterns] = useState(false);
+  const [showAICone,   setShowAICone]   = useState(true);
   
   // Chart Navigation State
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -397,11 +401,30 @@ export default function LiveChartView() {
   const backtestEquityRef = useRef(null);
 
   // Search & Alert State
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isSearching, setIsSearching] = useState(false);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [targetAlertPrice, setTargetAlertPrice] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Real-time Autocomplete Ticker Suggestions
+  useEffect(() => {
+    if (!symbolModalFilter.trim()) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+    setIsSearching(true);
+    const timer = setTimeout(async () => {
+      try {
+        const results = await searchStocks(symbolModalFilter.trim());
+        setSearchResults(Array.isArray(results) ? results : []);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [symbolModalFilter, searchStocks]);
 
   // Chart 1 Refs
   const cardContainerRef = useRef(null);
@@ -1164,10 +1187,13 @@ export default function LiveChartView() {
       }}>
         {/* Left: Symbol Selector · Interval · Exchange + Live OHLC Readout */}
         <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-          {/* Symbol Selector Dropdown (TradingView Style) */}
+          {/* Symbol Selector Dropdown (TradingView Style with Realtime Suggestions) */}
           <div style={{ position: 'relative' }}>
             <button
-              onClick={() => setShowSymbolModal(!showSymbolModal)}
+              onClick={() => {
+                setShowSymbolModal(!showSymbolModal);
+                setShowIndicatorDropdown(false);
+              }}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1188,75 +1214,152 @@ export default function LiveChartView() {
               <span style={{ fontSize: '0.68rem', color: '#94A3B8' }}>▾</span>
             </button>
 
-            {/* Quick Symbol Dropdown */}
+            {/* Quick Symbol & Autocomplete Dropdown */}
             {showSymbolModal && (
               <div
                 style={{
                   position: 'absolute',
                   top: 'calc(100% + 6px)',
                   left: 0,
-                  width: 240,
+                  width: 320,
                   backgroundColor: '#0F172A',
-                  border: '1px solid rgba(99, 102, 241, 0.35)',
-                  borderRadius: 8,
-                  padding: 8,
-                  zIndex: 200,
-                  boxShadow: '0 12px 30px rgba(0,0,0,0.7)',
+                  border: '1px solid rgba(99, 102, 241, 0.4)',
+                  borderRadius: 10,
+                  padding: 10,
+                  zIndex: 300,
+                  boxShadow: '0 16px 36px rgba(0,0,0,0.85)',
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <input
-                  type="text"
-                  placeholder="Search Ticker (e.g. INFY)..."
-                  value={symbolModalFilter}
-                  onChange={(e) => setSymbolModalFilter(e.target.value)}
-                  autoFocus
-                  style={{
-                    width: '100%',
-                    padding: '6px 10px',
-                    borderRadius: 5,
-                    border: '1px solid rgba(255,255,255,0.1)',
-                    background: '#090C18',
-                    color: '#fff',
-                    fontSize: '0.78rem',
-                    outline: 'none',
-                    marginBottom: 8,
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && symbolModalFilter.trim()) {
-                      setSelectedSymbol(symbolModalFilter.trim().toUpperCase());
-                      setShowSymbolModal(false);
-                      setSymbolModalFilter('');
-                    }
-                  }}
-                />
-                <div style={{ maxHeight: 200, overflowY: 'auto' }}>
-                  {POPULAR_STOCKS
-                    .filter((s) => !symbolModalFilter || s.toLowerCase().includes(symbolModalFilter.toLowerCase()))
-                    .map((sym) => (
+                <div style={{ position: 'relative', marginBottom: 8 }}>
+                  <Search size={13} style={{ position: 'absolute', left: 10, top: 10, color: '#64748B' }} />
+                  <input
+                    type="text"
+                    placeholder="Search any NSE stock (e.g. TATA, INFY)..."
+                    value={symbolModalFilter}
+                    onChange={(e) => setSymbolModalFilter(e.target.value)}
+                    autoFocus
+                    style={{
+                      width: '100%',
+                      padding: '7px 10px 7px 30px',
+                      borderRadius: 6,
+                      border: '1px solid rgba(99,102,241,0.25)',
+                      background: '#090C18',
+                      color: '#fff',
+                      fontSize: '0.78rem',
+                      outline: 'none',
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        if (searchResults.length > 0) {
+                          setSelectedSymbol(searchResults[0].ticker.toUpperCase());
+                          setShowSymbolModal(false);
+                          setSymbolModalFilter('');
+                        } else if (symbolModalFilter.trim()) {
+                          setSelectedSymbol(symbolModalFilter.trim().toUpperCase());
+                          setShowSymbolModal(false);
+                          setSymbolModalFilter('');
+                        }
+                      }
+                    }}
+                  />
+                  {symbolModalFilter && (
+                    <button
+                      onClick={() => setSymbolModalFilter('')}
+                      style={{
+                        position: 'absolute', right: 8, top: 7,
+                        background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer'
+                      }}
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Search Results / Suggestions List */}
+                <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                  {isSearching && (
+                    <div style={{ padding: '8px 12px', fontSize: '0.72rem', color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div className="spinner" style={{ width: 12, height: 12 }} /> Searching NSE Universe...
+                    </div>
+                  )}
+
+                  {/* If user typed a search query, show live server search suggestions */}
+                  {symbolModalFilter.trim() && searchResults.length > 0 && (
+                    searchResults.map((item) => (
                       <div
-                        key={sym}
+                        key={item.ticker}
                         onClick={() => {
-                          setSelectedSymbol(sym);
+                          setSelectedSymbol(item.ticker.toUpperCase());
                           setShowSymbolModal(false);
                           setSymbolModalFilter('');
                         }}
                         style={{
-                          padding: '6px 8px',
-                          borderRadius: 4,
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          color: selectedSymbol === sym ? '#60A5FA' : '#E2E8F0',
-                          backgroundColor: selectedSymbol === sym ? 'rgba(59,130,246,0.2)' : 'transparent',
+                          padding: '8px 10px',
+                          borderRadius: 6,
+                          fontSize: '0.76rem',
                           cursor: 'pointer',
                           display: 'flex',
+                          alignItems: 'center',
                           justifyContent: 'space-between',
+                          borderBottom: '1px solid rgba(255,255,255,0.04)',
+                          backgroundColor: selectedSymbol === item.ticker ? 'rgba(59,130,246,0.18)' : 'transparent',
                         }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(59,130,246,0.14)'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === item.ticker ? 'rgba(59,130,246,0.18)' : 'transparent'}
                       >
-                        <span>{sym}</span>
-                        <span style={{ fontSize: '0.65rem', color: '#64748B' }}>NSE</span>
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontWeight: 800, color: '#60A5FA', fontFamily: 'JetBrains Mono, monospace' }}>
+                            {item.ticker}
+                          </span>
+                          <span style={{ fontSize: '0.68rem', color: '#94A3B8', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.name}
+                          </span>
+                        </div>
+                        <span style={{ fontSize: '0.62rem', padding: '2px 6px', borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.06)', color: '#64748B' }}>
+                          {item.exchange || 'NSE'}
+                        </span>
                       </div>
-                    ))}
+                    ))
+                  )}
+
+                  {/* Fallback to popular stocks list when search query is empty or no server results */}
+                  {(!symbolModalFilter.trim() || (searchResults.length === 0 && !isSearching)) && (
+                    <div>
+                      <div style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, padding: '4px 8px', letterSpacing: '0.05em' }}>
+                        POPULAR NSE TICKERS
+                      </div>
+                      {POPULAR_STOCKS
+                        .filter((s) => !symbolModalFilter || s.toLowerCase().includes(symbolModalFilter.toLowerCase()))
+                        .map((sym) => (
+                          <div
+                            key={sym}
+                            onClick={() => {
+                              setSelectedSymbol(sym);
+                              setShowSymbolModal(false);
+                              setSymbolModalFilter('');
+                            }}
+                            style={{
+                              padding: '7px 10px',
+                              borderRadius: 4,
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              color: selectedSymbol === sym ? '#60A5FA' : '#E2E8F0',
+                              backgroundColor: selectedSymbol === sym ? 'rgba(59,130,246,0.2)' : 'transparent',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(59,130,246,0.12)'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === sym ? 'rgba(59,130,246,0.2)' : 'transparent'}
+                          >
+                            <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{sym}</span>
+                            <span style={{ fontSize: '0.65rem', color: '#64748B' }}>NSE</span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1289,7 +1392,7 @@ export default function LiveChartView() {
           )}
         </div>
 
-        {/* Right: Interval Buttons, TradingView Grid Switcher, Scalper Mode, Fullscreen */}
+        {/* Right: Interval Buttons, Indicators Dropdown, TradingView Grid Switcher, Scalper Mode, Fullscreen */}
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           {/* Timeframe Interval Buttons */}
           <div style={{ display:'flex', gap:2, background:'#0A0D1A', padding:'2px', borderRadius:6, border:'1px solid #1E2538' }}>
@@ -1311,6 +1414,220 @@ export default function LiveChartView() {
                 {iv.label}
               </button>
             ))}
+          </div>
+
+          {/* ── TradingView Style Indicators Dropdown Menu ── */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => {
+                setShowIndicatorDropdown(!showIndicatorDropdown);
+                setShowSymbolModal(false);
+              }}
+              title="Technical Indicators & Pro Tools"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 10px',
+                borderRadius: 6,
+                border: showIndicatorDropdown ? '1px solid #818CF8' : '1px solid #1E2538',
+                background: showIndicatorDropdown ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
+                color: showIndicatorDropdown ? '#A5B4FC' : '#E2E8F0',
+                fontSize: '0.74rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              <Activity size={13} style={{ color: '#818CF8' }} />
+              <span>Indicators</span>
+              {[showVolume, showSMA, showEMA, showBB, showRSI, showPatterns, showVolumeProfile, showOrderFlow, showMTFCorrelation, showBacktest].filter(Boolean).length > 0 && (
+                <span style={{ backgroundColor: '#6366F1', color: '#fff', fontSize: '0.62rem', padding: '1px 5px', borderRadius: 10, fontWeight: 800 }}>
+                  {[showVolume, showSMA, showEMA, showBB, showRSI, showPatterns, showVolumeProfile, showOrderFlow, showMTFCorrelation, showBacktest].filter(Boolean).length}
+                </span>
+              )}
+              <span style={{ fontSize: '0.65rem', color: '#94A3B8' }}>▾</span>
+            </button>
+
+            {/* Indicators Dropdown Menu */}
+            {showIndicatorDropdown && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  right: 0,
+                  width: 270,
+                  backgroundColor: '#0F172A',
+                  border: '1px solid rgba(99, 102, 241, 0.35)',
+                  borderRadius: 10,
+                  padding: 8,
+                  zIndex: 300,
+                  boxShadow: '0 16px 36px rgba(0,0,0,0.85)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 3,
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, letterSpacing: '0.06em', padding: '4px 8px', textTransform: 'uppercase' }}>
+                  Overlays & Signals
+                </div>
+
+                {/* Volume Toggle */}
+                <div
+                  onClick={() => setShowVolume(!showVolume)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: showVolume ? 'rgba(38,166,154,0.15)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showVolume ? 'rgba(38,166,154,0.2)' : 'rgba(255,255,255,0.04)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showVolume ? 'rgba(38,166,154,0.15)' : 'transparent'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <BarChart3 size={13} style={{ color: '#26A69A' }} />
+                    <span style={{ fontSize: '0.76rem', color: showVolume ? '#26A69A' : '#E2E8F0', fontWeight: 600 }}>Volume Bars</span>
+                  </div>
+                  {showVolume ? <Check size={14} color="#26A69A" /> : <EyeOff size={12} color="#64748B" />}
+                </div>
+
+                {/* AI Pattern Recognition Toggle */}
+                <div
+                  onClick={() => setShowPatterns(!showPatterns)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: showPatterns ? 'rgba(16,185,129,0.15)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showPatterns ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.04)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showPatterns ? 'rgba(16,185,129,0.15)' : 'transparent'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Sparkles size={13} style={{ color: '#10B981' }} />
+                    <span style={{ fontSize: '0.76rem', color: showPatterns ? '#10B981' : '#E2E8F0', fontWeight: 600 }}>AI Pattern Recognition</span>
+                  </div>
+                  {showPatterns ? <Check size={14} color="#10B981" /> : <EyeOff size={12} color="#64748B" />}
+                </div>
+
+                {/* SMA 20 */}
+                <div
+                  onClick={() => setShowSMA(!showSMA)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: showSMA ? 'rgba(0,229,255,0.15)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showSMA ? 'rgba(0,229,255,0.2)' : 'rgba(255,255,255,0.04)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showSMA ? 'rgba(0,229,255,0.15)' : 'transparent'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <TrendingUp size={13} style={{ color: '#00E5FF' }} />
+                    <span style={{ fontSize: '0.76rem', color: showSMA ? '#00E5FF' : '#E2E8F0', fontWeight: 600 }}>SMA (20)</span>
+                  </div>
+                  {showSMA ? <Check size={14} color="#00E5FF" /> : <EyeOff size={12} color="#64748B" />}
+                </div>
+
+                {/* EMA 20 */}
+                <div
+                  onClick={() => setShowEMA(!showEMA)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: showEMA ? 'rgba(255,145,0,0.15)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showEMA ? 'rgba(255,145,0,0.2)' : 'rgba(255,255,255,0.04)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showEMA ? 'rgba(255,145,0,0.15)' : 'transparent'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <TrendingUp size={13} style={{ color: '#FF9100' }} />
+                    <span style={{ fontSize: '0.76rem', color: showEMA ? '#FF9100' : '#E2E8F0', fontWeight: 600 }}>EMA (20)</span>
+                  </div>
+                  {showEMA ? <Check size={14} color="#FF9100" /> : <EyeOff size={12} color="#64748B" />}
+                </div>
+
+                {/* Bollinger Bands */}
+                <div
+                  onClick={() => setShowBB(!showBB)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: showBB ? 'rgba(224,64,251,0.15)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showBB ? 'rgba(224,64,251,0.2)' : 'rgba(255,255,255,0.04)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showBB ? 'rgba(224,64,251,0.15)' : 'transparent'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Activity size={13} style={{ color: '#E040FB' }} />
+                    <span style={{ fontSize: '0.76rem', color: showBB ? '#E040FB' : '#E2E8F0', fontWeight: 600 }}>Bollinger Bands (20,2)</span>
+                  </div>
+                  {showBB ? <Check size={14} color="#E040FB" /> : <EyeOff size={12} color="#64748B" />}
+                </div>
+
+                {/* RSI (14) */}
+                <div
+                  onClick={() => setShowRSI(!showRSI)}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: showRSI ? 'rgba(244,63,94,0.15)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showRSI ? 'rgba(244,63,94,0.2)' : 'rgba(255,255,255,0.04)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showRSI ? 'rgba(244,63,94,0.15)' : 'transparent'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Activity size={13} style={{ color: '#F43F5E' }} />
+                    <span style={{ fontSize: '0.76rem', color: showRSI ? '#F43F5E' : '#E2E8F0', fontWeight: 600 }}>RSI (14) Oscillator</span>
+                  </div>
+                  {showRSI ? <Check size={14} color="#F43F5E" /> : <EyeOff size={12} color="#64748B" />}
+                </div>
+
+                <div style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />
+                <div style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, letterSpacing: '0.06em', padding: '4px 8px', textTransform: 'uppercase' }}>
+                  Pro Analysis Tools
+                </div>
+
+                {/* Volume Profile & Order Flow */}
+                <div
+                  onClick={() => {
+                    setShowAdvancedPanel(!showAdvancedPanel);
+                    setAdvancedPanelTab('volume');
+                    setShowIndicatorDropdown(false);
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'volume' ? 'rgba(168,85,247,0.15)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.04)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'volume' ? 'rgba(168,85,247,0.15)' : 'transparent'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Layers size={13} style={{ color: '#818CF8' }} />
+                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>Volume Profile & Delta</span>
+                  </div>
+                </div>
+
+                {/* Strategy Backtest */}
+                <div
+                  onClick={() => {
+                    setShowAdvancedPanel(true);
+                    setAdvancedPanelTab('backtest');
+                    setShowIndicatorDropdown(false);
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'backtest' ? 'rgba(245,158,11,0.15)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.04)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'backtest' ? 'rgba(245,158,11,0.15)' : 'transparent'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <FlaskConical size={13} style={{ color: '#F59E0B' }} />
+                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>Strategy Backtest Overlay</span>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* TradingView Multi-Chart Layout Switcher [ 1x1 | 1x2 | 2x1 | 2x2 ] */}
@@ -1437,69 +1754,6 @@ export default function LiveChartView() {
           borderRadius:18, overflow:'hidden',
           position:'relative',
         }}>
-
-          {/* Enhanced Indicators Bar with Quick Stats */}
-          <div style={{ display:'flex', gap:8, padding:'10px 16px 0', fontSize:'0.71rem', color:'#4B5563', flexWrap:'wrap', alignItems:'center', borderBottom:'1px solid rgba(255,255,255,0.03)', paddingBottom:10 }}>
-            <span style={{ fontSize:'0.65rem', color:'#6B7280', fontWeight:700, marginRight:2 }}>INDICATORS:</span>
-            
-            <button onClick={() => setShowVolume(!showVolume)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showVolume ? '1px solid #26A69A' : '1px solid rgba(75,85,99,0.3)', background: showVolume ? 'rgba(38,166,154,0.15)' : 'transparent', color: showVolume ? '#26A69A' : '#6B7280' }}>
-              VOL {showVolume ? <Eye size={10} style={{ display:'inline', marginLeft:3 }} /> : <EyeOff size={10} style={{ display:'inline', marginLeft:3 }} />}
-            </button>
-
-            <button onClick={() => setShowSMA(!showSMA)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showSMA ? '1px solid #00E5FF' : '1px solid rgba(75,85,99,0.3)', background: showSMA ? 'rgba(0,229,255,0.15)' : 'transparent', color: showSMA ? '#00E5FF' : '#6B7280' }}>
-              SMA 20
-            </button>
-
-            <button onClick={() => setShowEMA(!showEMA)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showEMA ? '1px solid #FF9100' : '1px solid rgba(75,85,99,0.3)', background: showEMA ? 'rgba(255,145,0,0.15)' : 'transparent', color: showEMA ? '#FF9100' : '#6B7280' }}>
-              EMA 20
-            </button>
-
-            <button onClick={() => setShowBB(!showBB)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showBB ? '1px solid #E040FB' : '1px solid rgba(75,85,99,0.3)', background: showBB ? 'rgba(224,64,251,0.15)' : 'transparent', color: showBB ? '#E040FB' : '#6B7280' }}>
-              BOLL (20,2)
-            </button>
-
-            {/* RSI Toggle */}
-            <button onClick={() => setShowRSI(!showRSI)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showRSI ? '1px solid #F43F5E' : '1px solid rgba(75,85,99,0.3)', background: showRSI ? 'rgba(244,63,94,0.15)' : 'transparent', color: showRSI ? '#F43F5E' : '#6B7280' }}>
-              RSI 14 {showRSI ? <Eye size={10} style={{ display:'inline', marginLeft:3 }} /> : <EyeOff size={10} style={{ display:'inline', marginLeft:3 }} />}
-            </button>
-
-            {/* AI Pattern Markers Toggle */}
-            <button onClick={() => setShowPatterns(!showPatterns)} style={{ padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', border: showPatterns ? '1px solid #10B981' : '1px solid rgba(75,85,99,0.3)', background: showPatterns ? 'rgba(16,185,129,0.15)' : 'transparent', color: showPatterns ? '#10B981' : '#6B7280', display:'flex', alignItems:'center', gap:3 }}>
-              <Sparkles size={10} /> PATTERNS
-            </button>
-
-            {/* Advanced Tools Button */}
-            <button 
-              onClick={() => { setShowAdvancedPanel(!showAdvancedPanel); if (!showAdvancedPanel) setAdvancedPanelTab('volume'); }}
-              style={{ 
-                padding:'3px 8px', borderRadius:6, fontSize:'0.68rem', fontWeight:600, cursor:'pointer', 
-                border: showAdvancedPanel ? '1px solid #A855F7' : '1px solid rgba(75,85,99,0.3)', 
-                background: showAdvancedPanel ? 'rgba(168,85,247,0.15)' : 'transparent', 
-                color: showAdvancedPanel ? '#C084FC' : '#6B7280', 
-                display:'flex', alignItems:'center', gap:3 
-              }}
-            >
-              <Layers size={10} /> ADVANCED TOOLS
-            </button>
-
-            {/* Quick Trend Indicator */}
-            {rawHistory && rawHistory.length >= 20 && (
-              <div style={{ display:'flex', alignItems:'center', gap:4, padding:'3px 8px', borderRadius:6, background:'rgba(168,85,247,0.08)', border:'1px solid rgba(168,85,247,0.2)' }}>
-                <Activity size={10} color="#A855F7" />
-                <span style={{ fontSize:'0.65rem', color:'#A855F7', fontWeight:700 }}>
-                  TREND: {Number(rawHistory[rawHistory.length-1]?.close) > Number(rawHistory[rawHistory.length-20]?.close) ? '▲ BULLISH' : '▼ BEARISH'}
-                </span>
-              </div>
-            )}
-
-            <div style={{ marginLeft:'auto', display:'flex', gap:10, alignItems:'center' }}>
-              <span><span style={{ color:'#26A69A' }}>█</span> Bull</span>
-              <span><span style={{ color:'#EF5350' }}>█</span> Bear</span>
-              {isDaily && prediction && (
-                <span style={{ borderBottom:'2px dashed #A855F7', paddingBottom:1 }}>── AI Target</span>
-              )}
-            </div>
-          </div>
 
           {loading && (
             <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(9,12,24,0.75)', zIndex:10, borderRadius:18 }}>
