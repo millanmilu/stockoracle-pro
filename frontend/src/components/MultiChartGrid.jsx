@@ -12,9 +12,10 @@ const DEFAULT_PANES = [
   { id: 3, symbol: 'INFY',     interval: '1d' },
 ];
 
-export default function MultiChartGrid() {
+export default function MultiChartGrid({ layout: controlledLayout, onLayoutChange }) {
   const { selectedSymbol, setSelectedSymbol } = useStore();
-  const [layout, setLayout] = useState('1x1'); // '1x1' | '1x2' | '2x1' | '2x2'
+  const [internalLayout, setInternalLayout] = useState('1x2'); // '1x1' | '1x2' | '2x1' | '2x2'
+  const layout = controlledLayout || internalLayout;
   const [activePaneId, setActivePaneId] = useState(0);
   const [maximizedPaneId, setMaximizedPaneId] = useState(null);
   const [panes, setPanes] = useState(DEFAULT_PANES);
@@ -25,13 +26,13 @@ export default function MultiChartGrid() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.layout) setLayout(parsed.layout);
+        if (parsed.layout && !controlledLayout) setInternalLayout(parsed.layout);
         if (Array.isArray(parsed.panes) && parsed.panes.length >= 4) {
           setPanes(parsed.panes);
         }
       }
     } catch (_) {}
-  }, []);
+  }, [controlledLayout]);
 
   // Save grid state on change
   const persistState = (newLayout, newPanes) => {
@@ -49,10 +50,14 @@ export default function MultiChartGrid() {
         return next;
       });
     }
-  }, [selectedSymbol, activePaneId]);
+  }, [selectedSymbol, activePaneId, layout]);
 
   const handleLayoutChange = (newLayout) => {
-    setLayout(newLayout);
+    if (onLayoutChange) {
+      onLayoutChange(newLayout);
+    } else {
+      setInternalLayout(newLayout);
+    }
     setMaximizedPaneId(null);
     persistState(newLayout, panes);
   };

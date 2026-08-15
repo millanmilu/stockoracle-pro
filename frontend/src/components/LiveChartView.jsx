@@ -4,11 +4,12 @@ import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
 import { 
   Maximize2, Minimize2, Camera, Bell, Search, 
-  Columns, Square, Eye, EyeOff, Sparkles, TrendingUp,
+  Columns, Rows, Grid2X2, Square, Eye, EyeOff, Sparkles, TrendingUp,
   ZoomIn, ZoomOut, Move, RotateCcw, Zap, Activity,
   BarChart3, Layers, Target, ChevronRight, ChevronLeft, X, FlaskConical
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import MultiChartGrid from './MultiChartGrid';
 import DrawingTools from './chart-tools/DrawingTools';
 import VolumeProfile from './chart-tools/VolumeProfile';
 import OrderFlow from './chart-tools/OrderFlow';
@@ -357,6 +358,11 @@ export default function LiveChartView() {
   const [wsConnected, setWsConnected] = useState(false);
   const [loading,     setLoading]     = useState(true);
   const [predLoading, setPredLoading] = useState(true);
+
+  // TradingView Multi-Chart Grid Layout State ('1x1' | '1x2' | '2x1' | '2x2')
+  const [chartLayout, setChartLayout] = useState('1x1');
+  const [showSymbolModal, setShowSymbolModal] = useState(false);
+  const [symbolModalFilter, setSymbolModalFilter] = useState('');
 
   // Split View & Comparison State
   const [isSplitView, setIsSplitView] = useState(false);
@@ -1142,7 +1148,7 @@ export default function LiveChartView() {
         .pill-btn:hover { background:rgba(168,85,247,0.2)!important; color:#C084FC!important; }
       `}</style>
 
-      {/* ── Angel One TradeOne Style In-Chart Header ── */}
+      {/* ── TradingView Style In-Chart Header ── */}
       <div style={{
         display:'flex',
         alignItems:'center',
@@ -1152,18 +1158,113 @@ export default function LiveChartView() {
         background:'#0F1424',
         border:'1px solid #1E2538',
         borderRadius:10,
-        padding:'10px 16px',
+        padding:'8px 14px',
+        position: 'relative',
+        zIndex: 50,
       }}>
-        {/* Left: Symbol · Interval · Exchange + Live OHLC Readout */}
-        <div style={{ display:'flex', alignItems:'center', gap:16, flexWrap:'wrap' }}>
-          <div style={{ display:'flex', alignItems:'baseline', gap:8 }}>
-            <span style={{ fontSize:'1.2rem', fontWeight:800, color:'#F0F0FF', fontFamily:'JetBrains Mono, monospace' }}>
+        {/* Left: Symbol Selector · Interval · Exchange + Live OHLC Readout */}
+        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+          {/* Symbol Selector Dropdown (TradingView Style) */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowSymbolModal(!showSymbolModal)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '4px 10px',
+                borderRadius: 6,
+                background: 'rgba(59,130,246,0.15)',
+                border: '1px solid rgba(59,130,246,0.3)',
+                color: '#F0F0FF',
+                fontSize: '0.92rem',
+                fontWeight: 800,
+                fontFamily: 'JetBrains Mono, monospace',
+                cursor: 'pointer',
+              }}
+            >
+              <Search size={13} style={{ color: '#60A5FA' }} />
               {selectedSymbol || 'STOCK'}
-            </span>
-            <span style={{ fontSize:'0.75rem', fontWeight:700, color:'#3B82F6' }}>
-              · {interval ? interval.toUpperCase() : '1D'} · NSE
-            </span>
+              <span style={{ fontSize: '0.68rem', color: '#94A3B8' }}>▾</span>
+            </button>
+
+            {/* Quick Symbol Dropdown */}
+            {showSymbolModal && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 6px)',
+                  left: 0,
+                  width: 240,
+                  backgroundColor: '#0F172A',
+                  border: '1px solid rgba(99, 102, 241, 0.35)',
+                  borderRadius: 8,
+                  padding: 8,
+                  zIndex: 200,
+                  boxShadow: '0 12px 30px rgba(0,0,0,0.7)',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <input
+                  type="text"
+                  placeholder="Search Ticker (e.g. INFY)..."
+                  value={symbolModalFilter}
+                  onChange={(e) => setSymbolModalFilter(e.target.value)}
+                  autoFocus
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px',
+                    borderRadius: 5,
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    background: '#090C18',
+                    color: '#fff',
+                    fontSize: '0.78rem',
+                    outline: 'none',
+                    marginBottom: 8,
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && symbolModalFilter.trim()) {
+                      setSelectedSymbol(symbolModalFilter.trim().toUpperCase());
+                      setShowSymbolModal(false);
+                      setSymbolModalFilter('');
+                    }
+                  }}
+                />
+                <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                  {POPULAR_STOCKS
+                    .filter((s) => !symbolModalFilter || s.toLowerCase().includes(symbolModalFilter.toLowerCase()))
+                    .map((sym) => (
+                      <div
+                        key={sym}
+                        onClick={() => {
+                          setSelectedSymbol(sym);
+                          setShowSymbolModal(false);
+                          setSymbolModalFilter('');
+                        }}
+                        style={{
+                          padding: '6px 8px',
+                          borderRadius: 4,
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          color: selectedSymbol === sym ? '#60A5FA' : '#E2E8F0',
+                          backgroundColor: selectedSymbol === sym ? 'rgba(59,130,246,0.2)' : 'transparent',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <span>{sym}</span>
+                        <span style={{ fontSize: '0.65rem', color: '#64748B' }}>NSE</span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
+
+          <span style={{ fontSize:'0.72rem', fontWeight:700, color:'#3B82F6' }}>
+            · {interval ? interval.toUpperCase() : '1D'} · NSE
+          </span>
 
           {/* OHLC Readout Bar */}
           {curPrice != null && (
@@ -1171,11 +1272,11 @@ export default function LiveChartView() {
               display:'flex',
               alignItems:'center',
               gap:10,
-              fontSize:'0.75rem',
+              fontSize:'0.73rem',
               fontFamily:'JetBrains Mono, monospace',
               color:'#94A3B8',
               borderLeft:'1px solid #1E2538',
-              paddingLeft:14,
+              paddingLeft:12,
             }}>
               <span>O <strong style={{ color:'#F0F0FF' }}>{(activeCandleRef.current?.open ?? lastCandleClose ?? curPrice)?.toFixed(2)}</strong></span>
               <span>H <strong style={{ color:'#10B981' }}>{(activeCandleRef.current?.high ?? curPrice)?.toFixed(2)}</strong></span>
@@ -1188,7 +1289,7 @@ export default function LiveChartView() {
           )}
         </div>
 
-        {/* Right: Interval Buttons & Scalper Mode */}
+        {/* Right: Interval Buttons, TradingView Grid Switcher, Scalper Mode, Fullscreen */}
         <div style={{ display:'flex', alignItems:'center', gap:8 }}>
           {/* Timeframe Interval Buttons */}
           <div style={{ display:'flex', gap:2, background:'#0A0D1A', padding:'2px', borderRadius:6, border:'1px solid #1E2538' }}>
@@ -1210,6 +1311,74 @@ export default function LiveChartView() {
                 {iv.label}
               </button>
             ))}
+          </div>
+
+          {/* TradingView Multi-Chart Layout Switcher [ 1x1 | 1x2 | 2x1 | 2x2 ] */}
+          <div style={{ display:'flex', alignItems:'center', gap:2, background:'#0A0D1A', padding:'2px', borderRadius:6, border:'1px solid #1E2538' }}>
+            <button
+              onClick={() => setChartLayout('1x1')}
+              title="Single Chart (1x1)"
+              style={{
+                padding:'4px 7px',
+                borderRadius:4,
+                border:'none',
+                background: chartLayout === '1x1' ? '#3B82F6' : 'transparent',
+                color: chartLayout === '1x1' ? '#fff' : '#64748B',
+                cursor:'pointer',
+                display:'flex',
+                alignItems:'center',
+              }}
+            >
+              <Square size={13} />
+            </button>
+            <button
+              onClick={() => setChartLayout('1x2')}
+              title="Side-by-Side (1x2)"
+              style={{
+                padding:'4px 7px',
+                borderRadius:4,
+                border:'none',
+                background: chartLayout === '1x2' ? '#3B82F6' : 'transparent',
+                color: chartLayout === '1x2' ? '#fff' : '#64748B',
+                cursor:'pointer',
+                display:'flex',
+                alignItems:'center',
+              }}
+            >
+              <Columns size={13} />
+            </button>
+            <button
+              onClick={() => setChartLayout('2x1')}
+              title="Stacked (2x1)"
+              style={{
+                padding:'4px 7px',
+                borderRadius:4,
+                border:'none',
+                background: chartLayout === '2x1' ? '#3B82F6' : 'transparent',
+                color: chartLayout === '2x1' ? '#fff' : '#64748B',
+                cursor:'pointer',
+                display:'flex',
+                alignItems:'center',
+              }}
+            >
+              <Rows size={13} />
+            </button>
+            <button
+              onClick={() => setChartLayout('2x2')}
+              title="Quad Grid (2x2)"
+              style={{
+                padding:'4px 7px',
+                borderRadius:4,
+                border:'none',
+                background: chartLayout === '2x2' ? '#3B82F6' : 'transparent',
+                color: chartLayout === '2x2' ? '#fff' : '#64748B',
+                cursor:'pointer',
+                display:'flex',
+                alignItems:'center',
+              }}
+            >
+              <Grid2X2 size={13} />
+            </button>
           </div>
 
           {/* Scalper Mode */}
@@ -1253,7 +1422,12 @@ export default function LiveChartView() {
       </div>
 
 
-      {/* ── Main Chart Area (Single or Split Grid) ── */}
+      {/* ── Main Chart Body: Multi-Chart Grid OR Single Chart Workstation ── */}
+      {chartLayout !== '1x1' ? (
+        <div style={{ flex: 1, minHeight: 650, height: 'calc(100vh - 120px)', width: '100%' }}>
+          <MultiChartGrid layout={chartLayout} onLayoutChange={setChartLayout} />
+        </div>
+      ) : (
       <div style={{ display:'grid', gridTemplateColumns: isSplitView ? '1fr 1fr' : '1fr', gap:16 }}>
         
         {/* Chart 1 Container */}
@@ -1530,6 +1704,7 @@ export default function LiveChartView() {
           </div>
         )}
       </div>
+      )}
 
       {/* ── Price Alert Modal ── */}
       {showAlertModal && (

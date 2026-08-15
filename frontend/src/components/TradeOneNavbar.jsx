@@ -81,8 +81,7 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
 
   // Navigation tabs matching Angel One TradeOne header
   const NAV_TABS = [
-    { name: 'Live Chart',    label: 'TradeOne' },
-    { name: 'Chart Grid',    label: 'Chart Grid' },
+    { name: 'Live Chart',    label: 'Charts' },
     { name: 'Dashboard',     label: 'Dashboard' },
     { name: 'AI Prediction', label: 'AI Forecast' },
     { name: 'Adv. Screener', label: 'Screener' },
