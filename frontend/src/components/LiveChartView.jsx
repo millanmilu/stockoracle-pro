@@ -1857,6 +1857,7 @@ export default function LiveChartView() {
           {/* ── TradingView Style Vertical Left Drawing Sidebar ── */}
           <DrawingTools
             chartRef={chartRef}
+            candleRef={candleRef}
             symbol={selectedSymbol}
             interval={interval}
             onOpenSettings={() => setShowChartSettingsModal(true)}

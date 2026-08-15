@@ -19,13 +19,16 @@ const FIBONACCI_LEVELS = [
   { level: 1.0,   label: '1.0 (100%)',   color: '#A855F7', fill: 'rgba(168, 85, 247, 0.12)' },
 ];
 
-export default function DrawingTools({ chartRef, symbol, interval, onOpenSettings }) {
+export default function DrawingTools({ chartRef, candleRef, symbol, interval, onOpenSettings }) {
   // Tool & State Management
   const [activeTool, setActiveTool] = useState('crosshair');
   const [drawings, setDrawings] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentDraw, setCurrentDraw] = useState(null);
   
+  // Re-render tick to synchronize drawing positions on chart pan/zoom
+  const [, setRenderTick] = useState(0);
+
   // Selected / Dragging existing drawing
   const [selectedDrawingId, setSelectedDrawingId] = useState(null);
   const [draggingHandle, setDraggingHandle] = useState(null); // 'start' | 'end' | 'body'
@@ -52,6 +55,59 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
   const [floatingPos, setFloatingPos] = useState({ top: 12, right: 18 });
   const [isDraggingFloating, setIsDraggingFloating] = useState(false);
   const floatDragRef = useRef(null);
+
+  // Synchronize on chart pan & zoom (Visible Logical Range Change)
+  useEffect(() => {
+    if (!chartRef?.current) return;
+    const timeScale = chartRef.current.timeScale();
+    const handleRangeChange = () => {
+      setRenderTick((t) => t + 1);
+    };
+    try {
+      timeScale.subscribeVisibleLogicalRangeChange(handleRangeChange);
+    } catch (_) {}
+    return () => {
+      try {
+        timeScale.unsubscribeVisibleLogicalRangeChange(handleRangeChange);
+      } catch (_) {}
+    };
+  }, [chartRef]);
+
+  // Convert screen coordinate (x, y) to chart logical time & price
+  const coordToChart = useCallback((x, y) => {
+    let logical = null;
+    let price = null;
+    if (chartRef?.current) {
+      try {
+        logical = chartRef.current.timeScale().coordinateToLogical(x);
+      } catch (_) {}
+    }
+    if (candleRef?.current) {
+      try {
+        price = candleRef.current.coordinateToPrice(y);
+      } catch (_) {}
+    }
+    return { logical, price };
+  }, [chartRef, candleRef]);
+
+  // Convert chart logical time & price back to current screen (x, y) coordinate
+  const chartToCoord = useCallback((logical, price, fallbackX, fallbackY) => {
+    let x = fallbackX;
+    let y = fallbackY;
+    if (logical != null && chartRef?.current) {
+      try {
+        const cx = chartRef.current.timeScale().logicalToCoordinate(logical);
+        if (cx != null && !isNaN(cx)) x = cx;
+      } catch (_) {}
+    }
+    if (price != null && candleRef?.current) {
+      try {
+        const cy = candleRef.current.priceToCoordinate(price);
+        if (cy != null && !isNaN(cy)) y = cy;
+      } catch (_) {}
+    }
+    return { x, y };
+  }, [chartRef, candleRef]);
 
   // Disable / Enable chart pan & scroll to prevent chart jitter while drawing
   const setChartLocked = useCallback((locked) => {
@@ -120,22 +176,31 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
     toast.success('All drawings removed');
   };
 
-  // SVG Mouse handlers
+  // Helper to extract client coordinate from Mouse or Touch events
+  const getEventPos = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top,
+      clientX,
+      clientY,
+    };
+  };
+
+  // SVG Mouse & Touch Handlers
   const handleSvgMouseDown = (e) => {
-    // Stop propagation so underlying chart never moves
-    if (activeTool !== 'crosshair') {
-      e.preventDefault();
-      e.stopPropagation();
-    }
+    e.preventDefault();
+    e.stopPropagation();
 
     if (lockAllDrawings && activeTool !== 'crosshair') {
       toast.error('Drawings are locked');
       return;
     }
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const { x, y } = getEventPos(e);
+    const chartPt = coordToChart(x, y);
 
     // In crosshair mode, clicking empty space deselects drawing
     if (activeTool === 'crosshair') {
@@ -149,13 +214,13 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
     setChartLocked(true);
 
     if (activeTool === 'text') {
-      setTextInputPos({ x, y });
+      setTextInputPos({ x, y, logical: chartPt.logical, price: chartPt.price });
       setTextInputVal('');
       return;
     }
 
     if (activeTool === 'smile') {
-      setStickerPos({ x, y });
+      setStickerPos({ x, y, logical: chartPt.logical, price: chartPt.price });
       setShowStickerMenu(true);
       return;
     }
@@ -165,7 +230,7 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
       setCurrentDraw({
         id: Date.now(),
         type: 'brush',
-        points: [{ x, y }],
+        points: [{ x, y, logical: chartPt.logical, price: chartPt.price }],
         color: activeColor,
         strokeWidth: activeStrokeWidth,
       });
@@ -175,8 +240,12 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
         type: activeTool,
         startX: x,
         startY: y,
+        startLogical: chartPt.logical,
+        startPrice: chartPt.price,
         endX: x,
         endY: y,
+        endLogical: chartPt.logical,
+        endPrice: chartPt.price,
         color: activeColor,
         strokeWidth: activeStrokeWidth,
       });
@@ -189,9 +258,8 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
       e.stopPropagation();
     }
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const { x, y } = getEventPos(e);
+    const chartPt = coordToChart(x, y);
 
     // Moving an existing selected drawing or handle
     if (draggingHandle && selectedDrawingId && dragStartPos && !lockAllDrawings) {
@@ -202,24 +270,55 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
         prev.map((d) => {
           if (d.id !== selectedDrawingId) return d;
           if (draggingHandle === 'start') {
-            return { ...d, startX: x, startY: y };
+            return {
+              ...d,
+              startX: x,
+              startY: y,
+              startLogical: chartPt.logical,
+              startPrice: chartPt.price,
+            };
           }
           if (draggingHandle === 'end') {
-            return { ...d, endX: x, endY: y };
+            return {
+              ...d,
+              endX: x,
+              endY: y,
+              endLogical: chartPt.logical,
+              endPrice: chartPt.price,
+            };
           }
           if (draggingHandle === 'body') {
+            const currentStart = chartToCoord(d.startLogical, d.startPrice, d.startX, d.startY);
+            const currentEnd   = chartToCoord(d.endLogical, d.endPrice, d.endX, d.endY);
+            const newStartX = currentStart.x + dx;
+            const newStartY = currentStart.y + dy;
+            const newEndX   = currentEnd.x + dx;
+            const newEndY   = currentEnd.y + dy;
+            const newStartPt = coordToChart(newStartX, newStartY);
+            const newEndPt   = coordToChart(newEndX, newEndY);
+
             if (d.type === 'brush' && d.points) {
               return {
                 ...d,
-                points: d.points.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })),
+                points: d.points.map((pt) => {
+                  const ptCoord = chartToCoord(pt.logical, pt.price, pt.x, pt.y);
+                  const shiftedX = ptCoord.x + dx;
+                  const shiftedY = ptCoord.y + dy;
+                  const newPt = coordToChart(shiftedX, shiftedY);
+                  return { x: shiftedX, y: shiftedY, logical: newPt.logical, price: newPt.price };
+                }),
               };
             }
             return {
               ...d,
-              startX: (d.startX ?? 0) + dx,
-              startY: (d.startY ?? 0) + dy,
-              endX: (d.endX ?? 0) + dx,
-              endY: (d.endY ?? 0) + dy,
+              startX: newStartX,
+              startY: newStartY,
+              startLogical: newStartPt.logical,
+              startPrice: newStartPt.price,
+              endX: newEndX,
+              endY: newEndY,
+              endLogical: newEndPt.logical,
+              endPrice: newEndPt.price,
             };
           }
           return d;
@@ -235,18 +334,22 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
     if (currentDraw.type === 'brush') {
       setCurrentDraw((prev) => ({
         ...prev,
-        points: [...(prev.points || []), { x, y }],
+        points: [...(prev.points || []), { x, y, logical: chartPt.logical, price: chartPt.price }],
       }));
     } else {
-      setCurrentDraw((prev) => ({ ...prev, endX: x, endY: y }));
+      setCurrentDraw((prev) => ({
+        ...prev,
+        endX: x,
+        endY: y,
+        endLogical: chartPt.logical,
+        endPrice: chartPt.price,
+      }));
     }
   };
 
   const handleSvgMouseUp = (e) => {
-    if (activeTool !== 'crosshair') {
-      e.preventDefault();
-      e.stopPropagation();
-    }
+    e.preventDefault();
+    e.stopPropagation();
 
     // Release drag handle
     if (draggingHandle) {
@@ -296,6 +399,8 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
         type: 'text',
         startX: textInputPos.x,
         startY: textInputPos.y,
+        startLogical: textInputPos.logical,
+        startPrice: textInputPos.price,
         text: textInputVal.trim(),
         color: activeColor || '#F0F0FF',
       };
@@ -315,6 +420,8 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
         type: 'sticker',
         startX: stickerPos.x,
         startY: stickerPos.y,
+        startLogical: stickerPos.logical,
+        startPrice: stickerPos.price,
         emoji,
       };
       saveDrawings([...drawings, stickerDrawing]);
@@ -733,6 +840,9 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
           onMouseDown={handleSvgMouseDown}
           onMouseMove={handleSvgMouseMove}
           onMouseUp={handleSvgMouseUp}
+          onTouchStart={handleSvgMouseDown}
+          onTouchMove={handleSvgMouseMove}
+          onTouchEnd={handleSvgMouseUp}
           style={{
             position: 'absolute',
             top: 0,
@@ -741,26 +851,30 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
             bottom: 0,
             width: 'calc(100% - 44px)',
             height: '100%',
-            zIndex: activeTool !== 'crosshair' ? 50 : 25,
+            zIndex: 45,
             pointerEvents: activeTool !== 'crosshair' ? 'all' : 'none',
             cursor: activeTool === 'crosshair' ? 'default' : 'crosshair',
+            touchAction: 'none',
           }}
         >
           {/* Render Saved Drawings */}
           {drawings.map((d) => {
             const isSelected = selectedDrawingId === d.id;
+            const pt1 = chartToCoord(d.startLogical, d.startPrice, d.startX, d.startY);
+            const pt2 = chartToCoord(d.endLogical,   d.endPrice,   d.endX,   d.endY);
 
             // Trendline
             if (d.type === 'trendline') {
               return (
                 <g key={d.id} style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}>
                   <line
-                    x1={d.startX} y1={d.startY} x2={d.endX} y2={d.endY}
+                    x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y}
                     stroke={d.color || '#38BDF8'}
                     strokeWidth={d.strokeWidth || 2}
                     strokeDasharray={isSelected ? '4,4' : 'none'}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair') {
+                        e.preventDefault();
                         e.stopPropagation();
                         setSelectedDrawingId(d.id);
                         if (!lockAllDrawings) {
@@ -773,11 +887,12 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
                   />
                   {/* Start Handle */}
                   <circle
-                    cx={d.startX} cy={d.startY} r={isSelected ? 5 : 3}
+                    cx={pt1.x} cy={pt1.y} r={isSelected ? 5 : 3}
                     fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
                     stroke="#1E222D" strokeWidth={1}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair' && !lockAllDrawings) {
+                        e.preventDefault();
                         e.stopPropagation();
                         setSelectedDrawingId(d.id);
                         setDraggingHandle('start');
@@ -788,11 +903,12 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
                   />
                   {/* End Handle */}
                   <circle
-                    cx={d.endX} cy={d.endY} r={isSelected ? 5 : 3}
+                    cx={pt2.x} cy={pt2.y} r={isSelected ? 5 : 3}
                     fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
                     stroke="#1E222D" strokeWidth={1}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair' && !lockAllDrawings) {
+                        e.preventDefault();
                         e.stopPropagation();
                         setSelectedDrawingId(d.id);
                         setDraggingHandle('end');
@@ -807,10 +923,11 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
 
             // Fibonacci Retracement
             if (d.type === 'fibonacci') {
-              const minY = Math.min(d.startY, d.endY);
-              const maxY = Math.max(d.startY, d.endY);
+              const minY = Math.min(pt1.y, pt2.y);
+              const maxY = Math.max(pt1.y, pt2.y);
               const height = maxY - minY;
-              const rightX = Math.max(d.startX, d.endX) + 400;
+              const startX = Math.min(pt1.x, pt2.x);
+              const rightX = Math.max(pt1.x, pt2.x) + Math.max(300, Math.abs(pt2.x - pt1.x));
 
               return (
                 <g
@@ -818,6 +935,7 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
                   style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}
                   onMouseDown={(e) => {
                     if (activeTool === 'crosshair') {
+                      e.preventDefault();
                       e.stopPropagation();
                       setSelectedDrawingId(d.id);
                       if (!lockAllDrawings) {
@@ -831,16 +949,16 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
                   {/* Fibonacci colored bands */}
                   {FIBONACCI_LEVELS.slice(0, -1).map((fib, idx) => {
                     const nextFib = FIBONACCI_LEVELS[idx + 1];
-                    const y1 = d.startY < d.endY ? minY + height * fib.level : maxY - height * fib.level;
-                    const y2 = d.startY < d.endY ? minY + height * nextFib.level : maxY - height * nextFib.level;
+                    const y1 = pt1.y < pt2.y ? minY + height * fib.level : maxY - height * fib.level;
+                    const y2 = pt1.y < pt2.y ? minY + height * nextFib.level : maxY - height * nextFib.level;
                     const bandTop = Math.min(y1, y2);
                     const bandHeight = Math.abs(y2 - y1);
                     return (
                       <rect
                         key={`band-${fib.level}`}
-                        x={Math.min(d.startX, d.endX)}
+                        x={startX}
                         y={bandTop}
-                        width={Math.max(300, Math.abs(d.endX - d.startX))}
+                        width={Math.max(300, Math.abs(pt2.x - pt1.x))}
                         height={bandHeight}
                         fill={fib.fill}
                       />
@@ -849,20 +967,20 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
 
                   {/* Horizontal grid lines & labels */}
                   {FIBONACCI_LEVELS.map((fib) => {
-                    const y = d.startY < d.endY ? minY + height * fib.level : maxY - height * fib.level;
+                    const y = pt1.y < pt2.y ? minY + height * fib.level : maxY - height * fib.level;
                     return (
                       <g key={fib.level}>
                         <line
-                          x1={Math.min(d.startX, d.endX)}
+                          x1={startX}
                           y1={y}
-                          x2={Math.min(d.startX, d.endX) + Math.max(300, Math.abs(d.endX - d.startX))}
+                          x2={startX + Math.max(300, Math.abs(pt2.x - pt1.x))}
                           y2={y}
                           stroke={fib.color}
                           strokeWidth={1}
                           strokeDasharray={isSelected ? '2,2' : 'none'}
                         />
                         <text
-                          x={Math.min(d.startX, d.endX) + 6}
+                          x={startX + 6}
                           y={y - 4}
                           fill={fib.color}
                           fontSize="10"
@@ -878,8 +996,8 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
                   {/* Anchor handles */}
                   {isSelected && (
                     <>
-                      <circle cx={d.startX} cy={d.startY} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={2} />
-                      <circle cx={d.endX} cy={d.endY} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={2} />
+                      <circle cx={pt1.x} cy={pt1.y} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={2} />
+                      <circle cx={pt2.x} cy={pt2.y} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={2} />
                     </>
                   )}
                 </g>
@@ -888,7 +1006,8 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
 
             // Brush Freehand
             if (d.type === 'brush' && d.points?.length > 1) {
-              const pathData = d.points.reduce((acc, pt, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`, '');
+              const livePoints = d.points.map(pt => chartToCoord(pt.logical, pt.price, pt.x, pt.y));
+              const pathData = livePoints.reduce((acc, pt, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`, '');
               return (
                 <path
                   key={d.id}
@@ -900,6 +1019,7 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
                   strokeLinejoin="round"
                   onMouseDown={(e) => {
                     if (activeTool === 'crosshair') {
+                      e.preventDefault();
                       e.stopPropagation();
                       setSelectedDrawingId(d.id);
                       if (!lockAllDrawings) {
@@ -916,10 +1036,10 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
 
             // Rectangle
             if (d.type === 'rectangle') {
-              const x = Math.min(d.startX, d.endX);
-              const y = Math.min(d.startY, d.endY);
-              const w = Math.abs(d.endX - d.startX);
-              const h = Math.abs(d.endY - d.startY);
+              const x = Math.min(pt1.x, pt2.x);
+              const y = Math.min(pt1.y, pt2.y);
+              const w = Math.abs(pt2.x - pt1.x);
+              const h = Math.abs(pt2.y - pt1.y);
               return (
                 <g key={d.id} style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}>
                   <rect
@@ -930,6 +1050,7 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
                     strokeDasharray={isSelected ? '4,4' : 'none'}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair') {
+                        e.preventDefault();
                         e.stopPropagation();
                         setSelectedDrawingId(d.id);
                         if (!lockAllDrawings) {
@@ -954,18 +1075,22 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
 
             // Ruler / Measure
             if (d.type === 'ruler') {
-              const dx = Math.abs(d.endX - d.startX);
-              const dy = d.startY - d.endY; // price delta approx
-              const x = Math.min(d.startX, d.endX);
-              const y = Math.min(d.startY, d.endY);
-              const w = Math.abs(d.endX - d.startX);
-              const h = Math.abs(d.endY - d.startY);
+              const dx = Math.abs(pt2.x - pt1.x);
+              const dy = pt1.y - pt2.y;
+              const x = Math.min(pt1.x, pt2.x);
+              const y = Math.min(pt1.y, pt2.y);
+              const w = Math.abs(pt2.x - pt1.x);
+              const h = Math.abs(pt2.y - pt1.y);
+              const priceDelta = (d.startPrice != null && d.endPrice != null) ? d.endPrice - d.startPrice : dy * 0.45;
+              const pricePercent = d.startPrice ? (priceDelta / d.startPrice) * 100 : (dy * 0.08);
+
               return (
                 <g
                   key={d.id}
                   style={{ pointerEvents: 'auto', cursor: 'pointer' }}
                   onMouseDown={(e) => {
                     if (activeTool === 'crosshair') {
+                      e.preventDefault();
                       e.stopPropagation();
                       setSelectedDrawingId(d.id);
                     }
@@ -973,13 +1098,13 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
                 >
                   <rect
                     x={x} y={y} width={w} height={h}
-                    fill={dy >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,83,80,0.15)'}
-                    stroke={dy >= 0 ? '#10B981' : '#EF5350'}
+                    fill={priceDelta >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,83,80,0.15)'}
+                    stroke={priceDelta >= 0 ? '#10B981' : '#EF5350'}
                     strokeWidth={1}
                     strokeDasharray="3,3"
                   />
                   <text x={x + 6} y={y + 14} fill="#FFF" fontSize="10" fontWeight="700" fontFamily="JetBrains Mono">
-                    {dy >= 0 ? '+' : ''}{(dy * 0.45).toFixed(2)} pts ({(dy * 0.08).toFixed(2)}%) · {Math.max(1, Math.round(dx / 8))} bars
+                    {priceDelta >= 0 ? '+' : ''}{priceDelta.toFixed(2)} ({pricePercent.toFixed(2)}%) · {Math.max(1, Math.round(dx / 8))} bars
                   </text>
                 </g>
               );
@@ -990,11 +1115,12 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
               return (
                 <text
                   key={d.id}
-                  x={d.startX} y={d.startY}
+                  x={pt1.x} y={pt1.y}
                   fill={d.color || '#F0F0FF'}
                   fontSize="12" fontWeight="600" fontFamily="Inter, sans-serif"
                   onMouseDown={(e) => {
                     if (activeTool === 'crosshair') {
+                      e.preventDefault();
                       e.stopPropagation();
                       setSelectedDrawingId(d.id);
                       if (!lockAllDrawings) {
@@ -1016,10 +1142,11 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
               return (
                 <text
                   key={d.id}
-                  x={d.startX - 10} y={d.startY + 10}
+                  x={pt1.x - 10} y={pt1.y + 10}
                   fontSize="22"
                   onMouseDown={(e) => {
                     if (activeTool === 'crosshair') {
+                      e.preventDefault();
                       e.stopPropagation();
                       setSelectedDrawingId(d.id);
                       if (!lockAllDrawings) {
