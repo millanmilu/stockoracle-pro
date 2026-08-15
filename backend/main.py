@@ -653,75 +653,72 @@ manager = ConnectionManager()
 
 # Background price broadcaster loop
 async def websocket_price_broadcast_loop():
-    import random
+    from backend.data.fetcher import smartApi, get_token_info, fetch_company_info
+    from backend.data.database import get_company_info, get_stale_company_info
 
-    # Accurate fallback prices (INR) — used until real LTP is fetched
-    prices_cache = {
-        "RELIANCE": 1420.0, "TCS": 3900.0, "HDFCBANK": 1900.0, "INFY": 1560.0,
-        "ICICIBANK": 1390.0, "SBIN": 850.0, "BHARTIARTL": 1880.0, "ITC": 430.0,
-        "LT": 3600.0, "HUL": 2320.0
-    }
-
-    # Attempt to seed the cache with real LTP prices from Angel One
-    try:
-        from backend.data.fetcher import smartApi, get_token_info
-        ensure_session()
-    except Exception:
-        pass
+    # Local price cache seeded with authentic prices
+    prices_cache: Dict[str, float] = {}
 
     while True:
-        if manager.active_connections:
-            # Pick a random ticker to update
-            t = random.choice(popular_tickers)
-            
-            fetched = False
-            try:
-                from backend.data.fetcher import smartApi, get_token_info
-                ensure_session()
-                if get_session_status() and smartApi:
-                    tok = get_token_info(t)
-                    if tok:
-                        ltp_resp = smartApi.ltpData(tok["exch_seg"], tok["symbol"], tok["token"])
-                        if ltp_resp and ltp_resp.get("status") and ltp_resp.get("data"):
-                            ltp = float(ltp_resp["data"].get("ltp", 0.0))
-                            prev_close = float(ltp_resp["data"].get("close", 0.0))
-                            if ltp > 0:
-                                change_pct = ((ltp - prev_close) / prev_close) if prev_close > 0 else 0.0
-                                prices_cache[t] = ltp
-                                
-                                payload = {
-                                    "ticker": t,
-                                    "price": round(ltp, 2),
-                                    "change_pct": round(change_pct * 100, 3)
-                                }
-                                # Save tick updates directly to SQL database in the background (real ticks only)
-                                save_live_tick(t, round(ltp, 2), round(change_pct * 100, 3))
-                                await manager.broadcast(payload)
-                                fetched = True
-            except Exception as e:
-                print(f"Error fetching live tick for {t}: {e}")
+        try:
+            if manager.active_connections:
+                # Collect all tickers currently subscribed by active clients
+                active_subscribed = set()
+                for subs in manager.connections.values():
+                    active_subscribed.update(subs)
 
-            if not fetched:
-                base_price = prices_cache.get(t)
-                if not base_price:
+                tickers_to_check = list(active_subscribed) if active_subscribed else popular_tickers
+
+                for t in tickers_to_check:
+                    fetched = False
                     try:
-                        from backend.data.fetcher import fetch_company_info
-                        info = fetch_company_info(t)
-                        if info and info.get("current_price"):
-                            base_price = float(info["current_price"])
-                            prices_cache[t] = base_price
-                    except Exception: pass
-                
-                if base_price and base_price > 0:
-                    payload = {
-                        "ticker": t,
-                        "price": round(base_price, 2),
-                        "change_pct": 0.0
-                    }
-                    await manager.broadcast(payload)
+                        ensure_session()
+                        if get_session_status() and smartApi:
+                            tok = get_token_info(t)
+                            if tok:
+                                ltp_resp = smartApi.ltpData(tok["exch_seg"], tok["symbol"], tok["token"])
+                                if ltp_resp and ltp_resp.get("status") and ltp_resp.get("data"):
+                                    ltp = float(ltp_resp["data"].get("ltp", 0.0))
+                                    prev_close = float(ltp_resp["data"].get("close", 0.0))
+                                    if ltp > 0:
+                                        change_pct = ((ltp - prev_close) / prev_close) if prev_close > 0 else 0.0
+                                        prices_cache[t] = ltp
+                                        payload = {
+                                            "ticker": t,
+                                            "price": round(ltp, 2),
+                                            "change_pct": round(change_pct * 100, 3)
+                                        }
+                                        save_live_tick(t, round(ltp, 2), round(change_pct * 100, 3))
+                                        await manager.broadcast(payload)
+                                        fetched = True
+                    except Exception as exc:
+                        logger.debug("Live tick fetch failed for %s: %s", t, exc)
 
-        # Broadcast interval: 5 seconds to be gentle on connections
-        await asyncio.sleep(5.0)
+                    if not fetched:
+                        # Fallback: check cached company info or previous verified price
+                        base_price = prices_cache.get(t)
+                        if not base_price:
+                            info = get_company_info(t) or get_stale_company_info(t)
+                            if info and info.get("current_price"):
+                                base_price = float(info["current_price"])
+                                prices_cache[t] = base_price
+
+                        if base_price and base_price > 0:
+                            payload = {
+                                "ticker": t,
+                                "price": round(base_price, 2),
+                                "change_pct": 0.0
+                            }
+                            await manager.broadcast(payload)
+                    
+                    # Yield slightly between tickers
+                    await asyncio.sleep(0.5)
+
+        except Exception as e:
+            logger.warning("Error in websocket price broadcast loop: %s", e)
+
+        # Broadcast interval between rounds
+        await asyncio.sleep(4.0)
 
 
 # Startup is now handled by the lifespan context manager above.

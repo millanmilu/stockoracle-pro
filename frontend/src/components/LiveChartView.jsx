@@ -406,6 +406,7 @@ export default function LiveChartView() {
   const upperLineRef   = useRef(null);
   const lowerLineRef   = useRef(null);
   const livePriceLineRef = useRef(null);
+  const activeCandleRef  = useRef(null);
 
   // Chart 2 (Comparison) Refs
   const containerRef2  = useRef(null);
@@ -419,6 +420,7 @@ export default function LiveChartView() {
 
   const handleIntervalChange = useCallback((iv) => {
     setInterval(iv);
+    activeCandleRef.current = null;
     // Reset zoom when changing interval for smooth transition
     setTimeout(() => {
       if (chartRef.current) {
@@ -556,6 +558,7 @@ export default function LiveChartView() {
       upperLineRef.current = null;
       lowerLineRef.current = null;
       livePriceLineRef.current = null;
+      activeCandleRef.current = null;
       backtestEquityRef.current = null;
     };
   }, []);
@@ -688,6 +691,7 @@ export default function LiveChartView() {
     setPrediction(null);
     setLivePrice(null);
     setLiveChange(null);
+    activeCandleRef.current = null;
 
     fetchHistory(selectedSymbol, interval, timeframe).then(hist => {
       setRawHistory(hist);
@@ -778,6 +782,7 @@ export default function LiveChartView() {
     }
 
     const intraday = !isDaily;
+    activeCandleRef.current = null;
 
     // 1. Build Candles with IQR Outlier Filtering & High/Low validity safety
     const validRaw = rawHistory.filter(d => d && d.date && !isNaN(parseNum(d.close)) && parseNum(d.close) > 0);
@@ -962,26 +967,83 @@ export default function LiveChartView() {
   useEffect(() => {
     if (!candleRef.current || !rawHistory || !Array.isArray(rawHistory) || !rawHistory.length || livePrice == null) return;
 
-    const last      = rawHistory[rawHistory.length - 1];
+    const last = rawHistory[rawHistory.length - 1];
     if (!last || last.close == null) return;
     const lastClose = parseNum(last.close);
-    const intraday  = !isDaily;
 
-    // Sanity check: ignore out-of-range live ticks (> 10% deviation) to prevent abnormal candle spikes
-    if (lastClose > 0 && Math.abs(livePrice - lastClose) / lastClose > 0.10) {
-      console.warn(`⚠️ [LiveTick] Dropping live price tick spike ${livePrice} for ${selectedSymbol} (last close: ${lastClose})`);
+    // Sanity check: ignore out-of-range live ticks (> 20% deviation from recent reference)
+    const refPrice = activeCandleRef.current?.close || lastClose;
+    if (refPrice > 0 && Math.abs(livePrice - refPrice) / refPrice > 0.20) {
+      console.warn(`⚠️ [LiveTick] Dropping anomalous live price tick ${livePrice} for ${selectedSymbol} (ref: ${refPrice})`);
       return;
     }
 
     try {
-      candleRef.current.update({
-        time  : toChartTime(last.date, intraday),
-        open  : Number(last.open),
-        high  : Math.max(Number(last.high), Number(last.open), livePrice),
-        low   : Math.min(Number(last.low),  Number(last.open), livePrice),
-        close : livePrice,
-      });
-    } catch {}
+      if (isDaily) {
+        const now = new Date();
+        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+        const lastDateStr = String(last.date).substring(0, 10);
+
+        const targetTime = todayStr >= lastDateStr ? todayStr : lastDateStr;
+        const isNewBar = !activeCandleRef.current || activeCandleRef.current.time !== targetTime;
+
+        if (isNewBar) {
+          const initialOpen = targetTime === lastDateStr ? Number(last.open) : livePrice;
+          const initialHigh = targetTime === lastDateStr ? Math.max(Number(last.high), livePrice) : livePrice;
+          const initialLow  = targetTime === lastDateStr ? Math.min(Number(last.low),  livePrice) : livePrice;
+          activeCandleRef.current = {
+            time  : targetTime,
+            open  : initialOpen,
+            high  : initialHigh,
+            low   : initialLow,
+            close : livePrice,
+          };
+        } else {
+          activeCandleRef.current = {
+            ...activeCandleRef.current,
+            high  : Math.max(activeCandleRef.current.high, livePrice),
+            low   : Math.min(activeCandleRef.current.low,  livePrice),
+            close : livePrice,
+          };
+        }
+      } else {
+        // Intraday bucketing
+        const intervalSecondsMap = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600 };
+        const bucketSize = intervalSecondsMap[interval] || 300;
+        const currentSec = Math.floor(Date.now() / 1000);
+        const currentBucket = Math.floor(currentSec / bucketSize) * bucketSize;
+        const lastBarSec = toChartTime(last.date, true) || currentBucket;
+
+        const targetSec = currentBucket >= lastBarSec ? currentBucket : lastBarSec;
+        const isNewBar = !activeCandleRef.current || activeCandleRef.current.time !== targetSec;
+
+        if (isNewBar) {
+          const initialOpen = targetSec === lastBarSec ? Number(last.open) : livePrice;
+          const initialHigh = targetSec === lastBarSec ? Math.max(Number(last.high), livePrice) : livePrice;
+          const initialLow  = targetSec === lastBarSec ? Math.min(Number(last.low),  livePrice) : livePrice;
+          activeCandleRef.current = {
+            time  : targetSec,
+            open  : initialOpen,
+            high  : initialHigh,
+            low   : initialLow,
+            close : livePrice,
+          };
+        } else {
+          activeCandleRef.current = {
+            ...activeCandleRef.current,
+            high  : Math.max(activeCandleRef.current.high, livePrice),
+            low   : Math.min(activeCandleRef.current.low,  livePrice),
+            close : livePrice,
+          };
+        }
+      }
+
+      if (activeCandleRef.current) {
+        candleRef.current.update(activeCandleRef.current);
+      }
+    } catch (err) {
+      console.error('Error updating live candle:', err);
+    }
 
     if (livePriceLineRef.current) {
       try { candleRef.current.removePriceLine(livePriceLineRef.current); } catch {}
@@ -996,7 +1058,7 @@ export default function LiveChartView() {
       axisLabelTextColor  : '#fff',
       title               : 'LIVE',
     });
-  }, [livePrice, interval]);
+  }, [livePrice, interval, isDaily, selectedSymbol]);
 
   /* ── Header Handlers ──────────────────────────────────────── */
 

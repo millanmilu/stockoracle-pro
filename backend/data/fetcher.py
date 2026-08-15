@@ -316,20 +316,27 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
         )
         df = df.astype({"open": float, "high": float, "low": float,
                         "close": float, "volume": int})
-        if interval.lower() in ["1m", "5m", "15m", "1h"]:
+        
+        if is_intraday:
+            # Intraday data formatted as YYYY-MM-DD HH:MM:SS
             df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d %H:%M:%S")
+            df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
+            _set_cached(cache_key, df)
+            return df
         else:
+            # Daily data formatted strictly as YYYY-MM-DD
             df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")
-        
-        # Save to local database (UPSERT)
-        save_historical_prices(ticker, df)
-        
-        # Query again from database to get a complete/merged historical set
-        merged_df = get_historical_prices(ticker, fromdate_str, todate_str)
-        final_df = merged_df if (merged_df is not None and not merged_df.empty) else df
-        
-        _set_cached(cache_key, final_df)
-        return final_df
+            df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
+            
+            # Save daily records to local SQLite database (UPSERT)
+            save_historical_prices(ticker, df)
+            
+            # Query again from database to get a complete/merged historical set
+            merged_df = get_historical_prices(ticker, fromdate_str, todate_str)
+            final_df = merged_df if (merged_df is not None and not merged_df.empty) else df
+            
+            _set_cached(cache_key, final_df)
+            return final_df
 
     # API request failed — fallback to local database
     if db_df is not None and not db_df.empty:
@@ -453,29 +460,32 @@ def get_combined_stock_data(ticker: str, period: str = "2Y") -> Optional[pd.Data
     ticker = ticker.upper()
 
     # Step 1: Get base historical data
-    df = fetch_stock_data(ticker, period=period)
+    df = fetch_stock_data(ticker, period=period, interval="1d")
     if df is None or df.empty:
         return None
     # The live-candle merge below is request-specific.
     df = df.copy(deep=True)
 
-    # Step 2: Get today's live tick synthetic OHLCV
+    # Step 2: Check live ticks only on trading days
+    now = datetime.now()
+    if now.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        return df
+
     today_candle = get_live_tick_ohlcv(ticker)
     if today_candle is None:
         return df  # No live ticks yet — return historical as-is
 
     today_str = today_candle["date"]
 
-    # Step 3: Replace today's candle if it exists, otherwise append
+    # Step 3: Replace today's candle if it exists, otherwise append if during/after market hours
     if today_str in df["date"].values:
         idx = df.index[df["date"] == today_str][0]
         # Update close with latest live price; keep historical open; extend high/low
         df.at[idx, "close"]  = today_candle["close"]
         df.at[idx, "high"]   = max(float(df.at[idx, "high"]), today_candle["high"])
         df.at[idx, "low"]    = min(float(df.at[idx, "low"]),  today_candle["low"])
-        df.at[idx, "volume"] = int(df.at[idx, "volume"]) + today_candle["volume"]
-    else:
-        # Append as a new row
+    elif now.hour >= 9:
+        # Append as a new row for current session
         new_row = pd.DataFrame([today_candle])
         df = pd.concat([df, new_row], ignore_index=True)
 

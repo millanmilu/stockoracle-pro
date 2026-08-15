@@ -126,6 +126,9 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_task_ticker ON task_status (ticker)"
         )
 
+        # Cleanup: purge any legacy intraday records that polluted the daily historical_prices table
+        cursor.execute("DELETE FROM historical_prices WHERE length(date) > 10")
+
         conn.commit()
     print("✅ SQLite database initialization complete.")
 
@@ -185,14 +188,15 @@ def clean_paise_and_outliers(ticker: str = None):
                 print(f"🛠️ Normalized {len(paise_candidates)} paise records to rupees for {t}.")
 
         # Delete invalid <= 0 rows
-        conn.execute("DELETE FROM historical_prices WHERE close <= 0 OR high <= 0 OR open <= 0 OR low <= 0")
+        conn.execute("DELETE FROM historical_prices WHERE close <= 0 OR high <= 0 OR open <= 0 OR low <= 0 OR length(date) > 10")
         conn.commit()
 
 
 def save_historical_prices(ticker: str, df: pd.DataFrame):
     """
-    Saves a DataFrame of historical prices into the SQLite database.
+    Saves a DataFrame of daily historical prices into the SQLite database.
     Uses executemany (bulk insert) for fast writes with unit normalization.
+    Strictly accepts only daily dates (YYYY-MM-DD).
     """
     if df is None or df.empty:
         return
@@ -201,14 +205,14 @@ def save_historical_prices(ticker: str, df: pd.DataFrame):
     rows = []
     for _, row in df.iterrows():
         try:
-            d_str = str(row["date"])
+            d_str = str(row["date"])[:10]  # Enforce YYYY-MM-DD
             o_val = _normalize_price(row["open"])
             h_val = _normalize_price(row["high"])
             l_val = _normalize_price(row["low"])
             c_val = _normalize_price(row["close"])
             vol   = int(row.get("volume", 0) or 0)
 
-            if not all([o_val, h_val, l_val, c_val]):
+            if not all([o_val, h_val, l_val, c_val]) or len(d_str) != 10:
                 continue
             rows.append((ticker, d_str, o_val, max(h_val, o_val, c_val), min(l_val, o_val, c_val), c_val, vol))
         except Exception:
@@ -230,17 +234,17 @@ def save_historical_prices(ticker: str, df: pd.DataFrame):
 
 def get_historical_prices(ticker: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
     """
-    Fetches historical price records for a ticker within a date range.
+    Fetches historical daily price records for a ticker within a date range.
     Returns a Pandas DataFrame, or None if no records exist.
     """
     ticker = ticker.upper()
-    if len(end_date) == 10:
-        end_date = end_date + " 23:59:59"
+    start_date = str(start_date)[:10]
+    end_date = str(end_date)[:10]
 
     query = """
         SELECT date, open, high, low, close, volume
         FROM historical_prices
-        WHERE ticker = ? AND date BETWEEN ? AND ?
+        WHERE ticker = ? AND length(date) = 10 AND date BETWEEN ? AND ?
         ORDER BY date ASC
     """
     with get_db_connection() as conn:

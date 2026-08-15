@@ -3,17 +3,18 @@ import numpy as np
 from typing import Dict, Any
 
 def calculate_sma(series: pd.Series, period: int = 20) -> pd.Series:
-    return series.rolling(window=period).mean()
+    return series.rolling(window=period, min_periods=1).mean()
 
 def calculate_ema(series: pd.Series, period: int = 12) -> pd.Series:
     return series.ewm(span=period, adjust=False).mean()
 
 def calculate_rsi(series: pd.Series, period: int = 14) -> pd.Series:
     delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period, min_periods=1).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period, min_periods=1).mean()
     rs = gain / (loss + 1e-9)
-    return 100 - (100 / (1 + rs))
+    rsi = 100 - (100 / (1 + rs))
+    return rsi.fillna(50.0)
 
 def calculate_macd(series: pd.Series) -> Dict[str, pd.Series]:
     ema12 = calculate_ema(series, 12)
@@ -22,14 +23,14 @@ def calculate_macd(series: pd.Series) -> Dict[str, pd.Series]:
     signal_line = calculate_ema(macd_line, 9)
     macd_hist = macd_line - signal_line
     return {
-        "macd": macd_line,
-        "signal": signal_line,
-        "hist": macd_hist
+        "macd": macd_line.fillna(0.0),
+        "signal": signal_line.fillna(0.0),
+        "hist": macd_hist.fillna(0.0)
     }
 
 def calculate_bollinger_bands(series: pd.Series, period: int = 20) -> Dict[str, pd.Series]:
     sma = calculate_sma(series, period)
-    std = series.rolling(window=period).std()
+    std = series.rolling(window=period, min_periods=1).std().fillna(0.0)
     upper = sma + (2 * std)
     lower = sma - (2 * std)
     pct_b = (series - lower) / (upper - lower + 1e-9)
@@ -37,58 +38,57 @@ def calculate_bollinger_bands(series: pd.Series, period: int = 20) -> Dict[str, 
         "upper": upper,
         "middle": sma,
         "lower": lower,
-        "pct_b": pct_b
+        "pct_b": pct_b.fillna(0.5)
     }
 
 def calculate_volatility(series: pd.Series, period: int = 20) -> pd.Series:
-    returns = np.log(series / series.shift(1))
-    return returns.rolling(window=period).std()
+    returns = np.log(series / (series.shift(1).replace(0, np.nan)))
+    return returns.rolling(window=period, min_periods=1).std().fillna(0.0)
 
 def calculate_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     high = df["high"]
     low = df["low"]
-    close_prev = df["close"].shift(1)
+    close_prev = df["close"].shift(1).fillna(df["open"])
     
     tr1 = high - low
     tr2 = (high - close_prev).abs()
     tr3 = (low - close_prev).abs()
     
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    return tr.rolling(window=period).mean()
+    return tr.rolling(window=period, min_periods=1).mean().fillna(0.0)
 
 def calculate_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
     high = df["high"]
     low = df["low"]
     close = df["close"]
     
-    upmove = high.diff()
-    downmove = low.shift(1) - low
+    upmove = high.diff().fillna(0.0)
+    downmove = (low.shift(1) - low).fillna(0.0)
     
     pos_dm = np.where((upmove > downmove) & (upmove > 0), upmove, 0.0)
     neg_dm = np.where((downmove > upmove) & (downmove > 0), downmove, 0.0)
     
     tr1 = high - low
-    tr2 = (high - close.shift(1)).abs()
-    tr3 = (low - close.shift(1)).abs()
+    tr2 = (high - close.shift(1).fillna(close)).abs()
+    tr3 = (low - close.shift(1).fillna(close)).abs()
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     
-    # Smooth indicators using wilder's rolling sum technique
-    tr_smooth = tr.rolling(window=period).sum()
-    pos_dm_smooth = pd.Series(pos_dm).rolling(window=period).sum()
-    neg_dm_smooth = pd.Series(neg_dm).rolling(window=period).sum()
+    tr_smooth = tr.rolling(window=period, min_periods=1).sum()
+    pos_dm_smooth = pd.Series(pos_dm, index=df.index).rolling(window=period, min_periods=1).sum()
+    neg_dm_smooth = pd.Series(neg_dm, index=df.index).rolling(window=period, min_periods=1).sum()
     
     plus_di = 100 * (pos_dm_smooth / (tr_smooth + 1e-9))
     minus_di = 100 * (neg_dm_smooth / (tr_smooth + 1e-9))
     
     dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-9)
-    adx = dx.rolling(window=period).mean()
-    return adx
+    adx = dx.rolling(window=period, min_periods=1).mean()
+    return adx.fillna(0.0)
 
 def calculate_pivot_points(df: pd.DataFrame) -> Dict[str, pd.Series]:
-    # Pivot points are based on previous day's metrics
-    high_prev = df["high"].shift(1)
-    low_prev = df["low"].shift(1)
-    close_prev = df["close"].shift(1)
+    # Pivot points are based on previous day's metrics (or current if first row)
+    high_prev = df["high"].shift(1).fillna(df["high"])
+    low_prev = df["low"].shift(1).fillna(df["low"])
+    close_prev = df["close"].shift(1).fillna(df["close"])
     
     pivot = (high_prev + low_prev + close_prev) / 3.0
     r1 = (2.0 * pivot) - low_prev
@@ -99,8 +99,9 @@ def calculate_pivot_points(df: pd.DataFrame) -> Dict[str, pd.Series]:
     return {"pivot": pivot, "r1": r1, "s1": s1, "r2": r2, "s2": s2}
 
 def calculate_fibonacci_levels(df: pd.DataFrame, period: int = 50) -> Dict[str, pd.Series]:
-    high_roll = df["high"].rolling(window=period).max()
-    low_roll = df["low"].rolling(window=period).min()
+    effective_period = min(period, max(len(df), 1))
+    high_roll = df["high"].rolling(window=effective_period, min_periods=1).max()
+    low_roll = df["low"].rolling(window=effective_period, min_periods=1).min()
     diff = high_roll - low_roll
     
     return {
@@ -115,8 +116,8 @@ def detect_candlestick_patterns(df: pd.DataFrame) -> pd.DataFrame:
     o, h, l, c = df["open"], df["high"], df["low"], df["close"]
     
     body = (c - o).abs()
-    candle_range = h - l
-    body_avg = body.rolling(window=10).mean()
+    candle_range = (h - l).replace(0, 1e-9)
+    body_avg = body.rolling(window=10, min_periods=1).mean()
     
     # 1. Doji (extremely small body compared to full range)
     df["pattern_doji"] = (body <= 0.1 * candle_range)
@@ -139,44 +140,42 @@ def detect_candlestick_patterns(df: pd.DataFrame) -> pd.DataFrame:
     
     # 4. Bullish Engulfing
     df["pattern_bullish_engulfing"] = (
-        (c.shift(1) < o.shift(1)) & 
+        (c.shift(1).fillna(c) < o.shift(1).fillna(o)) & 
         (c > o) & 
-        (c >= o.shift(1)) & 
-        (o <= c.shift(1))
+        (c >= o.shift(1).fillna(o)) & 
+        (o <= c.shift(1).fillna(c))
     )
     
     # 5. Bearish Engulfing
     df["pattern_bearish_engulfing"] = (
-        (c.shift(1) > o.shift(1)) & 
+        (c.shift(1).fillna(c) > o.shift(1).fillna(o)) & 
         (c < o) & 
-        (c <= o.shift(1)) & 
-        (o >= c.shift(1))
+        (c <= o.shift(1).fillna(o)) & 
+        (o >= c.shift(1).fillna(c))
     )
     
     # 6. Morning Star (three-candle pattern)
     df["pattern_morning_star"] = (
-        (c.shift(2) < o.shift(2)) & # Bearish candle
-        (body.shift(1) < body_avg.shift(1) * 0.5) & # Star (small body)
-        (c.shift(1) < c.shift(2)) & # Gaps down
-        (c > o) & # Bullish reversal candle
-        (c > (o.shift(2) + c.shift(2)) / 2) # Closes inside body of first candle
+        (c.shift(2).fillna(c) < o.shift(2).fillna(o)) &
+        (body.shift(1).fillna(body) < body_avg.shift(1).fillna(body_avg) * 0.5) &
+        (c.shift(1).fillna(c) < c.shift(2).fillna(c)) &
+        (c > o) &
+        (c > (o.shift(2).fillna(o) + c.shift(2).fillna(c)) / 2)
     )
     
     # 7. Evening Star (three-candle pattern)
     df["pattern_evening_star"] = (
-        (c.shift(2) > o.shift(2)) & # Bullish candle
-        (body.shift(1) < body_avg.shift(1) * 0.5) & # Star (small body)
-        (c.shift(1) > c.shift(2)) & # Gaps up
-        (c < o) & # Bearish reversal candle
-        (c < (o.shift(2) + c.shift(2)) / 2) # Closes inside body of first candle
+        (c.shift(2).fillna(c) > o.shift(2).fillna(o)) &
+        (body.shift(1).fillna(body) < body_avg.shift(1).fillna(body_avg) * 0.5) &
+        (c.shift(1).fillna(c) > c.shift(2).fillna(c)) &
+        (c < o) &
+        (c < (o.shift(2).fillna(o) + c.shift(2).fillna(c)) / 2)
     )
     
     # 8. Harami
     df["pattern_harami"] = (
-        # Bullish Harami
-        ((c.shift(1) < o.shift(1)) & (c > o) & (c < o.shift(1)) & (o > c.shift(1))) |
-        # Bearish Harami
-        ((c.shift(1) > o.shift(1)) & (c < o) & (c > o.shift(1)) & (o < c.shift(1)))
+        ((c.shift(1).fillna(c) < o.shift(1).fillna(o)) & (c > o) & (c < o.shift(1).fillna(o)) & (o > c.shift(1).fillna(c))) |
+        ((c.shift(1).fillna(c) > o.shift(1).fillna(o)) & (c < o) & (c > o.shift(1).fillna(o)) & (o < c.shift(1).fillna(c)))
     )
     
     # 9. Marubozu (large body, tiny or no shadows)
@@ -193,8 +192,11 @@ def detect_candlestick_patterns(df: pd.DataFrame) -> pd.DataFrame:
 
 def enrich_stock_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Computes all technical indicators and appends them to the dataframe.
+    Computes all technical indicators and appends them to the dataframe without dropping OHLCV bars.
     """
+    if df is None or df.empty:
+        return df
+
     df = df.copy()
     
     # 1. Standard Technical indicators
@@ -239,6 +241,6 @@ def enrich_stock_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # 5. Candlestick Patterns
     df = detect_candlestick_patterns(df)
     
-    # Drop rows containing NaNs arising from rolling windows to keep clean
-    df.dropna(subset=["sma_50", "volatility", "rsi", "atr", "adx", "fib_618"], inplace=True)
+    # Only drop rows if critical price columns are missing
+    df.dropna(subset=["date", "open", "high", "low", "close"], inplace=True)
     return df
