@@ -787,102 +787,164 @@ async def get_advanced_screener(
     near_52w_low: bool = False,
     min_score: int = 0,
     sort_by: str = "ai_score",
+# Multi-Index Constituent Universes
+INDEX_UNIVERSES: Dict[str, List[str]] = {
+    "NIFTY 50": [
+        "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL",
+        "TATAMOTORS", "MARUTI", "AXISBANK", "WIPRO", "HCLTECH", "SUNPHARMA", "BAJFINANCE", "KOTAKBANK",
+        "TATASTEEL", "NTPC", "POWERGRID", "ONGC", "COALINDIA", "TITAN", "ULTRACEMCO", "ADANIENT",
+        "JSWSTEEL", "HDFCLIFE", "BPCL", "HEROMOTOCO", "BAJAJFINSV", "INDUSINDBK", "NESTLEIND", "HINDALCO",
+        "GRASIM", "TECHM", "CIPLA", "EICHERMOT", "DIVISLAB", "BRITANNIA", "TATACONSUM", "APOLLOHOSP",
+        "DRREDDY", "ADANIPORTS", "SBILIFE", "LTIM", "BEL", "SHRIRAMFIN", "ASIANPAINT", "M&M"
+    ],
+    "BANK NIFTY": [
+        "HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "INDUSINDBK",
+        "PNB", "BANKBARODA", "FEDERALBNK", "IDFCFIRSTB", "AUBANK", "BANDHANBNK"
+    ],
+    "NIFTY IT": [
+        "TCS", "INFY", "HCLTECH", "WIPRO", "TECHM", "LTIM", "PERSISTENT", "COFORGE", "LTTS", "MPHASIS"
+    ],
+    "NIFTY AUTO": [
+        "TATAMOTORS", "MARUTI", "M&M", "BAJAJ-AUTO", "EICHERMOT", "HEROMOTOCO",
+        "TVSMOTOR", "BHARATFORG", "ASHOKLEY", "MOTHERSON"
+    ],
+    "NIFTY PHARMA": [
+        "SUNPHARMA", "DRREDDY", "CIPLA", "DIVISLAB", "APOLLOHOSP", "LUPIN",
+        "AUROPHARMA", "TORNTPHARM", "ZYDUSLIFE", "BIOCON"
+    ],
+    "NIFTY 100": [
+        "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL",
+        "TATAMOTORS", "MARUTI", "AXISBANK", "WIPRO", "HCLTECH", "SUNPHARMA", "BAJFINANCE", "KOTAKBANK",
+        "TATASTEEL", "NTPC", "POWERGRID", "ONGC", "COALINDIA", "TITAN", "ULTRACEMCO", "ADANIENT",
+        "JSWSTEEL", "HDFCLIFE", "BPCL", "HEROMOTOCO", "BAJAJFINSV", "INDUSINDBK", "NESTLEIND", "HINDALCO",
+        "GRASIM", "TECHM", "CIPLA", "EICHERMOT", "DIVISLAB", "BRITANNIA", "TATACONSUM", "APOLLOHOSP",
+        "DRREDDY", "ADANIPORTS", "SBILIFE", "LTIM", "BEL", "SHRIRAMFIN", "ASIANPAINT", "M&M",
+        "PNB", "BANKBARODA", "FEDERALBNK", "IDFCFIRSTB", "AUBANK", "BANDHANBNK",
+        "PERSISTENT", "COFORGE", "LTTS", "MPHASIS", "BAJAJ-AUTO", "TVSMOTOR", "BHARATFORG", "ASHOKLEY",
+        "LUPIN", "AUROPHARMA", "TORNTPHARM", "ZYDUSLIFE", "BIOCON", "HAL", "VEDL", "IOC", "GAIL",
+        "CHOLAFIN", "HAVELLS", "PIDILITIND", "DABUR", "GODREJCP", "MARICO", "SIEMENS", "ABB", "DLF",
+        "AMBUJACEM", "TRENT", "ZOMATO", "JIOFIN", "CANBK", "UNIONBANK", "IRFC", "PFC", "RECLTD"
+    ]
+}
+
+# Comprehensive Master Sector Map
+EXPANDED_SECTOR_MAP = {
+    "RELIANCE": "Energy", "ONGC": "Energy", "IOC": "Energy", "BPCL": "Energy", "NTPC": "Energy", "POWERGRID": "Energy", "COALINDIA": "Energy", "GAIL": "Energy",
+    "TCS": "IT", "INFY": "IT", "WIPRO": "IT", "HCLTECH": "IT", "TECHM": "IT", "LTIM": "IT", "PERSISTENT": "IT", "COFORGE": "IT", "LTTS": "IT", "MPHASIS": "IT",
+    "HDFCBANK": "Banking", "ICICIBANK": "Banking", "SBIN": "Banking", "AXISBANK": "Banking", "KOTAKBANK": "Banking", "BAJFINANCE": "Banking", "HDFCLIFE": "Banking",
+    "BAJAJFINSV": "Banking", "INDUSINDBK": "Banking", "PNB": "Banking", "BANKBARODA": "Banking", "FEDERALBNK": "Banking", "IDFCFIRSTB": "Banking", "AUBANK": "Banking",
+    "BANDHANBNK": "Banking", "SBILIFE": "Banking", "SHRIRAMFIN": "Banking", "CHOLAFIN": "Banking", "JIOFIN": "Banking", "CANBK": "Banking", "UNIONBANK": "Banking",
+    "IRFC": "Banking", "PFC": "Banking", "RECLTD": "Banking",
+    "BHARTIARTL": "Telecom",
+    "ITC": "FMCG", "HUL": "FMCG", "NESTLEIND": "FMCG", "BRITANNIA": "FMCG", "TATACONSUM": "FMCG", "DABUR": "FMCG", "GODREJCP": "FMCG", "MARICO": "FMCG",
+    "LT": "Infrastructure", "ULTRACEMCO": "Infrastructure", "ADANIENT": "Infrastructure", "ADANIPORTS": "Infrastructure", "GRASIM": "Infrastructure", "SIEMENS": "Infrastructure", "ABB": "Infrastructure", "DLF": "Infrastructure", "AMBUJACEM": "Infrastructure", "BEL": "Infrastructure", "HAL": "Infrastructure",
+    "MARUTI": "Auto", "TATAMOTORS": "Auto", "HEROMOTOCO": "Auto", "M&M": "Auto", "EICHERMOT": "Auto", "BAJAJ-AUTO": "Auto", "TVSMOTOR": "Auto", "BHARATFORG": "Auto", "ASHOKLEY": "Auto", "MOTHERSON": "Auto",
+    "SUNPHARMA": "Pharma", "DRREDDY": "Pharma", "CIPLA": "Pharma", "DIVISLAB": "Pharma", "APOLLOHOSP": "Pharma", "LUPIN": "Pharma", "AUROPHARMA": "Pharma", "TORNTPHARM": "Pharma", "ZYDUSLIFE": "Pharma", "BIOCON": "Pharma",
+    "TATASTEEL": "Metals", "JSWSTEEL": "Metals", "HINDALCO": "Metals", "VEDL": "Metals",
+    "TITAN": "Consumer", "HAVELLS": "Consumer", "PIDILITIND": "Consumer", "TRENT": "Consumer", "ZOMATO": "Consumer",
+}
+
+
+@app.get("/api/screener/advanced")
+@limiter.limit("200/minute")
+async def get_advanced_screener(
+    request: Request,
+    universe: str = "NIFTY 50",
+    sector: str = "",
+    min_rsi: float = 0.0,
+    max_rsi: float = 100.0,
+    signal: str = "",
+    volume_spike: bool = False,
+    near_52w_high: bool = False,
+    near_52w_low: bool = False,
+    min_score: int = 0,
+    sort_by: str = "ai_score",
     sort_dir: str = "desc",
 ):
     """
-    Advanced multi-filter screener. Extends the basic screener with:
-    RSI range, MACD signal, volume spike detection, 52W proximity, sector, sorting.
+    Advanced multi-universe stock screener with support for:
+    NIFTY 50, BANK NIFTY, NIFTY IT, NIFTY AUTO, NIFTY PHARMA, and NIFTY 100.
     """
+    selected_universe = universe.upper() if universe.upper() in INDEX_UNIVERSES else "NIFTY 50"
+    target_tickers = INDEX_UNIVERSES[selected_universe]
+
     # Re-use or build screener base results
     cached_results = get_screener_results(ttl_minutes=5)
 
     if cached_results is None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _process_ticker(t: str) -> Optional[dict]:
+            try:
+                info = fetch_company_info(t)
+                if not info:
+                    return None
+                pred = _get_prediction_logic(t)
+                df = fetch_stock_data(t, period="1Y")
+                enriched = enrich_stock_dataframe(df) if df is not None and not df.empty else None
+
+                prev = info.get("previous_close") or 1.0
+                change_pct = ((info["current_price"] - prev) / prev) * 100
+
+                rsi_val = None
+                macd_sig = None
+                volume_ratio = None
+                high_52w = None
+                low_52w = None
+                trend = "NEUTRAL"
+
+                if enriched is not None and len(enriched) > 0:
+                    last_row = enriched.iloc[-1]
+                    rsi_val = float(last_row.get("rsi", 50)) if "rsi" in last_row else None
+                    macd_sig = float(last_row.get("macd_signal", 0)) if "macd_signal" in last_row else None
+
+                    ema_20 = float(last_row.get("ema_20", 0)) if "ema_20" in last_row else 0
+                    sma_50 = float(last_row.get("sma_50", 0)) if "sma_50" in last_row else 0
+                    if ema_20 > 0 and sma_50 > 0:
+                        trend = "BULLISH" if ema_20 >= sma_50 else "BEARISH"
+
+                    if "volume" in enriched.columns and len(enriched) >= 20:
+                        avg_vol = float(enriched["volume"].rolling(20).mean().iloc[-1])
+                        cur_vol = float(enriched["volume"].iloc[-1])
+                        volume_ratio = round(cur_vol / avg_vol, 2) if avg_vol > 0 else 1.0
+                    if "close" in enriched.columns and len(enriched) >= 50:
+                        high_52w = float(enriched["close"].rolling(min(252, len(enriched))).max().iloc[-1])
+                        low_52w  = float(enriched["close"].rolling(min(252, len(enriched))).min().iloc[-1])
+
+                cur_price = info["current_price"]
+                target_7d = pred.get("predicted_price_7d") or round(cur_price * (1.0 + pred.get("predicted_return_7d", 0.02)), 2)
+                stop_loss = round(cur_price * 0.96, 2)
+
+                return {
+                    "ticker":          t,
+                    "name":            info.get("name", t),
+                    "price":           cur_price,
+                    "change":          round(change_pct, 3),
+                    "ai_score":        pred["ai_confidence_score"],
+                    "signal":          pred["signal"],
+                    "predicted_pct":   round(pred["predicted_return_7d"] * 100, 3),
+                    "target_price_7d": round(target_7d, 2),
+                    "stop_loss":       stop_loss,
+                    "trend":           trend,
+                    "rsi":             round(rsi_val, 2) if rsi_val is not None else None,
+                    "macd_signal":     round(macd_sig, 4) if macd_sig is not None else None,
+                    "volume_ratio":    volume_ratio,
+                    "high_52w":        round(high_52w, 2) if high_52w else None,
+                    "low_52w":         round(low_52w, 2) if low_52w else None,
+                    "sector":          EXPANDED_SECTOR_MAP.get(t, "Other"),
+                }
+            except Exception:
+                return None
+
         def _build():
-            screener_universe = [
-                "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL",
-                "TATAMOTORS", "MARUTI", "AXISBANK", "WIPRO", "HCLTECH", "SUNPHARMA", "BAJFINANCE", "KOTAKBANK",
-                "TATASTEEL", "NTPC", "POWERGRID", "ONGC", "COALINDIA", "TITAN", "ULTRACEMCO", "ADANIENT",
-                "JSWSTEEL", "HDFCLIFE", "BPCL", "HEROMOTOCO"
-            ]
+            # Process entire NIFTY 100 universe in parallel with worker pool
+            all_100_tickers = INDEX_UNIVERSES["NIFTY 100"]
             fresh = []
-            for t in screener_universe:
-                try:
-                    info = fetch_company_info(t)
-                    if not info:
-                        continue
-                    pred = _get_prediction_logic(t)
-                    df = fetch_stock_data(t, period="1Y")
-                    enriched = enrich_stock_dataframe(df) if df is not None and not df.empty else None
-
-                    prev = info.get("previous_close") or 1.0
-                    change_pct = ((info["current_price"] - prev) / prev) * 100
-
-                    # RSI & MACD from enriched dataframe
-                    rsi_val = None
-                    macd_sig = None
-                    volume_ratio = None
-                    high_52w = None
-                    low_52w = None
-                    trend = "NEUTRAL"
-
-                    if enriched is not None and len(enriched) > 0:
-                        last_row = enriched.iloc[-1]
-                        rsi_val = float(last_row.get("rsi", 50)) if "rsi" in last_row else None
-                        macd_sig = float(last_row.get("macd_signal", 0)) if "macd_signal" in last_row else None
-
-                        # EMA20 vs SMA50 Trend Crossover
-                        ema_20 = float(last_row.get("ema_20", 0)) if "ema_20" in last_row else 0
-                        sma_50 = float(last_row.get("sma_50", 0)) if "sma_50" in last_row else 0
-                        if ema_20 > 0 and sma_50 > 0:
-                            trend = "BULLISH" if ema_20 >= sma_50 else "BEARISH"
-
-                        # Volume ratio: last volume / 20-day avg volume
-                        if "volume" in enriched.columns and len(enriched) >= 20:
-                            avg_vol = float(enriched["volume"].rolling(20).mean().iloc[-1])
-                            cur_vol = float(enriched["volume"].iloc[-1])
-                            volume_ratio = round(cur_vol / avg_vol, 2) if avg_vol > 0 else 1.0
-                        if "close" in enriched.columns and len(enriched) >= 50:
-                            high_52w = float(enriched["close"].rolling(min(252, len(enriched))).max().iloc[-1])
-                            low_52w  = float(enriched["close"].rolling(min(252, len(enriched))).min().iloc[-1])
-
-                    # Expanded Sector Mapping
-                    sector_map = {
-                        "RELIANCE": "Energy", "ONGC": "Energy", "IOC": "Energy", "BPCL": "Energy", "NTPC": "Energy", "POWERGRID": "Energy", "COALINDIA": "Energy",
-                        "TCS": "IT", "INFY": "IT", "WIPRO": "IT", "HCLTECH": "IT", "TECHM": "IT",
-                        "HDFCBANK": "Banking", "ICICIBANK": "Banking", "SBIN": "Banking", "AXISBANK": "Banking", "KOTAKBANK": "Banking", "BAJFINANCE": "Banking", "HDFCLIFE": "Banking",
-                        "BHARTIARTL": "Telecom",
-                        "ITC": "FMCG", "HUL": "FMCG", "NESTLEIND": "FMCG",
-                        "LT": "Infrastructure", "ULTRACEMCO": "Infrastructure", "ADANIENT": "Infrastructure",
-                        "MARUTI": "Auto", "TATAMOTORS": "Auto", "HEROMOTOCO": "Auto", "M&M": "Auto",
-                        "SUNPHARMA": "Pharma", "DRREDDY": "Pharma", "CIPLA": "Pharma",
-                        "TATASTEEL": "Metals", "JSWSTEEL": "Metals", "HINDALCO": "Metals",
-                        "TITAN": "Consumer",
-                    }
-
-                    cur_price = info["current_price"]
-                    target_7d = pred.get("predicted_price_7d") or round(cur_price * (1.0 + pred.get("predicted_return_7d", 0.02)), 2)
-                    stop_loss = round(cur_price * 0.96, 2)
-
-                    fresh.append({
-                        "ticker":          t,
-                        "name":            info["name"],
-                        "price":           cur_price,
-                        "change":          round(change_pct, 3),
-                        "ai_score":        pred["ai_confidence_score"],
-                        "signal":          pred["signal"],
-                        "predicted_pct":   round(pred["predicted_return_7d"] * 100, 3),
-                        "target_price_7d": round(target_7d, 2),
-                        "stop_loss":       stop_loss,
-                        "trend":           trend,
-                        "rsi":             round(rsi_val, 2) if rsi_val is not None else None,
-                        "macd_signal":     round(macd_sig, 4) if macd_sig is not None else None,
-                        "volume_ratio":    volume_ratio,
-                        "high_52w":        round(high_52w, 2) if high_52w else None,
-                        "low_52w":         round(low_52w, 2) if low_52w else None,
-                        "sector":          sector_map.get(t, "Other"),
-                    })
-                except Exception:
-                    continue
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                results_list = list(executor.map(_process_ticker, all_100_tickers))
+            for res in results_list:
+                if res is not None:
+                    fresh.append(res)
             return fresh
 
         loop = asyncio.get_running_loop()
@@ -891,23 +953,36 @@ async def get_advanced_screener(
 
     results = cached_results
 
-    # Apply filters
+    # 1. Filter by Selected Index Universe
+    results = [r for r in results if r.get("ticker", "") in target_tickers]
+
+    # 2. Sector Filter
     if sector:
         results = [r for r in results if r.get("sector", "").lower() == sector.lower()]
+
+    # 3. Signal Filter
     if signal:
         results = [r for r in results if r.get("signal", "") == signal.lower()]
+
+    # 4. Min Score
     if min_score:
         results = [r for r in results if r.get("ai_score", 0) >= min_score]
+
+    # 5. RSI Range
     if min_rsi > 0 or max_rsi < 100:
         results = [r for r in results if r.get("rsi") is not None and min_rsi <= r["rsi"] <= max_rsi]
+
+    # 6. Volume Spike
     if volume_spike:
         results = [r for r in results if (r.get("volume_ratio") or 0) >= 1.5]
+
+    # 7. 52W Proximity
     if near_52w_high:
         results = [r for r in results if r.get("high_52w") and abs(r["price"] - r["high_52w"]) / r["high_52w"] <= 0.05]
     if near_52w_low:
         results = [r for r in results if r.get("low_52w") and abs(r["price"] - r["low_52w"]) / r["price"] <= 0.05]
 
-    # Sorting
+    # 8. Sorting
     valid_sort_keys = {"ai_score", "change", "predicted_pct", "rsi", "volume_ratio", "price"}
     sk = sort_by if sort_by in valid_sort_keys else "ai_score"
     reverse = sort_dir.lower() != "asc"

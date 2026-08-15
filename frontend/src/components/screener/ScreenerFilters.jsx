@@ -1,33 +1,13 @@
 import React from 'react';
-import { SECTORS, SIGNALS } from '../../constants/screenerConfig';
+import { SECTORS, SIGNALS, UNIVERSES } from '../../constants/screenerConfig';
 import FilterPill from './FilterPill';
 
 /**
- * Filter control panel
- * @param {{
- *   sector: string,
- *   setSector: (s: string) => void,
- *   signal: string,
- *   setSignal: (s: string) => void,
- *   minRsi: number,
- *   setMinRsi: (val: number) => void,
- *   maxRsi: number,
- *   setMaxRsi: (val: number) => void,
- *   volumeSpike: boolean,
- *   setVolumeSpike: (val: boolean) => void,
- *   near52High: boolean,
- *   setNear52High: (val: boolean) => void,
- *   near52Low: boolean,
- *   setNear52Low: (val: boolean) => void,
- *   minScore: number,
- *   setMinScore: (val: number) => void,
- *   search: string,
- *   setSearch: (val: string) => void,
- *   onResetFilters: () => void,
- *   isFiltered: boolean
- * }} props
+ * Enhanced Filter Control Panel with Index Universe Selector
  */
 export default function ScreenerFilters({
+  universe,
+  setUniverse,
   sector,
   setSector,
   signal,
@@ -51,6 +31,23 @@ export default function ScreenerFilters({
 }) {
   return (
     <div className="screener-filter-panel">
+      {/* Row 0: Multi-Index Universe Selector */}
+      <div className="screener-filter-row" style={{ paddingBottom: 10, borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <span className="screener-filter-label" style={{ color: '#A855F7' }}>INDEX</span>
+        {UNIVERSES.map((u) => (
+          <button
+            key={u.id}
+            type="button"
+            className={`screener-universe-pill ${universe === u.id ? 'active' : ''}`}
+            onClick={() => setUniverse(u.id)}
+          >
+            <span>{u.icon}</span>
+            <span>{u.id}</span>
+            <span className="screener-universe-count">{u.count}</span>
+          </button>
+        ))}
+      </div>
+
       {/* Row 1: Sector Pills */}
       <div className="screener-filter-row">
         <span className="screener-filter-label">SECTOR</span>

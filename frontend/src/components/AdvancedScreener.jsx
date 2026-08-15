@@ -6,7 +6,8 @@ import {
   PRESETS,
   DEFAULT_FILTERS,
   DEFAULT_PAGE_SIZE,
-  THRESHOLDS
+  THRESHOLDS,
+  INDEX_CONSTITUENTS
 } from '../constants/screenerConfig';
 
 import ScreenerHeader from './screener/ScreenerHeader';
@@ -20,7 +21,7 @@ import ScreenerPagination from './screener/ScreenerPagination';
 import './screener/Screener.css';
 
 /**
- * Advanced AI Stock Screener Orchestrator Component
+ * Advanced AI Stock Screener Orchestrator Component with Multi-Universe Selection
  */
 export default function AdvancedScreener() {
   const { setSelectedSymbol, setActiveView } = useStore();
@@ -36,7 +37,8 @@ export default function AdvancedScreener() {
   const [autoRefreshTimer, setAutoRefreshTimer] = useState(30);
   const timerRef = useRef(null);
 
-  // Filter States
+  // Universe & Filter States
+  const [universe, setUniverse] = useState(DEFAULT_FILTERS.universe);
   const [preset, setPreset] = useState(DEFAULT_FILTERS.preset);
   const [sector, setSector] = useState(DEFAULT_FILTERS.sector);
   const [signal, setSignal] = useState(DEFAULT_FILTERS.signal);
@@ -57,19 +59,17 @@ export default function AdvancedScreener() {
     if (!isBackground) setLoading(true);
     setError(null);
 
-    api.get('/api/screener/advanced')
+    api.get('/api/screener/advanced?universe=NIFTY%20100')
       .then((r) => {
         if (Array.isArray(r.data) && r.data.length > 0) {
           setAllStocks(r.data);
         } else {
-          // Fallback to basic screener endpoint if advanced returns empty
           return api.get('/api/screener').then((bRes) => {
             if (Array.isArray(bRes.data)) setAllStocks(bRes.data);
           });
         }
       })
       .catch((err) => {
-        // Retry with basic screener endpoint
         return api.get('/api/screener')
           .then((bRes) => {
             if (Array.isArray(bRes.data)) setAllStocks(bRes.data);
@@ -135,6 +135,7 @@ export default function AdvancedScreener() {
 
   // Reset Filters Handler
   const handleResetFilters = useCallback(() => {
+    setUniverse(DEFAULT_FILTERS.universe);
     setPreset('all');
     setSector(DEFAULT_FILTERS.sector);
     setSignal(DEFAULT_FILTERS.signal);
@@ -152,6 +153,7 @@ export default function AdvancedScreener() {
   // Check if any filter is actively modified
   const isFiltered = useMemo(() => {
     return (
+      universe !== 'NIFTY 50' ||
       sector !== 'All' ||
       signal !== 'All' ||
       minRsi > 0 ||
@@ -163,7 +165,7 @@ export default function AdvancedScreener() {
       search.trim().length > 0 ||
       preset !== 'all'
     );
-  }, [sector, signal, minRsi, maxRsi, volumeSpike, near52High, near52Low, minScore, search, preset]);
+  }, [universe, sector, signal, minRsi, maxRsi, volumeSpike, near52High, near52Low, minScore, search, preset]);
 
   // Column Sort Handler
   const handleSort = useCallback((field) => {
@@ -184,14 +186,21 @@ export default function AdvancedScreener() {
     setActiveView('Live Chart');
   }, [setSelectedSymbol, setActiveView]);
 
+  // Filter stocks by Selected Universe
+  const universeStocks = useMemo(() => {
+    const targetTickers = INDEX_CONSTITUENTS[universe] || INDEX_CONSTITUENTS['NIFTY 50'];
+    if (!targetTickers || universe === 'NIFTY 100') return allStocks;
+    return allStocks.filter((r) => targetTickers.includes(r.ticker));
+  }, [allStocks, universe]);
+
   // CSV Export Handler
   const handleExportCsv = useCallback(() => {
-    if (!allStocks.length) {
+    if (!universeStocks.length) {
       toast.error('No stocks to export');
       return;
     }
     const header = 'Ticker,Name,Sector,Price,Change%,Trend,AI Score,Signal,Target 7D,Stop Loss,RSI,Volume Ratio,52W High,52W Low\n';
-    const lines = allStocks.map((r) =>
+    const lines = universeStocks.map((r) =>
       `"${r.ticker || ''}","${r.name || ''}","${r.sector || ''}",${r.price || 0},${r.change || 0},"${r.trend || ''}",${r.ai_score || 0},"${r.signal || ''}",${r.target_price_7d || ''},${r.stop_loss || ''},${r.rsi ?? ''},${r.volume_ratio ?? ''},${r.high_52w ?? ''},${r.low_52w ?? ''}`
     ).join('\n');
 
@@ -199,27 +208,27 @@ export default function AdvancedScreener() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `stockoracle_screener_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `stockoracle_screener_${universe.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success(`Exported ${allStocks.length} stocks to CSV`);
-  }, [allStocks]);
+    toast.success(`Exported ${universeStocks.length} stocks from ${universe} to CSV`);
+  }, [universeStocks, universe]);
 
-  // KPI Metrics Calculation from full universe (Memoized)
+  // KPI Metrics Calculation for Selected Universe
   const stats = useMemo(() => {
-    const total = allStocks.length;
-    const bullish = allStocks.filter((r) => r.signal === 'buy' || r.trend === 'BULLISH').length;
-    const volumeSurges = allStocks.filter((r) => (r.volume_ratio || 0) >= THRESHOLDS.VOLUME_SURGE_RATIO).length;
-    const oversold = allStocks.filter((r) => (r.rsi || 50) < THRESHOLDS.RSI_OVERSOLD).length;
+    const total = universeStocks.length;
+    const bullish = universeStocks.filter((r) => r.signal === 'buy' || r.trend === 'BULLISH').length;
+    const volumeSurges = universeStocks.filter((r) => (r.volume_ratio || 0) >= THRESHOLDS.VOLUME_SURGE_RATIO).length;
+    const oversold = universeStocks.filter((r) => (r.rsi || 50) < THRESHOLDS.RSI_OVERSOLD).length;
     const avgScore = total
-      ? (allStocks.reduce((acc, r) => acc + (r.ai_score || 0), 0) / total).toFixed(0)
+      ? (universeStocks.reduce((acc, r) => acc + (r.ai_score || 0), 0) / total).toFixed(0)
       : 0;
     return { total, bullish, volumeSurges, oversold, avgScore };
-  }, [allStocks]);
+  }, [universeStocks]);
 
-  // Instant reactive client-side filtering & sorting (0ms latency, zero rate-limit issues)
+  // Instant reactive client-side filtering & sorting (0ms latency)
   const filteredAndSortedRows = useMemo(() => {
-    let list = [...allStocks];
+    let list = [...universeStocks];
 
     // 1. Sector Filter
     if (sector !== 'All') {
@@ -277,7 +286,7 @@ export default function AdvancedScreener() {
     });
 
     return list;
-  }, [allStocks, sector, signal, minScore, minRsi, maxRsi, volumeSpike, near52High, near52Low, search, sortBy, sortDir]);
+  }, [universeStocks, sector, signal, minScore, minRsi, maxRsi, volumeSpike, near52High, near52Low, search, sortBy, sortDir]);
 
   // Paginated Slice
   const paginatedRows = useMemo(() => {
@@ -305,7 +314,7 @@ export default function AdvancedScreener() {
       {/* Sector Distribution Panel */}
       {viewMode === 'sectors' && (
         <ScreenerSectorChart
-          rows={allStocks}
+          rows={universeStocks}
           selectedSector={sector}
           onSelectSector={setSector}
         />
@@ -317,8 +326,14 @@ export default function AdvancedScreener() {
         onSelectPreset={handleSelectPreset}
       />
 
-      {/* Filter Controls Panel */}
+      {/* Filter Controls Panel (with Index Universe Selector) */}
       <ScreenerFilters
+        universe={universe}
+        setUniverse={(u) => {
+          setUniverse(u);
+          setSector('All');
+          setPage(1);
+        }}
         sector={sector}
         setSector={setSector}
         signal={signal}

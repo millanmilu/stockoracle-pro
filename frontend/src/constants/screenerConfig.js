@@ -1,7 +1,55 @@
 /**
  * StockOracle Pro - Screener Configuration & Constants
- * Defines sectors, presets, technical thresholds, and pagination options.
+ * Defines universes, sectors, presets, technical thresholds, and pagination options.
  */
+
+export const UNIVERSES = [
+  { id: 'NIFTY 50', label: '🏢 Nifty 50 (50 Stocks)', count: 50, icon: '🏢' },
+  { id: 'BANK NIFTY', label: '🏦 Bank Nifty (12 Banks)', count: 12, icon: '🏦' },
+  { id: 'NIFTY IT', label: '💻 Nifty IT (10 Stocks)', count: 10, icon: '💻' },
+  { id: 'NIFTY AUTO', label: '🚗 Nifty Auto (10 Stocks)', count: 10, icon: '🚗' },
+  { id: 'NIFTY PHARMA', label: '💊 Nifty Pharma (10 Stocks)', count: 10, icon: '💊' },
+  { id: 'NIFTY 100', label: '🌟 Nifty 100 (100 Stocks)', count: 100, icon: '🌟' },
+];
+
+export const INDEX_CONSTITUENTS = {
+  'NIFTY 50': [
+    'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'LT', 'HUL',
+    'TATAMOTORS', 'MARUTI', 'AXISBANK', 'WIPRO', 'HCLTECH', 'SUNPHARMA', 'BAJFINANCE', 'KOTAKBANK',
+    'TATASTEEL', 'NTPC', 'POWERGRID', 'ONGC', 'COALINDIA', 'TITAN', 'ULTRACEMCO', 'ADANIENT',
+    'JSWSTEEL', 'HDFCLIFE', 'BPCL', 'HEROMOTOCO', 'BAJAJFINSV', 'INDUSINDBK', 'NESTLEIND', 'HINDALCO',
+    'GRASIM', 'TECHM', 'CIPLA', 'EICHERMOT', 'DIVISLAB', 'BRITANNIA', 'TATACONSUM', 'APOLLOHOSP',
+    'DRREDDY', 'ADANIPORTS', 'SBILIFE', 'LTIM', 'BEL', 'SHRIRAMFIN', 'ASIANPAINT', 'M&M'
+  ],
+  'BANK NIFTY': [
+    'HDFCBANK', 'ICICIBANK', 'SBIN', 'KOTAKBANK', 'AXISBANK', 'INDUSINDBK',
+    'PNB', 'BANKBARODA', 'FEDERALBNK', 'IDFCFIRSTB', 'AUBANK', 'BANDHANBNK'
+  ],
+  'NIFTY IT': [
+    'TCS', 'INFY', 'HCLTECH', 'WIPRO', 'TECHM', 'LTIM', 'PERSISTENT', 'COFORGE', 'LTTS', 'MPHASIS'
+  ],
+  'NIFTY AUTO': [
+    'TATAMOTORS', 'MARUTI', 'M&M', 'BAJAJ-AUTO', 'EICHERMOT', 'HEROMOTOCO',
+    'TVSMOTOR', 'BHARATFORG', 'ASHOKLEY', 'MOTHERSON'
+  ],
+  'NIFTY PHARMA': [
+    'SUNPHARMA', 'DRREDDY', 'CIPLA', 'DIVISLAB', 'APOLLOHOSP', 'LUPIN',
+    'AUROPHARMA', 'TORNTPHARM', 'ZYDUSLIFE', 'BIOCON'
+  ],
+  'NIFTY 100': [
+    'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'LT', 'HUL',
+    'TATAMOTORS', 'MARUTI', 'AXISBANK', 'WIPRO', 'HCLTECH', 'SUNPHARMA', 'BAJFINANCE', 'KOTAKBANK',
+    'TATASTEEL', 'NTPC', 'POWERGRID', 'ONGC', 'COALINDIA', 'TITAN', 'ULTRACEMCO', 'ADANIENT',
+    'JSWSTEEL', 'HDFCLIFE', 'BPCL', 'HEROMOTOCO', 'BAJAJFINSV', 'INDUSINDBK', 'NESTLEIND', 'HINDALCO',
+    'GRASIM', 'TECHM', 'CIPLA', 'EICHERMOT', 'DIVISLAB', 'BRITANNIA', 'TATACONSUM', 'APOLLOHOSP',
+    'DRREDDY', 'ADANIPORTS', 'SBILIFE', 'LTIM', 'BEL', 'SHRIRAMFIN', 'ASIANPAINT', 'M&M',
+    'PNB', 'BANKBARODA', 'FEDERALBNK', 'IDFCFIRSTB', 'AUBANK', 'BANDHANBNK',
+    'PERSISTENT', 'COFORGE', 'LTTS', 'MPHASIS', 'BAJAJ-AUTO', 'TVSMOTOR', 'BHARATFORG', 'ASHOKLEY',
+    'LUPIN', 'AUROPHARMA', 'TORNTPHARM', 'ZYDUSLIFE', 'BIOCON', 'HAL', 'VEDL', 'IOC', 'GAIL',
+    'CHOLAFIN', 'HAVELLS', 'PIDILITIND', 'DABUR', 'GODREJCP', 'MARICO', 'SIEMENS', 'ABB', 'DLF',
+    'AMBUJACEM', 'TRENT', 'ZOMATO', 'JIOFIN', 'CANBK', 'UNIONBANK', 'IRFC', 'PFC', 'RECLTD'
+  ]
+};
 
 export const SECTORS = [
   'All',
@@ -14,6 +62,7 @@ export const SECTORS = [
   'Auto',
   'Pharma',
   'Metals',
+  'Consumer',
   'Other'
 ];
 
@@ -41,7 +90,7 @@ export const PRESETS = [
     id: 'all', 
     label: 'All Stocks', 
     icon: '🌐',
-    description: 'All 30+ tracked Nifty / Largecap stocks',
+    description: 'All stocks in selected universe',
     filter: {
       signal: 'All',
       minRsi: 0,
@@ -101,7 +150,7 @@ export const PRESETS = [
     id: 'momentum', 
     label: '🎯 52W High Momentum', 
     icon: '🎯',
-    description: 'Trading within 3% of 52-Week High with RSI > 55',
+    description: 'Trading within 5% of 52-Week High with RSI > 55',
     filter: {
       signal: 'All',
       minRsi: THRESHOLDS.RSI_MOMENTUM_MIN,
@@ -119,6 +168,7 @@ export const PAGE_SIZE_OPTIONS = [15, 25, 50, 100];
 export const DEFAULT_PAGE_SIZE = 25;
 
 export const DEFAULT_FILTERS = {
+  universe: 'NIFTY 50',
   preset: 'all',
   sector: 'All',
   signal: 'All',
