@@ -69,18 +69,19 @@ export default function PriceAlerts() {
   const handleAdd = (e) => {
     e.preventDefault();
     const threshold = parseFloat(form.threshold);
-    if (!form.ticker.trim() || isNaN(threshold) || threshold <= 0) {
+    const cleanTicker = form.ticker ? form.ticker.trim().toUpperCase() : '';
+    if (!cleanTicker || isNaN(threshold) || threshold <= 0) {
       setFormError('Please enter a valid ticker and threshold price.');
       return;
     }
     addAlert({
-      ticker: form.ticker.trim().toUpperCase(),
+      ticker: cleanTicker,
       condition: form.condition,
       threshold,
     });
     setForm({ ticker: '', condition: 'above', threshold: '' });
     setFormError('');
-    toast.success(`Alert set for ${form.ticker.toUpperCase()}`);
+    toast.success(`Alert set for ${cleanTicker}`);
   };
 
   return (

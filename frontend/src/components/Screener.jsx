@@ -17,9 +17,10 @@ export default function Screener({ onSelect }) {
   }, [])
 
   const filtered = rows.filter(r => {
-    const matchSearch = r.ticker.includes(search.toUpperCase()) || r.name?.toLowerCase().includes(search.toLowerCase())
-    const matchSig    = sigFilter === 'all' || r.signal === sigFilter
-    return matchSearch && matchSig
+    const q = (search || '').trim().toUpperCase();
+    const matchSearch = !q || (r.ticker && String(r.ticker).toUpperCase().includes(q)) || (r.name && String(r.name).toUpperCase().includes(q));
+    const matchSig    = sigFilter === 'all' || r.signal === sigFilter;
+    return matchSearch && matchSig;
   })
 
   if (loading) return <div className="spinner" />

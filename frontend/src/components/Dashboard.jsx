@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
 import StockChart from './StockChart';
@@ -162,7 +162,7 @@ export default function Dashboard() {
             Price Trend & Moving Averages (20 / 50 SMA)
           </div>
           <div style={{ fontSize: '0.75rem', color: '#6366F1', fontWeight: 600 }}>
-            {interval.toUpperCase()} INTERVAL
+            {interval ? interval.toUpperCase() : '1D'} INTERVAL
           </div>
         </div>
 

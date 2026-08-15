@@ -94,10 +94,12 @@ export function useStock() {
   }, []);
 
   const searchStock = useCallback(async (query) => {
+    if (!query) return { found: false, ticker: '', name: '' };
+    const q = String(query).toUpperCase();
     try {
-      const { data } = await api.get(`/api/stock/search/${query.toUpperCase()}`);
+      const { data } = await api.get(`/api/stock/search/${q}`);
       return data;
-    } catch (e) { return { found: false, ticker: query.toUpperCase(), name: query.toUpperCase() }; }
+    } catch (e) { return { found: false, ticker: q, name: q }; }
   }, []);
 
   const searchStocks = useCallback(async (query) => {

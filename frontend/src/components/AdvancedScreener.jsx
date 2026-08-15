@@ -172,9 +172,13 @@ export default function AdvancedScreener() {
     return { total, bullish, volumeSurges, oversold, avgScore };
   }, [rows]);
 
-  const filtered = rows.filter(r =>
-    !search || r.ticker.includes(search.toUpperCase()) || r.name?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = rows.filter(r => {
+    const q = (search || '').trim().toUpperCase();
+    if (!q) return true;
+    const matchTicker = r.ticker ? String(r.ticker).toUpperCase().includes(q) : false;
+    const matchName = r.name ? String(r.name).toUpperCase().includes(q) : false;
+    return matchTicker || matchName;
+  });
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
 
@@ -262,7 +266,7 @@ export default function AdvancedScreener() {
           <span style={{ color: '#6B7280', fontSize: '0.72rem', fontWeight: 700, marginRight: 4 }}>SIGNAL</span>
           {SIGNALS.map(s => (
             <FilterPill key={s} active={signal === s} onClick={() => setSignal(s)}>
-              {s === 'All' ? 'All Signals' : s.toUpperCase()}
+              {s === 'All' ? 'All Signals' : (s ? s.toUpperCase() : '')}
             </FilterPill>
           ))}
         </div>

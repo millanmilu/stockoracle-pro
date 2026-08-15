@@ -55,15 +55,15 @@ export default function VolatilityPanel({ ticker }) {
   if (!data) return <div className="spinner" />
 
   const {
-    current_vol_pct, avg_vol_pct, vol_percentile,
-    regime, garch_params, rolling_history, forecast,
-  } = data
+    current_vol_pct = 0, avg_vol_pct = 0, vol_percentile = 0,
+    regime = 'Normal', garch_params = { omega: 0, alpha: 0, beta: 0 }, rolling_history = [], forecast = [],
+  } = data || {}
 
   const regimeColor = REGIME_COLOR[regime] || '#A5B4FC'
 
   // Combine history + forecast for chart
-  const histPoints  = rolling_history.map(p => ({ date: p.date, historical: p.vol }))
-  const fcastPoints = forecast.map(p => ({ date: p.date, forecast: p.vol, upper: p.upper, lower: p.lower }))
+  const histPoints  = (rolling_history || []).map(p => ({ date: p.date, historical: p.vol }))
+  const fcastPoints = (forecast || []).map(p => ({ date: p.date, forecast: p.vol, upper: p.upper, lower: p.lower }))
 
   // Show last 30 history + all forecast
   const chartData   = [...histPoints.slice(-30), ...fcastPoints]
@@ -75,10 +75,10 @@ export default function VolatilityPanel({ ticker }) {
     <div>
       {/* Stat cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, marginBottom: 20 }}>
-        <StatCard label="Current Vol" value={current_vol_pct.toFixed(1)} unit="%" color={regimeColor} />
-        <StatCard label="1Y Avg Vol"  value={avg_vol_pct.toFixed(1)}     unit="%" />
-        <StatCard label="Vol Percentile" value={vol_percentile.toFixed(0)} unit="th" color={vol_percentile > 70 ? '#F43F5E' : vol_percentile < 30 ? '#10B981' : '#F59E0B'} />
-        <StatCard label="Regime"       value={regime.replace(' Volatility', '')} unit="" color={regimeColor} />
+        <StatCard label="Current Vol" value={current_vol_pct?.toFixed(1) ?? '0.0'} unit="%" color={regimeColor} />
+        <StatCard label="1Y Avg Vol"  value={avg_vol_pct?.toFixed(1) ?? '0.0'}     unit="%" />
+        <StatCard label="Vol Percentile" value={vol_percentile?.toFixed(0) ?? '0'} unit="th" color={vol_percentile > 70 ? '#F43F5E' : vol_percentile < 30 ? '#10B981' : '#F59E0B'} />
+        <StatCard label="Regime"       value={String(regime || '').replace(' Volatility', '')} unit="" color={regimeColor} />
       </div>
 
       {/* GARCH params */}

@@ -124,7 +124,7 @@ export default function StockChart({ history, prediction, interval, onIntervalCh
             className={`btn ${interval === tf ? 'btn-primary' : 'btn-ghost'}`}
             style={{ padding: '5px 12px', fontSize: '0.78rem' }}
             onClick={() => onIntervalChange(tf)}
-          >{tf.toUpperCase()}</button>
+          >{tf ? tf.toUpperCase() : ''}</button>
         ))}
       </div>
       <div className="chart-wrap" style={{ height: 300 }}>

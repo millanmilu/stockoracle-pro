@@ -24,7 +24,7 @@ export default function MonteCarlo({ ticker }) {
 
   if (loading) return <div className="spinner" />
   if (error)   return <div style={{ color: '#F43F5E', padding: 16 }}>{error}</div>
-  if (!mc)     return null
+  if (!mc || !Array.isArray(mc.p50)) return null
 
   const days = Array.from({ length: mc.p50.length }, (_, i) => `Day ${i}`)
 

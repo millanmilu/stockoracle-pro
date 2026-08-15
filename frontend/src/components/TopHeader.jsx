@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
 import { 
@@ -81,10 +81,12 @@ export default function TopHeader() {
   }, []);
 
   const handleSelectStock = (ticker) => {
-    setSelectedSymbol(ticker.toUpperCase());
+    if (!ticker) return;
+    const cleanTicker = String(ticker).toUpperCase();
+    setSelectedSymbol(cleanTicker);
     setQuery('');
     setShowDropdown(false);
-    toast.success(`Selected ${ticker.toUpperCase()}`);
+    toast.success(`Selected ${cleanTicker}`);
   };
 
   const handleRetrain = async () => {

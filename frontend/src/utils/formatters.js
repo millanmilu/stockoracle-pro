@@ -33,7 +33,7 @@ export const signalColor = (s) => {
 }
 
 export const signalLabel = (s) => {
-  if (!s) return 'N/A'
-  return s.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+  if (!s || typeof s !== 'string') return 'N/A'
+  return s.split('-').filter(Boolean).map(w => (w[0] ? w[0].toUpperCase() : '') + w.slice(1)).join(' ') || 'N/A'
 }
 

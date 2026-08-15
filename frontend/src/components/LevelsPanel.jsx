@@ -48,10 +48,10 @@ export default function LevelsPanel({ ticker }) {
   if (!data) return <div className="spinner" />
 
   const { current_price, pivot_point, resistance_1, resistance_2, resistance_3,
-          support_1, support_2, support_3, swing_resistances, swing_supports,
-          fibonacci, period_high, period_low } = data
+          support_1, support_2, support_3, swing_resistances = [], swing_supports = [],
+          fibonacci = {}, period_high, period_low } = data || {}
 
-  const fibEntries = Object.entries(fibonacci)
+  const fibEntries = Object.entries(fibonacci || {})
 
   return (
     <div>

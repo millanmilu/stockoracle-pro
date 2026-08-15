@@ -1,4 +1,4 @@
-﻿import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import useStore from '../store/useStore';
 import { 
   Search, SlidersHorizontal, Settings, Plus, 
@@ -48,9 +48,13 @@ export default function WatchlistDrawer({ onClose }) {
 
   const currentList = useMemo(() => {
     const list = WATCHLIST_PRESETS[activeTab] || WATCHLIST_PRESETS.mywatchlist;
-    if (!filterQuery.trim()) return list;
-    const q = filterQuery.toUpperCase().trim();
-    return list.filter(item => item.symbol.includes(q) || item.name.toUpperCase().includes(q));
+    if (!filterQuery || !filterQuery.trim()) return list;
+    const q = String(filterQuery || '').toUpperCase().trim();
+    return list.filter(item => {
+      const matchSymbol = item.symbol ? String(item.symbol).toUpperCase().includes(q) : false;
+      const matchName = item.name ? String(item.name).toUpperCase().includes(q) : false;
+      return matchSymbol || matchName;
+    });
   }, [activeTab, filterQuery]);
 
   const tabs = [

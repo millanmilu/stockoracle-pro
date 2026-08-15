@@ -66,10 +66,10 @@ export default function BacktestPanel({ ticker }) {
   if (!data) return <div className="spinner" />
 
   const {
-    initial_capital, final_value, total_trades, win_rate,
-    cagr, sharpe_ratio, max_drawdown, cumulative_return,
-    benchmark_return, equity_curve, benchmark_curve
-  } = data
+    initial_capital = 0, final_value = 0, total_trades = 0, win_rate = 0,
+    cagr = 0, sharpe_ratio = 0, max_drawdown = 0, cumulative_return = 0,
+    benchmark_return = 0, equity_curve = [], benchmark_curve = []
+  } = data || {}
 
   const alpha = cumulative_return - benchmark_return
 

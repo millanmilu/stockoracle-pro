@@ -93,10 +93,10 @@ export default function AIInsightCard() {
       {/* Right side: Top Features */}
       <div style={{ flex: 1 }}>
         <h3 style={{ margin: '0 0 15px 0', color: '#aaa', fontSize: '0.9rem' }}>Key Drivers (XGBoost Gain)</h3>
-        {Object.entries(explainData).map(([feature, pct]) => (
+        {Object.entries(explainData || {}).map(([feature, pct]) => (
           <div key={feature} style={{ marginBottom: '10px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-              <span style={{ color: '#ddd' }}>{feature.replace('_', ' ').toUpperCase()}</span>
+              <span style={{ color: '#ddd' }}>{String(feature || '').replace(/_/g, ' ').toUpperCase()}</span>
               <span style={{ color: '#888' }}>{pct}%</span>
             </div>
             <div style={{ width: '100%', backgroundColor: 'var(--border, #333)', height: '6px', borderRadius: '3px' }}>

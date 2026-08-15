@@ -1189,10 +1189,10 @@ export default function LiveChartView() {
         <div style={{ display:'flex', alignItems:'center', gap:16, flexWrap:'wrap' }}>
           <div style={{ display:'flex', alignItems:'baseline', gap:8 }}>
             <span style={{ fontSize:'1.2rem', fontWeight:800, color:'#F0F0FF', fontFamily:'JetBrains Mono, monospace' }}>
-              {selectedSymbol}
+              {selectedSymbol || 'STOCK'}
             </span>
             <span style={{ fontSize:'0.75rem', fontWeight:700, color:'#3B82F6' }}>
-              · {interval.toUpperCase()} · NSE
+              · {interval ? interval.toUpperCase() : '1D'} · NSE
             </span>
           </div>
 

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
 import { 
@@ -61,10 +61,12 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
   }, []);
 
   const handleSelectStock = (ticker) => {
-    setSelectedSymbol(ticker.toUpperCase());
+    if (!ticker) return;
+    const cleanTicker = String(ticker).toUpperCase();
+    setSelectedSymbol(cleanTicker);
     setSearchQuery('');
     setShowSearchDropdown(false);
-    toast.success(`Loaded ${ticker.toUpperCase()}`);
+    toast.success(`Loaded ${cleanTicker}`);
   };
 
   const toggleFullscreen = () => {

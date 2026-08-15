@@ -16,17 +16,18 @@ export default function AITraining() {
   useEffect(() => () => stopPolling(), [])
 
   const handleTrain = async () => {
-    if (!ticker.trim()) return
+    const sym = ticker ? ticker.trim().toUpperCase() : '';
+    if (!sym) return;
     setStarting(true)
     stopPolling()
 
     try {
-      await axios.post(`${API}/api/train/${ticker.toUpperCase()}`)
+      await axios.post(`${API}/api/train/${sym}`)
       setStatus({ status: 'training', epoch: 0, total_epochs: 60, loss: 0, val_loss: 0 })
 
       pollRef.current = setInterval(async () => {
         try {
-          const { data } = await axios.get(`${API}/api/train/${ticker.toUpperCase()}/status`)
+          const { data } = await axios.get(`${API}/api/train/${sym}/status`)
           setStatus(data)
           if (data.status === 'completed' || data.status === 'failed') stopPolling()
         } catch (_) {}
@@ -63,7 +64,7 @@ export default function AITraining() {
             style={{ background: '#080B18', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 10, padding: '9px 12px', color: '#F0F0FF', fontFamily: 'JetBrains Mono, monospace', width: '100%', fontSize: '0.9rem', outline: 'none', letterSpacing: '0.08em', textTransform: 'uppercase' }}
             placeholder="e.g. RELIANCE"
             value={ticker}
-            onChange={e => setTicker(e.target.value.toUpperCase())}
+            onChange={e => setTicker(e.target.value ? e.target.value.toUpperCase() : '')}
           />
         </div>
         <div className="ailab-field" style={{ display: 'flex', alignItems: 'flex-end' }}>
