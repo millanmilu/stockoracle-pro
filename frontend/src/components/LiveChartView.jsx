@@ -125,6 +125,9 @@ function calculateRSI(data, period = 14) {
     const rsi = 100 - (100 / (1 + rs));
     result.push({ time: data[i].time, value: Math.min(Math.max(rsi, 0), 100) });
   }
+  return result;
+}
+
 /** MACD (12, 26, 9) */
 function calculateMACD(data, fast = 12, slow = 26, signal = 9) {
   if (!data || data.length <= slow + signal) return { macd: [], signal: [], hist: [] };
