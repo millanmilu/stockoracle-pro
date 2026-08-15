@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Toaster } from 'react-hot-toast';
 import useStore from './store/useStore';
-import Sidebar from './components/Sidebar';
-import TopHeader from './components/TopHeader';
+import TradeOneNavbar from './components/TradeOneNavbar';
+import WatchlistDrawer from './components/WatchlistDrawer';
+import RightToolRail from './components/RightToolRail';
 import Dashboard from './components/Dashboard';
 import LiveChartView from './components/LiveChartView';
 import NewsPanel from './components/NewsPanel';
@@ -32,11 +33,12 @@ function AIPredictionView() {
 
 export default function App() {
   const { activeView, trainingStatus, selectedSymbol } = useStore();
+  const [showWatchlist, setShowWatchlist] = useState(true);
 
   const renderView = () => {
     switch (activeView) {
-      case 'Dashboard':         return <Dashboard />;
       case 'Live Chart':        return <LiveChartView />;
+      case 'Dashboard':         return <Dashboard />;
       case 'AI Prediction':     return <AIPredictionView />;
       case 'News':              return <NewsPanel ticker={selectedSymbol} />;
       case 'Patterns':          return <PatternsPanel ticker={selectedSymbol} />;
@@ -50,55 +52,70 @@ export default function App() {
       case 'Heatmap':           return <MarketHeatmap />;
       case 'Macro Data':        return <MacroPanel />;
       case 'Supply Chain':      return <SupplyChainPanel />;
-      default:                  return <Dashboard />;
+      default:                  return <LiveChartView />;
     }
   };
 
   return (
     <div style={{
       display: 'flex',
+      flexDirection: 'column',
       height: '100vh',
       width: '100vw',
       backgroundColor: 'var(--bg-primary, #04050E)',
       color: 'var(--text-primary, #F0F0FF)',
-      overflow: 'hidden'
+      overflow: 'hidden',
     }}>
       <Toaster position="top-right" toastOptions={{ style: { background: '#0F172A', color: '#F0F0FF', border: '1px solid rgba(99,102,241,0.3)' } }} />
-      <Sidebar />
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-        <TopHeader />
+      
+      {/* ── Top Global TradeOne Navigation ── */}
+      <TradeOneNavbar 
+        showWatchlist={showWatchlist} 
+        onToggleWatchlist={() => setShowWatchlist(!showWatchlist)} 
+      />
 
-        {/* Global Training Progress Bar */}
-        {trainingStatus && (
-          <div style={{
-            backgroundColor: 'rgba(15, 23, 42, 0.95)',
-            padding: '8px 20px',
-            borderBottom: '1px solid rgba(99, 102, 241, 0.25)',
-            zIndex: 50,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '15px'
-          }}>
-            <div style={{ fontSize: '0.82rem', color: '#818CF8', fontWeight: 'bold' }}>
-              Training AI for {trainingStatus.ticker || selectedSymbol}&hellip;
-            </div>
-            <div style={{ flex: 1, height: '5px', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
-              <div style={{ width: `${trainingStatus.progress || 0}%`, height: '100%', backgroundColor: '#818CF8', transition: 'width 0.3s' }} />
-            </div>
-            <div style={{ fontSize: '0.75rem', color: '#9CA3AF', fontFamily: 'JetBrains Mono, monospace' }}>
-              {trainingStatus.progress || 0}%
-            </div>
+      {/* ── Global Training Progress Bar ── */}
+      {trainingStatus && (
+        <div style={{
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          padding: '6px 20px',
+          borderBottom: '1px solid rgba(99, 102, 241, 0.25)',
+          zIndex: 50,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '15px',
+        }}>
+          <div style={{ fontSize: '0.8rem', color: '#3B82F6', fontWeight: 'bold' }}>
+            Training AI Model for {trainingStatus.ticker || selectedSymbol}&hellip;
           </div>
+          <div style={{ flex: 1, height: '4px', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: '2px', overflow: 'hidden' }}>
+            <div style={{ width: `${trainingStatus.progress || 0}%`, height: '100%', backgroundColor: '#3B82F6', transition: 'width 0.3s' }} />
+          </div>
+          <div style={{ fontSize: '0.72rem', color: '#9CA3AF', fontFamily: 'JetBrains Mono, monospace' }}>
+            {trainingStatus.progress || 0}%
+          </div>
+        </div>
+      )}
+
+      {/* ── Terminal Body: Left Watchlist + Main Center Canvas + Right Tool Rail ── */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+        {/* Left Watchlist Drawer */}
+        {showWatchlist && (
+          <WatchlistDrawer onClose={() => setShowWatchlist(false)} />
         )}
 
-        {/* Scrollable Page Content Area */}
-        <main style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
+        {/* Main Center Content Canvas */}
+        <main style={{ flex: 1, height: '100%', overflowY: 'auto', position: 'relative', backgroundColor: '#090C18' }}>
           <ErrorBoundary key={activeView}>
             {renderView()}
           </ErrorBoundary>
         </main>
+
+        {/* Right Tool Rail */}
+        <RightToolRail onToggleWatchlist={() => setShowWatchlist(!showWatchlist)} />
       </div>
     </div>
   );
 }
+
 

@@ -1173,141 +1173,171 @@ export default function LiveChartView() {
         </form>
       </div>
 
-      {/* ── Main Header ── */}
-      <div style={{ display:'flex', alignItems:'flex-start', gap:16, flexWrap:'wrap' }}>
-
-        {/* Ticker & Live Price */}
-        <div>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <h2 style={{ margin:0, fontSize:'1.65rem', fontWeight:800, color:'#F0F0FF', letterSpacing:'-0.02em' }}>
+      {/* ── Angel One TradeOne Style In-Chart Header ── */}
+      <div style={{
+        display:'flex',
+        alignItems:'center',
+        justifyContent:'space-between',
+        flexWrap:'wrap',
+        gap:12,
+        background:'#0F1424',
+        border:'1px solid #1E2538',
+        borderRadius:10,
+        padding:'10px 16px',
+      }}>
+        {/* Left: Symbol · Interval · Exchange + Live OHLC Readout */}
+        <div style={{ display:'flex', alignItems:'center', gap:16, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', alignItems:'baseline', gap:8 }}>
+            <span style={{ fontSize:'1.2rem', fontWeight:800, color:'#F0F0FF', fontFamily:'JetBrains Mono, monospace' }}>
               {selectedSymbol}
-            </h2>
+            </span>
+            <span style={{ fontSize:'0.75rem', fontWeight:700, color:'#3B82F6' }}>
+              · {interval.toUpperCase()} · NSE
+            </span>
+          </div>
 
-            {/* LIVE Badge */}
+          {/* OHLC Readout Bar */}
+          {curPrice != null && (
             <div style={{
-              display:'flex', alignItems:'center', gap:5,
-              background: wsConnected ? 'rgba(38,166,154,0.10)' : 'rgba(75,85,99,0.10)',
-              border:`1px solid ${wsConnected ? 'rgba(38,166,154,0.28)' : 'rgba(75,85,99,0.2)'}`,
-              borderRadius:20, padding:'3px 10px',
+              display:'flex',
+              alignItems:'center',
+              gap:10,
+              fontSize:'0.75rem',
+              fontFamily:'JetBrains Mono, monospace',
+              color:'#94A3B8',
+              borderLeft:'1px solid #1E2538',
+              paddingLeft:14,
             }}>
-              <div style={{
-                width:7, height:7, borderRadius:'50%',
-                background: wsConnected ? '#26A69A' : '#4B5563',
-                animation: wsConnected ? 'livePulse 2s infinite' : 'none',
-              }} />
-              <span style={{ fontSize:'0.67rem', fontWeight:700, letterSpacing:'0.07em', color: wsConnected ? '#26A69A' : '#4B5563' }}>
-                {wsConnected ? 'LIVE' : 'OFFLINE'}
+              <span>O <strong style={{ color:'#F0F0FF' }}>{(activeCandleRef.current?.open ?? lastCandleClose ?? curPrice)?.toFixed(2)}</strong></span>
+              <span>H <strong style={{ color:'#10B981' }}>{(activeCandleRef.current?.high ?? curPrice)?.toFixed(2)}</strong></span>
+              <span>L <strong style={{ color:'#EF5350' }}>{(activeCandleRef.current?.low ?? curPrice)?.toFixed(2)}</strong></span>
+              <span>C <strong style={{ color: changeUp ? '#10B981' : '#EF5350' }}>{curPrice?.toFixed(2)}</strong></span>
+              <span style={{ color: changeUp ? '#10B981' : '#EF5350', fontWeight:700 }}>
+                {changeUp ? '+' : ''}{(liveChange ?? 0).toFixed(2)}%
               </span>
             </div>
-
-            {/* Action Buttons: Split View, Alert, Snapshot, Fullscreen */}
-            <div style={{ display:'flex', gap:6, marginLeft:10 }}>
-              <button
-                onClick={() => setIsSplitView(!isSplitView)}
-                title="Toggle Dual Chart Split View"
-                style={{
-                  padding:'5px 10px', borderRadius:6,
-                  border: isSplitView ? '1px solid #3B82F6' : '1px solid rgba(75,85,99,0.3)',
-                  background: isSplitView ? 'rgba(59,130,246,0.2)' : 'rgba(255,255,255,0.05)',
-                  color: isSplitView ? '#60A5FA' : '#9CA3AF',
-                  fontSize:'0.72rem', fontWeight:700, cursor:'pointer', display:'flex', alignItems:'center', gap:4
-                }}
-              >
-                {isSplitView ? <Square size={13} /> : <Columns size={13} />}
-                {isSplitView ? 'Single View' : 'Split View'}
-              </button>
-              <button
-                onClick={() => setShowAlertModal(true)}
-                title="Set Price Alert"
-                style={{ padding:'5px 8px', borderRadius:6, border:'1px solid rgba(168,85,247,0.3)', background:'rgba(168,85,247,0.1)', color:'#C084FC', cursor:'pointer' }}
-              >
-                <Bell size={14} />
-              </button>
-              <button
-                onClick={handleSnapshot}
-                title="Take Chart Snapshot"
-                style={{ padding:'5px 8px', borderRadius:6, border:'1px solid rgba(38,166,154,0.3)', background:'rgba(38,166,154,0.1)', color:'#26A69A', cursor:'pointer' }}
-              >
-                <Camera size={14} />
-              </button>
-              <button
-                onClick={toggleFullscreen}
-                title="Toggle Fullscreen"
-                style={{ padding:'5px 8px', borderRadius:6, border:'1px solid rgba(255,255,255,0.2)', background:'rgba(255,255,255,0.05)', color:'#fff', cursor:'pointer' }}
-              >
-                {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-              </button>
-            </div>
-          </div>
-
-          {/* Chart Navigation Controls */}
-          <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:8 }}>
-            <button
-              onClick={handleZoomIn}
-              title="Zoom In"
-              className="lc-btn"
-              style={{ padding:'4px 8px', borderRadius:6, border:'1px solid rgba(99,102,241,0.3)', background:'rgba(99,102,241,0.1)', color:'#818CF8', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
-            >
-              <ZoomIn size={12} /> <span style={{fontSize:'0.65rem', fontWeight:600}}>Zoom In</span>
-            </button>
-            <button
-              onClick={handleZoomOut}
-              title="Zoom Out"
-              className="lc-btn"
-              style={{ padding:'4px 8px', borderRadius:6, border:'1px solid rgba(99,102,241,0.3)', background:'rgba(99,102,241,0.1)', color:'#818CF8', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
-            >
-              <ZoomOut size={12} /> <span style={{fontSize:'0.65rem', fontWeight:600}}>Zoom Out</span>
-            </button>
-            <button
-              onClick={handleResetView}
-              title="Reset View"
-              className="lc-btn"
-              style={{ padding:'4px 8px', borderRadius:6, border:'1px solid rgba(168,85,247,0.3)', background:'rgba(168,85,247,0.1)', color:'#C084FC', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
-            >
-              <RotateCcw size={12} /> <span style={{fontSize:'0.65rem', fontWeight:600}}>Reset</span>
-            </button>
-            <div style={{ width:1, height:20, background:'rgba(75,85,99,0.3)', margin:'0 4px' }} />
-            <button
-              onClick={() => setAutoScroll(!autoScroll)}
-              title={autoScroll ? "Disable Auto Scroll" : "Enable Auto Scroll"}
-              className="lc-btn"
-              style={{ padding:'4px 8px', borderRadius:6, border: autoScroll ? '1px solid #26A69A' : '1px solid rgba(75,85,99,0.3)', background: autoScroll ? 'rgba(38,166,154,0.15)' : 'transparent', color: autoScroll ? '#26A69A' : '#6B7280', cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}
-            >
-              <Move size={12} /> <span style={{fontSize:'0.65rem', fontWeight:600}}>{autoScroll ? 'Auto-Scroll ON' : 'OFF'}</span>
-            </button>
-          </div>
+          )}
         </div>
 
-        {/* Right: Multi-Timeframe Candle Intervals */}
-        <div style={{ marginLeft:'auto', display:'flex', alignItems:'center', gap:4 }}>
-          {/* Candle Interval Selector (1m, 5m, 15m, 1H, 1D) */}
-          <div style={{ display:'flex', alignItems:'center', gap:3, background:'rgba(255,255,255,0.02)', padding:'2px 4px', borderRadius:8, border:'1px solid rgba(99,102,241,0.15)' }}>
-            <span style={{ fontSize:'0.58rem', color:'#6B7280', letterSpacing:'0.06em', marginRight:2 }}>INTERVAL</span>
+        {/* Center: Quick Trade Widget (BUY @ ₹... | QTY 1 | SELL @ ₹...) */}
+        <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+          <button
+            onClick={() => toast.success(`Simulated BUY Order for ${selectedSymbol} @ ₹${curPrice?.toFixed(2)}`)}
+            style={{
+              padding:'6px 14px',
+              borderRadius:6,
+              border:'none',
+              background:'#10B981',
+              color:'#fff',
+              fontWeight:800,
+              fontSize:'0.75rem',
+              cursor:'pointer',
+              boxShadow:'0 2px 8px rgba(16,185,129,0.3)',
+            }}
+          >
+            BUY @ ₹{curPrice?.toFixed(2)}
+          </button>
+
+          <input
+            type="number"
+            defaultValue={1}
+            min={1}
+            style={{
+              width:42,
+              padding:'5px',
+              textAlign:'center',
+              background:'#0A0D1A',
+              border:'1px solid #1E2538',
+              borderRadius:6,
+              color:'#F0F0FF',
+              fontSize:'0.75rem',
+              fontWeight:700,
+              outline:'none',
+            }}
+          />
+
+          <button
+            onClick={() => toast.success(`Simulated SELL Order for ${selectedSymbol} @ ₹${curPrice?.toFixed(2)}`)}
+            style={{
+              padding:'6px 14px',
+              borderRadius:6,
+              border:'none',
+              background:'#EF5350',
+              color:'#fff',
+              fontWeight:800,
+              fontSize:'0.75rem',
+              cursor:'pointer',
+              boxShadow:'0 2px 8px rgba(239,83,80,0.3)',
+            }}
+          >
+            SELL @ ₹{curPrice?.toFixed(2)}
+          </button>
+        </div>
+
+        {/* Right: Interval Buttons & Scalper Mode */}
+        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+          {/* Timeframe Interval Buttons */}
+          <div style={{ display:'flex', gap:2, background:'#0A0D1A', padding:'2px', borderRadius:6, border:'1px solid #1E2538' }}>
             {INTERVALS.map(iv => (
-              <button key={iv.value} className="lc-btn" onClick={() => handleIntervalChange(iv.value)} style={{
-                padding:'3px 8px', borderRadius:5, fontSize:'0.68rem', fontWeight:700, cursor:'pointer',
-                border    : interval === iv.value ? '1px solid rgba(99,102,241,0.6)' : '1px solid transparent',
-                background: interval === iv.value ? 'rgba(99,102,241,0.15)'          : 'transparent',
-                color     : interval === iv.value ? '#818CF8'                         : '#6B7280',
-              }}>{iv.label}</button>
+              <button
+                key={iv.value}
+                onClick={() => handleIntervalChange(iv.value)}
+                style={{
+                  padding:'4px 8px',
+                  borderRadius:4,
+                  border:'none',
+                  background: interval === iv.value ? 'rgba(59,130,246,0.25)' : 'transparent',
+                  color: interval === iv.value ? '#3B82F6' : '#64748B',
+                  fontSize:'0.72rem',
+                  fontWeight: interval === iv.value ? 800 : 500,
+                  cursor:'pointer',
+                }}
+              >
+                {iv.label}
+              </button>
             ))}
           </div>
+
+          {/* Scalper Mode */}
+          <button
+            onClick={() => toast.success('Scalper AI Mode Enabled')}
+            style={{
+              padding:'5px 10px',
+              borderRadius:6,
+              border:'1px solid rgba(139,92,246,0.4)',
+              background:'rgba(139,92,246,0.12)',
+              color:'#C084FC',
+              fontSize:'0.72rem',
+              fontWeight:700,
+              cursor:'pointer',
+              display:'flex',
+              alignItems:'center',
+              gap:4,
+            }}
+          >
+            <Zap size={13} /> SCALPER MODE
+          </button>
+
+          {/* Snapshot Camera */}
+          <button
+            onClick={handleSnapshot}
+            title="Download Snapshot"
+            style={{ padding:'5px', borderRadius:6, border:'1px solid #1E2538', background:'transparent', color:'#94A3B8', cursor:'pointer' }}
+          >
+            <Camera size={14} />
+          </button>
+
+          {/* Fullscreen */}
+          <button
+            onClick={toggleFullscreen}
+            title="Fullscreen Chart"
+            style={{ padding:'5px', borderRadius:6, border:'1px solid #1E2538', background:'transparent', color:'#94A3B8', cursor:'pointer' }}
+          >
+            {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
         </div>
       </div>
 
-      {/* Price Display Section */}
-      {curPrice != null && (
-        <div style={{ display:'flex', alignItems:'baseline', gap:10, marginTop:5 }}>
-          <span style={{ fontSize:'1.9rem', fontWeight:800, color:'#F0F0FF', fontFamily:'JetBrains Mono, monospace' }}>
-            ₹{curPrice.toLocaleString('en-IN', { minimumFractionDigits:2, maximumFractionDigits:2 })}
-          </span>
-          {liveChange != null && (
-            <span style={{ fontSize:'0.9rem', fontWeight:700, color: changeUp ? '#26A69A' : '#EF5350', fontFamily:'JetBrains Mono, monospace' }}>
-              {changeUp ? '+' : ''}{liveChange.toFixed(2)}%
-            </span>
-          )}
-        </div>
-      )}
 
       {/* ── Main Chart Area (Single or Split Grid) ── */}
       <div style={{ display:'grid', gridTemplateColumns: isSplitView ? '1fr 1fr' : '1fr', gap:16 }}>
