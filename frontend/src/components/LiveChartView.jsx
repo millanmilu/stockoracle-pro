@@ -125,7 +125,87 @@ function calculateRSI(data, period = 14) {
     const rsi = 100 - (100 / (1 + rs));
     result.push({ time: data[i].time, value: Math.min(Math.max(rsi, 0), 100) });
   }
+/** MACD (12, 26, 9) */
+function calculateMACD(data, fast = 12, slow = 26, signal = 9) {
+  if (!data || data.length <= slow + signal) return { macd: [], signal: [], hist: [] };
+  const emaFast = calculateEMA(data, fast);
+  const emaSlow = calculateEMA(data, slow);
+  
+  const fastMap = new Map(emaFast.map(d => [d.time, d.value]));
+  const macdLine = [];
+  for (const s of emaSlow) {
+    const fVal = fastMap.get(s.time);
+    if (fVal != null) {
+      macdLine.push({ time: s.time, value: fVal - s.value });
+    }
+  }
+
+  const k = 2 / (signal + 1);
+  let sig = macdLine[0]?.value || 0;
+  const signalLine = [];
+  const hist = [];
+
+  for (let i = 0; i < macdLine.length; i++) {
+    const mVal = macdLine[i].value;
+    sig = i === 0 ? mVal : mVal * k + sig * (1 - k);
+    if (i >= signal - 1) {
+      signalLine.push({ time: macdLine[i].time, value: sig });
+      hist.push({
+        time: macdLine[i].time,
+        value: mVal - sig,
+        color: mVal - sig >= 0 ? 'rgba(16, 185, 129, 0.65)' : 'rgba(239, 83, 80, 0.65)'
+      });
+    }
+  }
+
+  return { macd: macdLine, signal: signalLine, hist };
+}
+
+/** Arnaud Legoux Moving Average (ALMA 9) */
+function calculateALMA(data, period = 9, offset = 0.85, sigma = 6) {
+  if (!data || data.length < period) return [];
+  const m = Math.floor(offset * (period - 1));
+  const s = period / sigma;
+  const weights = [];
+  let sumW = 0;
+  for (let i = 0; i < period; i++) {
+    const w = Math.exp(-Math.pow(i - m, 2) / (2 * Math.pow(s, 2)));
+    weights.push(w);
+    sumW += w;
+  }
+  for (let i = 0; i < period; i++) weights[i] /= sumW;
+
+  const result = [];
+  for (let i = period - 1; i < data.length; i++) {
+    let val = 0;
+    for (let j = 0; j < period; j++) {
+      val += data[i - period + 1 + j].close * weights[j];
+    }
+    result.push({ time: data[i].time, value: val });
+  }
   return result;
+}
+
+/** Auto Support & Resistance Key Levels */
+function calculateKeyLevels(data) {
+  if (!data || data.length < 25) return [];
+  const levels = [];
+  const lookback = 8;
+  for (let i = lookback; i < data.length - lookback; i += 4) {
+    const c = data[i];
+    const isHigh = data.slice(i - lookback, i + lookback).every(x => x.high <= c.high);
+    const isLow = data.slice(i - lookback, i + lookback).every(x => x.low >= c.low);
+    if (isHigh) levels.push({ price: c.high, title: `Resist ₹${c.high.toFixed(0)}`, color: 'rgba(239, 83, 80, 0.65)' });
+    if (isLow) levels.push({ price: c.low, title: `Support ₹${c.low.toFixed(0)}`, color: 'rgba(16, 185, 129, 0.65)' });
+  }
+  const deduped = [];
+  for (const lvl of levels.reverse()) {
+    if (!deduped.some(d => Math.abs(d.price - lvl.price) / lvl.price < 0.006)) {
+      deduped.push(lvl);
+    }
+    if (deduped.length >= 4) break;
+  }
+  return deduped;
 }
 
 /** AI Candlestick Pattern Detector */
@@ -378,14 +458,28 @@ export default function LiveChartView() {
   const [showChartSettingsModal, setShowChartSettingsModal] = useState(false);
   const [showBottomStats, setShowBottomStats] = useState(false); // Collapsed by default to maximize chart height
   const [showIndicatorDropdown, setShowIndicatorDropdown] = useState(false);
-  const [showVolume,   setShowVolume]   = useState(false);
-  const [showSMA,      setShowSMA]      = useState(false);
-  const [showEMA,      setShowEMA]      = useState(false);
-  const [showBB,       setShowBB]       = useState(false);
-  const [showRSI,      setShowRSI]      = useState(false);
-  const [showPatterns, setShowPatterns] = useState(false);
-  const [showAICone,   setShowAICone]   = useState(true);
+  const [showVolume,    setShowVolume]    = useState(false);
+  const [showSMA,       setShowSMA]       = useState(false);
+  const [showEMA,       setShowEMA]       = useState(false);
+  const [showBB,        setShowBB]        = useState(false);
+  const [showRSI,       setShowRSI]       = useState(false);
+  const [showMACD,      setShowMACD]      = useState(false);
+  const [showALMA,      setShowALMA]      = useState(false);
+  const [showKeyLevels, setShowKeyLevels] = useState(false);
+  const [showPatterns,  setShowPatterns]  = useState(false);
+  const [showAICone,    setShowAICone]    = useState(true);
   
+  // Real-time indicator readout values for on-chart TradingView legend
+  const [indicatorValues, setIndicatorValues] = useState({
+    sma: null,
+    ema: null,
+    bb: null,
+    rsi: null,
+    macd: null,
+    alma: null,
+    volume: null,
+  });
+
   // Chart Navigation State
   const [zoomLevel, setZoomLevel] = useState(1);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -412,12 +506,15 @@ export default function LiveChartView() {
     ema_20: showEMA,
     boll: showBB,
     rsi_14: showRSI,
+    macd: showMACD,
+    alma: showALMA,
+    auto_key_levels: showKeyLevels,
     ai_patterns: showPatterns || (showAdvancedPanel && advancedPanelTab === 'patterns'),
     vpvr: showAdvancedPanel && advancedPanelTab === 'volume',
     orderflow: showAdvancedPanel && advancedPanelTab === 'order',
     mtf_matrix: showAdvancedPanel && advancedPanelTab === 'mtf',
     backtester: showAdvancedPanel && advancedPanelTab === 'backtest',
-  }), [showVolume, showSMA, showEMA, showBB, showRSI, showPatterns, showAdvancedPanel, advancedPanelTab]);
+  }), [showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, showAdvancedPanel, advancedPanelTab]);
 
   const handleToggleIndicator = useCallback((id) => {
     switch (id) {
@@ -437,6 +534,40 @@ export default function LiveChartView() {
       case 'rsi_14':
         setShowRSI(prev => !prev);
         break;
+      case 'macd':
+        setShowMACD(prev => !prev);
+        break;
+      case 'alma':
+        setShowALMA(prev => !prev);
+        break;
+      case 'auto_key_levels':
+        setShowKeyLevels(prev => !prev);
+        break;
+      case 'ai_patterns':
+        setShowPatterns(prev => !prev);
+        setShowAdvancedPanel(true);
+        setAdvancedPanelTab('patterns');
+        break;
+      case 'vpvr':
+        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'volume');
+        setAdvancedPanelTab('volume');
+        break;
+      case 'orderflow':
+        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'order');
+        setAdvancedPanelTab('order');
+        break;
+      case 'mtf_matrix':
+        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'mtf');
+        setAdvancedPanelTab('mtf');
+        break;
+      case 'backtester':
+        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'backtest');
+        setAdvancedPanelTab('backtest');
+        break;
+      default:
+        toast.success(`Toggled ${id}`);
+    }
+  }, [advancedPanelTab]);
       case 'ai_patterns':
         setShowPatterns(prev => !prev);
         setShowAdvancedPanel(true);
@@ -502,6 +633,11 @@ export default function LiveChartView() {
   const rsiRef         = useRef(null);
   const rsiLine70Ref   = useRef(null);
   const rsiLine30Ref   = useRef(null);
+  const macdRef        = useRef(null);
+  const macdSignalRef  = useRef(null);
+  const macdHistRef    = useRef(null);
+  const almaRef        = useRef(null);
+  const keyLevelLinesRef = useRef([]);
 
   const predLineRef    = useRef(null);
   const upperLineRef   = useRef(null);
@@ -595,12 +731,15 @@ export default function LiveChartView() {
     });
     volumeRef.current = volume;
 
-    // SMA, EMA, BB
+    // SMA, EMA, BB, ALMA
     const sma = chart.addLineSeries({ color: '#00E5FF', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
     smaRef.current = sma;
 
     const ema = chart.addLineSeries({ color: '#FF9100', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
     emaRef.current = ema;
+
+    const alma = chart.addLineSeries({ color: '#FACC15', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
+    almaRef.current = alma;
 
     const bbUpper = chart.addLineSeries({ color: '#E040FB', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     bbUpperRef.current = bbUpper;
@@ -623,6 +762,31 @@ export default function LiveChartView() {
     const rsi30 = chart.addLineSeries({ color: 'rgba(38,166,154,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: '', scaleMargins: { top: 0.82, bottom: 0 }, priceLineVisible: false, lastValueVisible: false });
     rsiLine30Ref.current = rsi30;
 
+    // MACD Sub-chart (overlay scale with scaleMargins)
+    const macd = chart.addLineSeries({
+      color: '#38BDF8', lineWidth: 1.5,
+      priceScaleId: '',
+      scaleMargins: { top: 0.85, bottom: 0 },
+      priceLineVisible: false, lastValueVisible: false,
+    });
+    macdRef.current = macd;
+
+    const macdSignal = chart.addLineSeries({
+      color: '#F97316', lineWidth: 1.5,
+      priceScaleId: '',
+      scaleMargins: { top: 0.85, bottom: 0 },
+      priceLineVisible: false, lastValueVisible: false,
+    });
+    macdSignalRef.current = macdSignal;
+
+    const macdHist = chart.addHistogramSeries({
+      priceFormat: { type: 'volume' },
+      priceScaleId: '',
+      scaleMargins: { top: 0.85, bottom: 0 },
+      priceLineVisible: false, lastValueVisible: false,
+    });
+    macdHistRef.current = macdHist;
+
     // AI Predictions
     const predLine = chart.addLineSeries({
       color: '#A855F7', lineWidth: 2.5, lineStyle: LineStyle.Dashed,
@@ -631,6 +795,49 @@ export default function LiveChartView() {
       priceLineVisible: false, lastValueVisible: false,
     });
     predLineRef.current = predLine;
+
+    const upperLine = chart.addLineSeries({ color: 'rgba(38,166,154,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
+    upperLineRef.current = upperLine;
+
+    const lowerLine = chart.addLineSeries({ color: 'rgba(239,83,80,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
+    lowerLineRef.current = lowerLine;
+
+    const ro = new ResizeObserver(entries => {
+      if (entries[0] && chartRef.current) {
+        const { width, height } = entries[0].contentRect;
+        if (width > 0 && height > 0) {
+          chartRef.current.applyOptions({ width, height });
+        }
+      }
+    });
+    ro.observe(containerRef.current);
+
+    return () => {
+      ro.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      candleRef.current = null;
+      volumeRef.current = null;
+      smaRef.current = null;
+      emaRef.current = null;
+      almaRef.current = null;
+      bbUpperRef.current = null;
+      bbLowerRef.current = null;
+      rsiRef.current = null;
+      rsiLine70Ref.current = null;
+      rsiLine30Ref.current = null;
+      macdRef.current = null;
+      macdSignalRef.current = null;
+      macdHistRef.current = null;
+      keyLevelLinesRef.current = [];
+      predLineRef.current = null;
+      upperLineRef.current = null;
+      lowerLineRef.current = null;
+      livePriceLineRef.current = null;
+      activeCandleRef.current = null;
+      backtestEquityRef.current = null;
+    };
+  }, []);
 
     const upperLine = chart.addLineSeries({ color: 'rgba(38,166,154,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     upperLineRef.current = upperLine;
@@ -969,11 +1176,13 @@ export default function LiveChartView() {
     }
 
     // 4. RSI Sub-chart
+    let currentRSI = null;
     if (showRSI && rsiRef.current && dedupedCandles.length > 14) {
       const rsiVals = calculateRSI(dedupedCandles, 14);
       try {
         rsiRef.current.setData(rsiVals);
         if (rsiVals.length > 0) {
+          currentRSI = rsiVals[rsiVals.length - 1].value;
           const t1 = rsiVals[0].time;
           const t2 = rsiVals[rsiVals.length - 1].time;
           rsiLine70Ref.current?.setData([{ time: t1, value: 70 }, { time: t2, value: 70 }]);
@@ -988,7 +1197,90 @@ export default function LiveChartView() {
       } catch {}
     }
 
-    // 5. Interactive Multi-Step AI Forecast Prediction Cone (Daily only)
+    // 5. MACD Sub-chart
+    let currentMACD = null;
+    if (showMACD && macdRef.current && macdSignalRef.current && macdHistRef.current && dedupedCandles.length > 35) {
+      const macdData = calculateMACD(dedupedCandles, 12, 26, 9);
+      try {
+        macdRef.current.setData(macdData.macd);
+        macdSignalRef.current.setData(macdData.signal);
+        macdHistRef.current.setData(macdData.hist);
+        if (macdData.hist.length > 0) {
+          const lastHist = macdData.hist[macdData.hist.length - 1];
+          const lastMacd = macdData.macd[macdData.macd.length - 1];
+          const lastSig  = macdData.signal[macdData.signal.length - 1];
+          currentMACD = { hist: lastHist?.value || 0, macd: lastMacd?.value || 0, signal: lastSig?.value || 0 };
+        }
+      } catch {}
+    } else {
+      try {
+        macdRef.current?.setData([]);
+        macdSignalRef.current?.setData([]);
+        macdHistRef.current?.setData([]);
+      } catch {}
+    }
+
+    // 6. ALMA Overlay
+    let currentALMA = null;
+    if (showALMA && almaRef.current && dedupedCandles.length > 10) {
+      const almaVals = calculateALMA(dedupedCandles, 9, 0.85, 6);
+      try {
+        almaRef.current.setData(almaVals);
+        if (almaVals.length > 0) currentALMA = almaVals[almaVals.length - 1].value;
+      } catch {}
+    } else {
+      try { almaRef.current?.setData([]); } catch {}
+    }
+
+    // 7. Auto Support & Resistance Key Levels
+    if (showKeyLevels && candleRef.current && dedupedCandles.length > 25) {
+      if (keyLevelLinesRef.current && keyLevelLinesRef.current.length > 0) {
+        keyLevelLinesRef.current.forEach(line => {
+          try { candleRef.current?.removePriceLine(line); } catch {}
+        });
+        keyLevelLinesRef.current = [];
+      }
+      const keyLevels = calculateKeyLevels(dedupedCandles);
+      keyLevels.forEach(lvl => {
+        try {
+          const pLine = candleRef.current.createPriceLine({
+            price: lvl.price,
+            color: lvl.color,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: lvl.title,
+          });
+          keyLevelLinesRef.current.push(pLine);
+        } catch {}
+      });
+    } else if (!showKeyLevels && candleRef.current && keyLevelLinesRef.current.length > 0) {
+      keyLevelLinesRef.current.forEach(line => {
+        try { candleRef.current?.removePriceLine(line); } catch {}
+      });
+      keyLevelLinesRef.current = [];
+    }
+
+    // Update real-time indicator legend values
+    const lastCandle = dedupedCandles[dedupedCandles.length - 1];
+    const smaCalculated = showSMA && dedupedCandles.length > 20 ? calculateSMA(dedupedCandles, 20) : [];
+    const emaCalculated = showEMA && dedupedCandles.length > 20 ? calculateEMA(dedupedCandles, 20) : [];
+    const bbCalculated  = showBB && dedupedCandles.length > 20 ? calculateBollingerBands(dedupedCandles, 20, 2) : null;
+
+    setIndicatorValues({
+      sma: smaCalculated.length > 0 ? smaCalculated[smaCalculated.length - 1].value : null,
+      ema: emaCalculated.length > 0 ? emaCalculated[emaCalculated.length - 1].value : null,
+      bb: bbCalculated && bbCalculated.upper.length > 0 ? {
+        upper: bbCalculated.upper[bbCalculated.upper.length - 1].value,
+        lower: bbCalculated.lower[bbCalculated.lower.length - 1].value,
+      } : null,
+      rsi: currentRSI,
+      macd: currentMACD,
+      alma: currentALMA,
+      volume: lastCandle ? Number(rawHistory[rawHistory.length - 1]?.volume || 0) : null,
+    });
+
+    // 8. Interactive Multi-Step AI Forecast Prediction Cone (Daily only)
     if (isDaily && prediction?.predicted_price_7d > 0 && rawHistory.length > 0 && Number(rawHistory[rawHistory.length - 1]?.close) > 0) {
       const lastD     = rawHistory[rawHistory.length - 1];
       const lastTime  = toChartTime(lastD.date, false);
@@ -1047,7 +1339,7 @@ export default function LiveChartView() {
       } catch {}
     }, 50);
     return () => clearTimeout(timer);
-  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showPatterns]);
+  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns]);
 
   /* ── Secondary Comparison Chart Data Binding ───────────────── */
 
@@ -1632,6 +1924,99 @@ export default function LiveChartView() {
 
           {/* ── Center Chart Canvas ── */}
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden', height: '100%' }}>
+            {/* ── TradingView Style On-Chart Active Indicators Legend ── */}
+            <div style={{
+              position: 'absolute',
+              top: 10,
+              left: 12,
+              zIndex: 20,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              pointerEvents: 'auto',
+              userSelect: 'none',
+            }}>
+              {showSMA && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(0, 229, 255, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#00E5FF', fontWeight: 700 }}>SMA 20</span>
+                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>{indicatorValues.sma ? `₹${indicatorValues.sma.toFixed(2)}` : '—'}</span>
+                  <button onClick={() => setShowSMA(false)} title="Remove SMA" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+              {showEMA && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(255, 145, 0, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#FF9100', fontWeight: 700 }}>EMA 20</span>
+                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>{indicatorValues.ema ? `₹${indicatorValues.ema.toFixed(2)}` : '—'}</span>
+                  <button onClick={() => setShowEMA(false)} title="Remove EMA" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+              {showALMA && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(250, 204, 21, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#FACC15', fontWeight: 700 }}>ALMA 9</span>
+                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>{indicatorValues.alma ? `₹${indicatorValues.alma.toFixed(2)}` : '—'}</span>
+                  <button onClick={() => setShowALMA(false)} title="Remove ALMA" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+              {showBB && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(224, 64, 251, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#E040FB', fontWeight: 700 }}>BB (20, 2)</span>
+                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {indicatorValues.bb ? `U: ₹${indicatorValues.bb.upper.toFixed(1)} L: ₹${indicatorValues.bb.lower.toFixed(1)}` : '—'}
+                  </span>
+                  <button onClick={() => setShowBB(false)} title="Remove Bollinger Bands" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+              {showRSI && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(244, 63, 94, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#F43F5E', fontWeight: 700 }}>RSI 14</span>
+                  <span style={{ 
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontWeight: 700,
+                    color: indicatorValues.rsi > 70 ? '#EF5350' : indicatorValues.rsi < 30 ? '#10B981' : '#E2E8F0' 
+                  }}>
+                    {indicatorValues.rsi ? indicatorValues.rsi.toFixed(1) : '—'}
+                  </span>
+                  <button onClick={() => setShowRSI(false)} title="Remove RSI" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+              {showMACD && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(56, 189, 248, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#38BDF8', fontWeight: 700 }}>MACD (12, 26, 9)</span>
+                  <span style={{ 
+                    fontFamily: 'JetBrains Mono, monospace',
+                    fontWeight: 700,
+                    color: indicatorValues.macd?.hist >= 0 ? '#10B981' : '#EF5350' 
+                  }}>
+                    {indicatorValues.macd ? `${indicatorValues.macd.hist >= 0 ? '+' : ''}${indicatorValues.macd.hist.toFixed(2)}` : '—'}
+                  </span>
+                  <button onClick={() => setShowMACD(false)} title="Remove MACD" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+              {showKeyLevels && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(234, 179, 8, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#EAB308', fontWeight: 700 }}>Auto Key Levels</span>
+                  <span style={{ color: '#10B981', fontWeight: 600 }}>S/R Active</span>
+                  <button onClick={() => setShowKeyLevels(false)} title="Remove Key Levels" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+              {showVolume && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(38, 166, 154, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#26A69A', fontWeight: 700 }}>Volume</span>
+                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>
+                    {indicatorValues.volume ? Number(indicatorValues.volume).toLocaleString() : '—'}
+                  </span>
+                  <button onClick={() => setShowVolume(false)} title="Remove Volume" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+              {showPatterns && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(16, 185, 129, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#10B981', fontWeight: 700 }}>AI Patterns</span>
+                  <span style={{ color: '#E2E8F0' }}>Auto Detect</span>
+                  <button onClick={() => setShowPatterns(false)} title="Remove AI Patterns" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+            </div>
+
             {loading && (
               <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(9,12,24,0.75)', zIndex:10 }}>
                 <div style={{ width:38, height:38, borderRadius:'50%', border:'3px solid rgba(168,85,247,0.15)', borderTopColor:'#A855F7', animation:'spin 0.75s linear infinite' }} />
