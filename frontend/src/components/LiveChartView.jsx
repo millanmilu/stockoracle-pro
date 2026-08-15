@@ -17,8 +17,17 @@ import MultiTimeframeCorrelation from './chart-tools/MultiTimeframeCorrelation';
 
 /* ─── Constants ─────────────────────────────────────────────────────────────── */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
-const WS_BASE  = API_BASE.replace(/^https/, 'wss').replace(/^http(?!s)/, 'ws');
+const getWsUrl = () => {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    if (window.location.hostname.includes('amplifyapp.com')) {
+      return 'wss://stockoracle.duckdns.org/ws/prices';
+    }
+    return `${protocol}//${window.location.host}/ws/prices`;
+  }
+  return 'ws://localhost:8000/ws/prices';
+};
 
 const POPULAR_STOCKS = ['RELIANCE', 'TATAMOTORS', 'INFY', 'TCS', 'HDFCBANK', 'NIFTY50', 'BANKNIFTY'];
 
@@ -723,7 +732,7 @@ export default function LiveChartView() {
   useEffect(() => {
     if (wsRef.current) wsRef.current.close();
 
-    const ws = new WebSocket(`${WS_BASE}/ws/prices`);
+    const ws = new WebSocket(getWsUrl());
     wsRef.current = ws;
 
     ws.onopen  = () => {
@@ -788,14 +797,6 @@ export default function LiveChartView() {
     const validRaw = rawHistory.filter(d => d && d.date && !isNaN(parseNum(d.close)) && parseNum(d.close) > 0);
     if (!validRaw.length) return;
 
-    // Collect closes & compute IQR bounds (Q1, Q3, IQR)
-    const closes = validRaw.map(d => parseNum(d.close)).sort((a, b) => a - b);
-    const q1 = closes[Math.floor((closes.length - 1) * 0.25)] || closes[0];
-    const q3 = closes[Math.floor((closes.length - 1) * 0.75)] || closes[closes.length - 1];
-    const iqr = q3 - q1;
-    const lowerBound = Math.max(0, q1 - 2.5 * iqr);
-    const upperBound = iqr > 0 ? q3 + 2.5 * iqr : closes[closes.length - 1] * 3;
-
     const candles = validRaw
       .map(d => {
         const o = parseNum(d.open);
@@ -810,8 +811,7 @@ export default function LiveChartView() {
           close : c,
         };
       })
-      .filter(d => d.time != null && d.time !== '' && !isNaN(d.open) && !isNaN(d.close))
-      .filter(d => d.close >= lowerBound && d.close <= upperBound);
+      .filter(d => d.time != null && d.time !== '' && !isNaN(d.open) && !isNaN(d.close) && d.open > 0 && d.close > 0);
 
     candles.sort((a, b) => (typeof a.time === 'number' ? a.time - b.time : String(a.time).localeCompare(String(b.time))));
 

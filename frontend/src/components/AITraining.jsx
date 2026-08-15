@@ -1,7 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import axios from 'axios'
-
-const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
+import api from '../utils/api'
 
 export default function AITraining() {
   const [ticker, setTicker]   = useState('')
@@ -22,16 +20,17 @@ export default function AITraining() {
     stopPolling()
 
     try {
-      await axios.post(`${API}/api/train/${sym}`)
-      setStatus({ status: 'training', epoch: 0, total_epochs: 60, loss: 0, val_loss: 0 })
+      const { data } = await api.post(`/api/stock/${sym}/train`);
+      const taskId = data.task_id;
+      setStatus({ status: 'training', progress: 10, total_epochs: 60 });
 
       pollRef.current = setInterval(async () => {
         try {
-          const { data } = await axios.get(`${API}/api/train/${sym}/status`)
-          setStatus(data)
-          if (data.status === 'completed' || data.status === 'failed') stopPolling()
+          const res = await api.get(`/api/task/${taskId}/status`);
+          setStatus(res.data);
+          if (res.data.status === 'completed' || res.data.status === 'failed') stopPolling();
         } catch (_) {}
-      }, 2000)
+      }, 2000);
     } catch (e) {
       setStatus({
         status: 'failed',

@@ -4,8 +4,17 @@ import { fmt } from '../utils/formatters';
 import { Bell, BellOff, PlusCircle, Trash2, CheckCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
-const WS_BASE  = API_BASE.replace(/^https/, 'wss').replace(/^http(?!s)/, 'ws');
+const getWsUrl = () => {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    if (window.location.hostname.includes('amplifyapp.com')) {
+      return 'wss://stockoracle.duckdns.org/ws/prices';
+    }
+    return `${protocol}//${window.location.host}/ws/prices`;
+  }
+  return 'ws://localhost:8000/ws/prices';
+};
 
 export default function PriceAlerts() {
   const { priceAlerts, addAlert, removeAlert, livePrices, setLivePrice } = useStore();
@@ -29,7 +38,7 @@ export default function PriceAlerts() {
     const tickers = [...new Set(priceAlerts.map((a) => a.ticker))];
     let ws;
     try {
-      ws = new WebSocket(`${WS_BASE}/ws/prices`);
+      ws = new WebSocket(getWsUrl());
       ws.onopen = () => {
         ws.send(JSON.stringify({ subscribe: tickers }));
       };

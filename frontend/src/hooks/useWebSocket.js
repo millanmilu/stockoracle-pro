@@ -1,6 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 
-const API = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
+const getWsUrl = () => {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    if (window.location.hostname.includes('amplifyapp.com')) {
+      return 'wss://stockoracle.duckdns.org/ws/prices';
+    }
+    return `${protocol}//${window.location.host}/ws/prices`;
+  }
+  return 'ws://localhost:8000/ws/prices';
+};
 
 export function useWebSocket(onMessage) {
   const wsRef = useRef(null)
@@ -16,9 +26,7 @@ export function useWebSocket(onMessage) {
 
   useEffect(() => {
     let active = true
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host = API.replace(/^https?:\/\//, '') || window.location.host
-    const url  = `${protocol}://${host}/ws/prices`
+    const url  = getWsUrl();
 
     const connect = () => {
       if (!active) return

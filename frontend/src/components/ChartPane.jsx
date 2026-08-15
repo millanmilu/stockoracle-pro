@@ -1,13 +1,11 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { createChart, ColorType, LineStyle, CrosshairMode } from 'lightweight-charts';
-import axios from 'axios';
+import api from '../utils/api';
 import { 
   Maximize2, Minimize2, Sparkles, TrendingUp,
   ZoomIn, ZoomOut, RotateCcw, Activity, Layers, Target, Check
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-
-const API_BASE = import.meta.env.VITE_API_URL || 'https://stockoracle.duckdns.org';
 
 const INTERVALS = [
   { label: '1m',  value: '1m'  },
@@ -134,10 +132,9 @@ export default function ChartPane({
     setLoading(true);
     setError(null);
     try {
-      const period = interval === '1d' ? '1Y' : interval === '1h' ? '1M' : '5D';
-      const res = await axios.get(`${API_BASE}/api/stock/history/${symbol.toUpperCase()}`, {
-        params: { period, interval },
-        timeout: 15000,
+      const timeframe = interval === '1d' ? '5Y' : interval === '1h' ? '1M' : '5D';
+      const res = await api.get(`/api/stock/${symbol.toUpperCase()}/history`, {
+        params: { timeframe, interval },
       });
       const data = res.data;
       if (Array.isArray(data) && data.length > 0) {
@@ -165,7 +162,7 @@ export default function ChartPane({
       return;
     }
     try {
-      const res = await axios.get(`${API_BASE}/api/predict/${symbol.toUpperCase()}`, { timeout: 12000 });
+      const res = await api.get(`/api/stock/${symbol.toUpperCase()}/predict`);
       if (res.data && res.data.predicted_price_7d > 0) {
         setPrediction(res.data);
       }
