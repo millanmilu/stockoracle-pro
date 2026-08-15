@@ -573,10 +573,13 @@ export default function LiveChartView() {
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const initialWidth = containerRef.current.clientWidth || 800;
+    const initialHeight = containerRef.current.clientHeight || 600;
+
     const chart = createChart(containerRef.current, {
       ...CHART_OPTIONS,
-      width : containerRef.current.clientWidth,
-      height: 520,
+      width : initialWidth,
+      height: initialHeight,
     });
     chartRef.current = chart;
 
@@ -637,7 +640,10 @@ export default function LiveChartView() {
 
     const ro = new ResizeObserver(entries => {
       if (entries[0] && chartRef.current) {
-        chartRef.current.applyOptions({ width: entries[0].contentRect.width });
+        const { width, height } = entries[0].contentRect;
+        if (width > 0 && height > 0) {
+          chartRef.current.applyOptions({ width, height });
+        }
       }
     });
     ro.observe(containerRef.current);

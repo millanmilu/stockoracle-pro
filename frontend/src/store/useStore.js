@@ -9,7 +9,7 @@ const useStore = create(
       predictionData: null,
       trainingStatus: null,
       theme: 'dark',
-      activeView: 'Dashboard',
+      activeView: 'Live Chart',
 
       setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
       setPredictionData: (data)   => set({ predictionData: data }),
