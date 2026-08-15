@@ -165,85 +165,6 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
         </div>
       </div>
 
-      {/* ── Center Search Bar: Search for Anything [Ctrl+K] ── */}
-      <div ref={searchDropdownRef} style={{ position: 'relative', width: '300px', flexShrink: 0 }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          backgroundColor: isDark ? '#121626' : '#F1F5F9',
-          border: isDark ? '1px solid #232942' : '1px solid #CBD5E1',
-          borderRadius: '8px',
-          padding: '6px 12px',
-          gap: '8px',
-        }}>
-          <Search size={14} style={{ color: '#818CF8' }} />
-          <input
-            ref={searchInputRef}
-            type="text"
-            placeholder="Search for Anything [Ctrl + K]"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => { if (searchResults.length > 0) setShowSearchDropdown(true); }}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              outline: 'none',
-              color: isDark ? '#F0F0FF' : '#0F172A',
-              fontSize: '0.8rem',
-              width: '100%',
-              fontFamily: 'Inter, sans-serif',
-            }}
-          />
-        </div>
-
-        {/* Autocomplete Dropdown */}
-        {showSearchDropdown && searchResults.length > 0 && (
-          <div style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            left: 0,
-            right: 0,
-            backgroundColor: isDark ? '#0F172A' : '#ffffff',
-            border: isDark ? '1px solid #232942' : '1px solid #E2E8F0',
-            borderRadius: '8px',
-            maxHeight: '300px',
-            overflowY: 'auto',
-            zIndex: 200,
-            boxShadow: '0 12px 30px rgba(0,0,0,0.5)',
-          }}>
-            {searchResults.map((item) => (
-              <div
-                key={item.ticker}
-                onClick={() => handleSelectStock(item.ticker)}
-                style={{
-                  padding: '9px 12px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  cursor: 'pointer',
-                  borderBottom: isDark ? '1px solid #1E293B' : '1px solid #F1F5F9',
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isDark ? '#1E293B' : '#F1F5F9'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
-              >
-                <div>
-                  <span style={{ fontWeight: 700, color: '#3B82F6', fontFamily: 'JetBrains Mono, monospace', fontSize: '0.85rem' }}>
-                    {item.ticker}
-                  </span>
-                  <span style={{ fontSize: '0.72rem', color: isDark ? '#94A3B8' : '#64748B', marginLeft: '8px' }}>
-                    {item.name}
-                  </span>
-                </div>
-                <span style={{ fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px', backgroundColor: isDark ? '#1E293B' : '#E2E8F0', color: '#64748B' }}>
-                  {item.exchange || 'NSE'}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* ── Navigation Tabs ── */}
       <nav style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
         {NAV_TABS.map((tab) => {
@@ -270,25 +191,8 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
         })}
       </nav>
 
-      {/* ── Right Actions (Theme, Notification, Fullscreen, Profile) ── */}
+      {/* ── Right Actions (Theme, Fullscreen) ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-        {/* Watchlist Toggle Button */}
-        <button
-          onClick={onToggleWatchlist}
-          title="Toggle Left Watchlist Drawer"
-          style={{
-            padding: '5px 10px',
-            borderRadius: '6px',
-            border: `1px solid ${showWatchlist ? '#3B82F6' : (isDark ? '#232942' : '#CBD5E1')}`,
-            backgroundColor: showWatchlist ? (isDark ? 'rgba(59,130,246,0.15)' : '#EFF6FF') : 'transparent',
-            color: showWatchlist ? '#3B82F6' : (isDark ? '#94A3B8' : '#64748B'),
-            fontSize: '0.74rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          {showWatchlist ? 'Hide Watchlist' : 'Show Watchlist'}
-        </button>
 
         {/* Theme Toggle */}
         <button

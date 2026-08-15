@@ -1142,50 +1142,6 @@ export default function LiveChartView() {
         .pill-btn:hover { background:rgba(168,85,247,0.2)!important; color:#C084FC!important; }
       `}</style>
 
-      {/* ── Top Bar: Watchlist & Search ── */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, flexWrap:'wrap', background:'rgba(255,255,255,0.02)', padding:'10px 16px', borderRadius:14, border:'1px solid rgba(168,85,247,0.1)' }}>
-        
-        {/* Watchlist Pills */}
-        <div style={{ display:'flex', alignItems:'center', gap:6, flexWrap:'wrap' }}>
-          <span style={{ fontSize:'0.65rem', color:'#4B5563', letterSpacing:'0.08em', fontWeight:700, marginRight:4 }}>WATCHLIST</span>
-          {POPULAR_STOCKS.map(sym => (
-            <button
-              key={sym}
-              onClick={() => setSelectedSymbol(sym)}
-              className="pill-btn"
-              style={{
-                padding:'4px 10px', borderRadius:20, fontSize:'0.72rem', fontWeight:700,
-                border: selectedSymbol === sym ? '1px solid #A855F7' : '1px solid rgba(75,85,99,0.3)',
-                background: selectedSymbol === sym ? 'rgba(168,85,247,0.2)' : 'rgba(255,255,255,0.03)',
-                color: selectedSymbol === sym ? '#C084FC' : '#9CA3AF',
-              }}
-            >
-              {sym}
-            </button>
-          ))}
-        </div>
-
-        {/* Search Bar */}
-        <form onSubmit={handleSearchSubmit} style={{ display:'flex', alignItems:'center', gap:6 }}>
-          <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
-            <Search size={14} style={{ position:'absolute', left:10, color:'#6B7280' }} />
-            <input
-              type="text"
-              placeholder="Search ticker (e.g. INFY)..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              style={{
-                padding:'5px 10px 5px 30px', borderRadius:8, border:'1px solid rgba(168,85,247,0.2)',
-                background:'rgba(15,23,42,0.8)', color:'#F0F0FF', fontSize:'0.75rem', width:180, outline:'none',
-              }}
-            />
-          </div>
-          <button type="submit" style={{ padding:'5px 12px', borderRadius:8, border:'none', background:'#A855F7', color:'#fff', fontSize:'0.72rem', fontWeight:700, cursor:'pointer' }}>
-            {isSearching ? '...' : 'Go'}
-          </button>
-        </form>
-      </div>
-
       {/* ── Angel One TradeOne Style In-Chart Header ── */}
       <div style={{
         display:'flex',
