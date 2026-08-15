@@ -12,6 +12,7 @@ import toast from 'react-hot-toast';
 import MultiChartGrid from './MultiChartGrid';
 import DrawingTools from './chart-tools/DrawingTools';
 import IndicatorsModal from './IndicatorsModal';
+import ChartSettingsModal from './ChartSettingsModal';
 import VolumeProfile from './chart-tools/VolumeProfile';
 import OrderFlow from './chart-tools/OrderFlow';
 import AIPatternRecognition from './chart-tools/AIPatternRecognition';
@@ -372,8 +373,10 @@ export default function LiveChartView() {
   const [compareSymbol, setCompareSymbol] = useState('NIFTY50');
   const [rawHistoryCompare, setRawHistoryCompare] = useState(null);
 
-  // Indicator Toggles & TradingView Indicators Modal
+  // Indicator Toggles & TradingView Modals
   const [showIndicatorsModal, setShowIndicatorsModal] = useState(false);
+  const [showChartSettingsModal, setShowChartSettingsModal] = useState(false);
+  const [showBottomStats, setShowBottomStats] = useState(false); // Collapsed by default to maximize chart height
   const [showIndicatorDropdown, setShowIndicatorDropdown] = useState(false);
   const [showVolume,   setShowVolume]   = useState(false);
   const [showSMA,      setShowSMA]      = useState(false);
@@ -1607,7 +1610,7 @@ export default function LiveChartView() {
           borderRadius:18, overflow:'hidden',
           position:'relative',
           display: 'flex',
-          height: 540,
+          height: 600,
         }}>
 
           {/* ── TradingView Style Vertical Left Drawing Sidebar ── */}
@@ -1615,6 +1618,7 @@ export default function LiveChartView() {
             chartRef={chartRef}
             symbol={selectedSymbol}
             interval={interval}
+            onOpenSettings={() => setShowChartSettingsModal(true)}
           />
 
           {/* ── Center Chart Canvas ── */}
@@ -1810,85 +1814,69 @@ export default function LiveChartView() {
         </div>
       )}
 
-      {/* ── Enhanced Stats Bar with Volatility & Momentum (Daily Only) ── */}
+      {/* ── Compact Space-Saving Bottom Status Bar with Expandable Insights ── */}
       {isDaily && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(138px, 1fr))', gap:10 }}>
-          {[
-            { label:'CURRENT PRICE',   value: curPrice ? `₹${curPrice.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : '—', color:'#F0F0FF', delay:'0ms' },
-            { label:'AI TARGET (7D)',  value: prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : predLoading ? 'Loading…' : '—', color:'#A855F7', delay:'40ms' },
-            { label:'EXPECTED RETURN', value: prediction?.predicted_return_7d != null ? `${prediction.predicted_return_7d>=0?'+':''}${(prediction.predicted_return_7d*100).toFixed(2)}%` : predLoading ? 'Loading…' : '—',
-              color: prediction?.predicted_return_7d >= 0 ? '#26A69A' : '#EF5350', delay:'80ms' },
-            { label:'AI CONFIDENCE',   value: prediction?.ai_confidence_score != null ? `${prediction.ai_confidence_score}/100` : predLoading ? 'Loading…' : '—', color:scoreColor, delay:'120ms' },
-            { label:'95% UPPER',       value:(prediction?.predicted_upper_price_7d??prediction?.high_bound) ? `₹${(prediction.predicted_upper_price_7d??prediction.high_bound).toFixed(2)}` : predLoading?'Loading…':'—', color:'#26A69A', delay:'160ms' },
-            { label:'95% LOWER',       value:(prediction?.predicted_lower_price_7d??prediction?.low_bound)  ? `₹${(prediction.predicted_lower_price_7d??prediction.low_bound).toFixed(2)}`  : predLoading?'Loading…':'—', color:'#EF5350', delay:'200ms' },
-            // New: Volatility & Momentum Indicators
-            { label:'VOLATILITY',      value: rawHistory && rawHistory.length > 14 ? (() => { const closes = rawHistory.slice(-15).map(d => Number(d.close)); const changes = closes.map((c,i) => i>0 ? Math.abs(c-closes[i-1])/closes[i-1] : 0); const avgVol = changes.reduce((a,b)=>a+b,0)/changes.length*100; return avgVol.toFixed(2)+'%'; })() : predLoading?'Loading…':'—', color:'#F59E0B', delay:'240ms' },
-            { label:'MOMENTUM',        value: rawHistory && rawHistory.length > 5 ? (() => { const curr = Number(rawHistory[rawHistory.length-1]?.close); const prev = Number(rawHistory[rawHistory.length-6]?.close); const mom = ((curr-prev)/prev)*100; return (mom>=0?'+':'')+mom.toFixed(2)+'%'; })() : predLoading?'Loading…':'—', color: rawHistory && rawHistory.length > 5 ? (Number(rawHistory[rawHistory.length-1]?.close) >= Number(rawHistory[rawHistory.length-6]?.close) ? '#26A69A' : '#EF5350') : '#6B7280', delay:'280ms' },
-          ].map(({ label, value, color, delay }) => (
-            <div key={label} className="lc-stat" style={{
-              background:'rgba(255,255,255,0.022)', border:'1px solid rgba(168,85,247,0.09)',
-              borderRadius:12, padding:'11px 14px', animationDelay:delay,
-            }}>
-              <div style={{ fontSize:'0.64rem', color:'#374151', letterSpacing:'0.09em', marginBottom:5 }}>{label}</div>
-              <div style={{ fontSize:'0.9rem', fontWeight:700, color, fontFamily:'JetBrains Mono, monospace' }}>{value}</div>
-            </div>
-          ))}
-
-          {/* Signal Pill */}
-          <div className="lc-stat" style={{
-            background:sigMeta.bg, border:`1px solid ${sigMeta.border}`,
-            borderRadius:12, padding:'11px 14px', animationDelay:'240ms',
-            display:'flex', flexDirection:'column', justifyContent:'center',
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '6px 14px',
+            backgroundColor: '#0F121A',
+            border: '1px solid rgba(255,255,255,0.06)',
+            borderRadius: 8,
+            fontSize: '0.74rem',
+            color: '#94A3B8',
           }}>
-            <div style={{ fontSize:'0.64rem', color:'#374151', letterSpacing:'0.09em', marginBottom:5 }}>AI SIGNAL</div>
-            <div style={{ fontSize:'1rem', fontWeight:800, color:sigMeta.color, fontFamily:'JetBrains Mono, monospace' }}>
-              {predLoading ? 'Loading…' : sigMeta.label}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+              <span>LTP: <strong style={{ color: '#FFF' }}>{curPrice ? `₹${curPrice.toFixed(2)}` : '—'}</strong></span>
+              <span>7D Target: <strong style={{ color: '#A855F7' }}>{prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toFixed(2)}` : '—'}</strong></span>
+              <span>Return: <strong style={{ color: (prediction?.predicted_return_7d || 0) >= 0 ? '#26A69A' : '#EF5350' }}>{prediction?.predicted_return_7d != null ? `${prediction.predicted_return_7d >= 0 ? '+' : ''}${(prediction.predicted_return_7d * 100).toFixed(2)}%` : '—'}</strong></span>
+              <span>Signal: <strong style={{ color: sigMeta.color }}>{predLoading ? 'Loading…' : sigMeta.label}</strong></span>
+              <span>Confidence: <strong style={{ color: scoreColor }}>{score}/100</strong></span>
             </div>
+
+            <button
+              onClick={() => setShowBottomStats(!showBottomStats)}
+              style={{
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                borderRadius: 4,
+                padding: '3px 8px',
+                color: '#60A5FA',
+                cursor: 'pointer',
+                fontSize: '0.7rem',
+                fontWeight: 600,
+              }}
+            >
+              {showBottomStats ? '▴ Collapse Panel' : '▾ Expand Stats'}
+            </button>
           </div>
+
+          {/* Expanded Cards (Shown only on demand) */}
+          {showBottomStats && (
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(138px, 1fr))', gap:8 }}>
+              {[
+                { label:'CURRENT PRICE',   value: curPrice ? `₹${curPrice.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : '—', color:'#F0F0FF' },
+                { label:'AI TARGET (7D)',  value: prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : predLoading ? 'Loading…' : '—', color:'#A855F7' },
+                { label:'EXPECTED RETURN', value: prediction?.predicted_return_7d != null ? `${prediction.predicted_return_7d>=0?'+':''}${(prediction.predicted_return_7d*100).toFixed(2)}%` : predLoading ? 'Loading…' : '—',
+                  color: prediction?.predicted_return_7d >= 0 ? '#26A69A' : '#EF5350' },
+                { label:'AI CONFIDENCE',   value: prediction?.ai_confidence_score != null ? `${prediction.ai_confidence_score}/100` : predLoading ? 'Loading…' : '—', color:scoreColor },
+                { label:'95% UPPER',       value:(prediction?.predicted_upper_price_7d??prediction?.high_bound) ? `₹${(prediction.predicted_upper_price_7d??prediction.high_bound).toFixed(2)}` : predLoading?'Loading…':'—', color:'#26A69A' },
+                { label:'95% LOWER',       value:(prediction?.predicted_lower_price_7d??prediction?.low_bound)  ? `₹${(prediction.predicted_lower_price_7d??prediction.low_bound).toFixed(2)}`  : predLoading?'Loading…':'—', color:'#EF5350' },
+              ].map(({ label, value, color }) => (
+                <div key={label} style={{
+                  background:'rgba(255,255,255,0.02)', border:'1px solid rgba(168,85,247,0.09)',
+                  borderRadius:8, padding:'8px 12px',
+                }}>
+                  <div style={{ fontSize:'0.62rem', color:'#64748B', letterSpacing:'0.06em', marginBottom:3 }}>{label}</div>
+                  <div style={{ fontSize:'0.82rem', fontWeight:700, color, fontFamily:'JetBrains Mono, monospace' }}>{value}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
-
-      {/* ── Enhanced Confidence Score Bar with Quick Insights (Daily Only) ── */}
-      {isDaily && prediction?.ai_confidence_score != null && (
-        <div style={{
-          background:'rgba(255,255,255,0.018)', border:'1px solid rgba(168,85,247,0.08)',
-          borderRadius:12, padding:'11px 16px',
-        }}>
-          <div style={{ display:'flex', justifyContent:'space-between', marginBottom:7, fontSize:'0.74rem' }}>
-            <span style={{ color:'#6B7280' }}>AI Confidence Score</span>
-            <span style={{ color:scoreColor, fontFamily:'JetBrains Mono, monospace', fontWeight:700 }}>{score} / 100</span>
-          </div>
-          <div style={{ height:5, background:'rgba(255,255,255,0.05)', borderRadius:99, overflow:'hidden' }}>
-            <div style={{
-              height:'100%', width:`${score}%`,
-              background:`linear-gradient(90deg,${scoreColor}99,${scoreColor})`,
-              borderRadius:99, transition:'width 0.6s ease',
-            }} />
-          </div>
-          {/* Quick AI Insight */}
-          <div style={{ marginTop:10, display:'flex', alignItems:'center', gap:6, padding:'8px 10px', background:'rgba(168,85,247,0.06)', borderRadius:8, border:'1px solid rgba(168,85,247,0.12)' }}>
-            <Zap size={14} color="#A855F7" />
-            <span style={{ fontSize:'0.72rem', color:'#C084FC', fontWeight:600 }}>
-              {score >= 75 ? '🔥 HIGH CONFIDENCE TRADE SETUP' : score >= 50 ? '⚡ MODERATE OPPORTUNITY' : '⚠️ LOW CONFIDENCE - WAIT FOR SIGNAL'}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* ── Keyboard Shortcuts Hint ── */}
-      <div style={{ 
-        display:'flex', justifyContent:'center', gap:12, 
-        padding:'10px 16px', 
-        background:'rgba(255,255,255,0.01)', 
-        borderRadius:10, 
-        border:'1px solid rgba(75,85,99,0.15)',
-        fontSize:'0.68rem',
-        color:'#4B5563'
-      }}>
-        <span><kbd style={{padding:'2px 6px',background:'rgba(255,255,255,0.05)',borderRadius:4,border:'1px solid rgba(75,85,99,0.3)'}}>Scroll</kbd> Zoom</span>
-        <span><kbd style={{padding:'2px 6px',background:'rgba(255,255,255,0.05)',borderRadius:4,border:'1px solid rgba(75,85,99,0.3)'}}>Drag</kbd> Pan</span>
-        <span><kbd style={{padding:'2px 6px',background:'rgba(255,255,255,0.05)',borderRadius:4,border:'1px solid rgba(75,85,99,0.3)'}}>Hover</kbd> Crosshair</span>
-      </div>
 
       {/* ── TradingView Indicators, Metrics, and Strategies Modal ── */}
       <IndicatorsModal
@@ -1896,6 +1884,14 @@ export default function LiveChartView() {
         onClose={() => setShowIndicatorsModal(false)}
         activeIndicators={activeIndicatorsMap}
         onToggleIndicator={handleToggleIndicator}
+      />
+
+      {/* ── TradingView Chart Settings Modal ── */}
+      <ChartSettingsModal
+        isOpen={showChartSettingsModal}
+        onClose={() => setShowChartSettingsModal(false)}
+        chartRef={chartRef}
+        candleSeriesRef={candleSeriesRef}
       />
 
     </div>

@@ -1,31 +1,35 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Crosshair, TrendingUp, AlignJustify, Brush, Type, Smile,
   Ruler, ZoomIn, Magnet, Pencil, Lock, Unlock, Eye, EyeOff,
   Trash2, GripVertical, Square as SquareIcon, Sliders, Settings,
-  X, Circle, Minus, Palette, Move, Download
+  X, Circle, Minus, Palette, Move, Download, Check
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const STORAGE_KEY = 'stockoracle_drawings_tv_v3';
+const STORAGE_KEY = 'stockoracle_drawings_tv_v4';
 
 const FIBONACCI_LEVELS = [
-  { level: 0.0,   label: '0.0 (0%)',     color: '#787B86' },
-  { level: 0.236, label: '0.236 (23.6%)', color: '#EF5350' },
-  { level: 0.382, label: '0.382 (38.2%)', color: '#F59E0B' },
-  { level: 0.5,   label: '0.5 (50.0%)',   color: '#10B981' },
-  { level: 0.618, label: '0.618 (61.8%)', color: '#00E5FF' },
-  { level: 0.786, label: '0.786 (78.6%)', color: '#6366F1' },
-  { level: 1.0,   label: '1.0 (100%)',   color: '#A855F7' },
+  { level: 0.0,   label: '0.0 (0%)',     color: '#787B86', fill: 'rgba(120, 123, 134, 0.08)' },
+  { level: 0.236, label: '0.236 (23.6%)', color: '#EF5350', fill: 'rgba(239, 83, 80, 0.12)' },
+  { level: 0.382, label: '0.382 (38.2%)', color: '#F59E0B', fill: 'rgba(245, 158, 11, 0.12)' },
+  { level: 0.5,   label: '0.5 (50.0%)',   color: '#10B981', fill: 'rgba(16, 185, 129, 0.12)' },
+  { level: 0.618, label: '0.618 (61.8%)', color: '#00E5FF', fill: 'rgba(0, 229, 255, 0.12)' },
+  { level: 0.786, label: '0.786 (78.6%)', color: '#6366F1', fill: 'rgba(99, 102, 241, 0.12)' },
+  { level: 1.0,   label: '1.0 (100%)',   color: '#A855F7', fill: 'rgba(168, 85, 247, 0.12)' },
 ];
 
-export default function DrawingTools({ chartRef, symbol, interval }) {
+export default function DrawingTools({ chartRef, symbol, interval, onOpenSettings }) {
   // Tool & State Management
   const [activeTool, setActiveTool] = useState('crosshair');
   const [drawings, setDrawings] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentDraw, setCurrentDraw] = useState(null);
+  
+  // Selected / Dragging existing drawing
   const [selectedDrawingId, setSelectedDrawingId] = useState(null);
+  const [draggingHandle, setDraggingHandle] = useState(null); // 'start' | 'end' | 'body'
+  const [dragStartPos, setDragStartPos] = useState(null);
 
   // Modifier Modes
   const [magnetMode, setMagnetMode] = useState(false);
@@ -44,6 +48,23 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
   const [activeStrokeWidth, setActiveStrokeWidth] = useState(2);
   const [showStyleMenu, setShowStyleMenu] = useState(false);
 
+  // Floating toolbar positioning
+  const [floatingPos, setFloatingPos] = useState({ top: 12, right: 18 });
+  const [isDraggingFloating, setIsDraggingFloating] = useState(false);
+  const floatDragRef = useRef(null);
+
+  // Disable / Enable chart pan & scroll to prevent chart jitter while drawing
+  const setChartLocked = useCallback((locked) => {
+    if (chartRef?.current) {
+      try {
+        chartRef.current.applyOptions({
+          handleScroll: !locked,
+          handleScale: !locked,
+        });
+      } catch (_) {}
+    }
+  }, [chartRef]);
+
   // Load saved drawings on mount / symbol change
   useEffect(() => {
     const key = `${STORAGE_KEY}_${symbol}_${interval}`;
@@ -58,6 +79,27 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
       setDrawings([]);
     }
   }, [symbol, interval]);
+
+  // Delete key listener to remove selected drawing
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId && !textInputPos) {
+        if (lockAllDrawings) {
+          toast.error('Drawings are locked');
+          return;
+        }
+        setDrawings((prev) => {
+          const next = prev.filter((d) => d.id !== selectedDrawingId);
+          saveDrawings(next);
+          return next;
+        });
+        setSelectedDrawingId(null);
+        toast.success('Drawing deleted');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedDrawingId, lockAllDrawings, textInputPos]);
 
   // Persist drawings to localStorage
   const saveDrawings = (newDrawings) => {
@@ -80,10 +122,31 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
 
   // SVG Mouse handlers
   const handleSvgMouseDown = (e) => {
-    if (activeTool === 'crosshair' || lockAllDrawings) return;
+    // Stop propagation so underlying chart never moves
+    if (activeTool !== 'crosshair') {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    if (lockAllDrawings && activeTool !== 'crosshair') {
+      toast.error('Drawings are locked');
+      return;
+    }
+
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    // In crosshair mode, clicking empty space deselects drawing
+    if (activeTool === 'crosshair') {
+      if (selectedDrawingId && !draggingHandle) {
+        setSelectedDrawingId(null);
+      }
+      return;
+    }
+
+    // Freeze chart panning
+    setChartLocked(true);
 
     if (activeTool === 'text') {
       setTextInputPos({ x, y });
@@ -121,23 +184,83 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
   };
 
   const handleSvgMouseMove = (e) => {
-    if (!isDrawing || !currentDraw) return;
+    if (activeTool !== 'crosshair' || draggingHandle) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
+    // Moving an existing selected drawing or handle
+    if (draggingHandle && selectedDrawingId && dragStartPos && !lockAllDrawings) {
+      const dx = x - dragStartPos.x;
+      const dy = y - dragStartPos.y;
+
+      setDrawings((prev) =>
+        prev.map((d) => {
+          if (d.id !== selectedDrawingId) return d;
+          if (draggingHandle === 'start') {
+            return { ...d, startX: x, startY: y };
+          }
+          if (draggingHandle === 'end') {
+            return { ...d, endX: x, endY: y };
+          }
+          if (draggingHandle === 'body') {
+            if (d.type === 'brush' && d.points) {
+              return {
+                ...d,
+                points: d.points.map((pt) => ({ x: pt.x + dx, y: pt.y + dy })),
+              };
+            }
+            return {
+              ...d,
+              startX: (d.startX ?? 0) + dx,
+              startY: (d.startY ?? 0) + dy,
+              endX: (d.endX ?? 0) + dx,
+              endY: (d.endY ?? 0) + dy,
+            };
+          }
+          return d;
+        })
+      );
+      setDragStartPos({ x, y });
+      return;
+    }
+
+    // Actively drawing new item
+    if (!isDrawing || !currentDraw) return;
+
     if (currentDraw.type === 'brush') {
-      setCurrentDraw(prev => ({
+      setCurrentDraw((prev) => ({
         ...prev,
-        points: [...prev.points, { x, y }],
+        points: [...(prev.points || []), { x, y }],
       }));
     } else {
-      setCurrentDraw(prev => ({ ...prev, endX: x, endY: y }));
+      setCurrentDraw((prev) => ({ ...prev, endX: x, endY: y }));
     }
   };
 
-  const handleSvgMouseUp = () => {
-    if (!isDrawing || !currentDraw) return;
+  const handleSvgMouseUp = (e) => {
+    if (activeTool !== 'crosshair') {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    // Release drag handle
+    if (draggingHandle) {
+      setDraggingHandle(null);
+      setDragStartPos(null);
+      saveDrawings(drawings);
+      setChartLocked(false);
+      return;
+    }
+
+    if (!isDrawing || !currentDraw) {
+      setChartLocked(false);
+      return;
+    }
 
     let isValid = false;
     if (currentDraw.type === 'brush' && currentDraw.points?.length > 2) {
@@ -151,11 +274,14 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
     }
 
     if (isValid) {
-      saveDrawings([...drawings, currentDraw]);
+      const updated = [...drawings, currentDraw];
+      saveDrawings(updated);
+      setSelectedDrawingId(currentDraw.id);
     }
 
     setIsDrawing(false);
     setCurrentDraw(null);
+    setChartLocked(false);
 
     // If not staying in draw mode, revert back to crosshair
     if (!stayInDrawMode && activeTool !== 'brush') {
@@ -174,9 +300,11 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
         color: activeColor || '#F0F0FF',
       };
       saveDrawings([...drawings, textDrawing]);
+      setSelectedDrawingId(textDrawing.id);
     }
     setTextInputPos(null);
     setTextInputVal('');
+    setChartLocked(false);
     if (!stayInDrawMode) setActiveTool('crosshair');
   };
 
@@ -190,20 +318,12 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
         emoji,
       };
       saveDrawings([...drawings, stickerDrawing]);
+      setSelectedDrawingId(stickerDrawing.id);
     }
     setShowStickerMenu(false);
     setStickerPos(null);
+    setChartLocked(false);
     if (!stayInDrawMode) setActiveTool('crosshair');
-  };
-
-  const deleteDrawing = (id, e) => {
-    if (e) e.stopPropagation();
-    if (lockAllDrawings) {
-      toast.error('Drawings are locked');
-      return;
-    }
-    saveDrawings(drawings.filter(d => d.id !== id));
-    if (selectedDrawingId === id) setSelectedDrawingId(null);
   };
 
   return (
@@ -434,31 +554,36 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
             color: '#787B86',
             cursor: 'pointer',
           }}
-          onMouseEnter={(e) => e.currentTarget.style.color = '#EF5350'}
-          onMouseLeave={(e) => e.currentTarget.style.color = '#787B86'}
+          onMouseEnter={(e) => (e.currentTarget.style.color = '#EF5350')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = '#787B86')}
         >
           <Trash2 size={16} />
         </button>
       </div>
 
       {/* ── Floating Toolbar (Top Right: 5 Small White Icons) ── */}
-      <div style={{
-        position: 'absolute',
-        top: 14,
-        right: 18,
-        backgroundColor: '#1E222D',
-        border: '1px solid rgba(255, 255, 255, 0.12)',
-        borderRadius: 6,
-        padding: '3px 6px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        zIndex: 50,
-        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.6)',
-        userSelect: 'none',
-      }}>
+      <div
+        style={{
+          position: 'absolute',
+          top: floatingPos.top,
+          right: floatingPos.right,
+          backgroundColor: '#1E222D',
+          border: '1px solid rgba(255, 255, 255, 0.12)',
+          borderRadius: 6,
+          padding: '3px 6px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          zIndex: 50,
+          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.6)',
+          userSelect: 'none',
+        }}
+      >
         {/* 1. Drag Dots Handle */}
-        <span title="Favorite Tools" style={{ color: '#787B86', cursor: 'grab', display: 'flex', alignItems: 'center' }}>
+        <span
+          title="Drag to reposition toolbar"
+          style={{ color: '#787B86', cursor: 'grab', display: 'flex', alignItems: 'center' }}
+        >
           <GripVertical size={14} />
         </span>
 
@@ -568,7 +693,9 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
 
         {/* 5. Settings Menu Icon */}
         <button
-          onClick={() => toast.success('TradingView Chart Settings')}
+          onClick={() => {
+            if (onOpenSettings) onOpenSettings();
+          }}
           title="Chart & Drawing Settings"
           style={{
             background: 'transparent',
@@ -599,8 +726,8 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
             bottom: 0,
             width: 'calc(100% - 44px)',
             height: '100%',
-            zIndex: activeTool !== 'crosshair' ? 25 : 5,
-            pointerEvents: activeTool !== 'crosshair' ? 'all' : 'none',
+            zIndex: activeTool !== 'crosshair' ? 30 : 5,
+            pointerEvents: activeTool !== 'crosshair' || selectedDrawingId ? 'all' : 'none',
             cursor: activeTool === 'crosshair' ? 'default' : 'crosshair',
           }}
         >
@@ -611,15 +738,54 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
             // Trendline
             if (d.type === 'trendline') {
               return (
-                <g key={d.id} onClick={() => setSelectedDrawingId(d.id)} style={{ pointerEvents: 'auto', cursor: 'pointer' }}>
+                <g key={d.id} style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}>
                   <line
                     x1={d.startX} y1={d.startY} x2={d.endX} y2={d.endY}
                     stroke={d.color || '#38BDF8'}
                     strokeWidth={d.strokeWidth || 2}
                     strokeDasharray={isSelected ? '4,4' : 'none'}
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair') {
+                        e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        if (!lockAllDrawings) {
+                          setDraggingHandle('body');
+                          setDragStartPos({ x: e.clientX, y: e.clientY });
+                          setChartLocked(true);
+                        }
+                      }
+                    }}
                   />
-                  <circle cx={d.startX} cy={d.startY} r={3} fill={d.color || '#38BDF8'} />
-                  <circle cx={d.endX} cy={d.endY} r={3} fill={d.color || '#38BDF8'} />
+                  {/* Start Handle */}
+                  <circle
+                    cx={d.startX} cy={d.startY} r={isSelected ? 5 : 3}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    stroke="#1E222D" strokeWidth={1}
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair' && !lockAllDrawings) {
+                        e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        setDraggingHandle('start');
+                        setDragStartPos({ x: e.clientX, y: e.clientY });
+                        setChartLocked(true);
+                      }
+                    }}
+                  />
+                  {/* End Handle */}
+                  <circle
+                    cx={d.endX} cy={d.endY} r={isSelected ? 5 : 3}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    stroke="#1E222D" strokeWidth={1}
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair' && !lockAllDrawings) {
+                        e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        setDraggingHandle('end');
+                        setDragStartPos({ x: e.clientX, y: e.clientY });
+                        setChartLocked(true);
+                      }
+                    }}
+                  />
                 </g>
               );
             }
@@ -629,24 +795,78 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
               const minY = Math.min(d.startY, d.endY);
               const maxY = Math.max(d.startY, d.endY);
               const height = maxY - minY;
+              const rightX = Math.max(d.startX, d.endX) + 400;
+
               return (
-                <g key={d.id} onClick={() => setSelectedDrawingId(d.id)} style={{ pointerEvents: 'auto', cursor: 'pointer' }}>
+                <g
+                  key={d.id}
+                  style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}
+                  onMouseDown={(e) => {
+                    if (activeTool === 'crosshair') {
+                      e.stopPropagation();
+                      setSelectedDrawingId(d.id);
+                      if (!lockAllDrawings) {
+                        setDraggingHandle('body');
+                        setDragStartPos({ x: e.clientX, y: e.clientY });
+                        setChartLocked(true);
+                      }
+                    }
+                  }}
+                >
+                  {/* Fibonacci colored bands */}
+                  {FIBONACCI_LEVELS.slice(0, -1).map((fib, idx) => {
+                    const nextFib = FIBONACCI_LEVELS[idx + 1];
+                    const y1 = d.startY < d.endY ? minY + height * fib.level : maxY - height * fib.level;
+                    const y2 = d.startY < d.endY ? minY + height * nextFib.level : maxY - height * nextFib.level;
+                    const bandTop = Math.min(y1, y2);
+                    const bandHeight = Math.abs(y2 - y1);
+                    return (
+                      <rect
+                        key={`band-${fib.level}`}
+                        x={Math.min(d.startX, d.endX)}
+                        y={bandTop}
+                        width={Math.max(300, Math.abs(d.endX - d.startX))}
+                        height={bandHeight}
+                        fill={fib.fill}
+                      />
+                    );
+                  })}
+
+                  {/* Horizontal grid lines & labels */}
                   {FIBONACCI_LEVELS.map((fib) => {
                     const y = d.startY < d.endY ? minY + height * fib.level : maxY - height * fib.level;
                     return (
                       <g key={fib.level}>
                         <line
-                          x1={d.startX} y1={y} x2={d.endX > d.startX ? d.endX : d.startX + 300} y2={y}
+                          x1={Math.min(d.startX, d.endX)}
+                          y1={y}
+                          x2={Math.min(d.startX, d.endX) + Math.max(300, Math.abs(d.endX - d.startX))}
+                          y2={y}
                           stroke={fib.color}
                           strokeWidth={1}
-                          strokeDasharray="3,3"
+                          strokeDasharray={isSelected ? '2,2' : 'none'}
                         />
-                        <text x={d.startX + 4} y={y - 3} fill={fib.color} fontSize="9" fontFamily="JetBrains Mono">
+                        <text
+                          x={Math.min(d.startX, d.endX) + 6}
+                          y={y - 4}
+                          fill={fib.color}
+                          fontSize="10"
+                          fontWeight="700"
+                          fontFamily="JetBrains Mono, monospace"
+                        >
                           {fib.label}
                         </text>
                       </g>
                     );
                   })}
+
+                  {/* Anchor handles */}
+                  {isSelected && (
+                    <>
+                      <circle cx={d.startX} cy={d.startY} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={2} />
+                      <circle cx={d.endX} cy={d.endY} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={2} />
+                    </>
+                  )}
                 </g>
               );
             }
@@ -663,8 +883,18 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
                   strokeWidth={d.strokeWidth || 2}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  onClick={() => setSelectedDrawingId(d.id)}
-                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                  onMouseDown={(e) => {
+                    if (activeTool === 'crosshair') {
+                      e.stopPropagation();
+                      setSelectedDrawingId(d.id);
+                      if (!lockAllDrawings) {
+                        setDraggingHandle('body');
+                        setDragStartPos({ x: e.clientX, y: e.clientY });
+                        setChartLocked(true);
+                      }
+                    }
+                  }}
+                  style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}
                 />
               );
             }
@@ -676,15 +906,34 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
               const w = Math.abs(d.endX - d.startX);
               const h = Math.abs(d.endY - d.startY);
               return (
-                <rect
-                  key={d.id}
-                  x={x} y={y} width={w} height={h}
-                  fill="rgba(56, 189, 248, 0.12)"
-                  stroke={d.color || '#38BDF8'}
-                  strokeWidth={d.strokeWidth || 1.5}
-                  onClick={() => setSelectedDrawingId(d.id)}
-                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-                />
+                <g key={d.id} style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}>
+                  <rect
+                    x={x} y={y} width={w} height={h}
+                    fill="rgba(56, 189, 248, 0.12)"
+                    stroke={d.color || '#38BDF8'}
+                    strokeWidth={d.strokeWidth || 1.5}
+                    strokeDasharray={isSelected ? '4,4' : 'none'}
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair') {
+                        e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        if (!lockAllDrawings) {
+                          setDraggingHandle('body');
+                          setDragStartPos({ x: e.clientX, y: e.clientY });
+                          setChartLocked(true);
+                        }
+                      }
+                    }}
+                  />
+                  {isSelected && (
+                    <>
+                      <circle cx={x} cy={y} r={4} fill="#FFF" stroke="#2962FF" strokeWidth={1} />
+                      <circle cx={x + w} cy={y} r={4} fill="#FFF" stroke="#2962FF" strokeWidth={1} />
+                      <circle cx={x} cy={y + h} r={4} fill="#FFF" stroke="#2962FF" strokeWidth={1} />
+                      <circle cx={x + w} cy={y + h} r={4} fill="#FFF" stroke="#2962FF" strokeWidth={1} />
+                    </>
+                  )}
+                </g>
               );
             }
 
@@ -697,7 +946,16 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
               const w = Math.abs(d.endX - d.startX);
               const h = Math.abs(d.endY - d.startY);
               return (
-                <g key={d.id} onClick={() => setSelectedDrawingId(d.id)} style={{ pointerEvents: 'auto', cursor: 'pointer' }}>
+                <g
+                  key={d.id}
+                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                  onMouseDown={(e) => {
+                    if (activeTool === 'crosshair') {
+                      e.stopPropagation();
+                      setSelectedDrawingId(d.id);
+                    }
+                  }}
+                >
                   <rect
                     x={x} y={y} width={w} height={h}
                     fill={dy >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,83,80,0.15)'}
@@ -720,8 +978,18 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
                   x={d.startX} y={d.startY}
                   fill={d.color || '#F0F0FF'}
                   fontSize="12" fontWeight="600" fontFamily="Inter, sans-serif"
-                  onClick={() => setSelectedDrawingId(d.id)}
-                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                  onMouseDown={(e) => {
+                    if (activeTool === 'crosshair') {
+                      e.stopPropagation();
+                      setSelectedDrawingId(d.id);
+                      if (!lockAllDrawings) {
+                        setDraggingHandle('body');
+                        setDragStartPos({ x: e.clientX, y: e.clientY });
+                        setChartLocked(true);
+                      }
+                    }
+                  }}
+                  style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}
                 >
                   {d.text}
                 </text>
@@ -735,8 +1003,18 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
                   key={d.id}
                   x={d.startX - 10} y={d.startY + 10}
                   fontSize="22"
-                  onClick={() => setSelectedDrawingId(d.id)}
-                  style={{ pointerEvents: 'auto', cursor: 'pointer', userSelect: 'none' }}
+                  onMouseDown={(e) => {
+                    if (activeTool === 'crosshair') {
+                      e.stopPropagation();
+                      setSelectedDrawingId(d.id);
+                      if (!lockAllDrawings) {
+                        setDraggingHandle('body');
+                        setDragStartPos({ x: e.clientX, y: e.clientY });
+                        setChartLocked(true);
+                      }
+                    }
+                  }}
+                  style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer', userSelect: 'none' }}
                 >
                   {d.emoji}
                 </text>
@@ -764,11 +1042,27 @@ export default function DrawingTools({ chartRef, symbol, interval }) {
                     const height = maxY - minY;
                     const y = currentDraw.startY < currentDraw.endY ? minY + height * fib.level : maxY - height * fib.level;
                     return (
-                      <line
-                        key={fib.level}
-                        x1={currentDraw.startX} y1={y} x2={currentDraw.endX} y2={y}
-                        stroke={fib.color} strokeWidth={1} strokeDasharray="3,3"
-                      />
+                      <g key={fib.level}>
+                        <line
+                          x1={Math.min(currentDraw.startX, currentDraw.endX)}
+                          y1={y}
+                          x2={Math.min(currentDraw.startX, currentDraw.endX) + Math.max(300, Math.abs(currentDraw.endX - currentDraw.startX))}
+                          y2={y}
+                          stroke={fib.color}
+                          strokeWidth={1}
+                          strokeDasharray="3,3"
+                        />
+                        <text
+                          x={Math.min(currentDraw.startX, currentDraw.endX) + 6}
+                          y={y - 4}
+                          fill={fib.color}
+                          fontSize="10"
+                          fontWeight="700"
+                          fontFamily="JetBrains Mono, monospace"
+                        >
+                          {fib.label}
+                        </text>
+                      </g>
                     );
                   })}
                 </g>
