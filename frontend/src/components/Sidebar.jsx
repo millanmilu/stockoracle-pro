@@ -1,7 +1,8 @@
-import React from 'react';
+﻿import React, { useState } from 'react';
 import useStore from '../store/useStore';
 import {
   LayoutDashboard,
+  CandlestickChart,
   BrainCircuit,
   Newspaper,
   TrendingUp,
@@ -9,160 +10,235 @@ import {
   Activity,
   Dices,
   History,
-  RefreshCw,
-  CandlestickChart,
-  Wallet,
   Bell,
-  Sun,
-  Moon,
   Brain,
   SlidersHorizontal,
   Grid3X3,
   Globe,
   GitFork,
+  ChevronDown,
+  ChevronRight,
+  Sparkles,
+  Zap
 } from 'lucide-react';
-import api from '../utils/api';
-import toast from 'react-hot-toast';
 
-const NAV_ITEMS = [
-  { name: 'Dashboard',     icon: LayoutDashboard },
-  { name: 'Live Chart',    icon: CandlestickChart },
-  { name: 'AI Prediction', icon: BrainCircuit },
-  { name: 'News',          icon: Newspaper },
-  { name: 'Patterns',      icon: TrendingUp },
-  { name: 'Levels',        icon: BarChart3 },
-  { name: 'Volatility',    icon: Activity },
-  { name: 'Monte Carlo',   icon: Dices },
-  { name: 'Backtest',      icon: History },
-  { name: 'Price Alerts',  icon: Bell },
-  { name: '__divider__' },
-  { name: 'Sentiment',     icon: Brain,             badge: 'NEW' },
-  { name: 'Adv. Screener', icon: SlidersHorizontal, badge: 'NEW' },
-  { name: 'Heatmap',       icon: Grid3X3,           badge: 'NEW' },
-  { name: 'Macro Data',    icon: Globe,             badge: 'NEW' },
-  { name: 'Supply Chain',  icon: GitFork,           badge: 'NEW' },
+const CATEGORIES = [
+  {
+    name: 'Markets & Trading',
+    items: [
+      { name: 'Dashboard',     icon: LayoutDashboard, badge: '' },
+      { name: 'Live Chart',    icon: CandlestickChart, badge: 'PRO' },
+      { name: 'Heatmap',       icon: Grid3X3,           badge: '' },
+      { name: 'Adv. Screener', icon: SlidersHorizontal, badge: '' },
+    ]
+  },
+  {
+    name: 'AI & Forecasting',
+    items: [
+      { name: 'AI Prediction', icon: BrainCircuit, badge: 'AI' },
+      { name: 'Backtest',      icon: History,      badge: '' },
+      { name: 'Monte Carlo',   icon: Dices,        badge: '' },
+    ]
+  },
+  {
+    name: 'Technical Analysis',
+    items: [
+      { name: 'Patterns',   icon: TrendingUp, badge: '' },
+      { name: 'Levels',     icon: BarChart3,  badge: '' },
+      { name: 'Volatility', icon: Activity,   badge: '' },
+    ]
+  },
+  {
+    name: 'Market Intelligence',
+    items: [
+      { name: 'Sentiment',    icon: Brain,    badge: '' },
+      { name: 'Macro Data',   icon: Globe,    badge: '' },
+      { name: 'Supply Chain', icon: GitFork,  badge: '' },
+      { name: 'News',         icon: Newspaper,badge: '' },
+      { name: 'Price Alerts', icon: Bell,     badge: '' },
+    ]
+  }
 ];
 
 export default function Sidebar() {
-  const { activeView, setActiveView, selectedSymbol, setTrainingStatus, theme, setTheme } = useStore();
+  const { activeView, setActiveView, selectedSymbol } = useStore();
+  const [collapsedCategories, setCollapsedCategories] = useState({});
 
-  const handleRetrain = async () => {
-    try {
-      const { data } = await api.post(`/api/stock/${selectedSymbol}/train`);
-      toast.success(`Training started for ${selectedSymbol}`);
-
-      // Poll task status
-      const interval = setInterval(async () => {
-        try {
-          const statusRes = await api.get(`/api/task/${data.task_id}/status`);
-          setTrainingStatus(statusRes.data);
-          if (statusRes.data.status === 'completed') {
-            clearInterval(interval);
-            toast.success(`Training Complete! MAPE: ${(statusRes.data.mape * 100).toFixed(2)}%`);
-            setTrainingStatus(null);
-          } else if (statusRes.data.status === 'failed') {
-            clearInterval(interval);
-            toast.error(`Training failed: ${statusRes.data.error || 'Unknown error'}`);
-            setTrainingStatus(null);
-          }
-        } catch (err) {
-          console.error('Polling error', err);
-        }
-      }, 2000);
-    } catch (err) {
-      toast.error('Failed to start training');
-    }
+  const toggleCategory = (catName) => {
+    setCollapsedCategories(prev => ({
+      ...prev,
+      [catName]: !prev[catName]
+    }));
   };
 
-  const isDark = theme !== 'light';
-
   return (
-    <div style={{
-      width: '220px', height: '100vh',
-      backgroundColor: 'var(--sidebar-bg, #1a1a1a)',
-      borderRight: '1px solid var(--border, #333)',
-      display: 'flex', flexDirection: 'column',
+    <aside style={{
+      width: '235px',
+      height: '100vh',
+      backgroundColor: 'var(--sidebar-bg, #080B18)',
+      borderRight: '1px solid var(--border, rgba(99, 102, 241, 0.12))',
+      display: 'flex',
+      flexDirection: 'column',
+      flexShrink: 0,
+      userSelect: 'none',
     }}>
-      {/* Logo + theme toggle */}
-      <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: '#0ea5e9' }}>StockOracle Pro</div>
-        <button
-          onClick={() => setTheme(isDark ? 'light' : 'dark')}
-          title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#888', padding: 4 }}
-        >
-          {isDark ? <Sun size={16} /> : <Moon size={16} />}
-        </button>
+      {/* ── Brand Logo ── */}
+      <div style={{
+        padding: '18px 20px',
+        borderBottom: '1px solid var(--border, rgba(99, 102, 241, 0.12))',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+      }}>
+        <div style={{
+          width: '32px',
+          height: '32px',
+          borderRadius: '10px',
+          background: 'linear-gradient(135deg, #6366F1, #8B5CF6)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)',
+        }}>
+          <Zap size={18} color="#fff" />
+        </div>
+        <div>
+          <div style={{
+            fontSize: '1.05rem',
+            fontWeight: 800,
+            background: 'linear-gradient(135deg, #F0F0FF 40%, #818CF8)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            letterSpacing: '-0.02em',
+          }}>
+            StockOracle
+          </div>
+          <div style={{ fontSize: '0.65rem', color: '#6366F1', fontWeight: 700, letterSpacing: '0.08em' }}>
+            PRO AI PLATFORM
+          </div>
+        </div>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '2px', padding: '8px', overflowY: 'auto' }}>
-        {NAV_ITEMS.map(item => {
-          if (item.name === '__divider__') {
-            return (
-              <div key="divider" style={{
-                margin: '6px 8px 4px',
-                borderTop: '1px solid rgba(99,102,241,0.15)',
-                position: 'relative'
-              }}>
-                <span style={{
-                  position: 'absolute', top: -9, left: '50%', transform: 'translateX(-50%)',
-                  background: 'var(--sidebar-bg, #1a1a1a)', padding: '0 6px',
-                  fontSize: '0.6rem', color: '#4B5563', fontWeight: 600,
-                  letterSpacing: '0.1em', textTransform: 'uppercase', whiteSpace: 'nowrap'
-                }}>New Features</span>
-              </div>
-            );
-          }
+      {/* ── Categorized Navigation Menu ── */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: '12px 10px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '14px',
+      }}>
+        {CATEGORIES.map(cat => {
+          const isCollapsed = collapsedCategories[cat.name];
           return (
-            <div
-              key={item.name}
-              onClick={() => setActiveView(item.name)}
-              style={{
-                padding: '9px 12px',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                color: activeView === item.name ? '#fff' : 'var(--text-muted, #888)',
-                backgroundColor: activeView === item.name ? '#333' : 'transparent',
-                transition: 'all 0.2s',
-                fontSize: '0.9rem',
-                flexShrink: 0,
-              }}
-            >
-              <item.icon size={18} />
-              <span style={{ flex: 1 }}>{item.name}</span>
-              {item.badge && (
-                <span style={{
-                  fontSize: '0.55rem', fontWeight: 700, color: '#6366F1',
-                  background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)',
-                  borderRadius: 4, padding: '1px 5px', letterSpacing: '0.05em'
-                }}>{item.badge}</span>
-              )}
-              {item.name === 'Price Alerts' && <Bell size={10} style={{ marginLeft: 'auto', color: '#F59E0B' }} />}
+            <div key={cat.name} style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              {/* Category Header */}
+              <div
+                onClick={() => toggleCategory(cat.name)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '4px 10px',
+                  cursor: 'pointer',
+                  fontSize: '0.67rem',
+                  fontWeight: 700,
+                  color: '#6B7280',
+                  letterSpacing: '0.06em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                <span>{cat.name}</span>
+                {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+              </div>
+
+              {/* Category Items */}
+              {!isCollapsed && cat.items.map(item => {
+                const isActive = activeView === item.name;
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.name}
+                    onClick={() => setActiveView(item.name)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      padding: '8px 12px',
+                      borderRadius: '8px',
+                      border: isActive ? '1px solid rgba(99, 102, 241, 0.4)' : '1px solid transparent',
+                      backgroundColor: isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                      color: isActive ? '#F0F0FF' : '#9CA3AF',
+                      fontSize: '0.82rem',
+                      fontWeight: isActive ? 700 : 500,
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'all 0.15s ease',
+                      width: '100%',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.04)';
+                        e.currentTarget.style.color = '#F0F0FF';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.color = '#9CA3AF';
+                      }
+                    }}
+                  >
+                    <Icon size={16} style={{ color: isActive ? '#818CF8' : '#6B7280', flexShrink: 0 }} />
+                    <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {item.name}
+                    </span>
+                    {item.badge && (
+                      <span style={{
+                        fontSize: '0.55rem',
+                        fontWeight: 800,
+                        padding: '1px 5px',
+                        borderRadius: '4px',
+                        backgroundColor: item.badge === 'AI' ? 'rgba(168,85,247,0.2)' : 'rgba(99,102,241,0.2)',
+                        color: item.badge === 'AI' ? '#C084FC' : '#818CF8',
+                        border: `1px solid ${item.badge === 'AI' ? 'rgba(168,85,247,0.4)' : 'rgba(99,102,241,0.4)'}`,
+                      }}>
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           );
         })}
       </div>
 
-      <div style={{ padding: '20px', borderTop: '1px solid var(--border, #333)' }}>
-        <div style={{ fontSize: '0.75rem', color: '#555', marginBottom: 8, textAlign: 'center' }}>
-          {selectedSymbol}
+      {/* ── Active Stock Card in Footer ── */}
+      <div style={{
+        padding: '14px 16px',
+        borderTop: '1px solid var(--border, rgba(99, 102, 241, 0.12))',
+        backgroundColor: 'rgba(255, 255, 255, 0.01)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+          <span style={{ fontSize: '0.65rem', color: '#6B7280', fontWeight: 600 }}>ACTIVE ASSET</span>
+          <span style={{ fontSize: '0.62rem', color: '#10B981', fontWeight: 700 }}>● SYNCED</span>
         </div>
-        <button
-          onClick={handleRetrain}
-          style={{
-            width: '100%', padding: '10px',
-            backgroundColor: '#0ea5e9', color: 'white',
-            border: 'none', borderRadius: '8px', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-            fontWeight: 600,
-          }}
-        >
-          <RefreshCw size={18} /> Retrain AI
-        </button>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '6px 10px',
+          borderRadius: '8px',
+          backgroundColor: 'rgba(99, 102, 241, 0.08)',
+          border: '1px solid rgba(99, 102, 241, 0.2)',
+        }}>
+          <span style={{ fontWeight: 800, color: '#818CF8', fontFamily: 'JetBrains Mono, monospace', fontSize: '0.85rem' }}>
+            {selectedSymbol}
+          </span>
+          <span style={{ fontSize: '0.68rem', color: '#9CA3AF' }}>NSE EQ</span>
+        </div>
       </div>
-    </div>
+    </aside>
   );
 }

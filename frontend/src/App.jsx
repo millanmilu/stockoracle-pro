@@ -2,6 +2,7 @@ import React from 'react';
 import { Toaster } from 'react-hot-toast';
 import useStore from './store/useStore';
 import Sidebar from './components/Sidebar';
+import TopHeader from './components/TopHeader';
 import Dashboard from './components/Dashboard';
 import LiveChartView from './components/LiveChartView';
 import NewsPanel from './components/NewsPanel';
@@ -54,34 +55,50 @@ export default function App() {
   };
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', backgroundColor: 'var(--bg, #121212)', color: 'var(--text, #fff)' }}>
-      <Toaster position="top-right" />
+    <div style={{
+      display: 'flex',
+      height: '100vh',
+      width: '100vw',
+      backgroundColor: 'var(--bg-primary, #04050E)',
+      color: 'var(--text-primary, #F0F0FF)',
+      overflow: 'hidden'
+    }}>
+      <Toaster position="top-right" toastOptions={{ style: { background: '#0F172A', color: '#F0F0FF', border: '1px solid rgba(99,102,241,0.3)' } }} />
       <Sidebar />
-      <div style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+        <TopHeader />
 
         {/* Global Training Progress Bar */}
         {trainingStatus && (
           <div style={{
-            position: 'sticky', top: 0, left: 0, width: '100%',
-            backgroundColor: 'var(--card-bg, #1e1e1e)', padding: '10px 20px',
-            borderBottom: '1px solid #333', zIndex: 50,
-            display: 'flex', alignItems: 'center', gap: '15px'
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            padding: '8px 20px',
+            borderBottom: '1px solid rgba(99, 102, 241, 0.25)',
+            zIndex: 50,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '15px'
           }}>
-            <div style={{ fontSize: '0.9rem', color: '#0ea5e9', fontWeight: 'bold' }}>
-              Training AI for {trainingStatus.ticker || ''}&hellip;
+            <div style={{ fontSize: '0.82rem', color: '#818CF8', fontWeight: 'bold' }}>
+              Training AI for {trainingStatus.ticker || selectedSymbol}&hellip;
             </div>
-            <div style={{ flex: 1, height: '6px', backgroundColor: '#333', borderRadius: '3px', overflow: 'hidden' }}>
-              <div style={{ width: `${trainingStatus.progress || 0}%`, height: '100%', backgroundColor: '#0ea5e9', transition: 'width 0.3s' }} />
+            <div style={{ flex: 1, height: '5px', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
+              <div style={{ width: `${trainingStatus.progress || 0}%`, height: '100%', backgroundColor: '#818CF8', transition: 'width 0.3s' }} />
             </div>
-            <div style={{ fontSize: '0.8rem', color: '#555' }}>{trainingStatus.progress || 0}%</div>
+            <div style={{ fontSize: '0.75rem', color: '#9CA3AF', fontFamily: 'JetBrains Mono, monospace' }}>
+              {trainingStatus.progress || 0}%
+            </div>
           </div>
         )}
 
-        {/* Content Area */}
-        <ErrorBoundary key={activeView}>
-          {renderView()}
-        </ErrorBoundary>
+        {/* Scrollable Page Content Area */}
+        <main style={{ flex: 1, overflowY: 'auto', position: 'relative' }}>
+          <ErrorBoundary key={activeView}>
+            {renderView()}
+          </ErrorBoundary>
+        </main>
       </div>
     </div>
   );
 }
+

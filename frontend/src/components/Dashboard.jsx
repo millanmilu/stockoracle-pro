@@ -1,74 +1,43 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
 import StockChart from './StockChart';
 import AIInsightCard from './AIInsightCard';
+import { 
+  TrendingUp, TrendingDown, Activity, ArrowUpRight, 
+  CandlestickChart, BrainCircuit, BarChart3, ShieldCheck
+} from 'lucide-react';
 
-// Skeleton shimmer component
 function SkeletonChart() {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '12px', padding: '8px' }}>
-      <style>{`
-        @keyframes shimmer {
-          0% { background-position: -400px 0; }
-          100% { background-position: 400px 0; }
-        }
-        .skeleton {
-          background: linear-gradient(90deg, #1e1e1e 25%, #2a2a2a 50%, #1e1e1e 75%);
-          background-size: 800px 100%;
-          animation: shimmer 1.4s infinite;
-          border-radius: 6px;
-        }
-      `}</style>
       <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-        <div className="skeleton" style={{ width: 90, height: 20 }} />
-        <div className="skeleton" style={{ width: 60, height: 20 }} />
+        <div style={{ width: 90, height: 24, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.06)' }} />
+        <div style={{ width: 60, height: 24, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.06)' }} />
       </div>
-      <div className="skeleton" style={{ flex: 1, minHeight: 300 }} />
+      <div style={{ flex: 1, minHeight: 300, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.03)' }} />
     </div>
   );
 }
 
 export default function Dashboard() {
-  const { selectedSymbol, setSelectedSymbol, historyCache, setHistoryCache } = useStore();
-  const { searchStocks, fetchHistory } = useStock();
-  const [search, setSearch] = useState('');
-  const [results, setResults] = useState([]);
-  const [showDropdown, setShowDropdown] = useState(false);
+  const { selectedSymbol, setActiveView, historyCache, setHistoryCache } = useStore();
+  const { fetchHistory } = useStock();
   const [interval, setInterval] = useState('1d');
   const [localLoading, setLocalLoading] = useState(false);
 
-  // Build cache key from selected symbol + interval
   const cacheKey = `${selectedSymbol}_${interval}`;
   const history = historyCache[cacheKey] || null;
 
-  // Debounced search
-  useEffect(() => {
-    if (!search.trim()) { setResults([]); return; }
-    const timer = setTimeout(() => {
-      searchStocks(search).then(data => {
-        setResults(data);
-        setShowDropdown(true);
-      });
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [search, searchStocks]);
-
   // Load history — uses cache to avoid re-fetching on view switch
   useEffect(() => {
-    if (historyCache[cacheKey]) return;   // Already cached
+    if (historyCache[cacheKey]) return;
     setLocalLoading(true);
     fetchHistory(selectedSymbol, interval).then(data => {
       if (data && data.length > 0) setHistoryCache(cacheKey, data);
       setLocalLoading(false);
     });
   }, [selectedSymbol, interval]);
-
-  const selectStock = ticker => {
-    setSelectedSymbol(ticker);
-    setSearch('');
-    setShowDropdown(false);
-  };
 
   const lastBar = history && history.length > 0 ? history[history.length - 1] : null;
   const prevBar = history && history.length > 1 ? history[history.length - 2] : null;
@@ -78,80 +47,137 @@ export default function Dashboard() {
 
   const priceChange = currentPrice !== null && prevClose !== null ? currentPrice - prevClose : null;
   const pctChange = priceChange !== null && prevClose ? (priceChange / prevClose) * 100 : null;
+  const isUp = (priceChange ?? 0) >= 0;
   const isLoading = localLoading && !history;
 
   return (
-    <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '1600px', margin: '0 auto' }}>
 
-      {/* Search Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '20px', position: 'relative' }}>
+      {/* ── Asset Hero & Quick Metrics ── */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '20px',
+        background: 'linear-gradient(135deg, rgba(15,23,42,0.7) 0%, rgba(30,27,75,0.4) 100%)',
+        border: '1px solid rgba(99,102,241,0.2)',
+        borderRadius: '16px',
+        padding: '20px 24px',
+        boxShadow: '0 8px 30px rgba(0,0,0,0.3)',
+      }}>
+        {/* Left: Ticker & Live Price */}
         <div>
-          <h1 style={{ margin: 0, fontSize: '1.8rem', color: '#fff' }}>{selectedSymbol}</h1>
-          {currentPrice !== null && (
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'baseline', marginTop: '5px' }}>
-              <span style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>₹{currentPrice.toFixed(2)}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <h1 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 800, color: '#F0F0FF', letterSpacing: '-0.02em' }}>
+              {selectedSymbol}
+            </h1>
+            <span style={{ fontSize: '0.72rem', padding: '3px 8px', borderRadius: '6px', background: 'rgba(99,102,241,0.15)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)', fontWeight: 700 }}>
+              NSE EQUITIES
+            </span>
+          </div>
+
+          {currentPrice !== null ? (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', marginTop: '6px' }}>
+              <span style={{ fontSize: '1.9rem', fontWeight: 800, color: '#F0F0FF', fontFamily: 'Space Grotesk, sans-serif' }}>
+                ₹{currentPrice.toFixed(2)}
+              </span>
               {priceChange !== null && pctChange !== null && (
-                <span style={{ color: priceChange >= 0 ? '#10B981' : '#F43F5E', fontWeight: 'bold' }}>
-                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)} ({pctChange >= 0 ? '+' : ''}{pctChange.toFixed(2)}%)
-                </span>
-              )}
-            </div>
-          )}
-          {isLoading && !currentPrice && (
-            <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-              <div className="skeleton" style={{ width: 110, height: 28, borderRadius: 6, background: 'linear-gradient(90deg,#1e1e1e 25%,#2a2a2a 50%,#1e1e1e 75%)', backgroundSize: '800px 100%', animation: 'shimmer 1.4s infinite' }} />
-              <div className="skeleton" style={{ width: 80, height: 28, borderRadius: 6, background: 'linear-gradient(90deg,#1e1e1e 25%,#2a2a2a 50%,#1e1e1e 75%)', backgroundSize: '800px 100%', animation: 'shimmer 1.4s infinite' }} />
-            </div>
-          )}
-        </div>
-        <div style={{ position: 'relative', width: '400px', marginLeft: 'auto' }}>
-          <input
-            type="text"
-            placeholder="Search any NSE stock..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            onFocus={() => results.length && setShowDropdown(true)}
-            onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
-            style={{
-              width: '100%', padding: '10px 15px', borderRadius: '8px',
-              border: '1px solid var(--border, #333)', backgroundColor: 'var(--card-bg, #1e1e1e)', color: 'var(--text, #fff)',
-              boxSizing: 'border-box',
-            }}
-          />
-          {showDropdown && (
-            <div style={{
-              position: 'absolute', top: '45px', left: 0, width: '100%',
-              backgroundColor: 'var(--card-bg, #1e1e1e)', border: '1px solid var(--border, #333)',
-              borderRadius: '8px', zIndex: 10, maxHeight: '300px', overflowY: 'auto'
-            }}>
-              {results.length > 0 ? results.map(item => (
-                <div
-                  key={item.ticker}
-                  onMouseDown={() => selectStock(item.ticker)}
-                  style={{ padding: '10px 15px', cursor: 'pointer', borderBottom: '1px solid var(--border, #333)' }}
-                >
-                  <strong style={{ color: '#0ea5e9' }}>{item.ticker}</strong>{' '}
-                  <span style={{ color: '#888', fontSize: '0.9rem' }}>{item.name}</span>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '3px 8px',
+                  borderRadius: '6px',
+                  background: isUp ? 'rgba(16,185,129,0.12)' : 'rgba(239,83,80,0.12)',
+                  border: `1px solid ${isUp ? 'rgba(16,185,129,0.3)' : 'rgba(239,83,80,0.3)'}`,
+                  color: isUp ? '#10B981' : '#EF5350',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                }}>
+                  {isUp ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                  <span>{isUp ? '+' : ''}{priceChange.toFixed(2)} ({isUp ? '+' : ''}{pctChange.toFixed(2)}%)</span>
                 </div>
-              )) : (
-                <div style={{ padding: '10px 15px', color: '#888' }}>No matches found</div>
               )}
             </div>
+          ) : (
+            <div style={{ fontSize: '0.85rem', color: '#9CA3AF', marginTop: '6px' }}>Fetching market data…</div>
           )}
+        </div>
+
+        {/* Right: Quick Action Buttons */}
+        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setActiveView('Live Chart')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '10px',
+              border: '1px solid rgba(99,102,241,0.35)',
+              background: 'rgba(99,102,241,0.12)',
+              color: '#818CF8',
+              fontWeight: 700,
+              fontSize: '0.8rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.2s',
+            }}
+          >
+            <CandlestickChart size={15} /> Pro Charting
+          </button>
+
+          <button
+            onClick={() => setActiveView('AI Prediction')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '10px',
+              border: 'none',
+              background: 'linear-gradient(135deg, #6366F1, #8B5CF6)',
+              color: '#fff',
+              fontWeight: 700,
+              fontSize: '0.8rem',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxShadow: '0 4px 14px rgba(99,102,241,0.3)',
+            }}
+          >
+            <BrainCircuit size={15} /> AI Forecast
+          </button>
         </div>
       </div>
 
-      {/* Main Chart — skeleton while loading */}
-      <div style={{ height: '400px', backgroundColor: 'var(--card-bg, #1e1e1e)', padding: '15px', borderRadius: '12px', border: '1px solid var(--border, #333)' }}>
-        {isLoading
-          ? <SkeletonChart />
-          : history
-            ? <StockChart history={history} interval={interval} onIntervalChange={setInterval} />
-            : <div style={{ color: '#888', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>No chart data available.</div>
-        }
+      {/* ── Main Chart Card ── */}
+      <div style={{
+        backgroundColor: 'var(--bg-card, #0C1022)',
+        padding: '20px',
+        borderRadius: '16px',
+        border: '1px solid var(--border, rgba(99,102,241,0.15))',
+        boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+          <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            Price Trend & Moving Averages (20 / 50 SMA)
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#6366F1', fontWeight: 600 }}>
+            {interval.toUpperCase()} INTERVAL
+          </div>
+        </div>
+
+        {isLoading ? (
+          <SkeletonChart />
+        ) : history ? (
+          <StockChart history={history} interval={interval} onIntervalChange={setInterval} />
+        ) : (
+          <div style={{ color: '#888', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '300px' }}>
+            No chart data available.
+          </div>
+        )}
       </div>
 
-      {/* AI Insight Card below chart */}
+      {/* ── AI Insight Card below chart ── */}
       <AIInsightCard />
 
     </div>
