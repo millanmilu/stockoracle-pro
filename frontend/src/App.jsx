@@ -8,7 +8,7 @@ import Dashboard from './components/Dashboard';
 import LiveChartView from './components/LiveChartView';
 import ErrorBoundary from './components/ErrorBoundary';
 
-// Lazily load secondary analytical panels on demand for faster initial render
+const MultiChartGrid = lazy(() => import('./components/MultiChartGrid'));
 const NewsPanel = lazy(() => import('./components/NewsPanel'));
 const PatternsPanel = lazy(() => import('./components/PatternsPanel'));
 const LevelsPanel = lazy(() => import('./components/LevelsPanel'));
@@ -48,6 +48,7 @@ export default function App() {
   const renderView = () => {
     switch (activeView) {
       case 'Live Chart':        return <LiveChartView />;
+      case 'Chart Grid':        return <Suspense fallback={<LoadingFallback />}><MultiChartGrid /></Suspense>;
       case 'Dashboard':         return <Dashboard />;
       case 'AI Prediction':     return <Suspense fallback={<LoadingFallback />}><AIPredictionView /></Suspense>;
       case 'News':              return <Suspense fallback={<LoadingFallback />}><NewsPanel ticker={selectedSymbol} /></Suspense>;

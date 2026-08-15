@@ -887,29 +887,42 @@ export default function LiveChartView() {
       } catch {}
     }
 
-    // 5. AI Predictions (Daily only, valid target price)
+    // 5. Interactive Multi-Step AI Forecast Prediction Cone (Daily only)
     if (isDaily && prediction?.predicted_price_7d > 0 && rawHistory.length > 0 && Number(rawHistory[rawHistory.length - 1]?.close) > 0) {
-      const lastD    = rawHistory[rawHistory.length - 1];
-      const lastTime = toChartTime(lastD.date, false);
+      const lastD     = rawHistory[rawHistory.length - 1];
+      const lastTime  = toChartTime(lastD.date, false);
       const lastClose = Number(lastD.close);
-      const futureTime = addBusinessDays(lastD.date, 7);
 
-      const upperVal = prediction.predicted_upper_price_7d ?? prediction.high_bound ?? prediction.predicted_price_7d * 1.025;
-      const lowerVal = prediction.predicted_lower_price_7d ?? prediction.low_bound  ?? prediction.predicted_price_7d * 0.975;
+      const targetPrice = prediction.predicted_price_7d;
+      const upperTarget = prediction.predicted_upper_price_7d ?? prediction.high_bound ?? targetPrice * 1.03;
+      const lowerTarget = prediction.predicted_lower_price_7d ?? prediction.low_bound  ?? targetPrice * 0.97;
+
+      const predTrajectory  = [{ time: lastTime, value: lastClose }];
+      const upperTrajectory = [{ time: lastTime, value: lastClose }];
+      const lowerTrajectory = [{ time: lastTime, value: lastClose }];
+
+      const totalDays = 7;
+      for (let day = 1; day <= totalDays; day++) {
+        const stepTime = addBusinessDays(lastD.date, day);
+        const progress = day / totalDays;
+        const sqrtProgress = Math.sqrt(progress);
+
+        // Expected mid path
+        const stepPred = lastClose + (targetPrice - lastClose) * progress;
+        predTrajectory.push({ time: stepTime, value: Number(stepPred.toFixed(2)) });
+
+        // Expanding 95% confidence bounds
+        const stepUpper = stepPred + (upperTarget - targetPrice) * sqrtProgress;
+        const stepLower = stepPred - (targetPrice - lowerTarget) * sqrtProgress;
+
+        upperTrajectory.push({ time: stepTime, value: Number(stepUpper.toFixed(2)) });
+        lowerTrajectory.push({ time: stepTime, value: Number(Math.max(stepLower, 0.1).toFixed(2)) });
+      }
 
       try {
-        predLineRef.current?.setData([
-          { time: lastTime, value: lastClose },
-          { time: futureTime, value: prediction.predicted_price_7d },
-        ]);
-        upperLineRef.current?.setData([
-          { time: lastTime, value: lastClose },
-          { time: futureTime, value: upperVal },
-        ]);
-        lowerLineRef.current?.setData([
-          { time: lastTime, value: lastClose },
-          { time: futureTime, value: lowerVal },
-        ]);
+        predLineRef.current?.setData(predTrajectory);
+        upperLineRef.current?.setData(upperTrajectory);
+        lowerLineRef.current?.setData(lowerTrajectory);
       } catch {}
     } else {
       try {
