@@ -817,44 +817,6 @@ export default function LiveChartView() {
     };
   }, []);
 
-    const upperLine = chart.addLineSeries({ color: 'rgba(38,166,154,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
-    upperLineRef.current = upperLine;
-
-    const lowerLine = chart.addLineSeries({ color: 'rgba(239,83,80,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
-    lowerLineRef.current = lowerLine;
-
-    const ro = new ResizeObserver(entries => {
-      if (entries[0] && chartRef.current) {
-        const { width, height } = entries[0].contentRect;
-        if (width > 0 && height > 0) {
-          chartRef.current.applyOptions({ width, height });
-        }
-      }
-    });
-    ro.observe(containerRef.current);
-
-    return () => {
-      ro.disconnect();
-      chart.remove();
-      chartRef.current = null;
-      candleRef.current = null;
-      volumeRef.current = null;
-      smaRef.current = null;
-      emaRef.current = null;
-      bbUpperRef.current = null;
-      bbLowerRef.current = null;
-      rsiRef.current = null;
-      rsiLine70Ref.current = null;
-      rsiLine30Ref.current = null;
-      predLineRef.current = null;
-      upperLineRef.current = null;
-      lowerLineRef.current = null;
-      livePriceLineRef.current = null;
-      activeCandleRef.current = null;
-      backtestEquityRef.current = null;
-    };
-  }, []);
-
   /* ── Backtest Fetch + Chart Markers ──────────────────────────── */
 
   useEffect(() => {
