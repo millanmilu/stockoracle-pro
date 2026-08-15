@@ -11,6 +11,7 @@ import {
 import toast from 'react-hot-toast';
 import MultiChartGrid from './MultiChartGrid';
 import DrawingTools from './chart-tools/DrawingTools';
+import IndicatorsModal from './IndicatorsModal';
 import VolumeProfile from './chart-tools/VolumeProfile';
 import OrderFlow from './chart-tools/OrderFlow';
 import AIPatternRecognition from './chart-tools/AIPatternRecognition';
@@ -371,7 +372,8 @@ export default function LiveChartView() {
   const [compareSymbol, setCompareSymbol] = useState('NIFTY50');
   const [rawHistoryCompare, setRawHistoryCompare] = useState(null);
 
-  // Indicator Toggles (Volume and Pattern Recognition OFF by default as requested)
+  // Indicator Toggles & TradingView Indicators Modal
+  const [showIndicatorsModal, setShowIndicatorsModal] = useState(false);
   const [showIndicatorDropdown, setShowIndicatorDropdown] = useState(false);
   const [showVolume,   setShowVolume]   = useState(false);
   const [showSMA,      setShowSMA]      = useState(false);
@@ -399,6 +401,64 @@ export default function LiveChartView() {
   const [backtestLoading, setBacktestLoading] = useState(false);
   const [showBacktest, setShowBacktest] = useState(false);
   const backtestEquityRef = useRef(null);
+
+  // Indicators Map & Toggle Handler
+  const activeIndicatorsMap = useMemo(() => ({
+    vol_24h: showVolume,
+    sma_20: showSMA,
+    ema_20: showEMA,
+    boll: showBB,
+    rsi_14: showRSI,
+    ai_patterns: showPatterns || (showAdvancedPanel && advancedPanelTab === 'patterns'),
+    vpvr: showAdvancedPanel && advancedPanelTab === 'volume',
+    orderflow: showAdvancedPanel && advancedPanelTab === 'order',
+    mtf_matrix: showAdvancedPanel && advancedPanelTab === 'mtf',
+    backtester: showAdvancedPanel && advancedPanelTab === 'backtest',
+  }), [showVolume, showSMA, showEMA, showBB, showRSI, showPatterns, showAdvancedPanel, advancedPanelTab]);
+
+  const handleToggleIndicator = useCallback((id) => {
+    switch (id) {
+      case 'vol_24h':
+      case 'volume':
+        setShowVolume(prev => !prev);
+        break;
+      case 'sma_20':
+        setShowSMA(prev => !prev);
+        break;
+      case 'ema_20':
+        setShowEMA(prev => !prev);
+        break;
+      case 'boll':
+        setShowBB(prev => !prev);
+        break;
+      case 'rsi_14':
+        setShowRSI(prev => !prev);
+        break;
+      case 'ai_patterns':
+        setShowPatterns(prev => !prev);
+        setShowAdvancedPanel(true);
+        setAdvancedPanelTab('patterns');
+        break;
+      case 'vpvr':
+        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'volume');
+        setAdvancedPanelTab('volume');
+        break;
+      case 'orderflow':
+        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'order');
+        setAdvancedPanelTab('order');
+        break;
+      case 'mtf_matrix':
+        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'mtf');
+        setAdvancedPanelTab('mtf');
+        break;
+      case 'backtester':
+        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'backtest');
+        setAdvancedPanelTab('backtest');
+        break;
+      default:
+        toast.success(`Toggled ${id}`);
+    }
+  }, [advancedPanelTab]);
 
   // Search & Alert State
   const [showAlertModal, setShowAlertModal] = useState(false);
@@ -1416,292 +1476,32 @@ export default function LiveChartView() {
             ))}
           </div>
 
-          {/* ── TradingView Style Indicators Dropdown Menu ── */}
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={() => {
-                setShowIndicatorDropdown(!showIndicatorDropdown);
-                setShowSymbolModal(false);
-              }}
-              title="Technical Indicators & Pro Tools"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 10px',
-                borderRadius: 6,
-                border: showIndicatorDropdown ? '1px solid #818CF8' : '1px solid #1E2538',
-                background: showIndicatorDropdown ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
-                color: showIndicatorDropdown ? '#A5B4FC' : '#E2E8F0',
-                fontSize: '0.74rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              <Activity size={13} style={{ color: '#818CF8' }} />
-              <span>Indicators</span>
-              {[showVolume, showSMA, showEMA, showBB, showRSI, showPatterns, showVolumeProfile, showOrderFlow, showMTFCorrelation, showBacktest].filter(Boolean).length > 0 && (
-                <span style={{ backgroundColor: '#6366F1', color: '#fff', fontSize: '0.62rem', padding: '1px 5px', borderRadius: 10, fontWeight: 800 }}>
-                  {[showVolume, showSMA, showEMA, showBB, showRSI, showPatterns, showVolumeProfile, showOrderFlow, showMTFCorrelation, showBacktest].filter(Boolean).length}
-                </span>
-              )}
-              <span style={{ fontSize: '0.65rem', color: '#94A3B8' }}>▾</span>
-            </button>
-
-            {/* Indicators Dropdown Menu */}
-            {showIndicatorDropdown && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 'calc(100% + 6px)',
-                  right: 0,
-                  width: 270,
-                  backgroundColor: '#0F172A',
-                  border: '1px solid rgba(99, 102, 241, 0.35)',
-                  borderRadius: 10,
-                  padding: 8,
-                  zIndex: 300,
-                  boxShadow: '0 16px 36px rgba(0,0,0,0.85)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 3,
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, letterSpacing: '0.06em', padding: '4px 8px', textTransform: 'uppercase' }}>
-                  Overlays & Signals
-                </div>
-
-                {/* Volume Toggle */}
-                <div
-                  onClick={() => setShowVolume(!showVolume)}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showVolume ? 'rgba(38,166,154,0.15)' : 'transparent',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showVolume ? 'rgba(38,166,154,0.2)' : 'rgba(255,255,255,0.04)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showVolume ? 'rgba(38,166,154,0.15)' : 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <BarChart3 size={13} style={{ color: '#26A69A' }} />
-                    <span style={{ fontSize: '0.76rem', color: showVolume ? '#26A69A' : '#E2E8F0', fontWeight: 600 }}>Volume Bars</span>
-                  </div>
-                  {showVolume ? <Check size={14} color="#26A69A" /> : <EyeOff size={12} color="#64748B" />}
-                </div>
-
-                {/* AI Pattern Recognition Toggle */}
-                <div
-                  onClick={() => setShowPatterns(!showPatterns)}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showPatterns ? 'rgba(16,185,129,0.15)' : 'transparent',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showPatterns ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.04)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showPatterns ? 'rgba(16,185,129,0.15)' : 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Sparkles size={13} style={{ color: '#10B981' }} />
-                    <span style={{ fontSize: '0.76rem', color: showPatterns ? '#10B981' : '#E2E8F0', fontWeight: 600 }}>AI Pattern Recognition</span>
-                  </div>
-                  {showPatterns ? <Check size={14} color="#10B981" /> : <EyeOff size={12} color="#64748B" />}
-                </div>
-
-                {/* SMA 20 */}
-                <div
-                  onClick={() => setShowSMA(!showSMA)}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showSMA ? 'rgba(0,229,255,0.15)' : 'transparent',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showSMA ? 'rgba(0,229,255,0.2)' : 'rgba(255,255,255,0.04)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showSMA ? 'rgba(0,229,255,0.15)' : 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <TrendingUp size={13} style={{ color: '#00E5FF' }} />
-                    <span style={{ fontSize: '0.76rem', color: showSMA ? '#00E5FF' : '#E2E8F0', fontWeight: 600 }}>SMA (20)</span>
-                  </div>
-                  {showSMA ? <Check size={14} color="#00E5FF" /> : <EyeOff size={12} color="#64748B" />}
-                </div>
-
-                {/* EMA 20 */}
-                <div
-                  onClick={() => setShowEMA(!showEMA)}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showEMA ? 'rgba(255,145,0,0.15)' : 'transparent',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showEMA ? 'rgba(255,145,0,0.2)' : 'rgba(255,255,255,0.04)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showEMA ? 'rgba(255,145,0,0.15)' : 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <TrendingUp size={13} style={{ color: '#FF9100' }} />
-                    <span style={{ fontSize: '0.76rem', color: showEMA ? '#FF9100' : '#E2E8F0', fontWeight: 600 }}>EMA (20)</span>
-                  </div>
-                  {showEMA ? <Check size={14} color="#FF9100" /> : <EyeOff size={12} color="#64748B" />}
-                </div>
-
-                {/* Bollinger Bands */}
-                <div
-                  onClick={() => setShowBB(!showBB)}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showBB ? 'rgba(224,64,251,0.15)' : 'transparent',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showBB ? 'rgba(224,64,251,0.2)' : 'rgba(255,255,255,0.04)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showBB ? 'rgba(224,64,251,0.15)' : 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Activity size={13} style={{ color: '#E040FB' }} />
-                    <span style={{ fontSize: '0.76rem', color: showBB ? '#E040FB' : '#E2E8F0', fontWeight: 600 }}>Bollinger Bands (20,2)</span>
-                  </div>
-                  {showBB ? <Check size={14} color="#E040FB" /> : <EyeOff size={12} color="#64748B" />}
-                </div>
-
-                {/* RSI (14) */}
-                <div
-                  onClick={() => setShowRSI(!showRSI)}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showRSI ? 'rgba(244,63,94,0.15)' : 'transparent',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = showRSI ? 'rgba(244,63,94,0.2)' : 'rgba(255,255,255,0.04)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showRSI ? 'rgba(244,63,94,0.15)' : 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Activity size={13} style={{ color: '#F43F5E' }} />
-                    <span style={{ fontSize: '0.76rem', color: showRSI ? '#F43F5E' : '#E2E8F0', fontWeight: 600 }}>RSI (14) Oscillator</span>
-                  </div>
-                  {showRSI ? <Check size={14} color="#F43F5E" /> : <EyeOff size={12} color="#64748B" />}
-                </div>
-
-                <div style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />
-                <div style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, letterSpacing: '0.06em', padding: '4px 8px', textTransform: 'uppercase' }}>
-                  Pro Analytical Indicators
-                </div>
-
-                {/* Volume Profile VPVR */}
-                <div
-                  onClick={() => {
-                    const next = !(showAdvancedPanel && advancedPanelTab === 'volume');
-                    setShowAdvancedPanel(next);
-                    if (next) setAdvancedPanelTab('volume');
-                    setShowIndicatorDropdown(false);
-                  }}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'volume' ? 'rgba(56,189,248,0.18)' : 'transparent',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(56,189,248,0.12)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'volume' ? 'rgba(56,189,248,0.18)' : 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <BarChart3 size={13} style={{ color: '#38BDF8' }} />
-                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>Volume Profile (VPVR)</span>
-                  </div>
-                  {showAdvancedPanel && advancedPanelTab === 'volume' ? <Check size={14} color="#38BDF8" /> : <EyeOff size={12} color="#64748B" />}
-                </div>
-
-                {/* Order Flow Delta */}
-                <div
-                  onClick={() => {
-                    const next = !(showAdvancedPanel && advancedPanelTab === 'order');
-                    setShowAdvancedPanel(next);
-                    if (next) setAdvancedPanelTab('order');
-                    setShowIndicatorDropdown(false);
-                  }}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'order' ? 'rgba(168,85,247,0.18)' : 'transparent',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(168,85,247,0.12)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'order' ? 'rgba(168,85,247,0.18)' : 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Activity size={13} style={{ color: '#A855F7' }} />
-                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>Order Flow Delta</span>
-                  </div>
-                  {showAdvancedPanel && advancedPanelTab === 'order' ? <Check size={14} color="#A855F7" /> : <EyeOff size={12} color="#64748B" />}
-                </div>
-
-                {/* AI Pattern Scanner */}
-                <div
-                  onClick={() => {
-                    const next = !(showAdvancedPanel && advancedPanelTab === 'patterns');
-                    setShowAdvancedPanel(next);
-                    if (next) setAdvancedPanelTab('patterns');
-                    setShowIndicatorDropdown(false);
-                  }}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'patterns' ? 'rgba(16,185,129,0.18)' : 'transparent',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(16,185,129,0.12)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'patterns' ? 'rgba(16,185,129,0.18)' : 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Sparkles size={13} style={{ color: '#10B981' }} />
-                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>AI Pattern Recognition</span>
-                  </div>
-                  {showAdvancedPanel && advancedPanelTab === 'patterns' ? <Check size={14} color="#10B981" /> : <EyeOff size={12} color="#64748B" />}
-                </div>
-
-                {/* MTF Correlation */}
-                <div
-                  onClick={() => {
-                    const next = !(showAdvancedPanel && advancedPanelTab === 'mtf');
-                    setShowAdvancedPanel(next);
-                    if (next) setAdvancedPanelTab('mtf');
-                    setShowIndicatorDropdown(false);
-                  }}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'mtf' ? 'rgba(99,102,241,0.18)' : 'transparent',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.12)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'mtf' ? 'rgba(99,102,241,0.18)' : 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Target size={13} style={{ color: '#6366F1' }} />
-                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>MTF Correlation Matrix</span>
-                  </div>
-                  {showAdvancedPanel && advancedPanelTab === 'mtf' ? <Check size={14} color="#6366F1" /> : <EyeOff size={12} color="#64748B" />}
-                </div>
-
-                {/* Strategy Backtest */}
-                <div
-                  onClick={() => {
-                    const next = !(showAdvancedPanel && advancedPanelTab === 'backtest');
-                    setShowAdvancedPanel(next);
-                    if (next) setAdvancedPanelTab('backtest');
-                    setShowIndicatorDropdown(false);
-                  }}
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'backtest' ? 'rgba(245,158,11,0.18)' : 'transparent',
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(245,158,11,0.12)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'backtest' ? 'rgba(245,158,11,0.18)' : 'transparent'}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <FlaskConical size={13} style={{ color: '#F59E0B' }} />
-                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>Strategy Backtest Overlay</span>
-                  </div>
-                  {showAdvancedPanel && advancedPanelTab === 'backtest' ? <Check size={14} color="#F59E0B" /> : <EyeOff size={12} color="#64748B" />}
-                </div>
-              </div>
+          {/* ── TradingView Style Indicators Modal Button ── */}
+          <button
+            onClick={() => setShowIndicatorsModal(true)}
+            title="Indicators, metrics, and strategies"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 10px',
+              borderRadius: 6,
+              border: showIndicatorsModal ? '1px solid #2962FF' : '1px solid #1E2538',
+              background: showIndicatorsModal ? 'rgba(41,98,255,0.2)' : 'rgba(255,255,255,0.03)',
+              color: showIndicatorsModal ? '#60A5FA' : '#E2E8F0',
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            <Activity size={13} style={{ color: '#2962FF' }} />
+            <span>Indicators</span>
+            {Object.values(activeIndicatorsMap).filter(Boolean).length > 0 && (
+              <span style={{ backgroundColor: '#2962FF', color: '#fff', fontSize: '0.62rem', padding: '1px 5px', borderRadius: 10, fontWeight: 800 }}>
+                {Object.values(activeIndicatorsMap).filter(Boolean).length}
+              </span>
             )}
-          </div>
+          </button>
 
           {/* TradingView Multi-Chart Layout Switcher [ 1x1 | 1x2 | 2x1 | 2x2 ] */}
           <div style={{ display:'flex', alignItems:'center', gap:2, background:'#0A0D1A', padding:'2px', borderRadius:6, border:'1px solid #1E2538' }}>
@@ -1712,7 +1512,7 @@ export default function LiveChartView() {
                 padding:'4px 7px',
                 borderRadius:4,
                 border:'none',
-                background: chartLayout === '1x1' ? '#3B82F6' : 'transparent',
+                background: chartLayout === '1x1' ? '#2962FF' : 'transparent',
                 color: chartLayout === '1x1' ? '#fff' : '#64748B',
                 cursor:'pointer',
                 display:'flex',
@@ -1728,7 +1528,7 @@ export default function LiveChartView() {
                 padding:'4px 7px',
                 borderRadius:4,
                 border:'none',
-                background: chartLayout === '1x2' ? '#3B82F6' : 'transparent',
+                background: chartLayout === '1x2' ? '#2962FF' : 'transparent',
                 color: chartLayout === '1x2' ? '#fff' : '#64748B',
                 cursor:'pointer',
                 display:'flex',
@@ -1744,7 +1544,7 @@ export default function LiveChartView() {
                 padding:'4px 7px',
                 borderRadius:4,
                 border:'none',
-                background: chartLayout === '2x1' ? '#3B82F6' : 'transparent',
+                background: chartLayout === '2x1' ? '#2962FF' : 'transparent',
                 color: chartLayout === '2x1' ? '#fff' : '#64748B',
                 cursor:'pointer',
                 display:'flex',
@@ -1760,7 +1560,7 @@ export default function LiveChartView() {
                 padding:'4px 7px',
                 borderRadius:4,
                 border:'none',
-                background: chartLayout === '2x2' ? '#3B82F6' : 'transparent',
+                background: chartLayout === '2x2' ? '#2962FF' : 'transparent',
                 color: chartLayout === '2x2' ? '#fff' : '#64748B',
                 cursor:'pointer',
                 display:'flex',
@@ -1770,26 +1570,6 @@ export default function LiveChartView() {
               <Grid2X2 size={13} />
             </button>
           </div>
-
-          {/* Scalper Mode */}
-          <button
-            onClick={() => toast.success('Scalper AI Mode Enabled')}
-            style={{
-              padding:'5px 10px',
-              borderRadius:6,
-              border:'1px solid rgba(139,92,246,0.4)',
-              background:'rgba(139,92,246,0.12)',
-              color:'#C084FC',
-              fontSize:'0.72rem',
-              fontWeight:700,
-              cursor:'pointer',
-              display:'flex',
-              alignItems:'center',
-              gap:4,
-            }}
-          >
-            <Zap size={13} /> SCALPER MODE
-          </button>
 
           {/* Snapshot Camera */}
           <button
@@ -2109,6 +1889,14 @@ export default function LiveChartView() {
         <span><kbd style={{padding:'2px 6px',background:'rgba(255,255,255,0.05)',borderRadius:4,border:'1px solid rgba(75,85,99,0.3)'}}>Drag</kbd> Pan</span>
         <span><kbd style={{padding:'2px 6px',background:'rgba(255,255,255,0.05)',borderRadius:4,border:'1px solid rgba(75,85,99,0.3)'}}>Hover</kbd> Crosshair</span>
       </div>
+
+      {/* ── TradingView Indicators, Metrics, and Strategies Modal ── */}
+      <IndicatorsModal
+        isOpen={showIndicatorsModal}
+        onClose={() => setShowIndicatorsModal(false)}
+        activeIndicators={activeIndicatorsMap}
+        onToggleIndicator={handleToggleIndicator}
+      />
 
     </div>
   );

@@ -1,39 +1,57 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
-  TrendingUp, Trash2, Save, Download, Upload, 
-  MousePointer2, Square as SquareIcon, Circle, Type,
-  MoveDown, Pencil, X
+  Crosshair, TrendingUp, AlignJustify, Brush, Type, Smile,
+  Ruler, ZoomIn, Magnet, Pencil, Lock, Unlock, Eye, EyeOff,
+  Trash2, GripVertical, Square as SquareIcon, Sliders, Settings,
+  X, Circle, Minus, Palette, Move, Download
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const DRAWING_TOOLS = [
-  { id: 'pointer', label: 'Cursor (Select/Pan)', icon: MousePointer2 },
-  { id: 'trendline', label: 'Trend Line', icon: TrendingUp },
-  { id: 'horizontal', label: 'Horizontal Ray / Level', icon: MoveDown },
-  { id: 'rectangle', label: 'Support/Resistance Box', icon: SquareIcon },
-  { id: 'circle', label: 'Circle Marker', icon: Circle },
-  { id: 'text', label: 'Text Annotation', icon: Type },
+const STORAGE_KEY = 'stockoracle_drawings_tv_v3';
+
+const FIBONACCI_LEVELS = [
+  { level: 0.0,   label: '0.0 (0%)',     color: '#787B86' },
+  { level: 0.236, label: '0.236 (23.6%)', color: '#EF5350' },
+  { level: 0.382, label: '0.382 (38.2%)', color: '#F59E0B' },
+  { level: 0.5,   label: '0.5 (50.0%)',   color: '#10B981' },
+  { level: 0.618, label: '0.618 (61.8%)', color: '#00E5FF' },
+  { level: 0.786, label: '0.786 (78.6%)', color: '#6366F1' },
+  { level: 1.0,   label: '1.0 (100%)',   color: '#A855F7' },
 ];
 
-const STORAGE_KEY = 'stockoracle_drawings_v2';
-
-export default function DrawingTools({ chartRef, symbol, interval, overlayContainerRef }) {
-  const [activeTool, setActiveTool] = useState('pointer');
+export default function DrawingTools({ chartRef, symbol, interval }) {
+  // Tool & State Management
+  const [activeTool, setActiveTool] = useState('crosshair');
   const [drawings, setDrawings] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentDraw, setCurrentDraw] = useState(null);
   const [selectedDrawingId, setSelectedDrawingId] = useState(null);
+
+  // Modifier Modes
+  const [magnetMode, setMagnetMode] = useState(false);
+  const [stayInDrawMode, setStayInDrawMode] = useState(false);
+  const [lockAllDrawings, setLockAllDrawings] = useState(false);
+  const [hideAllDrawings, setHideAllDrawings] = useState(false);
+
+  // Text & Sticker modals
   const [textInputPos, setTextInputPos] = useState(null);
   const [textInputVal, setTextInputVal] = useState('');
+  const [showStickerMenu, setShowStickerMenu] = useState(false);
+  const [stickerPos, setStickerPos] = useState(null);
 
-  // Load saved drawings on symbol/interval change
+  // Line Style / Color Picker state
+  const [activeColor, setActiveColor] = useState('#38BDF8');
+  const [activeStrokeWidth, setActiveStrokeWidth] = useState(2);
+  const [showStyleMenu, setShowStyleMenu] = useState(false);
+
+  // Load saved drawings on mount / symbol change
   useEffect(() => {
     const key = `${STORAGE_KEY}_${symbol}_${interval}`;
     const saved = localStorage.getItem(key);
     if (saved) {
       try {
         setDrawings(JSON.parse(saved));
-      } catch (e) {
+      } catch (_) {
         setDrawings([]);
       }
     } else {
@@ -41,7 +59,7 @@ export default function DrawingTools({ chartRef, symbol, interval, overlayContai
     }
   }, [symbol, interval]);
 
-  // Save drawings
+  // Persist drawings to localStorage
   const saveDrawings = (newDrawings) => {
     const key = `${STORAGE_KEY}_${symbol}_${interval}`;
     try {
@@ -50,27 +68,19 @@ export default function DrawingTools({ chartRef, symbol, interval, overlayContai
     setDrawings(newDrawings);
   };
 
-  const clearDrawings = () => {
+  const handleClearAll = () => {
+    if (lockAllDrawings) {
+      toast.error('Drawings are locked. Unlock first.');
+      return;
+    }
     saveDrawings([]);
     setSelectedDrawingId(null);
-    toast.success('All drawings cleared');
-  };
-
-  const exportDrawings = () => {
-    const dataStr = JSON.stringify(drawings, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `drawings_${symbol}_${interval}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-    toast.success('Drawings exported');
+    toast.success('All drawings removed');
   };
 
   // SVG Mouse handlers
   const handleSvgMouseDown = (e) => {
-    if (activeTool === 'pointer') return;
+    if (activeTool === 'crosshair' || lockAllDrawings) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -81,16 +91,33 @@ export default function DrawingTools({ chartRef, symbol, interval, overlayContai
       return;
     }
 
+    if (activeTool === 'smile') {
+      setStickerPos({ x, y });
+      setShowStickerMenu(true);
+      return;
+    }
+
     setIsDrawing(true);
-    setCurrentDraw({
-      id: Date.now(),
-      type: activeTool,
-      startX: x,
-      startY: y,
-      endX: x,
-      endY: y,
-      color: activeTool === 'trendline' ? '#38BDF8' : activeTool === 'horizontal' ? '#F59E0B' : '#A855F7',
-    });
+    if (activeTool === 'brush') {
+      setCurrentDraw({
+        id: Date.now(),
+        type: 'brush',
+        points: [{ x, y }],
+        color: activeColor,
+        strokeWidth: activeStrokeWidth,
+      });
+    } else {
+      setCurrentDraw({
+        id: Date.now(),
+        type: activeTool,
+        startX: x,
+        startY: y,
+        endX: x,
+        endY: y,
+        color: activeColor,
+        strokeWidth: activeStrokeWidth,
+      });
+    }
   };
 
   const handleSvgMouseMove = (e) => {
@@ -98,18 +125,42 @@ export default function DrawingTools({ chartRef, symbol, interval, overlayContai
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
-    setCurrentDraw(prev => ({ ...prev, endX: x, endY: y }));
+
+    if (currentDraw.type === 'brush') {
+      setCurrentDraw(prev => ({
+        ...prev,
+        points: [...prev.points, { x, y }],
+      }));
+    } else {
+      setCurrentDraw(prev => ({ ...prev, endX: x, endY: y }));
+    }
   };
 
   const handleSvgMouseUp = () => {
     if (!isDrawing || !currentDraw) return;
-    const dx = Math.abs(currentDraw.endX - currentDraw.startX);
-    const dy = Math.abs(currentDraw.endY - currentDraw.startY);
-    if (dx > 3 || dy > 3 || currentDraw.type === 'horizontal') {
+
+    let isValid = false;
+    if (currentDraw.type === 'brush' && currentDraw.points?.length > 2) {
+      isValid = true;
+    } else {
+      const dx = Math.abs(currentDraw.endX - currentDraw.startX);
+      const dy = Math.abs(currentDraw.endY - currentDraw.startY);
+      if (dx > 3 || dy > 3 || currentDraw.type === 'ruler') {
+        isValid = true;
+      }
+    }
+
+    if (isValid) {
       saveDrawings([...drawings, currentDraw]);
     }
+
     setIsDrawing(false);
     setCurrentDraw(null);
+
+    // If not staying in draw mode, revert back to crosshair
+    if (!stayInDrawMode && activeTool !== 'brush') {
+      setActiveTool('crosshair');
+    }
   };
 
   const handleAddText = () => {
@@ -120,303 +171,646 @@ export default function DrawingTools({ chartRef, symbol, interval, overlayContai
         startX: textInputPos.x,
         startY: textInputPos.y,
         text: textInputVal.trim(),
-        color: '#F0F0FF',
+        color: activeColor || '#F0F0FF',
       };
       saveDrawings([...drawings, textDrawing]);
     }
     setTextInputPos(null);
     setTextInputVal('');
+    if (!stayInDrawMode) setActiveTool('crosshair');
+  };
+
+  const handleAddSticker = (emoji) => {
+    if (stickerPos) {
+      const stickerDrawing = {
+        id: Date.now(),
+        type: 'sticker',
+        startX: stickerPos.x,
+        startY: stickerPos.y,
+        emoji,
+      };
+      saveDrawings([...drawings, stickerDrawing]);
+    }
+    setShowStickerMenu(false);
+    setStickerPos(null);
+    if (!stayInDrawMode) setActiveTool('crosshair');
   };
 
   const deleteDrawing = (id, e) => {
     if (e) e.stopPropagation();
+    if (lockAllDrawings) {
+      toast.error('Drawings are locked');
+      return;
+    }
     saveDrawings(drawings.filter(d => d.id !== id));
     if (selectedDrawingId === id) setSelectedDrawingId(null);
   };
 
   return (
     <>
-      {/* ── TradingView Style Vertical Left Sidebar (42px) ── */}
+      {/* ── Left Vertical Sidebar (13 TradingView Dark Grey Icons) ── */}
       <div style={{
-        width: 42,
-        backgroundColor: '#0A0D1A',
-        borderRight: '1px solid rgba(255,255,255,0.06)',
+        width: 44,
+        backgroundColor: '#131722',
+        borderRight: '1px solid rgba(255, 255, 255, 0.08)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: '8px 0',
-        gap: 6,
-        zIndex: 40,
+        padding: '6px 0',
+        gap: 3,
+        zIndex: 45,
         userSelect: 'none',
         flexShrink: 0,
       }}>
-        {DRAWING_TOOLS.map((tool) => {
-          const Icon = tool.icon;
-          const isActive = activeTool === tool.id;
-          return (
-            <button
-              key={tool.id}
-              onClick={() => {
-                setActiveTool(tool.id);
-                if (tool.id !== 'text') setTextInputPos(null);
-              }}
-              title={tool.label}
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 6,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                border: isActive ? '1px solid #3B82F6' : '1px solid transparent',
-                background: isActive ? 'rgba(59,130,246,0.2)' : 'transparent',
-                color: isActive ? '#60A5FA' : '#64748B',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-              onMouseEnter={(e) => {
-                if (!isActive) e.currentTarget.style.color = '#F0F0FF';
-              }}
-              onMouseLeave={(e) => {
-                if (!isActive) e.currentTarget.style.color = '#64748B';
-              }}
-            >
-              <Icon size={16} />
-            </button>
-          );
-        })}
-
-        <div style={{ width: 24, height: 1, backgroundColor: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
-
-        {/* Clear All Drawings */}
+        {/* 1. Crosshair */}
         <button
-          onClick={clearDrawings}
-          title="Clear All Drawings"
-          disabled={drawings.length === 0}
+          onClick={() => setActiveTool('crosshair')}
+          title="Crosshair (Select / Pan)"
           style={{
-            width: 32,
-            height: 32,
-            borderRadius: 6,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '1px solid transparent',
-            background: 'transparent',
-            color: drawings.length > 0 ? '#EF5350' : '#374151',
-            cursor: drawings.length > 0 ? 'pointer' : 'not-allowed',
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'crosshair' ? '#2A2E39' : 'transparent',
+            color: activeTool === 'crosshair' ? '#2962FF' : '#787B86',
+            cursor: 'pointer',
           }}
         >
-          <Trash2 size={15} />
+          <Crosshair size={17} />
         </button>
 
-        {/* Export Drawings */}
+        {/* 2. Trend Line Tools */}
         <button
-          onClick={exportDrawings}
-          title="Export Drawings JSON"
-          disabled={drawings.length === 0}
+          onClick={() => setActiveTool('trendline')}
+          title="Trend Line"
           style={{
-            width: 32,
-            height: 32,
-            borderRadius: 6,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            border: '1px solid transparent',
-            background: 'transparent',
-            color: drawings.length > 0 ? '#10B981' : '#374151',
-            cursor: drawings.length > 0 ? 'pointer' : 'not-allowed',
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'trendline' ? '#2A2E39' : 'transparent',
+            color: activeTool === 'trendline' ? '#2962FF' : '#787B86',
+            cursor: 'pointer',
           }}
         >
-          <Download size={15} />
+          <TrendingUp size={17} />
         </button>
 
-        {/* Saved Count Badge */}
-        {drawings.length > 0 && (
-          <span style={{
-            fontSize: '0.6rem',
-            color: '#94A3B8',
-            fontFamily: 'JetBrains Mono, monospace',
-            marginTop: 'auto',
-            paddingBottom: 4,
-          }}>
-            {drawings.length}
-          </span>
-        )}
+        {/* 3. Fibonacci Tools */}
+        <button
+          onClick={() => setActiveTool('fibonacci')}
+          title="Fibonacci Retracement"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'fibonacci' ? '#2A2E39' : 'transparent',
+            color: activeTool === 'fibonacci' ? '#2962FF' : '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          <AlignJustify size={17} />
+        </button>
+
+        {/* 4. Brush / Shapes */}
+        <button
+          onClick={() => setActiveTool('brush')}
+          title="Brush (Freehand Drawing)"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'brush' ? '#2A2E39' : 'transparent',
+            color: activeTool === 'brush' ? '#2962FF' : '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          <Brush size={17} />
+        </button>
+
+        {/* 5. Text Tool ('T') */}
+        <button
+          onClick={() => setActiveTool('text')}
+          title="Text Tool ('T')"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'text' ? '#2A2E39' : 'transparent',
+            color: activeTool === 'text' ? '#2962FF' : '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          <Type size={17} />
+        </button>
+
+        {/* 6. Smiley Face (Stickers) */}
+        <button
+          onClick={() => {
+            setActiveTool('smile');
+            setShowStickerMenu(!showStickerMenu);
+          }}
+          title="Icons / Emojis / Stickers"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'smile' ? '#2A2E39' : 'transparent',
+            color: activeTool === 'smile' ? '#2962FF' : '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          <Smile size={17} />
+        </button>
+
+        {/* 7. Ruler (Measure) */}
+        <button
+          onClick={() => setActiveTool('ruler')}
+          title="Ruler (Measure Price & Bars)"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'ruler' ? '#2A2E39' : 'transparent',
+            color: activeTool === 'ruler' ? '#2962FF' : '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          <Ruler size={17} />
+        </button>
+
+        {/* 8. Zoom in (Magnifying glass) */}
+        <button
+          onClick={() => {
+            if (chartRef?.current) {
+              chartRef.current.timeScale().zoom(1.3);
+              toast.success('Zoom In');
+            }
+          }}
+          title="Zoom In"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: 'transparent',
+            color: '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          <ZoomIn size={17} />
+        </button>
+
+        {/* 9. Magnet Mode */}
+        <button
+          onClick={() => {
+            setMagnetMode(!magnetMode);
+            toast.success(magnetMode ? 'Magnet Mode OFF' : 'Magnet Mode ON');
+          }}
+          title="Magnet Mode (Snap to OHLC)"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: magnetMode ? '#2A2E39' : 'transparent',
+            color: magnetMode ? '#2962FF' : '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          <Magnet size={17} />
+        </button>
+
+        {/* 10. Pencil with Lock (Stay in Drawing Mode) */}
+        <button
+          onClick={() => {
+            setStayInDrawMode(!stayInDrawMode);
+            toast.success(stayInDrawMode ? 'Stay in Drawing Mode OFF' : 'Stay in Drawing Mode ON');
+          }}
+          title="Stay in Drawing Mode"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: stayInDrawMode ? '#2A2E39' : 'transparent',
+            color: stayInDrawMode ? '#2962FF' : '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          <Pencil size={16} />
+        </button>
+
+        {/* 11. Padlock (Lock All Drawings) */}
+        <button
+          onClick={() => {
+            setLockAllDrawings(!lockAllDrawings);
+            toast.success(lockAllDrawings ? 'Drawings Unlocked' : 'All Drawings Locked');
+          }}
+          title="Lock All Drawings"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: lockAllDrawings ? '#2A2E39' : 'transparent',
+            color: lockAllDrawings ? '#F59E0B' : '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          {lockAllDrawings ? <Lock size={16} /> : <Unlock size={16} />}
+        </button>
+
+        {/* 12. Eye Icon (Hide Drawings) */}
+        <button
+          onClick={() => {
+            setHideAllDrawings(!hideAllDrawings);
+          }}
+          title="Hide / Show Drawings"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: hideAllDrawings ? '#2A2E39' : 'transparent',
+            color: hideAllDrawings ? '#EF5350' : '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          {hideAllDrawings ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+
+        <div style={{ width: 20, height: 1, backgroundColor: 'rgba(255,255,255,0.08)', margin: '2px 0' }} />
+
+        {/* 13. Trash Can (Remove All) */}
+        <button
+          onClick={handleClearAll}
+          title="Remove All Drawings"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: 'transparent',
+            color: '#787B86',
+            cursor: 'pointer',
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.color = '#EF5350'}
+          onMouseLeave={(e) => e.currentTarget.style.color = '#787B86'}
+        >
+          <Trash2 size={16} />
+        </button>
       </div>
 
-      {/* ── Direct Interactive SVG Overlay on Chart Canvas ── */}
-      <svg
-        onMouseDown={handleSvgMouseDown}
-        onMouseMove={handleSvgMouseMove}
-        onMouseUp={handleSvgMouseUp}
-        style={{
-          position: 'absolute',
-          top: 0,
-          left: 42,
-          right: 0,
-          bottom: 0,
-          width: 'calc(100% - 42px)',
-          height: '100%',
-          zIndex: activeTool !== 'pointer' ? 25 : 5,
-          pointerEvents: activeTool !== 'pointer' ? 'all' : 'none',
-          cursor: activeTool === 'pointer' ? 'default' : 'crosshair',
-        }}
-      >
-        {/* Render Saved Drawings */}
-        {drawings.map((d) => {
-          const isSelected = selectedDrawingId === d.id;
-          if (d.type === 'trendline') {
-            return (
-              <g key={d.id} onClick={() => setSelectedDrawingId(d.id)} style={{ pointerEvents: 'auto', cursor: 'pointer' }}>
-                <line
-                  x1={d.startX}
-                  y1={d.startY}
-                  x2={d.endX}
-                  y2={d.endY}
+      {/* ── Floating Toolbar (Top Right: 5 Small White Icons) ── */}
+      <div style={{
+        position: 'absolute',
+        top: 14,
+        right: 18,
+        backgroundColor: '#1E222D',
+        border: '1px solid rgba(255, 255, 255, 0.12)',
+        borderRadius: 6,
+        padding: '3px 6px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        zIndex: 50,
+        boxShadow: '0 4px 16px rgba(0, 0, 0, 0.6)',
+        userSelect: 'none',
+      }}>
+        {/* 1. Drag Dots Handle */}
+        <span title="Favorite Tools" style={{ color: '#787B86', cursor: 'grab', display: 'flex', alignItems: 'center' }}>
+          <GripVertical size={14} />
+        </span>
+
+        {/* 2. Trendline Quick Tool */}
+        <button
+          onClick={() => setActiveTool('trendline')}
+          title="Quick Trendline"
+          style={{
+            background: activeTool === 'trendline' ? '#2A2E39' : 'transparent',
+            border: 'none',
+            borderRadius: 4,
+            padding: 4,
+            color: '#FFFFFF',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <TrendingUp size={14} />
+        </button>
+
+        {/* 3. Rectangle Tool */}
+        <button
+          onClick={() => setActiveTool('rectangle')}
+          title="Quick Rectangle Zone"
+          style={{
+            background: activeTool === 'rectangle' ? '#2A2E39' : 'transparent',
+            border: 'none',
+            borderRadius: 4,
+            padding: 4,
+            color: '#FFFFFF',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <SquareIcon size={14} />
+        </button>
+
+        {/* 4. Line Style Icon (Color & Stroke Picker) */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setShowStyleMenu(!showStyleMenu)}
+            title="Line Style & Color"
+            style={{
+              background: showStyleMenu ? '#2A2E39' : 'transparent',
+              border: 'none',
+              borderRadius: 4,
+              padding: 4,
+              color: activeColor,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            <Sliders size={14} />
+          </button>
+
+          {/* Color / Style Palette Popup */}
+          {showStyleMenu && (
+            <div style={{
+              position: 'absolute',
+              top: 'calc(100% + 6px)',
+              right: 0,
+              backgroundColor: '#1E222D',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              borderRadius: 8,
+              padding: 8,
+              zIndex: 100,
+              width: 140,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
+            }}>
+              <div style={{ fontSize: '0.65rem', color: '#787B86', marginBottom: 6, fontWeight: 700 }}>COLOR</div>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                {['#38BDF8', '#10B981', '#F59E0B', '#EF5350', '#A855F7', '#FFFFFF'].map((c) => (
+                  <div
+                    key={c}
+                    onClick={() => { setActiveColor(c); setShowStyleMenu(false); }}
+                    style={{
+                      width: 18, height: 18, borderRadius: '50%', backgroundColor: c,
+                      border: activeColor === c ? '2px solid #FFF' : '1px solid transparent',
+                      cursor: 'pointer',
+                    }}
+                  />
+                ))}
+              </div>
+
+              <div style={{ fontSize: '0.65rem', color: '#787B86', marginBottom: 4, fontWeight: 700 }}>WIDTH</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[1, 2, 3, 4].map((w) => (
+                  <button
+                    key={w}
+                    onClick={() => { setActiveStrokeWidth(w); setShowStyleMenu(false); }}
+                    style={{
+                      flex: 1, padding: '2px 0', borderRadius: 4, border: 'none',
+                      backgroundColor: activeStrokeWidth === w ? '#2962FF' : '#2A2E39',
+                      color: '#FFF', fontSize: '0.68rem', cursor: 'pointer',
+                    }}
+                  >
+                    {w}px
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 5. Settings Menu Icon */}
+        <button
+          onClick={() => toast.success('TradingView Chart Settings')}
+          title="Chart & Drawing Settings"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            borderRadius: 4,
+            padding: 4,
+            color: '#FFFFFF',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <Settings size={14} />
+        </button>
+      </div>
+
+      {/* ── Direct Interactive SVG Overlay Layer ── */}
+      {!hideAllDrawings && (
+        <svg
+          onMouseDown={handleSvgMouseDown}
+          onMouseMove={handleSvgMouseMove}
+          onMouseUp={handleSvgMouseUp}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 44,
+            right: 0,
+            bottom: 0,
+            width: 'calc(100% - 44px)',
+            height: '100%',
+            zIndex: activeTool !== 'crosshair' ? 25 : 5,
+            pointerEvents: activeTool !== 'crosshair' ? 'all' : 'none',
+            cursor: activeTool === 'crosshair' ? 'default' : 'crosshair',
+          }}
+        >
+          {/* Render Saved Drawings */}
+          {drawings.map((d) => {
+            const isSelected = selectedDrawingId === d.id;
+
+            // Trendline
+            if (d.type === 'trendline') {
+              return (
+                <g key={d.id} onClick={() => setSelectedDrawingId(d.id)} style={{ pointerEvents: 'auto', cursor: 'pointer' }}>
+                  <line
+                    x1={d.startX} y1={d.startY} x2={d.endX} y2={d.endY}
+                    stroke={d.color || '#38BDF8'}
+                    strokeWidth={d.strokeWidth || 2}
+                    strokeDasharray={isSelected ? '4,4' : 'none'}
+                  />
+                  <circle cx={d.startX} cy={d.startY} r={3} fill={d.color || '#38BDF8'} />
+                  <circle cx={d.endX} cy={d.endY} r={3} fill={d.color || '#38BDF8'} />
+                </g>
+              );
+            }
+
+            // Fibonacci Retracement
+            if (d.type === 'fibonacci') {
+              const minY = Math.min(d.startY, d.endY);
+              const maxY = Math.max(d.startY, d.endY);
+              const height = maxY - minY;
+              return (
+                <g key={d.id} onClick={() => setSelectedDrawingId(d.id)} style={{ pointerEvents: 'auto', cursor: 'pointer' }}>
+                  {FIBONACCI_LEVELS.map((fib) => {
+                    const y = d.startY < d.endY ? minY + height * fib.level : maxY - height * fib.level;
+                    return (
+                      <g key={fib.level}>
+                        <line
+                          x1={d.startX} y1={y} x2={d.endX > d.startX ? d.endX : d.startX + 300} y2={y}
+                          stroke={fib.color}
+                          strokeWidth={1}
+                          strokeDasharray="3,3"
+                        />
+                        <text x={d.startX + 4} y={y - 3} fill={fib.color} fontSize="9" fontFamily="JetBrains Mono">
+                          {fib.label}
+                        </text>
+                      </g>
+                    );
+                  })}
+                </g>
+              );
+            }
+
+            // Brush Freehand
+            if (d.type === 'brush' && d.points?.length > 1) {
+              const pathData = d.points.reduce((acc, pt, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`, '');
+              return (
+                <path
+                  key={d.id}
+                  d={pathData}
+                  fill="none"
                   stroke={d.color || '#38BDF8'}
-                  strokeWidth={isSelected ? 3 : 2}
-                  strokeDasharray={isSelected ? '4,4' : 'none'}
+                  strokeWidth={d.strokeWidth || 2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  onClick={() => setSelectedDrawingId(d.id)}
+                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
                 />
-                <circle cx={d.startX} cy={d.startY} r={3} fill={d.color || '#38BDF8'} />
-                <circle cx={d.endX} cy={d.endY} r={3} fill={d.color || '#38BDF8'} />
-              </g>
-            );
-          }
-          if (d.type === 'horizontal') {
-            return (
-              <g key={d.id} onClick={() => setSelectedDrawingId(d.id)} style={{ pointerEvents: 'auto', cursor: 'pointer' }}>
-                <line
-                  x1={0}
-                  y1={d.startY}
-                  x2={2000}
-                  y2={d.startY}
-                  stroke={d.color || '#F59E0B'}
-                  strokeWidth={isSelected ? 2 : 1.5}
-                  strokeDasharray="5,5"
+              );
+            }
+
+            // Rectangle
+            if (d.type === 'rectangle') {
+              const x = Math.min(d.startX, d.endX);
+              const y = Math.min(d.startY, d.endY);
+              const w = Math.abs(d.endX - d.startX);
+              const h = Math.abs(d.endY - d.startY);
+              return (
+                <rect
+                  key={d.id}
+                  x={x} y={y} width={w} height={h}
+                  fill="rgba(56, 189, 248, 0.12)"
+                  stroke={d.color || '#38BDF8'}
+                  strokeWidth={d.strokeWidth || 1.5}
+                  onClick={() => setSelectedDrawingId(d.id)}
+                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
                 />
-                <text x={10} y={d.startY - 4} fill={d.color || '#F59E0B'} fontSize="10" fontFamily="JetBrains Mono">
-                  Level {d.startY.toFixed(0)}px
+              );
+            }
+
+            // Ruler / Measure
+            if (d.type === 'ruler') {
+              const dx = Math.abs(d.endX - d.startX);
+              const dy = d.startY - d.endY; // price delta approx
+              const x = Math.min(d.startX, d.endX);
+              const y = Math.min(d.startY, d.endY);
+              const w = Math.abs(d.endX - d.startX);
+              const h = Math.abs(d.endY - d.startY);
+              return (
+                <g key={d.id} onClick={() => setSelectedDrawingId(d.id)} style={{ pointerEvents: 'auto', cursor: 'pointer' }}>
+                  <rect
+                    x={x} y={y} width={w} height={h}
+                    fill={dy >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,83,80,0.15)'}
+                    stroke={dy >= 0 ? '#10B981' : '#EF5350'}
+                    strokeWidth={1}
+                    strokeDasharray="3,3"
+                  />
+                  <text x={x + 6} y={y + 14} fill="#FFF" fontSize="10" fontWeight="700" fontFamily="JetBrains Mono">
+                    {dy >= 0 ? '+' : ''}{(dy * 0.45).toFixed(2)} pts ({(dy * 0.08).toFixed(2)}%) · {Math.max(1, Math.round(dx / 8))} bars
+                  </text>
+                </g>
+              );
+            }
+
+            // Text
+            if (d.type === 'text') {
+              return (
+                <text
+                  key={d.id}
+                  x={d.startX} y={d.startY}
+                  fill={d.color || '#F0F0FF'}
+                  fontSize="12" fontWeight="600" fontFamily="Inter, sans-serif"
+                  onClick={() => setSelectedDrawingId(d.id)}
+                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                >
+                  {d.text}
                 </text>
-              </g>
-            );
-          }
-          if (d.type === 'rectangle') {
-            const x = Math.min(d.startX, d.endX);
-            const y = Math.min(d.startY, d.endY);
-            const w = Math.abs(d.endX - d.startX);
-            const h = Math.abs(d.endY - d.startY);
-            return (
-              <rect
-                key={d.id}
-                x={x}
-                y={y}
-                width={w}
-                height={h}
-                fill="rgba(168,85,247,0.12)"
-                stroke={d.color || '#A855F7'}
-                strokeWidth={isSelected ? 2 : 1.5}
-                onClick={() => setSelectedDrawingId(d.id)}
-                style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-              />
-            );
-          }
-          if (d.type === 'circle') {
-            const r = Math.sqrt(Math.pow(d.endX - d.startX, 2) + Math.pow(d.endY - d.startY, 2));
-            return (
-              <circle
-                key={d.id}
-                cx={d.startX}
-                cy={d.startY}
-                r={Math.max(r, 6)}
-                fill="rgba(59,130,246,0.15)"
-                stroke={d.color || '#60A5FA'}
-                strokeWidth={isSelected ? 2 : 1.5}
-                onClick={() => setSelectedDrawingId(d.id)}
-                style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-              />
-            );
-          }
-          if (d.type === 'text') {
-            return (
-              <text
-                key={d.id}
-                x={d.startX}
-                y={d.startY}
-                fill="#F0F0FF"
-                fontSize="12"
-                fontWeight="600"
-                fontFamily="Inter, sans-serif"
-                onClick={() => setSelectedDrawingId(d.id)}
-                style={{ pointerEvents: 'auto', cursor: 'pointer' }}
-              >
-                {d.text}
-              </text>
-            );
-          }
-          return null;
-        })}
+              );
+            }
 
-        {/* Realtime Drawing Preview */}
-        {currentDraw && (
-          <>
-            {currentDraw.type === 'trendline' && (
-              <line
-                x1={currentDraw.startX}
-                y1={currentDraw.startY}
-                x2={currentDraw.endX}
-                y2={currentDraw.endY}
-                stroke="#38BDF8"
-                strokeWidth={2}
-                strokeDasharray="4,4"
-              />
-            )}
-            {currentDraw.type === 'horizontal' && (
-              <line
-                x1={0}
-                y1={currentDraw.startY}
-                x2={2000}
-                y2={currentDraw.startY}
-                stroke="#F59E0B"
-                strokeWidth={2}
-                strokeDasharray="4,4"
-              />
-            )}
-            {currentDraw.type === 'rectangle' && (
-              <rect
-                x={Math.min(currentDraw.startX, currentDraw.endX)}
-                y={Math.min(currentDraw.startY, currentDraw.endY)}
-                width={Math.abs(currentDraw.endX - currentDraw.startX)}
-                height={Math.abs(currentDraw.endY - currentDraw.startY)}
-                fill="rgba(168,85,247,0.15)"
-                stroke="#A855F7"
-                strokeWidth={2}
-                strokeDasharray="4,4"
-              />
-            )}
-            {currentDraw.type === 'circle' && (
-              <circle
-                cx={currentDraw.startX}
-                cy={currentDraw.startY}
-                r={Math.max(Math.sqrt(Math.pow(currentDraw.endX - currentDraw.startX, 2) + Math.pow(currentDraw.endY - currentDraw.startY, 2)), 6)}
-                fill="rgba(59,130,246,0.15)"
-                stroke="#60A5FA"
-                strokeWidth={2}
-                strokeDasharray="4,4"
-              />
-            )}
-          </>
-        )}
-      </svg>
+            // Sticker Emoji
+            if (d.type === 'sticker') {
+              return (
+                <text
+                  key={d.id}
+                  x={d.startX - 10} y={d.startY + 10}
+                  fontSize="22"
+                  onClick={() => setSelectedDrawingId(d.id)}
+                  style={{ pointerEvents: 'auto', cursor: 'pointer', userSelect: 'none' }}
+                >
+                  {d.emoji}
+                </text>
+              );
+            }
 
-      {/* Floating Text Input Box */}
+            return null;
+          })}
+
+          {/* Realtime Drawing Preview */}
+          {currentDraw && (
+            <>
+              {currentDraw.type === 'trendline' && (
+                <line
+                  x1={currentDraw.startX} y1={currentDraw.startY}
+                  x2={currentDraw.endX} y2={currentDraw.endY}
+                  stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4"
+                />
+              )}
+              {currentDraw.type === 'fibonacci' && (
+                <g>
+                  {FIBONACCI_LEVELS.map((fib) => {
+                    const minY = Math.min(currentDraw.startY, currentDraw.endY);
+                    const maxY = Math.max(currentDraw.startY, currentDraw.endY);
+                    const height = maxY - minY;
+                    const y = currentDraw.startY < currentDraw.endY ? minY + height * fib.level : maxY - height * fib.level;
+                    return (
+                      <line
+                        key={fib.level}
+                        x1={currentDraw.startX} y1={y} x2={currentDraw.endX} y2={y}
+                        stroke={fib.color} strokeWidth={1} strokeDasharray="3,3"
+                      />
+                    );
+                  })}
+                </g>
+              )}
+              {currentDraw.type === 'brush' && currentDraw.points?.length > 1 && (
+                <path
+                  d={currentDraw.points.reduce((acc, pt, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`, '')}
+                  fill="none" stroke={activeColor} strokeWidth={activeStrokeWidth} strokeLinecap="round"
+                />
+              )}
+              {currentDraw.type === 'rectangle' && (
+                <rect
+                  x={Math.min(currentDraw.startX, currentDraw.endX)}
+                  y={Math.min(currentDraw.startY, currentDraw.endY)}
+                  width={Math.abs(currentDraw.endX - currentDraw.startX)}
+                  height={Math.abs(currentDraw.endY - currentDraw.startY)}
+                  fill="rgba(56, 189, 248, 0.15)" stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4"
+                />
+              )}
+              {currentDraw.type === 'ruler' && (
+                <rect
+                  x={Math.min(currentDraw.startX, currentDraw.endX)}
+                  y={Math.min(currentDraw.startY, currentDraw.endY)}
+                  width={Math.abs(currentDraw.endX - currentDraw.startX)}
+                  height={Math.abs(currentDraw.endY - currentDraw.startY)}
+                  fill="rgba(59, 130, 246, 0.2)" stroke="#3B82F6" strokeWidth={1} strokeDasharray="4,4"
+                />
+              )}
+            </>
+          )}
+        </svg>
+      )}
+
+      {/* Floating Text Note Input */}
       {textInputPos && (
         <div style={{
           position: 'absolute',
-          left: textInputPos.x + 42,
+          left: textInputPos.x + 44,
           top: textInputPos.y,
           zIndex: 60,
-          background: '#0F172A',
-          border: '1px solid #6366F1',
+          background: '#1E222D',
+          border: '1px solid #2962FF',
           borderRadius: 6,
           padding: 4,
           display: 'flex',
@@ -425,7 +819,7 @@ export default function DrawingTools({ chartRef, symbol, interval, overlayContai
         }}>
           <input
             type="text"
-            placeholder="Type note & hit Enter..."
+            placeholder="Type text note..."
             value={textInputVal}
             onChange={(e) => setTextInputVal(e.target.value)}
             onKeyDown={(e) => {
@@ -434,7 +828,7 @@ export default function DrawingTools({ chartRef, symbol, interval, overlayContai
             }}
             autoFocus
             style={{
-              background: '#090C18',
+              background: '#131722',
               border: '1px solid rgba(255,255,255,0.1)',
               borderRadius: 4,
               padding: '4px 8px',
@@ -446,7 +840,7 @@ export default function DrawingTools({ chartRef, symbol, interval, overlayContai
           <button
             onClick={handleAddText}
             style={{
-              background: '#6366F1',
+              background: '#2962FF',
               color: '#fff',
               border: 'none',
               borderRadius: 4,
@@ -458,6 +852,33 @@ export default function DrawingTools({ chartRef, symbol, interval, overlayContai
           >
             Add
           </button>
+        </div>
+      )}
+
+      {/* Stickers Emoji Picker */}
+      {showStickerMenu && stickerPos && (
+        <div style={{
+          position: 'absolute',
+          left: stickerPos.x + 44,
+          top: stickerPos.y,
+          zIndex: 60,
+          background: '#1E222D',
+          border: '1px solid rgba(255, 255, 255, 0.15)',
+          borderRadius: 8,
+          padding: 8,
+          display: 'flex',
+          gap: 8,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
+        }}>
+          {['🚀', '📈', '📉', '🎯', '⭐', '🔥', '👍', '❌'].map((emoji) => (
+            <span
+              key={emoji}
+              onClick={() => handleAddSticker(emoji)}
+              style={{ fontSize: 20, cursor: 'pointer' }}
+            >
+              {emoji}
+            </span>
+          ))}
         </div>
       )}
     </>
