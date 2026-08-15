@@ -359,7 +359,10 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
 
         {/* 2. Trend Line Tools */}
         <button
-          onClick={() => setActiveTool('trendline')}
+          onClick={() => {
+            setActiveTool('trendline');
+            toast.success('Trend Line: Click and drag on chart to draw');
+          }}
           title="Trend Line"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
@@ -374,7 +377,10 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
 
         {/* 3. Fibonacci Tools */}
         <button
-          onClick={() => setActiveTool('fibonacci')}
+          onClick={() => {
+            setActiveTool('fibonacci');
+            toast.success('Fibonacci: Click and drag on chart to draw');
+          }}
           title="Fibonacci Retracement"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
@@ -389,7 +395,10 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
 
         {/* 4. Brush / Shapes */}
         <button
-          onClick={() => setActiveTool('brush')}
+          onClick={() => {
+            setActiveTool('brush');
+            toast.success('Brush: Click and drag freehand to draw');
+          }}
           title="Brush (Freehand Drawing)"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
@@ -404,7 +413,10 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
 
         {/* 5. Text Tool ('T') */}
         <button
-          onClick={() => setActiveTool('text')}
+          onClick={() => {
+            setActiveTool('text');
+            toast.success('Text Tool: Click anywhere on chart to type');
+          }}
           title="Text Tool ('T')"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
@@ -437,7 +449,10 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
 
         {/* 7. Ruler (Measure) */}
         <button
-          onClick={() => setActiveTool('ruler')}
+          onClick={() => {
+            setActiveTool('ruler');
+            toast.success('Ruler: Click and drag to measure price & bars');
+          }}
           title="Ruler (Measure Price & Bars)"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
@@ -726,7 +741,7 @@ export default function DrawingTools({ chartRef, symbol, interval, onOpenSetting
             bottom: 0,
             width: 'calc(100% - 44px)',
             height: '100%',
-            zIndex: activeTool !== 'crosshair' ? 30 : 5,
+            zIndex: activeTool !== 'crosshair' ? 50 : 25,
             pointerEvents: activeTool !== 'crosshair' ? 'all' : 'none',
             cursor: activeTool === 'crosshair' ? 'default' : 'crosshair',
           }}
