@@ -770,23 +770,9 @@ async def get_market_sentiment_endpoint(request: Request):
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, lambda: get_market_sentiment(popular_tickers))
     setattr(app.state, _cache_key, result)
-    setattr(app.state, _cache_ts_key, datetime.now())
     return result
 
 
-@app.get("/api/screener/advanced")
-@limiter.limit("200/minute")
-async def get_advanced_screener(
-    request: Request,
-    sector: str = "",
-    min_rsi: float = 0.0,
-    max_rsi: float = 100.0,
-    signal: str = "",
-    volume_spike: bool = False,
-    near_52w_high: bool = False,
-    near_52w_low: bool = False,
-    min_score: int = 0,
-    sort_by: str = "ai_score",
 # Multi-Index Constituent Universes
 INDEX_UNIVERSES: Dict[str, List[str]] = {
     "NIFTY 50": [
