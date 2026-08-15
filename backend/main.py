@@ -775,7 +775,7 @@ async def get_market_sentiment_endpoint(request: Request):
 
 
 @app.get("/api/screener/advanced")
-@limiter.limit("20/minute")
+@limiter.limit("200/minute")
 async def get_advanced_screener(
     request: Request,
     sector: str = "",

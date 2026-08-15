@@ -24,7 +24,7 @@ import './screener/Screener.css';
  */
 export default function AdvancedScreener() {
   const { setSelectedSymbol, setActiveView } = useStore();
-  const [rows, setRows] = useState([]);
+  const [allStocks, setAllStocks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -52,37 +52,40 @@ export default function AdvancedScreener() {
   const [page, setPage] = useState(DEFAULT_FILTERS.page);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
-  // Fetch screener data from API
+  // Fetch full stock universe from backend
   const fetchData = useCallback((isBackground = false) => {
     if (!isBackground) setLoading(true);
     setError(null);
-    const params = new URLSearchParams({
-      ...(sector !== 'All' && { sector }),
-      ...(signal !== 'All' && { signal }),
-      min_rsi: minRsi,
-      max_rsi: maxRsi,
-      volume_spike: volumeSpike,
-      near_52w_high: near52High,
-      near_52w_low: near52Low,
-      min_score: minScore,
-      sort_by: sortBy,
-      sort_dir: sortDir,
-    });
 
-    api.get(`/api/screener/advanced?${params}`)
+    api.get('/api/screener/advanced')
       .then((r) => {
-        setRows(Array.isArray(r.data) ? r.data : []);
+        if (Array.isArray(r.data) && r.data.length > 0) {
+          setAllStocks(r.data);
+        } else {
+          // Fallback to basic screener endpoint if advanced returns empty
+          return api.get('/api/screener').then((bRes) => {
+            if (Array.isArray(bRes.data)) setAllStocks(bRes.data);
+          });
+        }
       })
       .catch((err) => {
-        const msg = err.response?.data?.detail || 'Failed to load screener data.';
-        setError(msg);
-        if (!isBackground) toast.error(msg);
+        // Retry with basic screener endpoint
+        return api.get('/api/screener')
+          .then((bRes) => {
+            if (Array.isArray(bRes.data)) setAllStocks(bRes.data);
+          })
+          .catch(() => {
+            const msg = err.response?.data?.detail || err.message || 'Failed to load screener data.';
+            setError(msg);
+            if (!isBackground) toast.error(msg);
+          });
       })
       .finally(() => {
         if (!isBackground) setLoading(false);
       });
-  }, [sector, signal, minRsi, maxRsi, volumeSpike, near52High, near52Low, minScore, sortBy, sortDir]);
+  }, []);
 
+  // Initial fetch on mount
   useEffect(() => {
     fetchData();
   }, [fetchData]);
@@ -125,6 +128,7 @@ export default function AdvancedScreener() {
       setNear52High(filter.near52High);
       setNear52Low(filter.near52Low);
       setMinScore(filter.minScore);
+      setPage(1);
       toast.success(`Applied preset: ${targetPreset.label}`);
     }
   }, []);
@@ -182,12 +186,12 @@ export default function AdvancedScreener() {
 
   // CSV Export Handler
   const handleExportCsv = useCallback(() => {
-    if (!rows.length) {
-      toast.error('No rows to export');
+    if (!allStocks.length) {
+      toast.error('No stocks to export');
       return;
     }
     const header = 'Ticker,Name,Sector,Price,Change%,Trend,AI Score,Signal,Target 7D,Stop Loss,RSI,Volume Ratio,52W High,52W Low\n';
-    const lines = rows.map((r) =>
+    const lines = allStocks.map((r) =>
       `"${r.ticker || ''}","${r.name || ''}","${r.sector || ''}",${r.price || 0},${r.change || 0},"${r.trend || ''}",${r.ai_score || 0},"${r.signal || ''}",${r.target_price_7d || ''},${r.stop_loss || ''},${r.rsi ?? ''},${r.volume_ratio ?? ''},${r.high_52w ?? ''},${r.low_52w ?? ''}`
     ).join('\n');
 
@@ -198,36 +202,88 @@ export default function AdvancedScreener() {
     a.download = `stockoracle_screener_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success(`Exported ${rows.length} stocks to CSV`);
-  }, [rows]);
+    toast.success(`Exported ${allStocks.length} stocks to CSV`);
+  }, [allStocks]);
 
-  // KPI Metrics Calculation (Memoized)
+  // KPI Metrics Calculation from full universe (Memoized)
   const stats = useMemo(() => {
-    const total = rows.length;
-    const bullish = rows.filter((r) => r.signal === 'buy' || r.trend === 'BULLISH').length;
-    const volumeSurges = rows.filter((r) => (r.volume_ratio || 0) >= THRESHOLDS.VOLUME_SURGE_RATIO).length;
-    const oversold = rows.filter((r) => (r.rsi || 50) < THRESHOLDS.RSI_OVERSOLD).length;
+    const total = allStocks.length;
+    const bullish = allStocks.filter((r) => r.signal === 'buy' || r.trend === 'BULLISH').length;
+    const volumeSurges = allStocks.filter((r) => (r.volume_ratio || 0) >= THRESHOLDS.VOLUME_SURGE_RATIO).length;
+    const oversold = allStocks.filter((r) => (r.rsi || 50) < THRESHOLDS.RSI_OVERSOLD).length;
     const avgScore = total
-      ? (rows.reduce((acc, r) => acc + (r.ai_score || 0), 0) / total).toFixed(0)
+      ? (allStocks.reduce((acc, r) => acc + (r.ai_score || 0), 0) / total).toFixed(0)
       : 0;
     return { total, bullish, volumeSurges, oversold, avgScore };
-  }, [rows]);
+  }, [allStocks]);
 
-  // Filter and Paginate rows (Memoized for zero render lag)
-  const filteredRows = useMemo(() => {
+  // Instant reactive client-side filtering & sorting (0ms latency, zero rate-limit issues)
+  const filteredAndSortedRows = useMemo(() => {
+    let list = [...allStocks];
+
+    // 1. Sector Filter
+    if (sector !== 'All') {
+      list = list.filter((r) => String(r.sector || '').toLowerCase() === sector.toLowerCase());
+    }
+
+    // 2. Signal Filter
+    if (signal !== 'All') {
+      list = list.filter((r) => String(r.signal || '').toLowerCase() === signal.toLowerCase());
+    }
+
+    // 3. Min Score
+    if (minScore > 0) {
+      list = list.filter((r) => (r.ai_score ?? 0) >= minScore);
+    }
+
+    // 4. RSI Range
+    if (minRsi > 0 || maxRsi < 100) {
+      list = list.filter((r) => r.rsi == null || (r.rsi >= minRsi && r.rsi <= maxRsi));
+    }
+
+    // 5. Volume Spike
+    if (volumeSpike) {
+      list = list.filter((r) => (r.volume_ratio || 0) >= THRESHOLDS.VOLUME_SURGE_RATIO);
+    }
+
+    // 6. Near 52W High
+    if (near52High) {
+      list = list.filter((r) => r.high_52w && (r.price >= r.high_52w * 0.95));
+    }
+
+    // 7. Near 52W Low
+    if (near52Low) {
+      list = list.filter((r) => r.low_52w && (r.price <= r.low_52w * 1.05));
+    }
+
+    // 8. Search query
     const q = (search || '').trim().toUpperCase();
-    if (!q) return rows;
-    return rows.filter((r) => {
-      const matchTicker = r.ticker ? String(r.ticker).toUpperCase().includes(q) : false;
-      const matchName = r.name ? String(r.name).toUpperCase().includes(q) : false;
-      return matchTicker || matchName;
-    });
-  }, [rows, search]);
+    if (q) {
+      list = list.filter((r) => {
+        const matchTicker = r.ticker ? String(r.ticker).toUpperCase().includes(q) : false;
+        const matchName = r.name ? String(r.name).toUpperCase().includes(q) : false;
+        return matchTicker || matchName;
+      });
+    }
 
+    // 9. Sorting
+    list.sort((a, b) => {
+      let valA = a[sortBy] ?? 0;
+      let valB = b[sortBy] ?? 0;
+      if (typeof valA === 'string') {
+        return sortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      }
+      return sortDir === 'asc' ? valA - valB : valB - valA;
+    });
+
+    return list;
+  }, [allStocks, sector, signal, minScore, minRsi, maxRsi, volumeSpike, near52High, near52Low, search, sortBy, sortDir]);
+
+  // Paginated Slice
   const paginatedRows = useMemo(() => {
     const startIndex = (page - 1) * pageSize;
-    return filteredRows.slice(startIndex, startIndex + pageSize);
-  }, [filteredRows, page, pageSize]);
+    return filteredAndSortedRows.slice(startIndex, startIndex + pageSize);
+  }, [filteredAndSortedRows, page, pageSize]);
 
   return (
     <div className="screener-container">
@@ -246,10 +302,10 @@ export default function AdvancedScreener() {
       {/* KPI Cards Bar */}
       <ScreenerKpiCards stats={stats} />
 
-      {/* Sector Distribution Panel (When selected or visible) */}
+      {/* Sector Distribution Panel */}
       {viewMode === 'sectors' && (
         <ScreenerSectorChart
-          rows={rows}
+          rows={allStocks}
           selectedSector={sector}
           onSelectSector={setSector}
         />
@@ -285,17 +341,20 @@ export default function AdvancedScreener() {
         isFiltered={isFiltered}
       />
 
-      {/* Error Message */}
+      {/* Error Notice */}
       {error && (
-        <div style={{ color: '#F43F5E', background: 'rgba(244,63,94,0.1)', padding: 12, borderRadius: 8 }}>
-          ⚠️ {error}
+        <div style={{ color: '#F43F5E', background: 'rgba(244,63,94,0.1)', padding: 12, borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>⚠️ {error}</span>
+          <button type="button" className="screener-btn screener-btn-refresh" onClick={() => fetchData(false)}>
+            Retry
+          </button>
         </div>
       )}
 
       {/* Pagination Controls Top */}
       {viewMode !== 'sectors' && (
         <ScreenerPagination
-          totalItems={filteredRows.length}
+          totalItems={filteredAndSortedRows.length}
           page={page}
           setPage={setPage}
           pageSize={pageSize}
@@ -331,9 +390,9 @@ export default function AdvancedScreener() {
       )}
 
       {/* Bottom Pagination */}
-      {filteredRows.length > pageSize && viewMode !== 'sectors' && (
+      {filteredAndSortedRows.length > pageSize && viewMode !== 'sectors' && (
         <ScreenerPagination
-          totalItems={filteredRows.length}
+          totalItems={filteredAndSortedRows.length}
           page={page}
           setPage={setPage}
           pageSize={pageSize}
