@@ -1891,7 +1891,7 @@ export default function LiveChartView() {
         isOpen={showChartSettingsModal}
         onClose={() => setShowChartSettingsModal(false)}
         chartRef={chartRef}
-        candleSeriesRef={candleSeriesRef}
+        candleSeriesRef={candleRef}
       />
 
     </div>
