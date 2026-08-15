@@ -1582,49 +1582,122 @@ export default function LiveChartView() {
 
                 <div style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', margin: '4px 0' }} />
                 <div style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, letterSpacing: '0.06em', padding: '4px 8px', textTransform: 'uppercase' }}>
-                  Pro Analysis Tools
+                  Pro Analytical Indicators
                 </div>
 
-                {/* Volume Profile & Order Flow */}
+                {/* Volume Profile VPVR */}
                 <div
                   onClick={() => {
-                    setShowAdvancedPanel(!showAdvancedPanel);
-                    setAdvancedPanelTab('volume');
+                    const next = !(showAdvancedPanel && advancedPanelTab === 'volume');
+                    setShowAdvancedPanel(next);
+                    if (next) setAdvancedPanelTab('volume');
                     setShowIndicatorDropdown(false);
                   }}
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'volume' ? 'rgba(168,85,247,0.15)' : 'transparent',
+                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'volume' ? 'rgba(56,189,248,0.18)' : 'transparent',
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.04)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'volume' ? 'rgba(168,85,247,0.15)' : 'transparent'}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(56,189,248,0.12)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'volume' ? 'rgba(56,189,248,0.18)' : 'transparent'}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <Layers size={13} style={{ color: '#818CF8' }} />
-                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>Volume Profile & Delta</span>
+                    <BarChart3 size={13} style={{ color: '#38BDF8' }} />
+                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>Volume Profile (VPVR)</span>
                   </div>
+                  {showAdvancedPanel && advancedPanelTab === 'volume' ? <Check size={14} color="#38BDF8" /> : <EyeOff size={12} color="#64748B" />}
+                </div>
+
+                {/* Order Flow Delta */}
+                <div
+                  onClick={() => {
+                    const next = !(showAdvancedPanel && advancedPanelTab === 'order');
+                    setShowAdvancedPanel(next);
+                    if (next) setAdvancedPanelTab('order');
+                    setShowIndicatorDropdown(false);
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'order' ? 'rgba(168,85,247,0.18)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(168,85,247,0.12)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'order' ? 'rgba(168,85,247,0.18)' : 'transparent'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Activity size={13} style={{ color: '#A855F7' }} />
+                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>Order Flow Delta</span>
+                  </div>
+                  {showAdvancedPanel && advancedPanelTab === 'order' ? <Check size={14} color="#A855F7" /> : <EyeOff size={12} color="#64748B" />}
+                </div>
+
+                {/* AI Pattern Scanner */}
+                <div
+                  onClick={() => {
+                    const next = !(showAdvancedPanel && advancedPanelTab === 'patterns');
+                    setShowAdvancedPanel(next);
+                    if (next) setAdvancedPanelTab('patterns');
+                    setShowIndicatorDropdown(false);
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'patterns' ? 'rgba(16,185,129,0.18)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(16,185,129,0.12)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'patterns' ? 'rgba(16,185,129,0.18)' : 'transparent'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Sparkles size={13} style={{ color: '#10B981' }} />
+                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>AI Pattern Recognition</span>
+                  </div>
+                  {showAdvancedPanel && advancedPanelTab === 'patterns' ? <Check size={14} color="#10B981" /> : <EyeOff size={12} color="#64748B" />}
+                </div>
+
+                {/* MTF Correlation */}
+                <div
+                  onClick={() => {
+                    const next = !(showAdvancedPanel && advancedPanelTab === 'mtf');
+                    setShowAdvancedPanel(next);
+                    if (next) setAdvancedPanelTab('mtf');
+                    setShowIndicatorDropdown(false);
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
+                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'mtf' ? 'rgba(99,102,241,0.18)' : 'transparent',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.12)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'mtf' ? 'rgba(99,102,241,0.18)' : 'transparent'}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Target size={13} style={{ color: '#6366F1' }} />
+                    <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>MTF Correlation Matrix</span>
+                  </div>
+                  {showAdvancedPanel && advancedPanelTab === 'mtf' ? <Check size={14} color="#6366F1" /> : <EyeOff size={12} color="#64748B" />}
                 </div>
 
                 {/* Strategy Backtest */}
                 <div
                   onClick={() => {
-                    setShowAdvancedPanel(true);
-                    setAdvancedPanelTab('backtest');
+                    const next = !(showAdvancedPanel && advancedPanelTab === 'backtest');
+                    setShowAdvancedPanel(next);
+                    if (next) setAdvancedPanelTab('backtest');
                     setShowIndicatorDropdown(false);
                   }}
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     padding: '6px 10px', borderRadius: 6, cursor: 'pointer',
-                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'backtest' ? 'rgba(245,158,11,0.15)' : 'transparent',
+                    backgroundColor: showAdvancedPanel && advancedPanelTab === 'backtest' ? 'rgba(245,158,11,0.18)' : 'transparent',
                   }}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.04)'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'backtest' ? 'rgba(245,158,11,0.15)' : 'transparent'}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(245,158,11,0.12)'}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = showAdvancedPanel && advancedPanelTab === 'backtest' ? 'rgba(245,158,11,0.18)' : 'transparent'}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <FlaskConical size={13} style={{ color: '#F59E0B' }} />
                     <span style={{ fontSize: '0.76rem', color: '#E2E8F0', fontWeight: 600 }}>Strategy Backtest Overlay</span>
                   </div>
+                  {showAdvancedPanel && advancedPanelTab === 'backtest' ? <Check size={14} color="#F59E0B" /> : <EyeOff size={12} color="#64748B" />}
                 </div>
               </div>
             )}
@@ -1747,39 +1820,48 @@ export default function LiveChartView() {
       ) : (
       <div style={{ display:'grid', gridTemplateColumns: isSplitView ? '1fr 1fr' : '1fr', gap:16 }}>
         
-        {/* Chart 1 Container */}
+        {/* Chart 1 Container with TradingView Left Drawing Sidebar */}
         <div style={{
           background:'rgba(255,255,255,0.015)',
           border:'1px solid rgba(168,85,247,0.10)',
           borderRadius:18, overflow:'hidden',
           position:'relative',
+          display: 'flex',
+          height: 540,
         }}>
 
-          {loading && (
-            <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(9,12,24,0.75)', zIndex:10, borderRadius:18 }}>
-              <div style={{ width:38, height:38, borderRadius:'50%', border:'3px solid rgba(168,85,247,0.15)', borderTopColor:'#A855F7', animation:'spin 0.75s linear infinite' }} />
-              <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-            </div>
-          )}
+          {/* ── TradingView Style Vertical Left Drawing Sidebar ── */}
+          <DrawingTools
+            chartRef={chartRef}
+            symbol={selectedSymbol}
+            interval={interval}
+          />
 
-          <div ref={containerRef} style={{ width:'100%', height:520 }} />
+          {/* ── Center Chart Canvas ── */}
+          <div style={{ flex: 1, position: 'relative', overflow: 'hidden', height: '100%' }}>
+            {loading && (
+              <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(9,12,24,0.75)', zIndex:10 }}>
+                <div style={{ width:38, height:38, borderRadius:'50%', border:'3px solid rgba(168,85,247,0.15)', borderTopColor:'#A855F7', animation:'spin 0.75s linear infinite' }} />
+                <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+              </div>
+            )}
+
+            <div ref={containerRef} style={{ width:'100%', height:'100%' }} />
+          </div>
           
-          {/* Advanced Tools Panel - Slide-in Sidebar */}
+          {/* ── Right Docked Pro Indicator Panel (Volume Profile, Order Flow, AI Patterns, MTF, Backtest) ── */}
           {showAdvancedPanel && (
             <div style={{
-              position: 'absolute',
-              top: 60,
-              right: 16,
-              width: 340,
-              maxHeight: 'calc(100% - 120px)',
+              width: 320,
+              height: '100%',
               background: 'rgba(9,12,24,0.98)',
-              border: '1px solid rgba(168,85,247,0.2)',
-              borderRadius: 12,
-              zIndex: 50,
+              borderLeft: '1px solid rgba(168,85,247,0.2)',
+              zIndex: 35,
               overflow: 'hidden',
               display: 'flex',
               flexDirection: 'column',
-              boxShadow: '0 8px 32px rgba(0,0,0,0.4)',
+              boxShadow: '-8px 0 24px rgba(0,0,0,0.5)',
+              flexShrink: 0,
             }}>
               {/* Panel Header */}
               <div style={{
@@ -1790,9 +1872,13 @@ export default function LiveChartView() {
                 borderBottom: '1px solid rgba(168,85,247,0.2)',
                 background: 'rgba(168,85,247,0.05)',
               }}>
-                <div style={{ fontSize: '0.7rem', fontWeight: 700, color: '#A855F7', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Layers size={12} />
-                  ADVANCED CHART TOOLS
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#A855F7', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Activity size={13} />
+                  {advancedPanelTab === 'volume' ? 'VOLUME PROFILE (VPVR)' :
+                   advancedPanelTab === 'order' ? 'ORDER FLOW DELTA' :
+                   advancedPanelTab === 'patterns' ? 'AI PATTERN SCANNER' :
+                   advancedPanelTab === 'mtf' ? 'MTF CORRELATION' :
+                   advancedPanelTab === 'backtest' ? 'STRATEGY BACKTEST' : 'INDICATOR PANEL'}
                 </div>
                 <button
                   onClick={() => setShowAdvancedPanel(false)}
@@ -1808,49 +1894,6 @@ export default function LiveChartView() {
                 >
                   <X size={14} />
                 </button>
-              </div>
-              
-              {/* Tab Navigation */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(3, 1fr)',
-                gap: 4,
-                padding: 8,
-                borderBottom: '1px solid rgba(255,255,255,0.05)',
-              }}>
-                {[
-                  { id: 'volume', label: 'Vol Profile', icon: BarChart3 },
-                  { id: 'order', label: 'Order Flow', icon: Activity },
-                  { id: 'patterns', label: 'AI Patterns', icon: Zap },
-                  { id: 'mtf', label: 'MTF Corr', icon: Target },
-                  { id: 'draw', label: 'Drawings', icon: Layers },
-                  { id: 'backtest', label: 'Backtest', icon: FlaskConical },
-                ].map(tab => {
-                  const Icon = tab.icon;
-                  return (
-                    <button
-                      key={tab.id}
-                      onClick={() => setAdvancedPanelTab(tab.id)}
-                      style={{
-                        padding: '6px 4px',
-                        borderRadius: 6,
-                        border: advancedPanelTab === tab.id ? '1px solid #A855F7' : '1px solid rgba(75,85,99,0.3)',
-                        background: advancedPanelTab === tab.id ? 'rgba(168,85,247,0.15)' : 'transparent',
-                        color: advancedPanelTab === tab.id ? '#C084FC' : '#6B7280',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: 3,
-                        fontSize: '0.55rem',
-                        fontWeight: 600,
-                      }}
-                    >
-                      <Icon size={12} />
-                      <span style={{ fontSize: '0.52rem' }}>{tab.label}</span>
-                    </button>
-                  );
-                })}
               </div>
               
               {/* Panel Content */}
@@ -1909,14 +1952,6 @@ export default function LiveChartView() {
                       close: Number(d.close),
                     }))}
                     symbol={selectedSymbol}
-                  />
-                )}
-                
-                {advancedPanelTab === 'draw' && (
-                  <DrawingTools 
-                    chartRef={chartRef}
-                    symbol={selectedSymbol}
-                    interval={interval}
                   />
                 )}
 
