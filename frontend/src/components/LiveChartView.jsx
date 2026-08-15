@@ -603,6 +603,7 @@ export default function LiveChartView() {
   const containerRef   = useRef(null);
   const chartRef       = useRef(null);
   const candleRef      = useRef(null);
+  const [chartReady, setChartReady] = useState(0);
   const volumeRef      = useRef(null);
   const smaRef         = useRef(null);
   const emaRef         = useRef(null);
@@ -789,8 +790,10 @@ export default function LiveChartView() {
       }
     });
     ro.observe(containerRef.current);
+    setChartReady((c) => c + 1);
 
     return () => {
+      setChartReady(0);
       ro.disconnect();
       chart.remove();
       chartRef.current = null;
@@ -1860,6 +1863,7 @@ export default function LiveChartView() {
             candleRef={candleRef}
             symbol={selectedSymbol}
             interval={interval}
+            chartReady={chartReady}
             onOpenSettings={() => setShowChartSettingsModal(true)}
           />
 

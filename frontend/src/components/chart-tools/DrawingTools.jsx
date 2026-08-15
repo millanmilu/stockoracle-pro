@@ -19,7 +19,7 @@ const FIBONACCI_LEVELS = [
   { level: 1.0,   label: '1.0 (100%)',   color: '#A855F7', fill: 'rgba(168, 85, 247, 0.12)' },
 ];
 
-export default function DrawingTools({ chartRef, candleRef, symbol, interval, onOpenSettings }) {
+export default function DrawingTools({ chartRef, candleRef, symbol, interval, chartReady, onOpenSettings }) {
   // Tool & State Management
   const [activeTool, setActiveTool] = useState('crosshair');
   const [drawings, setDrawings] = useState([]);
@@ -77,22 +77,111 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, on
     };
   }, [isDraggingFloating]);
 
-  // Synchronize on chart pan & zoom (Visible Logical Range Change)
+  // Synchronize on chart pan & zoom (Visible Logical Range Change + Time Range Change)
   useEffect(() => {
-    if (!chartRef?.current) return;
-    const timeScale = chartRef.current.timeScale();
-    const handleRangeChange = () => {
-      setRenderTick((t) => t + 1);
-    };
-    try {
-      timeScale.subscribeVisibleLogicalRangeChange(handleRangeChange);
-    } catch (_) {}
-    return () => {
+    let cleanupTimeScale = null;
+    let pollInterval = null;
+
+    const attachListeners = () => {
+      if (!chartRef?.current) return false;
       try {
-        timeScale.unsubscribeVisibleLogicalRangeChange(handleRangeChange);
-      } catch (_) {}
+        const timeScale = chartRef.current.timeScale();
+        const handleRangeChange = () => {
+          setRenderTick((t) => (t + 1) % 1000000);
+        };
+        timeScale.subscribeVisibleLogicalRangeChange(handleRangeChange);
+        timeScale.subscribeVisibleTimeRangeChange(handleRangeChange);
+
+        try {
+          chartRef.current.subscribeCrosshairMove(handleRangeChange);
+        } catch (_) {}
+
+        cleanupTimeScale = () => {
+          try {
+            timeScale.unsubscribeVisibleLogicalRangeChange(handleRangeChange);
+            timeScale.unsubscribeVisibleTimeRangeChange(handleRangeChange);
+            chartRef.current?.unsubscribeCrosshairMove?.(handleRangeChange);
+          } catch (_) {}
+        };
+        return true;
+      } catch (_) {
+        return false;
+      }
     };
-  }, [chartRef]);
+
+    const attached = attachListeners();
+    if (!attached) {
+      pollInterval = setInterval(() => {
+        if (attachListeners()) {
+          clearInterval(pollInterval);
+          setRenderTick((t) => (t + 1) % 1000000);
+        }
+      }, 100);
+    }
+
+    const handleGlobalChartInteraction = () => {
+      setRenderTick((t) => (t + 1) % 1000000);
+    };
+
+    window.addEventListener('resize', handleGlobalChartInteraction);
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+      if (cleanupTimeScale) cleanupTimeScale();
+      window.removeEventListener('resize', handleGlobalChartInteraction);
+    };
+  }, [chartRef, chartReady]);
+
+  // Real-time animation frame tracking while panning/dragging chart
+  useEffect(() => {
+    let isMouseDownOnChart = false;
+    let animFrame = null;
+
+    const onPointerDown = (e) => {
+      if (e.target?.closest?.('svg') || e.target?.closest?.('canvas')) {
+        isMouseDownOnChart = true;
+      }
+    };
+
+    const onPointerMove = () => {
+      if (isMouseDownOnChart && activeTool === 'crosshair') {
+        if (!animFrame) {
+          animFrame = requestAnimationFrame(() => {
+            setRenderTick((t) => (t + 1) % 1000000);
+            animFrame = null;
+          });
+        }
+      }
+    };
+
+    const onPointerUp = () => {
+      isMouseDownOnChart = false;
+      if (animFrame) {
+        cancelAnimationFrame(animFrame);
+        animFrame = null;
+      }
+      setRenderTick((t) => (t + 1) % 1000000);
+    };
+
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('mousemove', onPointerMove);
+    window.addEventListener('mouseup', onPointerUp);
+    window.addEventListener('touchstart', onPointerDown, { passive: true });
+    window.addEventListener('touchmove', onPointerMove, { passive: true });
+    window.addEventListener('touchend', onPointerUp);
+    window.addEventListener('wheel', onPointerMove, { passive: true });
+
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('mousemove', onPointerMove);
+      window.removeEventListener('mouseup', onPointerUp);
+      window.removeEventListener('touchstart', onPointerDown);
+      window.removeEventListener('touchmove', onPointerMove);
+      window.removeEventListener('touchend', onPointerUp);
+      window.removeEventListener('wheel', onPointerMove);
+      if (animFrame) cancelAnimationFrame(animFrame);
+    };
+  }, [activeTool]);
 
   // Convert screen coordinate (x, y) to chart logical time & price
   const coordToChart = useCallback((x, y) => {
