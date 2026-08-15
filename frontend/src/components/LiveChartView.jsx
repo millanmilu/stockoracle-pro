@@ -571,31 +571,6 @@ export default function LiveChartView() {
         toast.success(`Toggled ${id}`);
     }
   }, [advancedPanelTab]);
-      case 'ai_patterns':
-        setShowPatterns(prev => !prev);
-        setShowAdvancedPanel(true);
-        setAdvancedPanelTab('patterns');
-        break;
-      case 'vpvr':
-        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'volume');
-        setAdvancedPanelTab('volume');
-        break;
-      case 'orderflow':
-        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'order');
-        setAdvancedPanelTab('order');
-        break;
-      case 'mtf_matrix':
-        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'mtf');
-        setAdvancedPanelTab('mtf');
-        break;
-      case 'backtester':
-        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'backtest');
-        setAdvancedPanelTab('backtest');
-        break;
-      default:
-        toast.success(`Toggled ${id}`);
-    }
-  }, [advancedPanelTab]);
 
   // Search & Alert State
   const [showAlertModal, setShowAlertModal] = useState(false);
