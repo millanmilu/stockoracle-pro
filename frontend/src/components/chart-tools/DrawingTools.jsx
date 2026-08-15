@@ -56,6 +56,27 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, on
   const [isDraggingFloating, setIsDraggingFloating] = useState(false);
   const floatDragRef = useRef(null);
 
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!isDraggingFloating) return;
+      setFloatingPos((prev) => ({
+        top: Math.max(0, prev.top + e.movementY),
+        right: Math.max(0, prev.right - e.movementX),
+      }));
+    };
+    const handleMouseUp = () => {
+      setIsDraggingFloating(false);
+    };
+    if (isDraggingFloating) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingFloating]);
+
   // Synchronize on chart pan & zoom (Visible Logical Range Change)
   useEffect(() => {
     if (!chartRef?.current) return;
@@ -704,7 +725,8 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, on
         {/* 1. Drag Dots Handle */}
         <span
           title="Drag to reposition toolbar"
-          style={{ color: '#787B86', cursor: 'grab', display: 'flex', alignItems: 'center' }}
+          onMouseDown={() => setIsDraggingFloating(true)}
+          style={{ color: '#787B86', cursor: isDraggingFloating ? 'grabbing' : 'grab', display: 'flex', alignItems: 'center' }}
         >
           <GripVertical size={14} />
         </span>
