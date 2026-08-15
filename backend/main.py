@@ -131,6 +131,10 @@ env_origins = os.getenv("ALLOWED_ORIGINS")
 if env_origins:
     origins.extend([o.strip() for o in env_origins.split(",") if o.strip()])
 
+from fastapi.middleware.gzip import GZipMiddleware
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,   # Fixed: was ["*"] — now uses the configured origins list

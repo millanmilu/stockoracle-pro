@@ -3,7 +3,7 @@ import { fmt } from '../utils/formatters'
 export default function TechnicalPanel({ history }) {
   if (!history || history.length === 0) return <div className="spinner" />
 
-  const last = history[history.length - 1]
+  const last = history[history.length - 1] || {}
   const { rsi, macd_hist, close, sma_20, sma_50, bb_pct_b, volatility } = last
 
   const indicators = [

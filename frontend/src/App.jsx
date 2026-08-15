@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { Toaster } from 'react-hot-toast';
 import useStore from './store/useStore';
 import TradeOneNavbar from './components/TradeOneNavbar';
@@ -6,21 +6,31 @@ import WatchlistDrawer from './components/WatchlistDrawer';
 import RightToolRail from './components/RightToolRail';
 import Dashboard from './components/Dashboard';
 import LiveChartView from './components/LiveChartView';
-import NewsPanel from './components/NewsPanel';
-import PatternsPanel from './components/PatternsPanel';
-import LevelsPanel from './components/LevelsPanel';
-import VolatilityPanel from './components/VolatilityPanel';
-import MonteCarlo from './components/MonteCarlo';
-import BacktestPanel from './components/BacktestPanel';
-import AIInsightCard from './components/AIInsightCard';
-import ScenarioSimulator from './components/ScenarioSimulator';
-import PriceAlerts from './components/PriceAlerts';
 import ErrorBoundary from './components/ErrorBoundary';
-import SentimentDashboard from './components/SentimentDashboard';
-import AdvancedScreener from './components/AdvancedScreener';
-import MarketHeatmap from './components/MarketHeatmap';
-import MacroPanel from './components/MacroPanel';
-import SupplyChainPanel from './components/SupplyChainPanel';
+
+// Lazily load secondary analytical panels on demand for faster initial render
+const NewsPanel = lazy(() => import('./components/NewsPanel'));
+const PatternsPanel = lazy(() => import('./components/PatternsPanel'));
+const LevelsPanel = lazy(() => import('./components/LevelsPanel'));
+const VolatilityPanel = lazy(() => import('./components/VolatilityPanel'));
+const MonteCarlo = lazy(() => import('./components/MonteCarlo'));
+const BacktestPanel = lazy(() => import('./components/BacktestPanel'));
+const AIInsightCard = lazy(() => import('./components/AIInsightCard'));
+const ScenarioSimulator = lazy(() => import('./components/ScenarioSimulator'));
+const PriceAlerts = lazy(() => import('./components/PriceAlerts'));
+const SentimentDashboard = lazy(() => import('./components/SentimentDashboard'));
+const AdvancedScreener = lazy(() => import('./components/AdvancedScreener'));
+const MarketHeatmap = lazy(() => import('./components/MarketHeatmap'));
+const MacroPanel = lazy(() => import('./components/MacroPanel'));
+const SupplyChainPanel = lazy(() => import('./components/SupplyChainPanel'));
+
+function LoadingFallback() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 300 }}>
+      <div className="spinner" />
+    </div>
+  );
+}
 
 function AIPredictionView() {
   return (
@@ -39,19 +49,19 @@ export default function App() {
     switch (activeView) {
       case 'Live Chart':        return <LiveChartView />;
       case 'Dashboard':         return <Dashboard />;
-      case 'AI Prediction':     return <AIPredictionView />;
-      case 'News':              return <NewsPanel ticker={selectedSymbol} />;
-      case 'Patterns':          return <PatternsPanel ticker={selectedSymbol} />;
-      case 'Levels':            return <LevelsPanel ticker={selectedSymbol} />;
-      case 'Volatility':        return <VolatilityPanel ticker={selectedSymbol} />;
-      case 'Monte Carlo':       return <MonteCarlo ticker={selectedSymbol} />;
-      case 'Backtest':          return <BacktestPanel ticker={selectedSymbol} />;
-      case 'Price Alerts':      return <PriceAlerts />;
-      case 'Sentiment':         return <SentimentDashboard />;
-      case 'Adv. Screener':     return <AdvancedScreener />;
-      case 'Heatmap':           return <MarketHeatmap />;
-      case 'Macro Data':        return <MacroPanel />;
-      case 'Supply Chain':      return <SupplyChainPanel />;
+      case 'AI Prediction':     return <Suspense fallback={<LoadingFallback />}><AIPredictionView /></Suspense>;
+      case 'News':              return <Suspense fallback={<LoadingFallback />}><NewsPanel ticker={selectedSymbol} /></Suspense>;
+      case 'Patterns':          return <Suspense fallback={<LoadingFallback />}><PatternsPanel ticker={selectedSymbol} /></Suspense>;
+      case 'Levels':            return <Suspense fallback={<LoadingFallback />}><LevelsPanel ticker={selectedSymbol} /></Suspense>;
+      case 'Volatility':        return <Suspense fallback={<LoadingFallback />}><VolatilityPanel ticker={selectedSymbol} /></Suspense>;
+      case 'Monte Carlo':       return <Suspense fallback={<LoadingFallback />}><MonteCarlo ticker={selectedSymbol} /></Suspense>;
+      case 'Backtest':          return <Suspense fallback={<LoadingFallback />}><BacktestPanel ticker={selectedSymbol} /></Suspense>;
+      case 'Price Alerts':      return <Suspense fallback={<LoadingFallback />}><PriceAlerts /></Suspense>;
+      case 'Sentiment':         return <Suspense fallback={<LoadingFallback />}><SentimentDashboard /></Suspense>;
+      case 'Adv. Screener':     return <Suspense fallback={<LoadingFallback />}><AdvancedScreener /></Suspense>;
+      case 'Heatmap':           return <Suspense fallback={<LoadingFallback />}><MarketHeatmap /></Suspense>;
+      case 'Macro Data':        return <Suspense fallback={<LoadingFallback />}><MacroPanel /></Suspense>;
+      case 'Supply Chain':      return <Suspense fallback={<LoadingFallback />}><SupplyChainPanel /></Suspense>;
       default:                  return <LiveChartView />;
     }
   };

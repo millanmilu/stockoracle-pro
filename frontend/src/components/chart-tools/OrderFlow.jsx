@@ -55,11 +55,10 @@ export default function OrderFlow({ candles, showImbalance = true }) {
       });
     }
     
-    // Calculate statistics
-    const deltas = flowMetrics.map(m => m.delta);
-    const maxDelta = Math.max(...deltas);
-    const minDelta = Math.min(...deltas);
-    const avgDelta = deltas.reduce((a, b) => a + b, 0) / deltas.length;
+    // Calculate statistics safely without call stack overflow
+    const maxDelta = deltas.length > 0 ? deltas.reduce((m, v) => (v > m ? v : m), -Infinity) : 0;
+    const minDelta = deltas.length > 0 ? deltas.reduce((m, v) => (v < m ? v : m), Infinity) : 0;
+    const avgDelta = deltas.length > 0 ? deltas.reduce((a, b) => a + b, 0) / deltas.length : 0;
     
     // Find divergence points (price making new high/low but delta not confirming)
     const divergences = [];
@@ -210,32 +209,36 @@ export default function OrderFlow({ candles, showImbalance = true }) {
       </div>
 
       {/* Cumulative Delta Trend */}
-      <div style={{ 
-        height: 40, 
-        display: 'flex', 
-        alignItems: 'flex-end',
-        gap: 2
-      }}>
-        {latestMetrics.map((m, idx) => {
-          const cumDeltas = latestMetrics.map(x => x.cumDelta);
-          const maxCum = Math.max(...cumDeltas);
-          const minCum = Math.min(...cumDeltas);
-          const range = maxCum - minCum || 1;
-          const normalizedHeight = ((m.cumDelta - minCum) / range) * 100;
-          
-          return (
-            <div
-              key={`cum-${idx}`}
-              style={{
-                flex: 1,
-                height: `${normalizedHeight}%`,
-                background: 'rgba(168,85,247,0.4)',
-                borderRadius: '1px 1px 0 0',
-              }}
-            />
-          );
-        })}
-      </div>
+      {(() => {
+        const cumDeltas = latestMetrics.map(x => x.cumDelta);
+        const maxCum = cumDeltas.length > 0 ? cumDeltas.reduce((m, v) => (v > m ? v : m), -Infinity) : 0;
+        const minCum = cumDeltas.length > 0 ? cumDeltas.reduce((m, v) => (v < m ? v : m), Infinity) : 0;
+        const range = maxCum - minCum || 1;
+
+        return (
+          <div style={{ 
+            height: 40, 
+            display: 'flex', 
+            alignItems: 'flex-end',
+            gap: 2
+          }}>
+            {latestMetrics.map((m, idx) => {
+              const normalizedHeight = ((m.cumDelta - minCum) / range) * 100;
+              return (
+                <div
+                  key={`cum-${idx}`}
+                  style={{
+                    flex: 1,
+                    height: `${normalizedHeight}%`,
+                    background: 'rgba(168,85,247,0.4)',
+                    borderRadius: '1px 1px 0 0',
+                  }}
+                />
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Signal Indicators */}
       <div style={{ 

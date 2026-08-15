@@ -4,13 +4,17 @@ export default function VolumeProfile({ candles, width = 200, height = 400 }) {
   const profileData = useMemo(() => {
     if (!candles || candles.length === 0) return null;
 
-    // Get price range
-    const prices = candles.flatMap(c => [c.high, c.low]);
-    const minPrice = Math.min(...prices);
-    const maxPrice = Math.max(...prices);
+    // Get price range safely
+    let minPrice = Infinity;
+    let maxPrice = -Infinity;
+    for (let i = 0; i < candles.length; i++) {
+      const c = candles[i];
+      if (c.high != null && c.high > maxPrice) maxPrice = c.high;
+      if (c.low != null && c.low < minPrice) minPrice = c.low;
+    }
     const priceRange = maxPrice - minPrice;
     
-    if (priceRange === 0) return null;
+    if (!isFinite(priceRange) || priceRange <= 0) return null;
 
     // Create price bins (50 levels)
     const numLevels = 50;
