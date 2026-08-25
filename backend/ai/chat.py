@@ -1,4 +1,4 @@
-﻿import os
+import os
 import logging
 
 logger = logging.getLogger("stockoracle.ai")
@@ -75,6 +75,16 @@ def build_stock_context(
 
 # ── Gemini API call ───────────────────────────────────────────────────────────
 
+CANDIDATE_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-1.5-flash",
+    "gemini-3.6-flash",
+    "gemini-2.5-pro",
+    "gemini-1.5-pro",
+    "gemini-pro",
+]
+
+
 def ask_gemini(question: str, context: str) -> str:
     """
     Sends a question + stock context to Gemini and returns the answer string.
@@ -89,21 +99,34 @@ def ask_gemini(question: str, context: str) -> str:
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
-            system_instruction=(
-                "You are StockOracle AI, an expert NSE India stock analyst. "
-                "Answer questions based ONLY on the provided stock data context. "
-                "Be concise, specific, and data-driven. Keep answers under 200 words. "
-                "Use ₹ for prices. Always mention key risks."
-            ),
-        )
+
         prompt = f"{context}\n\n--- User Question ---\n{question}"
-        response = model.generate_content(
-            prompt,
-            generation_config={"max_output_tokens": 512, "temperature": 0.3},
+        system_instruction = (
+            "You are StockOracle AI, an expert NSE India stock analyst. "
+            "Answer questions based ONLY on the provided stock data context. "
+            "Be concise, specific, and data-driven. Keep answers under 200 words. "
+            "Use ₹ for prices. Always mention key risks."
         )
-        return response.text.strip()
+
+        last_error = None
+        for m_name in CANDIDATE_MODELS:
+            try:
+                model = genai.GenerativeModel(
+                    model_name=m_name,
+                    system_instruction=system_instruction,
+                )
+                response = model.generate_content(
+                    prompt,
+                    generation_config={"max_output_tokens": 512, "temperature": 0.3},
+                )
+                if response and response.text:
+                    return response.text.strip()
+            except Exception as e:
+                last_error = e
+                continue
+
+        return f"AI temporarily unavailable: {last_error}"
     except Exception as exc:
         logger.warning("Gemini API call failed: %s", exc)
         return f"AI temporarily unavailable: {exc}"
+
