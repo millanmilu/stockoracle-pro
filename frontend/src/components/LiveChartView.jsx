@@ -1516,7 +1516,7 @@ export default function LiveChartView() {
                 cursor: 'pointer',
               }}
             >
-              <Search size={13} style={{ color: '#60A5FA' }} />
+              <BarChart3 size={13} style={{ color: '#60A5FA' }} />
               {selectedSymbol || 'STOCK'}
               <span style={{ fontSize: '0.68rem', color: '#94A3B8' }}>▾</span>
             </button>

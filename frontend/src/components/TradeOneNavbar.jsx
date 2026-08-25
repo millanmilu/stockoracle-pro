@@ -196,27 +196,25 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
             </span>
           </div>
 
-          {/* Active Symbol Pill (tap to search) */}
-          <button
-            onClick={() => setShowSearchModal(true)}
+          {/* Active Symbol Badge */}
+          <div
             style={{
-              padding: '4px 10px',
-              borderRadius: '8px',
+              padding: '3px 8px',
+              borderRadius: '6px',
               background: 'rgba(99,102,241,0.12)',
-              border: '1px solid rgba(99,102,241,0.3)',
+              border: '1px solid rgba(99,102,241,0.25)',
               color: '#818CF8',
               fontWeight: 800,
-              fontSize: '0.78rem',
+              fontSize: '0.74rem',
               fontFamily: 'JetBrains Mono, monospace',
-              cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
+              gap: '4px',
             }}
           >
+            <span style={{ fontSize: '0.62rem', color: '#6366F1' }}>NSE:</span>
             <span>{selectedSymbol}</span>
-            <Search size={11} />
-          </button>
+          </div>
 
           {/* Live Indices Ticker (Desktop only) */}
           <div className="desktop-indices" style={{
