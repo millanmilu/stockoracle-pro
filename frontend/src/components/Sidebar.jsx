@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import useStore from '../store/useStore';
 import {
   LayoutDashboard,
@@ -19,7 +19,12 @@ import {
   ChevronDown,
   ChevronRight,
   Sparkles,
-  Zap
+  Zap,
+  MessageSquare,
+  BookOpen,
+  BarChart2,
+  Layers,
+  Wallet
 } from 'lucide-react';
 
 const CATEGORIES = [
@@ -30,12 +35,14 @@ const CATEGORIES = [
       { name: 'Live Chart',    icon: CandlestickChart, badge: 'PRO' },
       { name: 'Heatmap',       icon: Grid3X3,           badge: '' },
       { name: 'Adv. Screener', icon: SlidersHorizontal, badge: '' },
+      { name: 'Portfolio',     icon: Wallet,            badge: 'NEW' },
     ]
   },
   {
     name: 'AI & Forecasting',
     items: [
       { name: 'AI Prediction', icon: BrainCircuit, badge: 'AI' },
+      { name: 'AI Chat',       icon: MessageSquare, badge: 'NEW' },
       { name: 'Backtest',      icon: History,      badge: '' },
       { name: 'Monte Carlo',   icon: Dices,        badge: '' },
     ]
@@ -46,6 +53,14 @@ const CATEGORIES = [
       { name: 'Patterns',   icon: TrendingUp, badge: '' },
       { name: 'Levels',     icon: BarChart3,  badge: '' },
       { name: 'Volatility', icon: Activity,   badge: '' },
+    ]
+  },
+  {
+    name: 'Fundamentals & Options',
+    items: [
+      { name: 'Fundamentals',  icon: BookOpen, badge: 'NEW' },
+      { name: 'Earnings',      icon: BarChart2, badge: '' },
+      { name: 'Options Chain', icon: Layers,   badge: '' },
     ]
   },
   {

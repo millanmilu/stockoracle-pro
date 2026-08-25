@@ -1074,3 +1074,297 @@ async def get_supply_chain_endpoint(request: Request, ticker: str):
     loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, lambda: get_supply_chain(t))
     return result
+
+
+# ── AI CHAT & INTELLIGENCE ENDPOINTS ────────────────────────────────────────
+
+class ChatRequest(BaseModel):
+    ticker: str
+    question: str
+
+
+class PortfolioPositionRequest(BaseModel):
+    ticker: str
+    shares: float
+    buy_price: float
+
+
+class SmartAlertRequest(BaseModel):
+    ticker: str
+    alert_type: str
+    param_value: dict = {}
+
+
+@app.post("/api/ai/chat")
+@limiter.limit("20/minute")
+async def ai_chat(request: Request, req: ChatRequest):
+    """
+    Gemini-powered AI chat. Builds full stock context (indicators, prediction,
+    patterns, levels, news) then answers the user's natural-language question.
+    """
+    from backend.ai.chat import build_stock_context, ask_gemini
+    from backend.analysis.patterns import get_pattern_summary
+    from backend.analysis.levels import calculate_support_resistance
+    from urllib.parse import quote_plus
+    from urllib.request import Request as UrllibRequest, urlopen
+    import xml.etree.ElementTree as _ET
+
+    t = req.ticker.upper().strip()
+    if not t or len(t) > 20:
+        raise HTTPException(status_code=422, detail="Invalid ticker.")
+
+    loop = asyncio.get_running_loop()
+
+    # 1. Enriched stock data
+    enriched_df = None
+    try:
+        df = await loop.run_in_executor(None, lambda: fetch_stock_data(t, period="3M"))
+        if df is not None and not df.empty:
+            enriched_df = enrich_stock_dataframe(df)
+    except Exception:
+        pass
+
+    # 2. AI Prediction
+    prediction_data = None
+    try:
+        prediction_data = _get_prediction_logic(t)
+    except Exception:
+        pass
+
+    # 3. Patterns
+    patterns = None
+    try:
+        df3m = await loop.run_in_executor(None, lambda: fetch_stock_data(t, period="6M"))
+        if df3m is not None and not df3m.empty:
+            patterns = get_pattern_summary(df3m, lookback=45)
+    except Exception:
+        pass
+
+    # 4. Levels
+    levels = None
+    try:
+        df1y = await loop.run_in_executor(None, lambda: fetch_stock_data(t, period="1Y"))
+        if df1y is not None and not df1y.empty and len(df1y) >= 15:
+            levels = calculate_support_resistance(df1y)
+    except Exception:
+        pass
+
+    # 5. News headlines
+    news_items = []
+    try:
+        from backend.data.fetcher import get_token_info as _gti
+        tok = _gti(t)
+        company = tok.get("name", t) if tok else t
+        rss_url = f"https://news.google.com/rss/search?q={quote_plus(company + ' stock NSE')}&hl=en-IN&gl=IN&ceid=IN:en"
+        rss_req = UrllibRequest(rss_url, headers={"User-Agent": "StockOracle/1.0"})
+        with urlopen(rss_req, timeout=5) as rss_resp:
+            root = _ET.fromstring(rss_resp.read())
+        for item in root.findall("./channel/item")[:5]:
+            source_el = item.find("source")
+            news_items.append({
+                "title": item.findtext("title", ""),
+                "source": source_el.text if source_el is not None else "News",
+            })
+    except Exception:
+        pass
+
+    # 6. Build context & ask Gemini
+    def _run_gemini():
+        context = build_stock_context(t, enriched_df, prediction_data, patterns, levels, news_items)
+        return ask_gemini(req.question, context)
+
+    answer = await loop.run_in_executor(None, _run_gemini)
+    return {"answer": answer, "ticker": t}
+
+
+@app.get("/api/stock/{ticker}/news-summary")
+@limiter.limit("10/minute")
+async def get_news_summary(request: Request, ticker: str):
+    """Uses Gemini to summarize recent news headlines for the given ticker."""
+    from backend.ai.news_summarizer import summarize_news
+    from urllib.parse import quote_plus
+    from urllib.request import Request as UrllibRequest, urlopen
+    import xml.etree.ElementTree as _ET
+
+    t = ticker.upper().strip()
+    headlines = []
+    try:
+        from backend.data.fetcher import get_token_info as _gti
+        tok = _gti(t)
+        company = tok.get("name", t) if tok else t
+        rss_url = f"https://news.google.com/rss/search?q={quote_plus(company + ' stock NSE')}&hl=en-IN&gl=IN&ceid=IN:en"
+        rss_req = UrllibRequest(rss_url, headers={"User-Agent": "StockOracle/1.0"})
+        with urlopen(rss_req, timeout=6) as rss_resp:
+            root = _ET.fromstring(rss_resp.read())
+        for item in root.findall("./channel/item")[:8]:
+            title = item.findtext("title", "")
+            if title:
+                headlines.append(title)
+    except Exception:
+        pass
+
+    loop = asyncio.get_running_loop()
+    summary = await loop.run_in_executor(None, lambda: summarize_news(t, headlines))
+    return summary
+
+
+@app.get("/api/stock/{symbol}/ai-trade-explain")
+@limiter.limit("10/minute")
+async def ai_trade_explain(request: Request, symbol: str):
+    """
+    Returns a Gemini-generated plain-English explanation of the AI trade signal,
+    grounded in the current indicator readings.
+    """
+    from backend.ai.chat import ask_gemini
+
+    sym = symbol.upper().strip()
+    loop = asyncio.get_running_loop()
+
+    # Get prediction and latest indicators
+    pred = None
+    enriched_df = None
+    try:
+        pred = _get_prediction_logic(sym)
+        df = await loop.run_in_executor(None, lambda: fetch_stock_data(sym, period="45D"))
+        if df is not None and not df.empty:
+            enriched_df = enrich_stock_dataframe(df)
+    except Exception:
+        pass
+
+    if not pred:
+        return {"explanation": "Prediction data unavailable.", "signal": "hold"}
+
+    # Build focused context
+    ctx_lines = [f"Stock: {sym}"]
+    ctx_lines.append(f"AI Signal: {pred.get('signal', 'hold').upper()}")
+    ctx_lines.append(f"Current Price: ₹{pred.get('current_price', 0):.2f}")
+    ctx_lines.append(f"Predicted Price (7d): ₹{pred.get('predicted_price', 0):.2f}")
+    ctx_lines.append(f"Expected Return: {float(pred.get('predicted_return_7d', 0))*100:+.2f}%")
+    ctx_lines.append(f"AI Confidence: {pred.get('ai_confidence_score', 0)}/100")
+    if enriched_df is not None and len(enriched_df) > 0:
+        row = enriched_df.iloc[-1]
+        ctx_lines.append(f"RSI(14): {float(row.get('rsi', 50)):.1f}")
+        ctx_lines.append(f"MACD Hist: {float(row.get('macd_hist', 0)):.4f}")
+        ctx_lines.append(f"ADX: {float(row.get('adx', 20)):.1f}")
+    context = "\n".join(ctx_lines)
+    question = (
+        f"Based on the data above, explain in 3-4 sentences WHY the AI is giving a "
+        f"{pred.get('signal', 'hold').upper()} signal for {sym}. "
+        f"Mention specific indicators, the confidence level, and one key risk to watch."
+    )
+
+    def _run():
+        return ask_gemini(question, context)
+
+    explanation = await loop.run_in_executor(None, _run)
+    return {"explanation": explanation, "signal": pred.get("signal", "hold")}
+
+
+@app.get("/api/stock/{ticker}/fundamentals")
+@limiter.limit("10/minute")
+async def get_fundamentals_endpoint(request: Request, ticker: str):
+    """Returns fundamental data (P/E, EPS, revenue, etc.) scraped from Screener.in."""
+    from backend.data.fundamentals import get_fundamentals
+    t = ticker.upper().strip()
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(None, lambda: get_fundamentals(t))
+    return data
+
+
+@app.get("/api/stock/{ticker}/options-chain")
+@limiter.limit("20/minute")
+async def get_options_chain_endpoint(request: Request, ticker: str, expiry: str = None):
+    """Returns the NSE options chain with OI, IV, max pain, and PCR."""
+    from backend.data.options import get_options_chain
+    t = ticker.upper().strip()
+    loop = asyncio.get_running_loop()
+    data = await loop.run_in_executor(None, lambda: get_options_chain(t, expiry))
+    return data
+
+
+# ── PORTFOLIO ENDPOINTS ──────────────────────────────────────────────────────
+
+@app.get("/api/portfolio")
+@limiter.limit("30/minute")
+async def get_portfolio_endpoint(request: Request):
+    """Returns all portfolio positions enriched with live prices and P&L."""
+    from backend.data.database import get_portfolio as _get_portfolio
+    loop = asyncio.get_running_loop()
+    positions = _get_portfolio()
+    enriched = []
+    for pos in positions:
+        t = pos["ticker"]
+        current_price = pos["buy_price"]  # fallback
+        try:
+            info = await loop.run_in_executor(None, lambda tk=t: fetch_company_info(tk))
+            if info and info.get("current_price"):
+                current_price = float(info["current_price"])
+        except Exception:
+            pass
+        pnl = (current_price - pos["buy_price"]) * pos["shares"]
+        pnl_pct = ((current_price - pos["buy_price"]) / pos["buy_price"]) * 100 if pos["buy_price"] > 0 else 0.0
+        enriched.append({
+            "id": pos["id"],
+            "ticker": t,
+            "shares": pos["shares"],
+            "buy_price": pos["buy_price"],
+            "current_price": round(current_price, 2),
+            "pnl": round(pnl, 2),
+            "pnl_pct": round(pnl_pct, 2),
+            "sector": EXPANDED_SECTOR_MAP.get(t, "Other"),
+            "added_at": pos["added_at"],
+        })
+    return enriched
+
+
+@app.post("/api/portfolio")
+@limiter.limit("10/minute")
+def add_portfolio_endpoint(request: Request, req: PortfolioPositionRequest):
+    """Add a new portfolio position."""
+    from backend.data.database import add_portfolio_position as _add
+    t = req.ticker.upper().strip()
+    if not t or req.shares <= 0 or req.buy_price <= 0:
+        raise HTTPException(status_code=422, detail="Invalid ticker, shares, or buy_price.")
+    position_id = _add(t, req.shares, req.buy_price)
+    return {"id": position_id, "message": f"Position in {t} added."}
+
+
+@app.delete("/api/portfolio/{position_id}")
+@limiter.limit("10/minute")
+def delete_portfolio_endpoint(request: Request, position_id: int):
+    """Delete a portfolio position by id."""
+    from backend.data.database import remove_portfolio_position as _remove
+    _remove(position_id)
+    return {"deleted": True}
+
+
+# ── SMART ALERTS ENDPOINTS ───────────────────────────────────────────────────
+
+@app.get("/api/smart-alerts")
+@limiter.limit("30/minute")
+def get_smart_alerts_endpoint(request: Request):
+    """Returns all configured smart alerts."""
+    from backend.data.database import get_smart_alerts as _get
+    return _get()
+
+
+@app.post("/api/smart-alerts")
+@limiter.limit("10/minute")
+def add_smart_alert_endpoint(request: Request, req: SmartAlertRequest):
+    """Add a new smart alert."""
+    from backend.data.database import add_smart_alert as _add
+    valid_types = {"rsi_below", "rsi_above", "volume_spike", "pattern", "ai_signal", "price_above", "price_below"}
+    if req.alert_type not in valid_types:
+        raise HTTPException(status_code=422, detail=f"Invalid alert_type. Valid: {sorted(valid_types)}")
+    alert_id = _add(req.ticker.upper().strip(), req.alert_type, req.param_value)
+    return {"id": alert_id, "message": "Smart alert created."}
+
+
+@app.delete("/api/smart-alerts/{alert_id}")
+@limiter.limit("10/minute")
+def delete_smart_alert_endpoint(request: Request, alert_id: int):
+    """Delete a smart alert by id."""
+    from backend.data.database import remove_smart_alert as _remove
+    _remove(alert_id)
+    return {"deleted": True}
+

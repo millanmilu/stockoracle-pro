@@ -23,3 +23,5 @@ statsmodels
 slowapi>=0.1.9
 transformers>=4.40.0
 sentencepiece>=0.2.0
+google-generativeai>=0.8.0
+beautifulsoup4>=4.12.0

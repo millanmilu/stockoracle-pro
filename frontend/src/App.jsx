@@ -23,6 +23,11 @@ const AdvancedScreener = lazy(() => import('./components/AdvancedScreener'));
 const MarketHeatmap = lazy(() => import('./components/MarketHeatmap'));
 const MacroPanel = lazy(() => import('./components/MacroPanel'));
 const SupplyChainPanel = lazy(() => import('./components/SupplyChainPanel'));
+const AIChatPanel = lazy(() => import('./components/AIChatPanel'));
+const FundamentalsPanel = lazy(() => import('./components/FundamentalsPanel'));
+const EarningsPanel = lazy(() => import('./components/EarningsPanel'));
+const OptionsChainView = lazy(() => import('./components/OptionsChainView'));
+const PortfolioView = lazy(() => import('./components/PortfolioView'));
 
 function LoadingFallback() {
   return (
@@ -51,6 +56,7 @@ export default function App() {
       case 'Chart Grid':        return <Suspense fallback={<LoadingFallback />}><MultiChartGrid /></Suspense>;
       case 'Dashboard':         return <Dashboard />;
       case 'AI Prediction':     return <Suspense fallback={<LoadingFallback />}><AIPredictionView /></Suspense>;
+      case 'AI Chat':           return <Suspense fallback={<LoadingFallback />}><AIChatPanel ticker={selectedSymbol} /></Suspense>;
       case 'News':              return <Suspense fallback={<LoadingFallback />}><NewsPanel ticker={selectedSymbol} /></Suspense>;
       case 'Patterns':          return <Suspense fallback={<LoadingFallback />}><PatternsPanel ticker={selectedSymbol} /></Suspense>;
       case 'Levels':            return <Suspense fallback={<LoadingFallback />}><LevelsPanel ticker={selectedSymbol} /></Suspense>;
@@ -63,6 +69,10 @@ export default function App() {
       case 'Heatmap':           return <Suspense fallback={<LoadingFallback />}><MarketHeatmap /></Suspense>;
       case 'Macro Data':        return <Suspense fallback={<LoadingFallback />}><MacroPanel /></Suspense>;
       case 'Supply Chain':      return <Suspense fallback={<LoadingFallback />}><SupplyChainPanel /></Suspense>;
+      case 'Fundamentals':      return <Suspense fallback={<LoadingFallback />}><FundamentalsPanel ticker={selectedSymbol} /></Suspense>;
+      case 'Earnings':          return <Suspense fallback={<LoadingFallback />}><EarningsPanel ticker={selectedSymbol} /></Suspense>;
+      case 'Options Chain':     return <Suspense fallback={<LoadingFallback />}><OptionsChainView ticker={selectedSymbol} /></Suspense>;
+      case 'Portfolio':         return <Suspense fallback={<LoadingFallback />}><PortfolioView /></Suspense>;
       default:                  return <LiveChartView />;
     }
   };

@@ -1,13 +1,14 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import useStore from '../store/useStore';
 import { 
   Bookmark, LineChart, Shield, ShoppingCart, 
-  BarChart2, Link2, Sparkles, Newspaper, BrainCircuit, X, Zap
+  BarChart2, Link2, Sparkles, Newspaper, BrainCircuit, X, Zap, MessageCircle
 } from 'lucide-react';
 import AIInsightCard from './AIInsightCard';
 import LevelsPanel from './LevelsPanel';
 import NewsPanel from './NewsPanel';
 import PriceAlerts from './PriceAlerts';
+import AIChatPanel from './AIChatPanel';
 
 export default function RightToolRail({ onToggleWatchlist }) {
   const { selectedSymbol, theme } = useStore();
@@ -16,6 +17,7 @@ export default function RightToolRail({ onToggleWatchlist }) {
   const isDark = theme !== 'light';
 
   const TOOLS = [
+    { id: 'ai_chat',     label: 'AI Chat',      icon: MessageCircle, component: AIChatPanel },
     { id: 'watchlist',   label: 'Watchlist',    icon: Bookmark, action: 'toggle_watchlist' },
     { id: 'ai_insight',  label: 'AI Insight',   icon: BrainCircuit, component: AIInsightCard },
     { id: 'levels',      label: 'Levels',       icon: BarChart2,    component: LevelsPanel },

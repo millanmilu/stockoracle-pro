@@ -126,6 +126,32 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_task_ticker ON task_status (ticker)"
         )
 
+        # 8. Portfolio (user holdings)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker      TEXT NOT NULL,
+                shares      REAL NOT NULL,
+                buy_price   REAL NOT NULL,
+                added_at    TEXT DEFAULT (datetime('now'))
+            )
+        """)
+
+        # 9. Smart Alerts (AI-powered alert conditions)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS smart_alerts (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker      TEXT NOT NULL,
+                alert_type  TEXT NOT NULL,
+                param_value TEXT DEFAULT '{}',
+                created_at  TEXT DEFAULT (datetime('now')),
+                triggered   INTEGER DEFAULT 0
+            )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_smart_alerts_ticker ON smart_alerts (ticker)"
+        )
+
         # Cleanup: purge any legacy intraday records that polluted the daily historical_prices table
         cursor.execute("DELETE FROM historical_prices WHERE length(date) > 10")
 
@@ -558,3 +584,78 @@ def get_db_stats() -> dict:
     except Exception as e:
         stats["error"] = str(e)
     return stats
+
+
+# ── Portfolio Functions ────────────────────────────────────────────────────────
+
+def add_portfolio_position(ticker: str, shares: float, buy_price: float) -> int:
+    """Add a portfolio position and return the new row id."""
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO portfolio (ticker, shares, buy_price) VALUES (?, ?, ?)",
+            (ticker.upper(), shares, buy_price),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
+def get_portfolio() -> list:
+    """Return all portfolio positions as a list of dicts."""
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, ticker, shares, buy_price, added_at FROM portfolio ORDER BY added_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def remove_portfolio_position(position_id: int):
+    """Delete a portfolio position by id."""
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM portfolio WHERE id = ?", (position_id,))
+        conn.commit()
+
+
+# ── Smart Alert Functions ──────────────────────────────────────────────────────
+
+def add_smart_alert(ticker: str, alert_type: str, param_value: dict) -> int:
+    """Add a smart alert and return the new row id."""
+    import json as _json
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO smart_alerts (ticker, alert_type, param_value) VALUES (?, ?, ?)",
+            (ticker.upper(), alert_type, _json.dumps(param_value)),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
+def get_smart_alerts() -> list:
+    """Return all smart alerts as a list of dicts (param_value parsed from JSON)."""
+    import json as _json
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, ticker, alert_type, param_value, created_at, triggered FROM smart_alerts ORDER BY created_at DESC"
+        ).fetchall()
+    result = []
+    for r in rows:
+        item = dict(r)
+        try:
+            item["param_value"] = _json.loads(item["param_value"] or "{}")
+        except Exception:
+            item["param_value"] = {}
+        result.append(item)
+    return result
+
+
+def remove_smart_alert(alert_id: int):
+    """Delete a smart alert by id."""
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM smart_alerts WHERE id = ?", (alert_id,))
+        conn.commit()
+
+
+def mark_alert_triggered(alert_id: int):
+    """Mark a smart alert as triggered."""
+    with get_db_connection() as conn:
+        conn.execute("UPDATE smart_alerts SET triggered = 1 WHERE id = ?", (alert_id,))
+        conn.commit()
