@@ -83,7 +83,7 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
     { name: 'AI Prediction', label: 'Forecast',   icon: BrainCircuit },
     { name: 'Fundamentals',  label: 'Financials', icon: BookOpen },
     { name: 'Options Chain', label: 'Options',    icon: Layers },
-    { name: 'Portfolio',     label: 'Portfolio',  icon: Wallet },
+    { name: 'Price Alerts',  label: 'Smart Alerts', icon: Bell },
     { name: 'Adv. Screener', label: 'Screener',   icon: SlidersHorizontal },
   ];
 
@@ -94,7 +94,6 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
       items: [
         { name: 'Live Chart',    label: 'Pro Live Chart', icon: CandlestickChart, badge: 'PRO' },
         { name: 'Dashboard',     label: 'Dashboard',      icon: LayoutDashboard },
-        { name: 'Portfolio',     label: 'My Portfolio',   icon: Wallet, badge: 'NEW' },
         { name: 'Heatmap',       label: 'Market Heatmap', icon: Grid3X3 },
         { name: 'Adv. Screener', label: 'Adv. Screener',  icon: SlidersHorizontal },
       ]

@@ -1368,3 +1368,108 @@ def delete_smart_alert_endpoint(request: Request, alert_id: int):
     _remove(alert_id)
     return {"deleted": True}
 
+
+@app.get("/api/smart-alerts/evaluate")
+@limiter.limit("20/minute")
+def evaluate_smart_alerts_endpoint(request: Request):
+    """
+    Evaluates all active smart alerts against current stock data, indicators, patterns, and AI signals.
+    """
+    from backend.data.database import get_smart_alerts as _get, mark_alert_triggered as _mark
+    alerts = _get()
+    results = []
+
+    for a in alerts:
+        ticker = a.get("ticker", "")
+        alert_type = a.get("alert_type", "")
+        param = a.get("param_value") or {}
+        if isinstance(param, str):
+            import json
+            try: param = json.loads(param)
+            except: param = {}
+
+        triggered = False
+        reason = ""
+        current_val = None
+
+        try:
+            df = fetch_stock_data(ticker, period="3M")
+            if df is not None and not df.empty:
+                df = enrich_stock_dataframe(df)
+                last = df.iloc[-1]
+                close = float(last.get("close", 0))
+
+                if alert_type == "price_above":
+                    threshold = float(param.get("threshold", 0))
+                    current_val = close
+                    if close >= threshold:
+                        triggered = True
+                        reason = f"Price ₹{close:.2f} is above threshold ₹{threshold:.2f}"
+
+                elif alert_type == "price_below":
+                    threshold = float(param.get("threshold", 0))
+                    current_val = close
+                    if close <= threshold:
+                        triggered = True
+                        reason = f"Price ₹{close:.2f} is below threshold ₹{threshold:.2f}"
+
+                elif alert_type == "rsi_below":
+                    threshold = float(param.get("threshold", 30))
+                    rsi_val = float(last.get("rsi", 50))
+                    current_val = rsi_val
+                    if rsi_val <= threshold:
+                        triggered = True
+                        reason = f"RSI is oversold at {rsi_val:.1f} (<= {threshold})"
+
+                elif alert_type == "rsi_above":
+                    threshold = float(param.get("threshold", 70))
+                    rsi_val = float(last.get("rsi", 50))
+                    current_val = rsi_val
+                    if rsi_val >= threshold:
+                        triggered = True
+                        reason = f"RSI is overbought at {rsi_val:.1f} (>= {threshold})"
+
+                elif alert_type == "volume_spike":
+                    vol = float(last.get("volume", 0))
+                    vol_sma = float(last.get("vol_sma_20", vol) or vol)
+                    ratio = (vol / vol_sma) if vol_sma > 0 else 1.0
+                    multiplier = float(param.get("multiplier", 2.0))
+                    current_val = f"{ratio:.1f}x"
+                    if ratio >= multiplier:
+                        triggered = True
+                        reason = f"Volume spike of {ratio:.1f}x 20-day average volume"
+
+                elif alert_type == "ai_signal":
+                    target_sig = str(param.get("signal", "buy")).lower()
+                    pred = _get_prediction_logic(ticker)
+                    actual_sig = str(pred.get("signal", "")).lower()
+                    current_val = actual_sig.upper()
+                    if target_sig in actual_sig:
+                        triggered = True
+                        reason = f"AI Forecast triggered {actual_sig.upper()} signal"
+
+                elif alert_type == "pattern":
+                    target_pat = str(param.get("pattern", "")).lower()
+                    patterns_data = get_pattern_summary(df)
+                    recent_patterns = [p.get("pattern", "").lower() for p in patterns_data.get("recent_patterns", [])]
+                    current_val = ", ".join(recent_patterns[:2]) or "None"
+                    if any(target_pat in p for p in recent_patterns):
+                        triggered = True
+                        reason = f"Detected pattern matching '{target_pat}'"
+
+            if triggered and not a.get("triggered"):
+                _mark(a["id"])
+
+        except Exception as e:
+            reason = f"Evaluation error: {e}"
+
+        results.append({
+            **a,
+            "is_triggered": triggered,
+            "reason": reason,
+            "current_value": current_val,
+        })
+
+    return results
+
+

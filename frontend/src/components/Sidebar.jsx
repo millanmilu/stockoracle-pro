@@ -35,7 +35,6 @@ const CATEGORIES = [
       { name: 'Live Chart',    icon: CandlestickChart, badge: 'PRO' },
       { name: 'Heatmap',       icon: Grid3X3,           badge: '' },
       { name: 'Adv. Screener', icon: SlidersHorizontal, badge: '' },
-      { name: 'Portfolio',     icon: Wallet,            badge: 'NEW' },
     ]
   },
   {
