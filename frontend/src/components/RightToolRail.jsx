@@ -39,42 +39,63 @@ export default function RightToolRail({ onToggleWatchlist }) {
     <div style={{ display: 'flex', height: '100%', position: 'relative' }}>
       {/* ── Slide-Over Drawer Content ── */}
       {activeDrawer && ActiveComponent && (
-        <div style={{
-          width: '360px',
-          height: '100%',
-          backgroundColor: isDark ? '#0C1022' : '#FFFFFF',
-          borderLeft: isDark ? '1px solid #1E2338' : '1px solid #E2E8F0',
-          display: 'flex',
-          flexDirection: 'column',
-          zIndex: 30,
-          boxShadow: '-8px 0 25px rgba(0,0,0,0.3)',
-          overflowY: 'auto',
-        }}>
-          {/* Drawer Header */}
+        <>
+          {/* Mobile backdrop */}
+          <div
+            onClick={() => setActiveDrawer(null)}
+            className="drawer-backdrop"
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.5)',
+              zIndex: 25,
+            }}
+          />
           <div style={{
-            padding: '12px 16px',
-            borderBottom: isDark ? '1px solid #1E2338' : '1px solid #E2E8F0',
+            position: 'absolute',
+            right: '46px',
+            top: 0,
+            bottom: 0,
+            width: 'min(calc(100vw - 46px), 360px)',
+            height: '100%',
+            backgroundColor: isDark ? '#0C1022' : '#FFFFFF',
+            borderLeft: isDark ? '1px solid #1E2338' : '1px solid #E2E8F0',
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
+            flexDirection: 'column',
+            zIndex: 30,
+            boxShadow: '-10px 0 30px rgba(0,0,0,0.4)',
+            overflowY: 'auto',
           }}>
-            <div style={{ fontWeight: 700, fontSize: '0.85rem', color: isDark ? '#F0F0FF' : '#0F172A', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Sparkles size={14} color="#3B82F6" />
-              <span>{TOOLS.find(t => t.id === activeDrawer)?.label} ({selectedSymbol})</span>
+            {/* Drawer Header */}
+            <div style={{
+              padding: '12px 16px',
+              borderBottom: isDark ? '1px solid #1E2338' : '1px solid #E2E8F0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              position: 'sticky',
+              top: 0,
+              backgroundColor: isDark ? '#0C1022' : '#FFFFFF',
+              zIndex: 10,
+            }}>
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', color: isDark ? '#F0F0FF' : '#0F172A', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Sparkles size={14} color="#3B82F6" />
+                <span>{TOOLS.find(t => t.id === activeDrawer)?.label} ({selectedSymbol})</span>
+              </div>
+              <button
+                onClick={() => setActiveDrawer(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: isDark ? '#94A3B8' : '#64748B', padding: 4 }}
+              >
+                <X size={16} />
+              </button>
             </div>
-            <button
-              onClick={() => setActiveDrawer(null)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', color: isDark ? '#94A3B8' : '#64748B' }}
-            >
-              <X size={16} />
-            </button>
-          </div>
 
-          {/* Drawer Body */}
-          <div style={{ flex: 1, padding: '16px' }}>
-            <ActiveComponent ticker={selectedSymbol} />
+            {/* Drawer Body */}
+            <div style={{ flex: 1, padding: '16px', overflowY: 'auto' }}>
+              <ActiveComponent ticker={selectedSymbol} />
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* ── Vertical Icon Rail (Angel One Right Rail) ── */}

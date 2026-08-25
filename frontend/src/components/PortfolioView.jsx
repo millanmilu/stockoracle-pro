@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import api from "../utils/api";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import { Wallet, PlusCircle, Trash2, TrendingUp, TrendingDown, RefreshCw } from "lucide-react";
@@ -84,10 +84,10 @@ export default function PortfolioView() {
   const pieData = Object.entries(sectorMap).map(([name, value]) => ({ name, value: Math.round(value) }));
 
   return (
-    <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: 24, maxWidth: 1200, margin: "0 auto" }}>
+    <div style={{ padding: "clamp(14px, 3vw, 24px)", display: "flex", flexDirection: "column", gap: 20, maxWidth: 1200, margin: "0 auto" }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <h1 style={{ margin: 0, fontSize: "1.6rem", fontWeight: 800, color: "#F0F0FF", display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+        <h1 style={{ margin: 0, fontSize: "clamp(1.2rem, 4vw, 1.6rem)", fontWeight: 800, color: "#F0F0FF", display: "flex", alignItems: "center", gap: 10 }}>
           <Wallet size={22} color="#818CF8" />My Portfolio
         </h1>
         <button onClick={fetchPortfolio} style={{ padding: "6px 12px", borderRadius: 8, background: "rgba(99,102,241,0.1)", color: "#818CF8", border: "1px solid rgba(99,102,241,0.2)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem" }}>
@@ -97,7 +97,7 @@ export default function PortfolioView() {
 
       {/* Summary Cards */}
       {positions.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10 }}>
           {[
             { label: "Total Invested", value: fmt(totalInvested), color: "#9CA3AF" },
             { label: "Current Value", value: fmt(totalCurrent), color: "#F0F0FF" },
@@ -106,13 +106,13 @@ export default function PortfolioView() {
           ].map(({ label, value, color }) => (
             <div key={label} style={cardStyle}>
               <div style={{ fontSize: "0.68rem", color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>{label}</div>
-              <div style={{ fontSize: "1.3rem", fontWeight: 800, color, fontFamily: "JetBrains Mono, monospace" }}>{value}</div>
+              <div style={{ fontSize: "1.2rem", fontWeight: 800, color, fontFamily: "JetBrains Mono, monospace" }}>{value}</div>
             </div>
           ))}
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: positions.length > 0 && pieData.length > 0 ? "1fr 260px" : "1fr", gap: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: positions.length > 0 && pieData.length > 0 ? "repeat(auto-fit, minmax(320px, 1fr))" : "1fr", gap: 16 }}>
         {/* Main column */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           {/* Add Position Form */}

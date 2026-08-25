@@ -1,4 +1,15 @@
-```
-# Build artifacts
+# Environment variables and secrets
+backend/.env
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.pytest_cache/
+
+# Node & Build artifacts
 frontend/dist/
-```
+frontend/node_modules/
+.DS_Store

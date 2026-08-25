@@ -65,16 +65,29 @@ export default function WatchlistDrawer({ onClose }) {
   ];
 
   return (
-    <div style={{
-      width: '260px',
-      height: '100%',
-      backgroundColor: isDark ? '#0A0D1A' : '#FFFFFF',
-      borderRight: isDark ? '1px solid #1E2338' : '1px solid #E2E8F0',
-      display: 'flex',
-      flexDirection: 'column',
-      flexShrink: 0,
-      userSelect: 'none',
-    }}>
+    <>
+      {/* Mobile backdrop */}
+      <div
+        onClick={onClose}
+        className="watchlist-mobile-backdrop"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          zIndex: 25,
+        }}
+      />
+      <div className="watchlist-drawer-container" style={{
+        width: 'min(85vw, 280px)',
+        height: '100%',
+        backgroundColor: isDark ? '#0A0D1A' : '#FFFFFF',
+        borderRight: isDark ? '1px solid #1E2338' : '1px solid #E2E8F0',
+        display: 'flex',
+        flexDirection: 'column',
+        flexShrink: 0,
+        userSelect: 'none',
+        zIndex: 30,
+      }}>
       {/* ── Top Header ── */}
       <div style={{
         padding: '10px 14px',
@@ -285,5 +298,6 @@ export default function WatchlistDrawer({ onClose }) {
         <ChevronRight size={14} />
       </div>
     </div>
+    </>
   );
 }

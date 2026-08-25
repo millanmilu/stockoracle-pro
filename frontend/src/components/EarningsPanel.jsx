@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import useStore from "../store/useStore";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ComposedChart, Legend } from "recharts";
 import api from "../utils/api";
@@ -27,8 +27,8 @@ export default function EarningsPanel({ ticker: propTicker }) {
   const quarterly = (data.quarterly_results || []).slice().reverse();
 
   return (
-    <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: 24, maxWidth: 1100, margin: "0 auto" }}>
-      <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 800, color: "#F0F0FF", display: "flex", alignItems: "center", gap: 10 }}>
+    <div style={{ padding: "clamp(14px, 3vw, 24px)", display: "flex", flexDirection: "column", gap: 20, maxWidth: 1100, margin: "0 auto" }}>
+      <h1 style={{ margin: 0, fontSize: "clamp(1.2rem, 4vw, 1.5rem)", fontWeight: 800, color: "#F0F0FF", display: "flex", alignItems: "center", gap: 10 }}>
         <BarChart2 size={22} color="#818CF8" />Earnings — {ticker}
       </h1>
 

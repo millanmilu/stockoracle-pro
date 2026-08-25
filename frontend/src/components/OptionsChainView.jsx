@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import useStore from "../store/useStore";
 import api from "../utils/api";
 import { Layers, RefreshCw, AlertTriangle } from "lucide-react";
@@ -73,11 +73,11 @@ export default function OptionsChainView({ ticker: propTicker }) {
   const fmt = (n, dec = 0) => n != null ? n.toLocaleString("en-IN", { maximumFractionDigits: dec }) : "—";
 
   return (
-    <div style={{ padding: "24px 28px", display: "flex", flexDirection: "column", gap: 20, maxWidth: 1300, margin: "0 auto" }}>
+    <div style={{ padding: "clamp(12px, 2.5vw, 24px)", display: "flex", flexDirection: "column", gap: 16, maxWidth: 1300, margin: "0 auto" }}>
 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <h1 style={{ margin: 0, fontSize: "1.5rem", fontWeight: 800, color: "#F0F0FF", display: "flex", alignItems: "center", gap: 10 }}>
+        <h1 style={{ margin: 0, fontSize: "clamp(1.2rem, 4vw, 1.5rem)", fontWeight: 800, color: "#F0F0FF", display: "flex", alignItems: "center", gap: 10 }}>
           <Layers size={22} color="#818CF8" />Options Chain — {ticker}
         </h1>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>

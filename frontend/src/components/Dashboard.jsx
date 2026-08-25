@@ -51,7 +51,7 @@ export default function Dashboard() {
   const isLoading = localLoading && !history;
 
   return (
-    <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: '24px', maxWidth: '1600px', margin: '0 auto' }}>
+    <div style={{ padding: 'clamp(14px, 3vw, 24px)', display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1600px', margin: '0 auto' }}>
 
       {/* ── Asset Hero & Quick Metrics ── */}
       <div style={{
@@ -59,17 +59,17 @@ export default function Dashboard() {
         alignItems: 'center',
         justifyContent: 'space-between',
         flexWrap: 'wrap',
-        gap: '20px',
+        gap: '16px',
         background: 'linear-gradient(135deg, rgba(15,23,42,0.7) 0%, rgba(30,27,75,0.4) 100%)',
         border: '1px solid rgba(99,102,241,0.2)',
         borderRadius: '16px',
-        padding: '20px 24px',
+        padding: 'clamp(14px, 2.5vw, 20px)',
         boxShadow: '0 8px 30px rgba(0,0,0,0.3)',
       }}>
         {/* Left: Ticker & Live Price */}
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h1 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 800, color: '#F0F0FF', letterSpacing: '-0.02em' }}>
+            <h1 style={{ margin: 0, fontSize: 'clamp(1.3rem, 4vw, 1.85rem)', fontWeight: 800, color: '#F0F0FF', letterSpacing: '-0.02em' }}>
               {selectedSymbol}
             </h1>
             <span style={{ fontSize: '0.72rem', padding: '3px 8px', borderRadius: '6px', background: 'rgba(99,102,241,0.15)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)', fontWeight: 700 }}>

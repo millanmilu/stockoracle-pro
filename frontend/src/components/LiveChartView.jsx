@@ -1484,16 +1484,16 @@ export default function LiveChartView() {
         alignItems:'center',
         justifyContent:'space-between',
         flexWrap:'wrap',
-        gap:12,
+        gap:8,
         background:'#0F1424',
         border:'1px solid #1E2538',
         borderRadius:10,
-        padding:'8px 14px',
+        padding:'clamp(6px, 1.5vw, 10px) clamp(8px, 2vw, 14px)',
         position: 'relative',
         zIndex: 50,
       }}>
         {/* Left: Symbol Selector · Interval · Exchange + Live OHLC Readout */}
-        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
           {/* Symbol Selector Dropdown (TradingView Style with Realtime Suggestions) */}
           <div style={{ position: 'relative' }}>
             <button
@@ -1528,7 +1528,7 @@ export default function LiveChartView() {
                   position: 'absolute',
                   top: 'calc(100% + 6px)',
                   left: 0,
-                  width: 320,
+                  width: 'min(90vw, 320px)',
                   backgroundColor: '#0F172A',
                   border: '1px solid rgba(99, 102, 241, 0.4)',
                   borderRadius: 10,

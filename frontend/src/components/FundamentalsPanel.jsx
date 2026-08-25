@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import api from '../utils/api';
@@ -80,12 +80,12 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const profit5y = data.profit_5y || [];
 
   return (
-    <div style={{ padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 28, maxWidth: 1200, margin: '0 auto' }}>
+    <div style={{ padding: 'clamp(14px, 3vw, 28px)', display: 'flex', flexDirection: 'column', gap: 24, maxWidth: 1200, margin: '0 auto' }}>
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800, color: '#F0F0FF' }}>
+          <h1 style={{ margin: 0, fontSize: 'clamp(1.2rem, 4vw, 1.6rem)', fontWeight: 800, color: '#F0F0FF' }}>
             <BookOpen size={22} style={{ marginRight: 10, verticalAlign: 'middle', color: '#818CF8' }} />
             Fundamentals — {ticker}
           </h1>
@@ -101,7 +101,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       {/* Key Ratios Grid */}
       <div>
         <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12 }}>KEY RATIOS</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(155px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
           <RatioCard label="P/E Ratio" value={data.pe_ratio} />
           <RatioCard label="P/B Ratio" value={data.pb_ratio} />
           <RatioCard label="EPS (TTM)" value={data.eps} unit=" ₹" />
@@ -130,7 +130,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
       {/* 5-Year Revenue & Profit Charts */}
       {(revenue5y.length > 0 || profit5y.length > 0) && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
           {/* Revenue */}
           {revenue5y.length > 0 && (
             <div style={cardStyle}>
