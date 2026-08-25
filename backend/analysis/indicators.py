@@ -217,13 +217,17 @@ def enrich_stock_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     df["bb_lower"] = bb_data["lower"]
     df["bb_pct_b"] = bb_data["pct_b"]
     
-    df["volatility"] = calculate_volatility(df["close"], 20)
-    
-    # 2. ATR & ADX indicators
+    # 2. Volume SMA
+    if "volume" in df.columns:
+        df["volume_sma_20"] = calculate_sma(df["volume"], 20)
+    else:
+        df["volume_sma_20"] = 0.0
+
+    # 3. ATR & ADX indicators
     df["atr"] = calculate_atr(df, 14)
     df["adx"] = calculate_adx(df, 14)
     
-    # 3. Pivot Points (Classic)
+    # 4. Pivot Points (Classic)
     pivots = calculate_pivot_points(df)
     df["pivot"] = pivots["pivot"]
     df["r1"] = pivots["r1"]
@@ -231,14 +235,14 @@ def enrich_stock_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     df["r2"] = pivots["r2"]
     df["s2"] = pivots["s2"]
     
-    # 4. Fibonacci Levels
+    # 5. Fibonacci Levels
     fibs = calculate_fibonacci_levels(df, 50)
     df["fib_236"] = fibs["fib_236"]
     df["fib_382"] = fibs["fib_382"]
     df["fib_500"] = fibs["fib_500"]
     df["fib_618"] = fibs["fib_618"]
     
-    # 5. Candlestick Patterns
+    # 6. Candlestick Patterns
     df = detect_candlestick_patterns(df)
     
     # Only drop rows if critical price columns are missing

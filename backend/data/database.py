@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import sqlite3
 import pandas as pd
@@ -8,6 +9,7 @@ from typing import Optional, Any
 
 # Absolute path for the SQLite database file
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stockoracle.db")
+DATE_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -126,21 +128,30 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_task_ticker ON task_status (ticker)"
         )
 
-        # 8. Portfolio (user holdings)
+        # 8. Portfolio (user holdings with multi-user isolation)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS portfolio (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     TEXT DEFAULT 'default_user',
                 ticker      TEXT NOT NULL,
                 shares      REAL NOT NULL,
                 buy_price   REAL NOT NULL,
                 added_at    TEXT DEFAULT (datetime('now'))
             )
         """)
+        # Auto-migrate user_id if missing
+        try:
+            p_cols = [c[1] for c in cursor.execute("PRAGMA table_info(portfolio)").fetchall()]
+            if "user_id" not in p_cols:
+                cursor.execute("ALTER TABLE portfolio ADD COLUMN user_id TEXT DEFAULT 'default_user'")
+        except Exception:
+            pass
 
         # 9. Smart Alerts (AI-powered alert conditions)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS smart_alerts (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     TEXT DEFAULT 'default_user',
                 ticker      TEXT NOT NULL,
                 alert_type  TEXT NOT NULL,
                 param_value TEXT DEFAULT '{}',
@@ -148,12 +159,20 @@ def init_db():
                 triggered   INTEGER DEFAULT 0
             )
         """)
+        # Auto-migrate user_id if missing
+        try:
+            a_cols = [c[1] for c in cursor.execute("PRAGMA table_info(smart_alerts)").fetchall()]
+            if "user_id" not in a_cols:
+                cursor.execute("ALTER TABLE smart_alerts ADD COLUMN user_id TEXT DEFAULT 'default_user'")
+        except Exception:
+            pass
+
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_smart_alerts_ticker ON smart_alerts (ticker)"
         )
 
         # Cleanup: purge any legacy intraday records that polluted the daily historical_prices table
-        cursor.execute("DELETE FROM historical_prices WHERE length(date) > 10")
+        cursor.execute("DELETE FROM historical_prices WHERE length(date) != 10")
 
         conn.commit()
     print("✅ SQLite database initialization complete.")
@@ -177,8 +196,8 @@ def _normalize_price(v):
         val = float(v)
         if np.isnan(val) or val <= 0:
             return None
-        # Heuristic: convert paise (> 100,000) to rupees
-        if val > 100000:
+        # Normalization heuristic: convert paise (> 100,000 for non-MRF stocks) to rupees
+        if val > 200000:
             return round(val / 100.0, 2)
         return round(val, 2)
     except Exception:
@@ -214,7 +233,7 @@ def clean_paise_and_outliers(ticker: str = None):
                 print(f"🛠️ Normalized {len(paise_candidates)} paise records to rupees for {t}.")
 
         # Delete invalid <= 0 rows
-        conn.execute("DELETE FROM historical_prices WHERE close <= 0 OR high <= 0 OR open <= 0 OR low <= 0 OR length(date) > 10")
+        conn.execute("DELETE FROM historical_prices WHERE close <= 0 OR high <= 0 OR open <= 0 OR low <= 0 OR length(date) != 10")
         conn.commit()
 
 
@@ -222,7 +241,7 @@ def save_historical_prices(ticker: str, df: pd.DataFrame):
     """
     Saves a DataFrame of daily historical prices into the SQLite database.
     Uses executemany (bulk insert) for fast writes with unit normalization.
-    Strictly accepts only daily dates (YYYY-MM-DD).
+    Strictly accepts only daily dates (YYYY-MM-DD) matching DATE_REGEX.
     """
     if df is None or df.empty:
         return
@@ -232,13 +251,16 @@ def save_historical_prices(ticker: str, df: pd.DataFrame):
     for _, row in df.iterrows():
         try:
             d_str = str(row["date"])[:10]  # Enforce YYYY-MM-DD
+            if not DATE_REGEX.match(d_str):
+                continue
+
             o_val = _normalize_price(row["open"])
             h_val = _normalize_price(row["high"])
             l_val = _normalize_price(row["low"])
             c_val = _normalize_price(row["close"])
             vol   = int(row.get("volume", 0) or 0)
 
-            if not all([o_val, h_val, l_val, c_val]) or len(d_str) != 10:
+            if not all([o_val, h_val, l_val, c_val]):
                 continue
             rows.append((ticker, d_str, o_val, max(h_val, o_val, c_val), min(l_val, o_val, c_val), c_val, vol))
         except Exception:
@@ -616,53 +638,57 @@ def get_db_stats() -> dict:
 
 # ── Portfolio Functions ────────────────────────────────────────────────────────
 
-def add_portfolio_position(ticker: str, shares: float, buy_price: float) -> int:
+# ── Portfolio Functions ────────────────────────────────────────────────────────
+
+def add_portfolio_position(ticker: str, shares: float, buy_price: float, user_id: str = "default_user") -> int:
     """Add a portfolio position and return the new row id."""
     with get_db_connection() as conn:
         cursor = conn.execute(
-            "INSERT INTO portfolio (ticker, shares, buy_price) VALUES (?, ?, ?)",
-            (ticker.upper(), shares, buy_price),
+            "INSERT INTO portfolio (user_id, ticker, shares, buy_price) VALUES (?, ?, ?, ?)",
+            (user_id, ticker.upper(), shares, buy_price),
         )
         conn.commit()
         return cursor.lastrowid
 
 
-def get_portfolio() -> list:
-    """Return all portfolio positions as a list of dicts."""
+def get_portfolio(user_id: str = "default_user") -> list:
+    """Return all portfolio positions for a user as a list of dicts."""
     with get_db_connection() as conn:
         rows = conn.execute(
-            "SELECT id, ticker, shares, buy_price, added_at FROM portfolio ORDER BY added_at DESC"
+            "SELECT id, user_id, ticker, shares, buy_price, added_at FROM portfolio WHERE user_id = ? ORDER BY added_at DESC",
+            (user_id,)
         ).fetchall()
     return [dict(r) for r in rows]
 
 
-def remove_portfolio_position(position_id: int):
-    """Delete a portfolio position by id."""
+def remove_portfolio_position(position_id: int, user_id: str = "default_user"):
+    """Delete a portfolio position by id and user_id."""
     with get_db_connection() as conn:
-        conn.execute("DELETE FROM portfolio WHERE id = ?", (position_id,))
+        conn.execute("DELETE FROM portfolio WHERE id = ? AND user_id = ?", (position_id, user_id))
         conn.commit()
 
 
 # ── Smart Alert Functions ──────────────────────────────────────────────────────
 
-def add_smart_alert(ticker: str, alert_type: str, param_value: dict) -> int:
+def add_smart_alert(ticker: str, alert_type: str, param_value: dict, user_id: str = "default_user") -> int:
     """Add a smart alert and return the new row id."""
     import json as _json
     with get_db_connection() as conn:
         cursor = conn.execute(
-            "INSERT INTO smart_alerts (ticker, alert_type, param_value) VALUES (?, ?, ?)",
-            (ticker.upper(), alert_type, _json.dumps(param_value)),
+            "INSERT INTO smart_alerts (user_id, ticker, alert_type, param_value) VALUES (?, ?, ?, ?)",
+            (user_id, ticker.upper(), alert_type, _json.dumps(param_value)),
         )
         conn.commit()
         return cursor.lastrowid
 
 
-def get_smart_alerts() -> list:
-    """Return all smart alerts as a list of dicts (param_value parsed from JSON)."""
+def get_smart_alerts(user_id: str = "default_user") -> list:
+    """Return all smart alerts for a user as a list of dicts (param_value parsed from JSON)."""
     import json as _json
     with get_db_connection() as conn:
         rows = conn.execute(
-            "SELECT id, ticker, alert_type, param_value, created_at, triggered FROM smart_alerts ORDER BY created_at DESC"
+            "SELECT id, user_id, ticker, alert_type, param_value, created_at, triggered FROM smart_alerts WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,)
         ).fetchall()
     result = []
     for r in rows:
@@ -675,10 +701,10 @@ def get_smart_alerts() -> list:
     return result
 
 
-def remove_smart_alert(alert_id: int):
-    """Delete a smart alert by id."""
+def remove_smart_alert(alert_id: int, user_id: str = "default_user"):
+    """Delete a smart alert by id and user_id."""
     with get_db_connection() as conn:
-        conn.execute("DELETE FROM smart_alerts WHERE id = ?", (alert_id,))
+        conn.execute("DELETE FROM smart_alerts WHERE id = ? AND user_id = ?", (alert_id, user_id))
         conn.commit()
 
 
@@ -687,3 +713,4 @@ def mark_alert_triggered(alert_id: int):
     with get_db_connection() as conn:
         conn.execute("UPDATE smart_alerts SET triggered = 1 WHERE id = ?", (alert_id,))
         conn.commit()
+

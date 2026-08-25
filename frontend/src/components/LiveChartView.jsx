@@ -17,6 +17,7 @@ import VolumeProfile from './chart-tools/VolumeProfile';
 import OrderFlow from './chart-tools/OrderFlow';
 import AIPatternRecognition from './chart-tools/AIPatternRecognition';
 import MultiTimeframeCorrelation from './chart-tools/MultiTimeframeCorrelation';
+import TrustBadge from './TrustBadge';
 
 /* ─── Constants ─────────────────────────────────────────────────────────────── */
 
@@ -1520,6 +1521,7 @@ export default function LiveChartView() {
               {selectedSymbol || 'STOCK'}
               <span style={{ fontSize: '0.68rem', color: '#94A3B8' }}>▾</span>
             </button>
+            <TrustBadge />
 
             {/* Quick Symbol & Autocomplete Dropdown */}
             {showSymbolModal && (
