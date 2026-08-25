@@ -59,7 +59,7 @@ export default function AdvancedScreener() {
     if (!isBackground) setLoading(true);
     setError(null);
 
-    api.get('/api/screener/advanced?universe=NIFTY%20100')
+    api.get('/api/screener/advanced?universe=ALL%20NSE')
       .then((r) => {
         if (Array.isArray(r.data) && r.data.length > 0) {
           setAllStocks(r.data);
@@ -188,8 +188,9 @@ export default function AdvancedScreener() {
 
   // Filter stocks by Selected Universe
   const universeStocks = useMemo(() => {
-    const targetTickers = INDEX_CONSTITUENTS[universe] || INDEX_CONSTITUENTS['NIFTY 50'];
-    if (!targetTickers || universe === 'NIFTY 100') return allStocks;
+    if (universe === 'ALL NSE' || universe === 'NIFTY 500' || !universe) return allStocks;
+    const targetTickers = INDEX_CONSTITUENTS[universe];
+    if (!targetTickers || targetTickers.length === 0) return allStocks;
     return allStocks.filter((r) => targetTickers.includes(r.ticker));
   }, [allStocks, universe]);
 

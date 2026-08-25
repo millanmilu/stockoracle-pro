@@ -571,47 +571,19 @@ def get_backtest(request: Request, ticker: str):
     return results
 
 @app.get("/api/screener")
-@limiter.limit("20/minute")
+@limiter.limit("60/minute")
 async def get_screener_list(request: Request, signal: str = "", min_score: int = 0):
-    # Try DB cache first (5-min TTL — persists across restarts)
-    cached_results = get_screener_results(ttl_minutes=5)
-
+    """Returns basic screener list derived from the full advanced screener dataset."""
+    cached_results = get_screener_results(ttl_minutes=10)
     if cached_results is None:
-        # Cache miss — rebuild in thread pool so we don't block the event loop
-        def _build_screener_cache():
-            fresh_results = []
-            for t in popular_tickers:
-                try:
-                    info = fetch_company_info(t)
-                    if not info:
-                        continue
-                    pred = _get_prediction_logic(t)
-                    prev = info["previous_close"] or 1.0
-                    change_pct = ((info["current_price"] - prev) / prev) * 100
-                    fresh_results.append({
-                        "ticker":        t,
-                        "name":          info["name"],
-                        "price":         info["current_price"],
-                        "change":        round(change_pct, 3),
-                        "ai_score":      pred["ai_confidence_score"],
-                        "signal":        pred["signal"],
-                        "predicted_pct": round(pred["predicted_return_7d"] * 100, 3),
-                    })
-                except Exception:
-                    continue
-            return fresh_results
+        # Trigger advanced screener build
+        return await get_advanced_screener(request, universe="ALL NSE", signal=signal, min_score=min_score)
 
-        loop = asyncio.get_running_loop()
-        cached_results = await loop.run_in_executor(None, _build_screener_cache)
-        save_screener_results(cached_results)
-
-    # Apply optional filters
     results = cached_results
-    if signal:
-        results = [r for r in results if r["signal"] == signal.lower()]
+    if signal and signal.lower() != "all":
+        results = [r for r in results if r.get("signal", "").lower() == signal.lower()]
     if min_score:
-        results = [r for r in results if r["ai_score"] >= min_score]
-
+        results = [r for r in results if r.get("ai_score", 0) >= min_score]
     return results
 
 # ── WEBSOCKET LIVE PRICE FEED MANAGER ──
@@ -773,7 +745,7 @@ async def get_market_sentiment_endpoint(request: Request):
     return result
 
 
-# Multi-Index Constituent Universes
+# Multi-Index Constituent Universes (Comprehensive NSE Coverage)
 INDEX_UNIVERSES: Dict[str, List[str]] = {
     "NIFTY 50": [
         "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL",
@@ -787,16 +759,41 @@ INDEX_UNIVERSES: Dict[str, List[str]] = {
         "HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "INDUSINDBK",
         "PNB", "BANKBARODA", "FEDERALBNK", "IDFCFIRSTB", "AUBANK", "BANDHANBNK"
     ],
+    "NIFTY PSU BANK": [
+        "SBIN", "PNB", "BANKBARODA", "CANBK", "UNIONBANK", "IOB", "INDIANB", "UCOBANK",
+        "BANKINDIA", "CENTRALBK", "PSB", "MAHABANK"
+    ],
     "NIFTY IT": [
-        "TCS", "INFY", "HCLTECH", "WIPRO", "TECHM", "LTIM", "PERSISTENT", "COFORGE", "LTTS", "MPHASIS"
+        "TCS", "INFY", "HCLTECH", "WIPRO", "TECHM", "LTIM", "PERSISTENT", "COFORGE", "LTTS", "MPHASIS",
+        "TATAELXSI", "KPITTECH", "CYIENT", "SONACOMS", "ZENSARTECH", "BSOFT"
     ],
     "NIFTY AUTO": [
         "TATAMOTORS", "MARUTI", "M&M", "BAJAJ-AUTO", "EICHERMOT", "HEROMOTOCO",
-        "TVSMOTOR", "BHARATFORG", "ASHOKLEY", "MOTHERSON"
+        "TVSMOTOR", "BHARATFORG", "ASHOKLEY", "MOTHERSON", "MRF", "BALKRISIND", "BOSCHLTD", "APOLLOTYRE", "EXIDEIND"
     ],
     "NIFTY PHARMA": [
         "SUNPHARMA", "DRREDDY", "CIPLA", "DIVISLAB", "APOLLOHOSP", "LUPIN",
-        "AUROPHARMA", "TORNTPHARM", "ZYDUSLIFE", "BIOCON"
+        "AUROPHARMA", "TORNTPHARM", "ZYDUSLIFE", "BIOCON", "MANKIND", "ALKEM", "GLENMARK", "ABBOTINDIA", "IPCALAB",
+        "LAURUSLABS", "NATCOPHARM", "SYNGENE", "GRANULES", "AJANTPHARM"
+    ],
+    "NIFTY FMCG": [
+        "ITC", "HUL", "NESTLEIND", "BRITANNIA", "TATACONSUM", "DABUR", "GODREJCP", "MARICO",
+        "COLPAL", "VBL", "PGHH", "EMAMILTD", "RADICO", "UBL", "BALRAMCHIN"
+    ],
+    "NIFTY METAL": [
+        "TATASTEEL", "JSWSTEEL", "HINDALCO", "VEDL", "JINDALSTEL", "SAIL", "NMDC", "NATIONALUM",
+        "HINDZINC", "APLAPOLLO", "RATNAMANI", "WELCORP", "HINDCOPPER", "JSL"
+    ],
+    "NIFTY ENERGY": [
+        "RELIANCE", "NTPC", "POWERGRID", "ONGC", "COALINDIA", "BPCL", "IOC", "GAIL",
+        "TATAPOWER", "ADANIGREEN", "ADANIPOWER", "ADANITRANS", "NHPC", "SJVN", "OIL"
+    ],
+    "NIFTY INFRA": [
+        "LT", "ULTRACEMCO", "ADANIENT", "ADANIPORTS", "GRASIM", "SIEMENS", "ABB", "DLF", "AMBUJACEM",
+        "BEL", "HAL", "GMRINFRA", "BHEL", "CONCOR", "IRCTC", "RVNL", "IRCON", "NBCC", "VOLTAS", "HAVELLS"
+    ],
+    "NIFTY REALTY": [
+        "DLF", "GODREJPROP", "LODHA", "OBEROIRLTY", "PHOENIXLTD", "BRIGADE", "PRESTIGE", "SOBHA", "SUNTECK", "MAHLIFE"
     ],
     "NIFTY 100": [
         "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL",
@@ -809,25 +806,28 @@ INDEX_UNIVERSES: Dict[str, List[str]] = {
         "PERSISTENT", "COFORGE", "LTTS", "MPHASIS", "BAJAJ-AUTO", "TVSMOTOR", "BHARATFORG", "ASHOKLEY",
         "LUPIN", "AUROPHARMA", "TORNTPHARM", "ZYDUSLIFE", "BIOCON", "HAL", "VEDL", "IOC", "GAIL",
         "CHOLAFIN", "HAVELLS", "PIDILITIND", "DABUR", "GODREJCP", "MARICO", "SIEMENS", "ABB", "DLF",
-        "AMBUJACEM", "TRENT", "ZOMATO", "JIOFIN", "CANBK", "UNIONBANK", "IRFC", "PFC", "RECLTD"
+        "AMBUJACEM", "TRENT", "ZOMATO", "JIOFIN", "CANBK", "UNIONBANK", "IRFC", "PFC", "RECLTD",
+        "TATAPOWER", "ADANIGREEN", "ADANIPOWER", "VBL", "POLYCAB", "JINDALSTEL", "MANKIND", "BOSCHLTD",
+        "CGPOWER", "MAXHEALTH", "SOLARINDS"
     ]
 }
 
 # Comprehensive Master Sector Map
 EXPANDED_SECTOR_MAP = {
-    "RELIANCE": "Energy", "ONGC": "Energy", "IOC": "Energy", "BPCL": "Energy", "NTPC": "Energy", "POWERGRID": "Energy", "COALINDIA": "Energy", "GAIL": "Energy",
-    "TCS": "IT", "INFY": "IT", "WIPRO": "IT", "HCLTECH": "IT", "TECHM": "IT", "LTIM": "IT", "PERSISTENT": "IT", "COFORGE": "IT", "LTTS": "IT", "MPHASIS": "IT",
+    "RELIANCE": "Energy", "ONGC": "Energy", "IOC": "Energy", "BPCL": "Energy", "NTPC": "Energy", "POWERGRID": "Energy", "COALINDIA": "Energy", "GAIL": "Energy", "TATAPOWER": "Energy", "ADANIGREEN": "Energy", "ADANIPOWER": "Energy", "ADANITRANS": "Energy", "NHPC": "Energy", "SJVN": "Energy", "OIL": "Energy",
+    "TCS": "IT", "INFY": "IT", "WIPRO": "IT", "HCLTECH": "IT", "TECHM": "IT", "LTIM": "IT", "PERSISTENT": "IT", "COFORGE": "IT", "LTTS": "IT", "MPHASIS": "IT", "TATAELXSI": "IT", "KPITTECH": "IT", "CYIENT": "IT", "SONACOMS": "IT", "ZENSARTECH": "IT", "BSOFT": "IT",
     "HDFCBANK": "Banking", "ICICIBANK": "Banking", "SBIN": "Banking", "AXISBANK": "Banking", "KOTAKBANK": "Banking", "BAJFINANCE": "Banking", "HDFCLIFE": "Banking",
     "BAJAJFINSV": "Banking", "INDUSINDBK": "Banking", "PNB": "Banking", "BANKBARODA": "Banking", "FEDERALBNK": "Banking", "IDFCFIRSTB": "Banking", "AUBANK": "Banking",
     "BANDHANBNK": "Banking", "SBILIFE": "Banking", "SHRIRAMFIN": "Banking", "CHOLAFIN": "Banking", "JIOFIN": "Banking", "CANBK": "Banking", "UNIONBANK": "Banking",
-    "IRFC": "Banking", "PFC": "Banking", "RECLTD": "Banking",
-    "BHARTIARTL": "Telecom",
-    "ITC": "FMCG", "HUL": "FMCG", "NESTLEIND": "FMCG", "BRITANNIA": "FMCG", "TATACONSUM": "FMCG", "DABUR": "FMCG", "GODREJCP": "FMCG", "MARICO": "FMCG",
-    "LT": "Infrastructure", "ULTRACEMCO": "Infrastructure", "ADANIENT": "Infrastructure", "ADANIPORTS": "Infrastructure", "GRASIM": "Infrastructure", "SIEMENS": "Infrastructure", "ABB": "Infrastructure", "DLF": "Infrastructure", "AMBUJACEM": "Infrastructure", "BEL": "Infrastructure", "HAL": "Infrastructure",
-    "MARUTI": "Auto", "TATAMOTORS": "Auto", "HEROMOTOCO": "Auto", "M&M": "Auto", "EICHERMOT": "Auto", "BAJAJ-AUTO": "Auto", "TVSMOTOR": "Auto", "BHARATFORG": "Auto", "ASHOKLEY": "Auto", "MOTHERSON": "Auto",
-    "SUNPHARMA": "Pharma", "DRREDDY": "Pharma", "CIPLA": "Pharma", "DIVISLAB": "Pharma", "APOLLOHOSP": "Pharma", "LUPIN": "Pharma", "AUROPHARMA": "Pharma", "TORNTPHARM": "Pharma", "ZYDUSLIFE": "Pharma", "BIOCON": "Pharma",
-    "TATASTEEL": "Metals", "JSWSTEEL": "Metals", "HINDALCO": "Metals", "VEDL": "Metals",
-    "TITAN": "Consumer", "HAVELLS": "Consumer", "PIDILITIND": "Consumer", "TRENT": "Consumer", "ZOMATO": "Consumer",
+    "IRFC": "Banking", "PFC": "Banking", "RECLTD": "Banking", "IOB": "Banking", "INDIANB": "Banking", "UCOBANK": "Banking", "BANKINDIA": "Banking", "CENTRALBK": "Banking", "PSB": "Banking", "MAHABANK": "Banking",
+    "BHARTIARTL": "Telecom", "IDEA": "Telecom", "INDUSTOWER": "Telecom", "TATACOMM": "Telecom",
+    "ITC": "FMCG", "HUL": "FMCG", "NESTLEIND": "FMCG", "BRITANNIA": "FMCG", "TATACONSUM": "FMCG", "DABUR": "FMCG", "GODREJCP": "FMCG", "MARICO": "FMCG", "COLPAL": "FMCG", "VBL": "FMCG", "PGHH": "FMCG", "EMAMILTD": "FMCG", "RADICO": "FMCG", "UBL": "FMCG", "BALRAMCHIN": "FMCG",
+    "LT": "Infrastructure", "ULTRACEMCO": "Infrastructure", "ADANIENT": "Infrastructure", "ADANIPORTS": "Infrastructure", "GRASIM": "Infrastructure", "SIEMENS": "Infrastructure", "ABB": "Infrastructure", "DLF": "Infrastructure", "AMBUJACEM": "Infrastructure", "BEL": "Infrastructure", "HAL": "Infrastructure", "GMRINFRA": "Infrastructure", "BHEL": "Infrastructure", "CONCOR": "Infrastructure", "IRCTC": "Infrastructure", "RVNL": "Infrastructure", "IRCON": "Infrastructure", "NBCC": "Infrastructure", "VOLTAS": "Infrastructure", "HAVELLS": "Infrastructure", "POLYCAB": "Infrastructure", "CGPOWER": "Infrastructure", "SOLARINDS": "Infrastructure",
+    "MARUTI": "Auto", "TATAMOTORS": "Auto", "HEROMOTOCO": "Auto", "M&M": "Auto", "EICHERMOT": "Auto", "BAJAJ-AUTO": "Auto", "TVSMOTOR": "Auto", "BHARATFORG": "Auto", "ASHOKLEY": "Auto", "MOTHERSON": "Auto", "MRF": "Auto", "BALKRISIND": "Auto", "BOSCHLTD": "Auto", "APOLLOTYRE": "Auto", "EXIDEIND": "Auto",
+    "SUNPHARMA": "Pharma", "DRREDDY": "Pharma", "CIPLA": "Pharma", "DIVISLAB": "Pharma", "APOLLOHOSP": "Pharma", "LUPIN": "Pharma", "AUROPHARMA": "Pharma", "TORNTPHARM": "Pharma", "ZYDUSLIFE": "Pharma", "BIOCON": "Pharma", "MANKIND": "Pharma", "ALKEM": "Pharma", "GLENMARK": "Pharma", "ABBOTINDIA": "Pharma", "IPCALAB": "Pharma", "LAURUSLABS": "Pharma", "NATCOPHARM": "Pharma", "SYNGENE": "Pharma", "GRANULES": "Pharma", "AJANTPHARM": "Pharma", "MAXHEALTH": "Pharma",
+    "TATASTEEL": "Metals", "JSWSTEEL": "Metals", "HINDALCO": "Metals", "VEDL": "Metals", "JINDALSTEL": "Metals", "SAIL": "Metals", "NMDC": "Metals", "NATIONALUM": "Metals", "HINDZINC": "Metals", "APLAPOLLO": "Metals", "RATNAMANI": "Metals", "WELCORP": "Metals", "HINDCOPPER": "Metals", "JSL": "Metals",
+    "TITAN": "Consumer", "PIDILITIND": "Consumer", "TRENT": "Consumer", "ZOMATO": "Consumer", "NYKAA": "Consumer", "PAYTM": "Consumer", "DELHIVERY": "Consumer",
+    "GODREJPROP": "Realty", "LODHA": "Realty", "OBEROIRLTY": "Realty", "PHOENIXLTD": "Realty", "BRIGADE": "Realty", "PRESTIGE": "Realty", "SOBHA": "Realty", "SUNTECK": "Realty", "MAHLIFE": "Realty",
 }
 
 
@@ -835,7 +835,7 @@ EXPANDED_SECTOR_MAP = {
 @limiter.limit("200/minute")
 async def get_advanced_screener(
     request: Request,
-    universe: str = "NIFTY 50",
+    universe: str = "ALL NSE",
     sector: str = "",
     min_rsi: float = 0.0,
     max_rsi: float = 100.0,
@@ -848,14 +848,17 @@ async def get_advanced_screener(
     sort_dir: str = "desc",
 ):
     """
-    Advanced multi-universe stock screener with support for:
-    NIFTY 50, BANK NIFTY, NIFTY IT, NIFTY AUTO, NIFTY PHARMA, and NIFTY 100.
+    Comprehensive multi-universe stock screener with full NSE universe support (500+ stocks).
     """
-    selected_universe = universe.upper() if universe.upper() in INDEX_UNIVERSES else "NIFTY 50"
-    target_tickers = INDEX_UNIVERSES[selected_universe]
+    from backend.data.database import get_all_stock_universe_tickers
+
+    selected_universe = universe.upper().strip()
+    is_all_universe = selected_universe in ["ALL NSE", "ALL", "NIFTY 500", ""]
+
+    target_tickers = INDEX_UNIVERSES.get(selected_universe) if not is_all_universe else None
 
     # Re-use or build screener base results
-    cached_results = get_screener_results(ttl_minutes=5)
+    cached_results = get_screener_results(ttl_minutes=10)
 
     if cached_results is None:
         from concurrent.futures import ThreadPoolExecutor
@@ -923,11 +926,21 @@ async def get_advanced_screener(
                 return None
 
         def _build():
-            # Process entire NIFTY 100 universe in parallel with worker pool
-            all_100_tickers = INDEX_UNIVERSES["NIFTY 100"]
+            # Combine all index tickers + database universe tickers
+            master_set = set(EXPANDED_SECTOR_MAP.keys())
+            for syms in INDEX_UNIVERSES.values():
+                master_set.update(syms)
+            try:
+                db_tickers = get_all_stock_universe_tickers(limit=500)
+                if db_tickers:
+                    master_set.update(db_tickers)
+            except Exception:
+                pass
+
+            all_tickers = sorted(list(master_set))
             fresh = []
-            with ThreadPoolExecutor(max_workers=8) as executor:
-                results_list = list(executor.map(_process_ticker, all_100_tickers))
+            with ThreadPoolExecutor(max_workers=16) as executor:
+                results_list = list(executor.map(_process_ticker, all_tickers))
             for res in results_list:
                 if res is not None:
                     fresh.append(res)
@@ -935,24 +948,26 @@ async def get_advanced_screener(
 
         loop = asyncio.get_running_loop()
         cached_results = await loop.run_in_executor(None, _build)
-        save_screener_results(cached_results)
+        save_screener_results(cached_results, ttl_minutes=10)
 
     results = cached_results
 
-    # 1. Filter by Selected Index Universe
-    results = [r for r in results if r.get("ticker", "") in target_tickers]
+    # 1. Filter by Selected Index Universe (if specific index selected)
+    if target_tickers is not None:
+        results = [r for r in results if r.get("ticker", "") in target_tickers]
 
     # 2. Sector Filter
-    if sector:
+    if sector and sector.lower() != "all":
         results = [r for r in results if r.get("sector", "").lower() == sector.lower()]
 
     # 3. Signal Filter
-    if signal:
-        results = [r for r in results if r.get("signal", "") == signal.lower()]
+    if signal and signal.lower() != "all":
+        results = [r for r in results if r.get("signal", "").lower() == signal.lower()]
 
     # 4. Min Score
     if min_score:
         results = [r for r in results if r.get("ai_score", 0) >= min_score]
+
 
     # 5. RSI Range
     if min_rsi > 0 or max_rsi < 100:

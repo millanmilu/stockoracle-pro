@@ -324,6 +324,34 @@ def search_stock_universe(query: str, limit: int = 12) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def get_all_stock_universe_tickers(limit: int = 1500) -> list[str]:
+    """Returns all NSE tickers stored in the stock_universe table."""
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT ticker FROM stock_universe
+            ORDER BY ticker ASC
+            LIMIT ?
+            """,
+            (limit,)
+        ).fetchall()
+    return [row["ticker"] for row in rows]
+
+
+def get_all_stock_universe_records(limit: int = 1500) -> list[dict]:
+    """Returns all NSE stock master records."""
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT ticker, name, exchange FROM stock_universe
+            ORDER BY ticker ASC
+            LIMIT ?
+            """,
+            (limit,)
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 # ── Live Ticks ─────────────────────────────────────────────────────────────────
 
 def save_live_tick(ticker: str, price: float, change_pct: float):
