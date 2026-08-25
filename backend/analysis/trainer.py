@@ -159,13 +159,16 @@ def predict_future(symbol: str, override_features: dict = None) -> dict:
     booster = xgb.Booster()
     
     import tempfile
-    with tempfile.NamedTemporaryFile('w', delete=False) as tf:
+    with tempfile.NamedTemporaryFile('w', suffix='.json', delete=False) as tf:
         json.dump(xgb_json, tf)
         temp_name = tf.name
     try:
         booster.load_model(temp_name)
     finally:
-        os.remove(temp_name)
+        try:
+            os.remove(temp_name)
+        except Exception:
+            pass
         
     # XGBoost requires DMatrix for booster inference
     dtest = xgb.DMatrix(X_latest)

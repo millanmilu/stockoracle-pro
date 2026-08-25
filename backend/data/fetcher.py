@@ -363,7 +363,15 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
     if not is_intraday:
         try:
             import yfinance as yf
-            yf_ticker = f"{ticker}.NS" if not ticker.endswith(".NS") else ticker
+            YF_ALIAS_MAP = {
+                "HUL": "HINDUNILVR.NS",
+                "M&M": "M&M.NS",
+                "TATAMTRDVR": "TATAMOTORS.NS",
+                "NIFTY50": "^NSEI",
+                "NIFTY": "^NSEI",
+                "BANKNIFTY": "^NSEBANK",
+            }
+            yf_ticker = YF_ALIAS_MAP.get(ticker, f"{ticker}.NS" if not ticker.endswith(".NS") else ticker)
             yf_period = "1y" if period.upper() in ["1Y", "370D", "200D", "6M"] else ("5y" if period.upper() == "5Y" else "6mo")
             yf_data = yf.download(yf_ticker, period=yf_period, interval="1d", progress=False, auto_adjust=True)
             if yf_data is not None and not yf_data.empty:
