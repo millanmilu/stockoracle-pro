@@ -274,51 +274,8 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
           })}
         </nav>
 
-        {/* ── Right: Search + Watchlist + Theme + Fullscreen ── */}
+        {/* ── Right: Theme + Fullscreen Controls ── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-          {/* Quick Search Button */}
-          <button
-            onClick={() => setShowSearchModal(true)}
-            title="Search Stocks (Ctrl+K)"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 10px',
-              borderRadius: '8px',
-              border: isDark ? '1px solid #1E2338' : '1px solid #CBD5E1',
-              background: isDark ? 'rgba(255,255,255,0.03)' : '#F8FAFC',
-              color: isDark ? '#94A3B8' : '#64748B',
-              cursor: 'pointer',
-              fontSize: '0.75rem',
-            }}
-          >
-            <Search size={14} />
-            <span className="search-shortcut-text" style={{ fontSize: '0.7rem' }}>Search</span>
-            <kbd className="search-kbd" style={{ fontSize: '0.65rem', padding: '1px 4px', background: isDark ? '#1E2338' : '#E2E8F0', borderRadius: '4px' }}>⌘K</kbd>
-          </button>
-
-          {/* Watchlist Toggle */}
-          <button
-            onClick={onToggleWatchlist}
-            title="Toggle Watchlist"
-            style={{
-              background: showWatchlist ? (isDark ? 'rgba(59,130,246,0.18)' : '#EFF6FF') : 'transparent',
-              border: showWatchlist ? '1px solid #3B82F6' : (isDark ? '1px solid #1E2338' : '1px solid #CBD5E1'),
-              borderRadius: '8px',
-              cursor: 'pointer',
-              color: showWatchlist ? '#3B82F6' : (isDark ? '#94A3B8' : '#64748B'),
-              padding: '6px 9px',
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-            }}
-          >
-            <span>WL</span>
-          </button>
-
           {/* Theme Toggle */}
           <button
             onClick={() => setTheme(isDark ? 'light' : 'dark')}
