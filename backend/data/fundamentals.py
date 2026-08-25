@@ -1,4 +1,4 @@
-﻿import time
+import time
 import logging
 import re
 from typing import Optional
@@ -85,32 +85,38 @@ def get_fundamentals(ticker: str) -> dict:
         data = dict(empty)
 
         # ── Key Ratios ────────────────────────────────────────────────────────
-        ratio_section = soup.find("section", id="top-ratios")
-        if ratio_section:
-            for li in ratio_section.find_all("li"):
-                name_el = li.find("span", class_="name")
-                val_el = li.find("span", class_="nowrap")
-                if not name_el or not val_el:
-                    continue
-                name = name_el.get_text(strip=True).lower()
-                val_text = val_el.get_text(strip=True)
-                val = _parse_number(val_text)
+        ratio_items = soup.select("#top-ratios li, .company-ratios li, ul.company-ratios li")
+        if not ratio_items:
+            ratio_container = soup.find(id="top-ratios") or soup.find("div", class_="company-ratios")
+            if ratio_container:
+                ratio_items = ratio_container.find_all("li")
 
-                if "market cap" in name:
-                    data["market_cap"] = val_text.strip()
-                elif "stock p/e" in name or "p/e" == name:
-                    data["pe_ratio"] = val
-                elif "book value" in name or "p/b" in name:
-                    data["pb_ratio"] = val
-                elif "eps" in name:
-                    data["eps"] = val
-                elif "return on equity" in name or "roe" in name:
-                    data["roe"] = val
-                elif "debt" in name and "equity" in name:
-                    data["debt_to_equity"] = val
+        for li in ratio_items:
+            name_el = li.find(class_="name") or li.find("span")
+            val_el = li.find(class_="value") or li.find(class_="nowrap") or li.find(class_="number")
+            
+            text_full = li.get_text(" ", strip=True).lower()
+            name = name_el.get_text(strip=True).lower() if name_el else text_full
+            val_text = val_el.get_text(strip=True) if val_el else li.get_text(strip=True)
+            val = _parse_number(val_text)
+
+            if "market cap" in name or "market cap" in text_full:
+                data["market_cap"] = val_text.strip()
+            elif "stock p/e" in name or "p/e" in name:
+                data["pe_ratio"] = val
+            elif "book value" in name or "p/b" in name:
+                data["pb_ratio"] = val
+            elif "roce" in name or "return on capital" in name:
+                data["roce"] = val
+            elif "return on equity" in name or "roe" in name:
+                data["roe"] = val
+            elif "eps" in name:
+                data["eps"] = val
+            elif ("debt" in name and "equity" in name) or "debt to equity" in text_full:
+                data["debt_to_equity"] = val
 
         # ── Shareholding — Promoter & FII ─────────────────────────────────────
-        share_section = soup.find("section", id="shareholding")
+        share_section = soup.find("section", id="shareholding") or soup.find(id="shareholding")
         if share_section:
             rows = share_section.find_all("tr")
             for row in rows:
