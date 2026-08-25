@@ -1752,6 +1752,31 @@ export default function LiveChartView() {
             )}
           </button>
 
+          {/* ── Auto-Drawing AI Overlays (S/R, Pivots, Fibs) ── */}
+          <button
+            onClick={() => {
+              setShowKeyLevels((prev) => !prev);
+              toast.success(!showKeyLevels ? "🪄 AI Technical Overlays Enabled (S/R, Pivots, Fibs)" : "AI Overlays Disabled");
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 9px',
+              borderRadius: 6,
+              border: showKeyLevels ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
+              background: showKeyLevels ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
+              color: showKeyLevels ? '#818CF8' : '#E2E8F0',
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+            title="Auto-draw Support/Resistance & Fibonacci Overlays"
+          >
+            <Sparkles size={13} style={{ color: '#818CF8' }} />
+            <span>AI Overlays</span>
+          </button>
+
           {/* TradingView Multi-Chart Layout Switcher [ 1x1 | 1x2 | 2x1 | 2x2 ] */}
           <div style={{ display:'flex', alignItems:'center', gap:2, background:'#0A0D1A', padding:'2px', borderRadius:6, border:'1px solid #1E2538' }}>
             <button

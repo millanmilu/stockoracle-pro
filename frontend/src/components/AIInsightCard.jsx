@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import useStore from '../store/useStore';
 import api from '../utils/api';
 import { Sparkles } from 'lucide-react';
+import AIConsensusGauge from './AIConsensusGauge';
 
 export default function AIInsightCard() {
   const { selectedSymbol, predictionData, setPredictionData } = useStore();
@@ -118,6 +119,9 @@ export default function AIInsightCard() {
           ))}
         </div>
       </div>
+
+      {/* 3-Engine AI Consensus Gauge */}
+      <AIConsensusGauge ticker={selectedSymbol} />
 
       {/* Gemini Trade Explanation */}
       {(explanationLoading || aiExplanation) && (

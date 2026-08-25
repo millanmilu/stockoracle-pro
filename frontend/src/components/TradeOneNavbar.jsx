@@ -81,10 +81,11 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
     { name: 'Live Chart',    label: 'Charts',     icon: CandlestickChart },
     { name: 'Dashboard',     label: 'Dashboard',  icon: LayoutDashboard },
     { name: 'AI Prediction', label: 'Forecast',   icon: BrainCircuit },
+    { name: 'Paper Trading', label: 'Paper Trade',icon: Wallet },
+    { name: 'Adv. Screener', label: 'Screener',   icon: SlidersHorizontal },
     { name: 'Fundamentals',  label: 'Financials', icon: BookOpen },
     { name: 'Options Chain', label: 'Options',    icon: Layers },
     { name: 'Price Alerts',  label: 'Smart Alerts', icon: Bell },
-    { name: 'Adv. Screener', label: 'Screener',   icon: SlidersHorizontal },
   ];
 
   // All categorized views for the mobile drawer / full menu
@@ -93,6 +94,7 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
       category: 'Trading & Markets',
       items: [
         { name: 'Live Chart',    label: 'Pro Live Chart', icon: CandlestickChart, badge: 'PRO' },
+        { name: 'Paper Trading', label: 'Paper Trading (₹10L)', icon: Wallet, badge: '₹10L' },
         { name: 'Dashboard',     label: 'Dashboard',      icon: LayoutDashboard },
         { name: 'Heatmap',       label: 'Market Heatmap', icon: Grid3X3 },
         { name: 'Adv. Screener', label: 'Adv. Screener',  icon: SlidersHorizontal },

@@ -33,8 +33,9 @@ const CATEGORIES = [
     items: [
       { name: 'Dashboard',     icon: LayoutDashboard, badge: '' },
       { name: 'Live Chart',    icon: CandlestickChart, badge: 'PRO' },
-      { name: 'Heatmap',       icon: Grid3X3,           badge: '' },
+      { name: 'Paper Trading', icon: Wallet,           badge: '₹10L' },
       { name: 'Adv. Screener', icon: SlidersHorizontal, badge: '' },
+      { name: 'Heatmap',       icon: Grid3X3,           badge: '' },
     ]
   },
   {

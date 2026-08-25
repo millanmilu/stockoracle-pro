@@ -147,25 +147,48 @@ def init_db():
         except Exception:
             pass
 
-        # 9. Smart Alerts (AI-powered alert conditions)
+        # 10. Paper Trading Accounts (Virtual ₹10 Lakhs)
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS smart_alerts (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id     TEXT DEFAULT 'default_user',
-                ticker      TEXT NOT NULL,
-                alert_type  TEXT NOT NULL,
-                param_value TEXT DEFAULT '{}',
-                created_at  TEXT DEFAULT (datetime('now')),
-                triggered   INTEGER DEFAULT 0
+            CREATE TABLE IF NOT EXISTS paper_accounts (
+                user_id           TEXT PRIMARY KEY,
+                cash_balance      REAL NOT NULL DEFAULT 1000000.0,
+                starting_balance  REAL NOT NULL DEFAULT 1000000.0,
+                updated_at        TEXT NOT NULL
             )
         """)
-        # Auto-migrate user_id if missing
-        try:
-            a_cols = [c[1] for c in cursor.execute("PRAGMA table_info(smart_alerts)").fetchall()]
-            if "user_id" not in a_cols:
-                cursor.execute("ALTER TABLE smart_alerts ADD COLUMN user_id TEXT DEFAULT 'default_user'")
-        except Exception:
-            pass
+
+        # 11. Paper Trading Active Positions
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS paper_positions (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id        TEXT NOT NULL,
+                ticker         TEXT NOT NULL,
+                order_type     TEXT NOT NULL DEFAULT 'BUY',
+                shares         REAL NOT NULL,
+                avg_buy_price  REAL NOT NULL,
+                stop_loss      REAL,
+                target_price   REAL,
+                opened_at      TEXT NOT NULL
+            )
+        """)
+
+        # 12. Paper Trading Executed Orders & Journal
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS paper_orders (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id         TEXT NOT NULL,
+                ticker          TEXT NOT NULL,
+                order_type      TEXT NOT NULL,
+                action          TEXT NOT NULL,
+                shares          REAL NOT NULL,
+                executed_price  REAL NOT NULL,
+                realized_pnl    REAL DEFAULT 0.0,
+                status          TEXT NOT NULL DEFAULT 'EXECUTED',
+                executed_at     TEXT NOT NULL
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_paper_pos_user ON paper_positions (user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_paper_ord_user ON paper_orders (user_id)")
 
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_smart_alerts_ticker ON smart_alerts (ticker)"
@@ -713,4 +736,131 @@ def mark_alert_triggered(alert_id: int):
     with get_db_connection() as conn:
         conn.execute("UPDATE smart_alerts SET triggered = 1 WHERE id = ?", (alert_id,))
         conn.commit()
+
+
+# ── Paper Trading Functions (₹10 Lakh Virtual Funds) ──────────────────────────
+
+def get_paper_account(user_id: str = "default_user") -> dict:
+    """Returns the paper trading account state, initializing with ₹1,000,000 if new."""
+    now_str = datetime.now().isoformat()
+    with get_db_connection() as conn:
+        row = conn.execute("SELECT user_id, cash_balance, starting_balance, updated_at FROM paper_accounts WHERE user_id = ?", (user_id,)).fetchone()
+        if not row:
+            conn.execute(
+                "INSERT INTO paper_accounts (user_id, cash_balance, starting_balance, updated_at) VALUES (?, 1000000.0, 1000000.0, ?)",
+                (user_id, now_str)
+            )
+            conn.commit()
+            return {"user_id": user_id, "cash_balance": 1000000.0, "starting_balance": 1000000.0, "updated_at": now_str}
+        return dict(row)
+
+
+def get_paper_positions(user_id: str = "default_user") -> list:
+    """Returns active open paper trading positions."""
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, ticker, order_type, shares, avg_buy_price, stop_loss, target_price, opened_at FROM paper_positions WHERE user_id = ? ORDER BY opened_at DESC",
+            (user_id,)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def place_paper_order(ticker: str, order_type: str, action: str, shares: float, price: float, stop_loss: float = None, target_price: float = None, user_id: str = "default_user") -> dict:
+    """
+    Executes a paper order:
+    - If action == 'BUY': checks cash balance, debits cash, and creates a paper position.
+    - Records order in paper_orders journal.
+    """
+    ticker = ticker.upper().strip()
+    action = action.upper().strip()
+    order_type = order_type.upper().strip()
+    total_cost = shares * price
+    now_str = datetime.now().isoformat()
+
+    account = get_paper_account(user_id)
+
+    with get_db_connection() as conn:
+        if action == "BUY":
+            if account["cash_balance"] < total_cost:
+                raise ValueError(f"Insufficient virtual cash balance. Needed ₹{total_cost:,.2f}, Available ₹{account['cash_balance']:,.2f}")
+
+            new_cash = account["cash_balance"] - total_cost
+            conn.execute("UPDATE paper_accounts SET cash_balance = ?, updated_at = ? WHERE user_id = ?", (new_cash, now_str, user_id))
+
+            cursor = conn.execute(
+                """
+                INSERT INTO paper_positions (user_id, ticker, order_type, shares, avg_buy_price, stop_loss, target_price, opened_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (user_id, ticker, order_type, shares, price, stop_loss, target_price, now_str)
+            )
+            pos_id = cursor.lastrowid
+
+            conn.execute(
+                """
+                INSERT INTO paper_orders (user_id, ticker, order_type, action, shares, executed_price, realized_pnl, status, executed_at)
+                VALUES (?, ?, ?, 'BUY', ?, ?, 0.0, 'EXECUTED', ?)
+                """,
+                (user_id, ticker, order_type, shares, price, now_str)
+            )
+            conn.commit()
+            return {"status": "SUCCESS", "position_id": pos_id, "action": "BUY", "ticker": ticker, "shares": shares, "price": price, "remaining_cash": new_cash}
+
+        else:
+            raise ValueError("Direct SELL without position not supported. Use close_paper_position() to exit holdings.")
+
+
+def close_paper_position(position_id: int, current_price: float, user_id: str = "default_user") -> dict:
+    """Closes an open position at current live price and calculates realized P&L."""
+    now_str = datetime.now().isoformat()
+    with get_db_connection() as conn:
+        pos = conn.execute("SELECT id, user_id, ticker, order_type, shares, avg_buy_price FROM paper_positions WHERE id = ? AND user_id = ?", (position_id, user_id)).fetchone()
+        if not pos:
+            raise ValueError(f"Position #{position_id} not found.")
+
+        shares = float(pos["shares"])
+        buy_p  = float(pos["avg_buy_price"])
+        pnl    = (current_price - buy_p) * shares
+        proceeds = shares * current_price
+
+        # Update Account Cash
+        acc = get_paper_account(user_id)
+        new_cash = acc["cash_balance"] + proceeds
+        conn.execute("UPDATE paper_accounts SET cash_balance = ?, updated_at = ? WHERE user_id = ?", (new_cash, now_str, user_id))
+
+        # Record Close Order in Journal
+        conn.execute(
+            """
+            INSERT INTO paper_orders (user_id, ticker, order_type, action, shares, executed_price, realized_pnl, status, executed_at)
+            VALUES (?, ?, ?, 'SELL', ?, ?, ?, 'EXECUTED', ?)
+            """,
+            (user_id, pos["ticker"], pos["order_type"], shares, current_price, pnl, now_str)
+        )
+
+        # Delete Position
+        conn.execute("DELETE FROM paper_positions WHERE id = ?", (position_id,))
+        conn.commit()
+
+        return {"status": "CLOSED", "position_id": position_id, "ticker": pos["ticker"], "shares": shares, "exit_price": current_price, "realized_pnl": round(pnl, 2), "new_cash": round(new_cash, 2)}
+
+
+def get_paper_trade_history(user_id: str = "default_user", limit: int = 50) -> list:
+    """Returns past executed orders journal."""
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, ticker, order_type, action, shares, executed_price, realized_pnl, status, executed_at FROM paper_orders WHERE user_id = ? ORDER BY executed_at DESC LIMIT ?",
+            (user_id, limit)
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def reset_paper_account(user_id: str = "default_user") -> dict:
+    """Resets paper trading account back to ₹1,000,000 and clears positions/orders."""
+    now_str = datetime.now().isoformat()
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM paper_positions WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM paper_orders WHERE user_id = ?", (user_id,))
+        conn.execute("UPDATE paper_accounts SET cash_balance = 1000000.0, starting_balance = 1000000.0, updated_at = ? WHERE user_id = ?", (now_str, user_id))
+        conn.commit()
+    return {"status": "RESET", "cash_balance": 1000000.0}
 

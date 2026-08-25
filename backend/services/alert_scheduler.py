@@ -38,11 +38,23 @@ async def evaluate_single_alert(alert: dict) -> bool:
 
             if alert_type == "price_above" and cur_p >= target:
                 mark_alert_triggered(alert_id)
-                logger.info(f"🚨 Alert #{alert_id} TRIGGERED: {ticker} Price ₹{cur_p} >= Target ₹{target}")
+                msg = f"Price crossed ABOVE target ₹{target:,.2f}"
+                logger.info(f"🚨 Alert #{alert_id} TRIGGERED: {ticker} ₹{cur_p} >= ₹{target}")
+                try:
+                    from backend.services.telegram_bot import send_telegram_alert
+                    send_telegram_alert(ticker, alert_type, msg, price=cur_p)
+                except Exception:
+                    pass
                 return True
             elif alert_type == "price_below" and cur_p <= target:
                 mark_alert_triggered(alert_id)
-                logger.info(f"🚨 Alert #{alert_id} TRIGGERED: {ticker} Price ₹{cur_p} <= Target ₹{target}")
+                msg = f"Price dropped BELOW target ₹{target:,.2f}"
+                logger.info(f"🚨 Alert #{alert_id} TRIGGERED: {ticker} ₹{cur_p} <= ₹{target}")
+                try:
+                    from backend.services.telegram_bot import send_telegram_alert
+                    send_telegram_alert(ticker, alert_type, msg, price=cur_p)
+                except Exception:
+                    pass
                 return True
 
         # 2. RSI Alerts
@@ -54,15 +66,28 @@ async def evaluate_single_alert(alert: dict) -> bool:
             if "rsi" not in enriched.columns or enriched.empty:
                 return False
             cur_rsi = float(enriched["rsi"].iloc[-1])
+            cur_p = float(enriched["close"].iloc[-1])
             thresh = float(param.get("threshold") or (30.0 if alert_type == "rsi_below" else 70.0))
 
             if alert_type == "rsi_below" and cur_rsi <= thresh:
                 mark_alert_triggered(alert_id)
+                msg = f"RSI is oversold at {cur_rsi:.1f} (<= {thresh})"
                 logger.info(f"🚨 Alert #{alert_id} TRIGGERED: {ticker} RSI {cur_rsi:.1f} <= {thresh}")
+                try:
+                    from backend.services.telegram_bot import send_telegram_alert
+                    send_telegram_alert(ticker, alert_type, msg, price=cur_p)
+                except Exception:
+                    pass
                 return True
             elif alert_type == "rsi_above" and cur_rsi >= thresh:
                 mark_alert_triggered(alert_id)
+                msg = f"RSI is overbought at {cur_rsi:.1f} (>= {thresh})"
                 logger.info(f"🚨 Alert #{alert_id} TRIGGERED: {ticker} RSI {cur_rsi:.1f} >= {thresh}")
+                try:
+                    from backend.services.telegram_bot import send_telegram_alert
+                    send_telegram_alert(ticker, alert_type, msg, price=cur_p)
+                except Exception:
+                    pass
                 return True
 
         # 3. Volume Spike
@@ -75,10 +100,17 @@ async def evaluate_single_alert(alert: dict) -> bool:
                 return False
             vol_sma = float(enriched["volume_sma_20"].iloc[-1])
             cur_vol = float(enriched["volume"].iloc[-1])
+            cur_p = float(enriched["close"].iloc[-1])
             mult = float(param.get("multiplier") or 2.0)
             if vol_sma > 0 and (cur_vol / vol_sma) >= mult:
                 mark_alert_triggered(alert_id)
+                msg = f"Unusual volume surge: {cur_vol/vol_sma:.2f}x above 20-day SMA"
                 logger.info(f"🚨 Alert #{alert_id} TRIGGERED: {ticker} Volume surge {cur_vol/vol_sma:.2f}x >= {mult}x")
+                try:
+                    from backend.services.telegram_bot import send_telegram_alert
+                    send_telegram_alert(ticker, alert_type, msg, price=cur_p)
+                except Exception:
+                    pass
                 return True
 
     except Exception as e:

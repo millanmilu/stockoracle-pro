@@ -1478,3 +1478,102 @@ def evaluate_smart_alerts_endpoint(request: Request):
     return results
 
 
+# ── 3-Engine AI Consensus Endpoint ──────────────────────────────────────────
+
+@app.get("/api/stock/{ticker}/ai-consensus")
+@limiter.limit("30/minute")
+async def get_ai_consensus_endpoint(request: Request, ticker: str):
+    """
+    Computes a 3-Engine Consensus (Technicals, XGBoost ML, and Gemini Fundamentals).
+    """
+    from backend.services.ai_consensus import compute_ai_consensus
+    return compute_ai_consensus(ticker)
+
+
+# ── Paper Trading Simulator Endpoints (₹10 Lakh Virtual Funds) ────────────────
+
+class PaperOrderRequest(BaseModel):
+    ticker: str
+    order_type: str = "BUY"
+    action: str = "BUY"
+    shares: float
+    price: float
+    stop_loss: Optional[float] = None
+    target_price: Optional[float] = None
+    user_id: str = "default_user"
+
+
+@app.get("/api/paper/account")
+@limiter.limit("60/minute")
+async def get_paper_account_endpoint(request: Request, user_id: str = "default_user"):
+    """Returns virtual cash balance, net worth, and account status."""
+    from backend.data.database import get_paper_account
+    return get_paper_account(user_id=user_id)
+
+
+@app.post("/api/paper/order")
+@limiter.limit("30/minute")
+async def place_paper_order_endpoint(request: Request, req: PaperOrderRequest):
+    """Executes a virtual 1-click paper trading order."""
+    from backend.data.database import place_paper_order
+    try:
+        return place_paper_order(
+            ticker=req.ticker,
+            order_type=req.order_type,
+            action=req.action,
+            shares=req.shares,
+            price=req.price,
+            stop_loss=req.stop_loss,
+            target_price=req.target_price,
+            user_id=req.user_id
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/paper/close/{position_id}")
+@limiter.limit("30/minute")
+async def close_paper_position_endpoint(request: Request, position_id: int, current_price: float, user_id: str = "default_user"):
+    """Closes an active virtual position at current live LTP and realizes P&L."""
+    from backend.data.database import close_paper_position
+    try:
+        return close_paper_position(position_id=position_id, current_price=current_price, user_id=user_id)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/paper/positions")
+@limiter.limit("60/minute")
+async def get_paper_positions_endpoint(request: Request, user_id: str = "default_user"):
+    """Returns all open virtual trading holdings."""
+    from backend.data.database import get_paper_positions
+    return get_paper_positions(user_id=user_id)
+
+
+@app.get("/api/paper/history")
+@limiter.limit("60/minute")
+async def get_paper_history_endpoint(request: Request, user_id: str = "default_user", limit: int = 50):
+    """Returns the closed trades journal with realized P&L."""
+    from backend.data.database import get_paper_trade_history
+    return get_paper_trade_history(user_id=user_id, limit=limit)
+
+
+@app.post("/api/paper/reset")
+@limiter.limit("10/minute")
+async def reset_paper_endpoint(request: Request, user_id: str = "default_user"):
+    """Resets paper trading account back to ₹1,000,000."""
+    from backend.data.database import reset_paper_account
+    return reset_paper_account(user_id=user_id)
+
+
+# ── Telegram Bot Connectivity Test ──────────────────────────────────────────
+
+@app.post("/api/settings/telegram-test")
+@limiter.limit("5/minute")
+async def telegram_test_endpoint(request: Request):
+    """Dispatches a test notification to verified Telegram Chat ID."""
+    from backend.services.telegram_bot import test_telegram_connection
+    return test_telegram_connection()
+
+
+

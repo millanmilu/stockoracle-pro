@@ -27,6 +27,7 @@ const AIChatPanel = lazy(() => import('./components/AIChatPanel'));
 const FundamentalsPanel = lazy(() => import('./components/FundamentalsPanel'));
 const EarningsPanel = lazy(() => import('./components/EarningsPanel'));
 const OptionsChainView = lazy(() => import('./components/OptionsChainView'));
+const PaperTradingView = lazy(() => import('./components/PaperTradingView'));
 
 function LoadingFallback() {
   return (
@@ -54,6 +55,7 @@ export default function App() {
       case 'Live Chart':        return <LiveChartView />;
       case 'Chart Grid':        return <Suspense fallback={<LoadingFallback />}><MultiChartGrid /></Suspense>;
       case 'Dashboard':         return <Dashboard />;
+      case 'Paper Trading':     return <Suspense fallback={<LoadingFallback />}><PaperTradingView /></Suspense>;
       case 'AI Prediction':     return <Suspense fallback={<LoadingFallback />}><AIPredictionView /></Suspense>;
       case 'AI Chat':           return <Suspense fallback={<LoadingFallback />}><AIChatPanel ticker={selectedSymbol} /></Suspense>;
       case 'News':              return <Suspense fallback={<LoadingFallback />}><NewsPanel ticker={selectedSymbol} /></Suspense>;
