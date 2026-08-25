@@ -23,7 +23,7 @@ const API_KEY  = import.meta.env.VITE_API_KEY  || '';
 
 const api = axios.create({
   baseURL: API_BASE,
-  timeout: 30000,
+  timeout: 60000,
   headers: {
     ...(API_KEY ? { 'X-API-Key': API_KEY } : {}),
   },
