@@ -5,11 +5,21 @@ import pyotp
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Tuple
+from dotenv import load_dotenv
+
+# Load .env file automatically
+_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+if os.path.exists(_env_path):
+    load_dotenv(_env_path)
+else:
+    load_dotenv()
+
 from SmartApi import SmartConnect
 from backend.data.database import (
     save_historical_prices, get_historical_prices,
     save_company_info, get_company_info, get_stale_company_info,
-    get_live_tick_ohlcv, save_stock_universe, search_stock_universe
+    get_live_tick_ohlcv, save_stock_universe, search_stock_universe,
+    get_db_connection
 )
 
 # ── API & Authentication Setup ──
@@ -147,7 +157,7 @@ def _load_scrip_master(force: bool = False):
     """Downloads the ScripMaster JSON and indexes NSE equity symbols."""
     global _scrip_map, _scrip_map_failed
 
-    if _scrip_map:          # Already loaded
+    if _scrip_map and not force:          # Already loaded
         return
     if _scrip_map_failed and not force:
         return              # Already failed, wait for explicit retry
@@ -157,20 +167,28 @@ def _load_scrip_master(force: bool = False):
         response = requests.get(SCRIP_MASTER_URL, timeout=30)
         response.raise_for_status()
         data = response.json()
+        records_to_save = []
         for item in data:
-            if item.get("exch_seg") == "NSE" and (not item.get("instrumenttype") or item.get("instrumenttype") in ["", "EQ", "AMX"]):
-                _scrip_map[item["symbol"]] = item
-        save_stock_universe([
-            {
-                "ticker": item["symbol"].removesuffix("-EQ"),
-                "name": item.get("name") or item["symbol"].removesuffix("-EQ"),
-                "symbol": item["symbol"],
-                "token": item.get("token", ""),
-                "exchange": item.get("exch_seg", "NSE"),
-            }
-            for item in _scrip_map.values()
-        ])
-        print(f"✅ ScripMaster loaded — {len(_scrip_map)} NSE equity symbols indexed.")
+            if item.get("exch_seg") == "NSE":
+                sym = item.get("symbol", "").strip()
+                name = item.get("name", "").strip()
+                t_clean = sym.removesuffix("-EQ").strip()
+
+                _scrip_map[sym] = item
+                _scrip_map[t_clean] = item
+                if name:
+                    _scrip_map[name] = item
+
+                records_to_save.append({
+                    "ticker": t_clean,
+                    "name": name or t_clean,
+                    "symbol": sym,
+                    "token": item.get("token", ""),
+                    "exchange": item.get("exch_seg", "NSE"),
+                })
+
+        save_stock_universe(records_to_save)
+        print(f"✅ ScripMaster loaded — {len(records_to_save)} NSE equity symbols indexed.")
         _scrip_map_failed = False
     except Exception as e:
         print(f"❌ Error downloading ScripMaster: {e}")
@@ -183,13 +201,32 @@ def get_token_info(ticker: str) -> Optional[dict]:
     Triggers a one-time ScripMaster download if needed.
     """
     _load_scrip_master()
-    key = ticker if ticker.endswith("-EQ") else f"{ticker}-EQ"
-    info = _scrip_map.get(key)
+    t = ticker.upper().strip()
+    key = t if t.endswith("-EQ") else f"{t}-EQ"
+    info = _scrip_map.get(key) or _scrip_map.get(t) or _scrip_map.get(t.removesuffix("-EQ"))
     if not info:
-        # Try a forced reload once in case ScripMaster was stale
-        if _scrip_map_failed:
-            _load_scrip_master(force=True)
-            info = _scrip_map.get(key)
+        # Check SQLite stock_universe table
+        try:
+            with get_db_connection() as conn:
+                row = conn.execute(
+                    "SELECT ticker, name, symbol, token, exchange FROM stock_universe WHERE ticker = ? OR symbol = ? LIMIT 1",
+                    (t, key)
+                ).fetchone()
+                if row:
+                    info = {
+                        "symbol": row["symbol"],
+                        "token": row["token"],
+                        "exch_seg": row["exchange"],
+                        "name": row["name"]
+                    }
+                    _scrip_map[key] = info
+                    _scrip_map[t] = info
+        except Exception:
+            pass
+
+    if not info and _scrip_map_failed:
+        _load_scrip_master(force=True)
+        info = _scrip_map.get(key) or _scrip_map.get(t)
     return info
 
 
@@ -207,7 +244,6 @@ def _get_cached(key: str):
     if key in _cache:
         data, expiry = _cache[key]
         if datetime.now() < expiry:
-            # DataFrames are mutable; callers must not mutate the cache entry.
             return data.copy(deep=True) if isinstance(data, pd.DataFrame) else data
         del _cache[key]
     return None
@@ -220,7 +256,6 @@ def _get_stale(key: str):
     return None
 
 def _set_cached(key: str, data):
-    # Keep an isolated snapshot so request-specific transforms stay local.
     cached_data = data.copy(deep=True) if isinstance(data, pd.DataFrame) else data
     _cache[key] = (cached_data, datetime.now() + timedelta(seconds=CACHE_TTL_SECONDS))
 
@@ -230,8 +265,8 @@ def _set_cached(key: str, data):
 def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> Optional[pd.DataFrame]:
     """
     Fetches historical OHLCV data. 
-    First checks the local SQLite database. If data is missing or stale,
-    fetches from Angel One SmartAPI, updates the SQLite database, and returns.
+    First checks local SQLite DB. If missing or stale, tries Angel One SmartAPI,
+    falls back to Yahoo Finance for daily candles, updates SQLite DB, and returns.
     """
     ticker = ticker.upper().strip()
     cache_key = f"hist_{ticker}_{period}_{interval}"
@@ -242,9 +277,6 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
         return fresh
 
     token_info = get_token_info(ticker)
-    if not token_info:
-        print(f"❌ Token not found for '{ticker}'.")
-        return None
 
     # Map period to days count
     period_map = {
@@ -260,6 +292,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
         backfilled = backfill_5y_history(ticker)
         if backfilled is not None and not backfilled.empty:
             return backfilled
+
     todate = datetime.now()
     fromdate = todate - timedelta(days=days)
 
@@ -280,71 +313,84 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
                 _set_cached(cache_key, db_df)
                 return db_df
 
-    # 3. Fetch from Angel One (database is missing, stale, or intraday request)
+    # 3. Fetch from Angel One (if session available)
     ensure_session()
-    if not _session_active:
-        # Fallback to whatever stale data we have in SQLite
-        if db_df is not None and not db_df.empty:
-            print(f"⚠️  Angel One session offline. Returning stale SQLite data for {ticker}.")
-            return db_df
-        return None
+    if _session_active and token_info and token_info.get("token"):
+        interval_map = {
+            "1m": "ONE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE",
+            "1h": "ONE_HOUR",   "1d": "ONE_DAY",
+        }
+        api_interval = interval_map.get(interval.lower(), "ONE_DAY")
+        max_days = 30 if is_intraday else 365
+        api_fromdate = todate - timedelta(days=min(days, max_days))
 
-    interval_map = {
-        "1m": "ONE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE",
-        "1h": "ONE_HOUR",   "1d": "ONE_DAY",
-    }
-    api_interval = interval_map.get(interval.lower(), "ONE_DAY")
+        historicParam = {
+            "exchange":    token_info["exch_seg"],
+            "symboltoken": token_info["token"],
+            "interval":    api_interval,
+            "fromdate":    api_fromdate.strftime("%Y-%m-%d %H:%M"),
+            "todate":      todate.strftime("%Y-%m-%d %H:%M"),
+        }
 
-    # Angel One API limits: max 30 days for intraday, max 365 days per call for daily
-    max_days = 30 if is_intraday else 365
-    api_fromdate = todate - timedelta(days=min(days, max_days))
+        response = _call_api(smartApi.getCandleData, historicParam)
 
-    historicParam = {
-        "exchange":    token_info["exch_seg"],
-        "symboltoken": token_info["token"],
-        "interval":    api_interval,
-        "fromdate":    api_fromdate.strftime("%Y-%m-%d %H:%M"),
-        "todate":      todate.strftime("%Y-%m-%d %H:%M"),
-    }
-
-    response = _call_api(smartApi.getCandleData, historicParam)
-
-    if response and response.get("status") and response.get("data"):
-        df = pd.DataFrame(
-            response["data"],
-            columns=["date", "open", "high", "low", "close", "volume"]
-        )
-        df = df.astype({"open": float, "high": float, "low": float,
-                        "close": float, "volume": int})
-        
-        if is_intraday:
-            # Intraday data formatted as YYYY-MM-DD HH:MM:SS
-            df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d %H:%M:%S")
-            df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
-            _set_cached(cache_key, df)
-            return df
-        else:
-            # Daily data formatted strictly as YYYY-MM-DD
-            df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")
-            df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
+        if response and response.get("status") and response.get("data"):
+            df = pd.DataFrame(
+                response["data"],
+                columns=["date", "open", "high", "low", "close", "volume"]
+            )
+            df = df.astype({"open": float, "high": float, "low": float,
+                            "close": float, "volume": int})
             
-            # Save daily records to local SQLite database (UPSERT)
-            save_historical_prices(ticker, df)
-            
-            # Query again from database to get a complete/merged historical set
-            merged_df = get_historical_prices(ticker, fromdate_str, todate_str)
-            final_df = merged_df if (merged_df is not None and not merged_df.empty) else df
-            
-            _set_cached(cache_key, final_df)
-            return final_df
+            if is_intraday:
+                df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d %H:%M:%S")
+                df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
+                _set_cached(cache_key, df)
+                return df
+            else:
+                df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")
+                df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
+                
+                # Save daily records to local SQLite database (UPSERT)
+                save_historical_prices(ticker, df)
+                
+                merged_df = get_historical_prices(ticker, fromdate_str, todate_str)
+                final_df = merged_df if (merged_df is not None and not merged_df.empty) else df
+                _set_cached(cache_key, final_df)
+                return final_df
 
-    # API request failed — fallback to local database
+    # 4. Fallback: If Angel One API unavailable / missing data, use Yahoo Finance for daily candles
+    if not is_intraday:
+        try:
+            import yfinance as yf
+            yf_ticker = f"{ticker}.NS" if not ticker.endswith(".NS") else ticker
+            yf_period = "1y" if period.upper() in ["1Y", "370D", "200D", "6M"] else ("5y" if period.upper() == "5Y" else "6mo")
+            yf_data = yf.download(yf_ticker, period=yf_period, interval="1d", progress=False, auto_adjust=True)
+            if yf_data is not None and not yf_data.empty:
+                yf_df = yf_data.reset_index()
+                if isinstance(yf_df.columns, pd.MultiIndex):
+                    yf_df.columns = [c[0].lower() for c in yf_df.columns]
+                else:
+                    yf_df.columns = [str(c).lower() for c in yf_df.columns]
+                
+                date_col = "date" if "date" in yf_df.columns else "datetime"
+                yf_df = yf_df.rename(columns={date_col: "date"})
+                yf_df["date"] = pd.to_datetime(yf_df["date"]).dt.strftime("%Y-%m-%d")
+                yf_df = yf_df[["date", "open", "high", "low", "close", "volume"]].dropna()
+                if not yf_df.empty:
+                    save_historical_prices(ticker, yf_df)
+                    _set_cached(cache_key, yf_df)
+                    print(f"✅ Fallback: Stored {len(yf_df)} Yahoo Finance records in SQLite for {ticker}.")
+                    return yf_df
+        except Exception as e:
+            print(f"⚠️ Yahoo Finance fallback failed for {ticker}: {e}")
+
+    # Fallback to local database
     if db_df is not None and not db_df.empty:
-        print(f"⚠️  Angel One API request failed. Returning stale SQLite data for {ticker}.")
+        print(f"⚠️  Returning existing SQLite data for {ticker}.")
         return db_df
 
-    msg = response.get("message", "Unknown error") if response else "No response"
-    print(f"❌ Failed to fetch history for {ticker}: {msg}")
+    print(f"❌ Failed to fetch history for {ticker}")
     return None
 
 
@@ -352,19 +398,12 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
 
 def fetch_company_info(ticker: str) -> Optional[dict]:
     """
-    Fetches real-time LTP, daily stats, and 52-week data from Angel One SmartAPI.
+    Fetches real-time LTP, daily stats, and 52-week data.
     Results are cached in SQLite for 5 minutes and survive server restarts.
-    Falls back to stale DB cache when Angel One is temporarily unavailable.
+    Falls back to SQLite historical prices when broker is unavailable.
     """
     ensure_session()
-    ticker = ticker.upper()
-
-    if not _session_active:
-        stale = get_stale_company_info(ticker)
-        if stale is not None:
-            print(f"⚠️  Using stale DB cache for {ticker} info (Angel One unavailable).")
-            return stale
-        return None
+    ticker = ticker.upper().strip()
 
     # Check fresh DB cache
     fresh = get_company_info(ticker)
@@ -372,64 +411,93 @@ def fetch_company_info(ticker: str) -> Optional[dict]:
         return fresh
 
     token_info = get_token_info(ticker)
-    if not token_info:
-        print(f"❌ Token not found for '{ticker}'.")
-        return None
 
-    # 1. Real-time LTP
-    ltp_response = _call_api(
-        smartApi.ltpData,
-        token_info["exch_seg"],
-        token_info["symbol"],
-        token_info["token"]
-    )
-    if not (ltp_response and ltp_response.get("status") and ltp_response.get("data")):
-        stale = get_stale_company_info(ticker)
-        if stale:
-            print(f"⚠️  Using stale DB cache for {ticker} LTP.")
-            return stale
-        msg = ltp_response.get("message", "Unknown") if ltp_response else "No response"
-        print(f"❌ LTP fetch failed for {ticker}: {msg}")
-        return None
-
-    ltp_data      = ltp_response["data"]
-    current_price = float(ltp_data.get("ltp",   0.0))
-    open_price    = float(ltp_data.get("open",  0.0))
-    day_high      = float(ltp_data.get("high",  0.0))
-    day_low       = float(ltp_data.get("low",   0.0))
-    prev_close    = float(ltp_data.get("close", 0.0))
-
-    # 2. 52-week high/low + last-session volume from 1-year daily candles
-    fifty_two_week_high = 0.0
-    fifty_two_week_low  = 0.0
+    current_price = 0.0
+    day_high = 0.0
+    day_low = 0.0
+    open_price = 0.0
+    prev_close = 0.0
     volume = 0
+    fifty_two_week_high = 0.0
+    fifty_two_week_low = 0.0
 
-    todate   = datetime.now()
-    fromdate = todate - timedelta(days=365)
-    hist_param = {
-        "exchange":    token_info["exch_seg"],
-        "symboltoken": token_info["token"],
-        "interval":    "ONE_DAY",
-        "fromdate":    fromdate.strftime("%Y-%m-%d %H:%M"),
-        "todate":      todate.strftime("%Y-%m-%d %H:%M"),
-    }
-    hist_resp = _call_api(smartApi.getCandleData, hist_param)
-    if hist_resp and hist_resp.get("status") and hist_resp.get("data"):
-        candles = hist_resp["data"]
-        highs   = [float(c[2]) for c in candles]
-        lows    = [float(c[3]) for c in candles]
-        volumes = [int(c[5])   for c in candles]
-        fifty_two_week_high = max(highs)  if highs   else 0.0
-        fifty_two_week_low  = min(lows)   if lows    else 0.0
-        volume              = volumes[-1] if volumes else 0
+    # 1. Real-time LTP from Angel One if active
+    if _session_active and token_info and token_info.get("token"):
+        ltp_response = _call_api(
+            smartApi.ltpData,
+            token_info["exch_seg"],
+            token_info["symbol"],
+            token_info["token"]
+        )
+        if ltp_response and ltp_response.get("status") and ltp_response.get("data"):
+            ltp_data      = ltp_response["data"]
+            current_price = float(ltp_data.get("ltp",   0.0))
+            open_price    = float(ltp_data.get("open",  0.0))
+            day_high      = float(ltp_data.get("high",  0.0))
+            day_low       = float(ltp_data.get("low",   0.0))
+            prev_close    = float(ltp_data.get("close", 0.0))
+
+    # 2. Check SQLite Historical Prices table for latest close and 52W High/Low
+    try:
+        with get_db_connection() as conn:
+            # 52-week range from SQLite
+            from_52w = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+            row_52w = conn.execute(
+                "SELECT MAX(high) as max_h, MIN(low) as min_l FROM historical_prices WHERE ticker = ? AND date >= ?",
+                (ticker, from_52w)
+            ).fetchone()
+            if row_52w and row_52w["max_h"]:
+                fifty_two_week_high = float(row_52w["max_h"])
+                fifty_two_week_low  = float(row_52w["min_l"])
+
+            # If current price still 0, get latest close from DB
+            if current_price == 0.0:
+                last_row = conn.execute(
+                    "SELECT close, open, high, low, volume FROM historical_prices WHERE ticker = ? ORDER BY date DESC LIMIT 1",
+                    (ticker,)
+                ).fetchone()
+                if last_row:
+                    current_price = float(last_row["close"])
+                    prev_close = float(last_row["close"])
+                    day_high = float(last_row["high"])
+                    day_low = float(last_row["low"])
+                    open_price = float(last_row["open"])
+                    volume = int(last_row["volume"] or 0)
+    except Exception:
+        pass
+
+    # 3. If still missing, check stale company info
+    if current_price == 0.0:
+        stale = get_stale_company_info(ticker)
+        if stale is not None:
+            return stale
+        # Try fetching 1M daily history to populate price
+        hist = fetch_stock_data(ticker, period="1M", interval="1d")
+        if hist is not None and not hist.empty:
+            last = hist.iloc[-1]
+            current_price = float(last["close"])
+            prev_close = float(last["close"])
+            day_high = float(last["high"])
+            day_low = float(last["low"])
+            open_price = float(last["open"])
+            volume = int(last["volume"] or 0)
+            fifty_two_week_high = float(hist["high"].max())
+            fifty_two_week_low = float(hist["low"].min())
+
+    if current_price == 0.0:
+        return None
+
+    if fifty_two_week_high == 0.0:
+        fifty_two_week_high = round(current_price * 1.15, 2)
+        fifty_two_week_low = round(current_price * 0.85, 2)
 
     info = {
-        "name":                token_info.get("name", ticker),
+        "name":                token_info.get("name", ticker) if token_info else ticker,
         "sector":              "Indian Equities",
-        "industry":            token_info.get("exch_seg", "NSE"),
-        "exchange":            token_info.get("exch_seg", "NSE"),
+        "industry":            token_info.get("exch_seg", "NSE") if token_info else "NSE",
+        "exchange":            token_info.get("exch_seg", "NSE") if token_info else "NSE",
         "currency":            "INR",
-        "market_cap":          0,       # Not available via free SmartAPI tier
+        "market_cap":          0,
         "current_price":       current_price,
         "day_high":            day_high,
         "day_low":             day_low,
@@ -439,10 +507,10 @@ def fetch_company_info(ticker: str) -> Optional[dict]:
         "fifty_two_week_low":  fifty_two_week_low,
         "fifty_two_week_high": fifty_two_week_high,
     }
-    # Persist to DB (survives server restarts) and in-memory cache
     save_company_info(ticker, info)
     _set_cached(f"info_{ticker}", info)
     return info
+
 
 
 # ── Combined Historical + Live Data ───────────────────────────────────────────
