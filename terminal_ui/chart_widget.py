@@ -27,9 +27,13 @@ def render_ascii_candlestick_chart(df: pd.DataFrame, symbol: str, width: int = 7
     lows = sub_df["low"].astype(float).tolist()
     closes = sub_df["close"].astype(float).tolist()
 
-    plt.clear_figure()
+    if hasattr(plt, "clear_data"):
+        plt.clear_data()
+    elif hasattr(plt, "cld"):
+        plt.cld()
     plt.plotsize(width, height)
     plt.theme("dark")
+
     plt.candlestick(dates, {
         "Open": opens,
         "Close": closes,
