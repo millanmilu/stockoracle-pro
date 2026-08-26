@@ -27,7 +27,7 @@ def render_ascii_candlestick_chart(df: pd.DataFrame, symbol: str, width: int = 7
     lows = sub_df["low"].astype(float).tolist()
     closes = sub_df["close"].astype(float).tolist()
 
-    plt.clf()
+    plt.clear_figure()
     plt.plotsize(width, height)
     plt.theme("dark")
     plt.candlestick(dates, {
@@ -36,6 +36,7 @@ def render_ascii_candlestick_chart(df: pd.DataFrame, symbol: str, width: int = 7
         "High": highs,
         "Low": lows
     })
+
     plt.title(f"📈 {symbol} — DAILY CANDLESTICK CHART & VOLUME (LAST 30 BARS)")
     return plt.build()
 
