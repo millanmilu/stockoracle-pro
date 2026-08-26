@@ -48,9 +48,10 @@ def main():
     args = parser.parse_args()
 
     if args.mode in ["terminal", "financial-terminal"]:
-        logger.info("Initializing OpenTerminalUI Presentation Layer for %s...", args.symbol)
-        from terminal_ui.app import run_terminal_app
-        run_terminal_app(initial_symbol=args.symbol)
+        logger.info("Initializing OpenBB & OpenTerminalUI Institutional Terminal for %s...", args.symbol)
+        from terminal_ui.institutional_terminal import launch_institutional_terminal
+        launch_institutional_terminal(symbol=args.symbol)
+
 
     elif args.mode == "worker":
         logger.info("Starting Celery Worker Fleet...")
