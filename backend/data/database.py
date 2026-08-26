@@ -231,6 +231,25 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_saved_scans_user ON saved_scans (user_id)"
         )
 
+        # 15. Model Registry & Version Lineage
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS model_registry (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker        TEXT    NOT NULL,
+                model_type    TEXT    NOT NULL,
+                version       TEXT    NOT NULL,
+                artifact_path TEXT    NOT NULL,
+                mape          REAL,
+                rmse          REAL,
+                metrics_json  TEXT,
+                trained_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                is_active     INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_model_registry_ticker ON model_registry (ticker)"
+        )
+
         # Cleanup: purge any legacy intraday records that polluted the daily historical_prices table
         cursor.execute("DELETE FROM historical_prices WHERE length(date) != 10")
 
@@ -1041,5 +1060,61 @@ def delete_saved_scan(scan_id: int, user_id: str = "default_user") -> bool:
         conn.commit()
     write_audit_log("DELETE", "saved_scan", entity_id=scan_id, user_id=user_id)
     return True
+
+
+# ── Model Registry Functions ─────────────────────────────────────────────────
+
+def register_model_version(
+    ticker: str, model_type: str, version: str, artifact_path: str,
+    mape: float = None, rmse: float = None, metrics: dict = None
+) -> int:
+    """Registers a newly trained ML model artifact and metrics lineage."""
+    import json as _json
+    now_str = datetime.now().isoformat()
+    with get_db_connection() as conn:
+        # Mark previous versions as inactive for this ticker and model_type
+        conn.execute(
+            "UPDATE model_registry SET is_active = 0 WHERE ticker = ? AND model_type = ?",
+            (ticker.upper(), model_type)
+        )
+        cursor = conn.execute(
+            """
+            INSERT INTO model_registry (ticker, model_type, version, artifact_path, mape, rmse, metrics_json, trained_at, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+            """,
+            (ticker.upper(), model_type, version, artifact_path, mape, rmse, _json.dumps(metrics or {}), now_str)
+        )
+        conn.commit()
+        row_id = cursor.lastrowid
+    write_audit_log("REGISTER", "model_version", entity_id=row_id, details=f"ticker={ticker} type={model_type} v={version} mape={mape}")
+    return row_id
+
+
+def get_registered_models(ticker: str = None) -> list:
+    """Returns registered model artifacts and accuracy metrics."""
+    import json as _json
+    with get_db_connection() as conn:
+        if ticker:
+            rows = conn.execute(
+                "SELECT id, ticker, model_type, version, artifact_path, mape, rmse, metrics_json, trained_at, is_active "
+                "FROM model_registry WHERE ticker = ? ORDER BY id DESC",
+                (ticker.upper(),)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, ticker, model_type, version, artifact_path, mape, rmse, metrics_json, trained_at, is_active "
+                "FROM model_registry ORDER BY id DESC LIMIT 100"
+            ).fetchall()
+
+    result = []
+    for r in rows:
+        item = dict(r)
+        try:
+            item["metrics"] = _json.loads(item["metrics_json"] or "{}")
+        except Exception:
+            item["metrics"] = {}
+        result.append(item)
+    return result
+
 
 

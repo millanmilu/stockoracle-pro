@@ -70,3 +70,25 @@ async def get_audit_log_endpoint(
     except Exception as exc:
         logger.error("audit-log read failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Could not read audit log")
+
+
+@router.get("/api/system/disclaimer")
+def get_regulatory_disclaimer():
+    """Returns official regulatory and AI predictive analysis disclaimers."""
+    return {
+        "title": "Regulatory & Model Risk Disclaimer",
+        "entity": "StockOracle Pro — Research & Algorithmic Analytics Platform",
+        "disclaimer_text": (
+            "StockOracle Pro is an advanced AI research and market analysis tool designed strictly for informational "
+            "and educational purposes. All machine learning predictions, quantitative forecasts, volatility bands, "
+            "and consensus scores are algorithmic estimates derived from historical data and mathematical models. "
+            "They do NOT constitute financial advice, investment recommendations, or SEBI-registered advisory services. "
+            "Trading equities and derivatives involves substantial risk of capital loss. Past performance does not guarantee future results."
+        ),
+        "compliance": {
+            "sebi_registered": False,
+            "purpose": "Educational, Analytical & Paper Simulation Only",
+            "jurisdiction": "National Stock Exchange of India (NSE)",
+        }
+    }
+

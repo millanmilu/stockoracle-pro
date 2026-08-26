@@ -111,3 +111,33 @@ def get_ai_consensus_endpoint(ticker: str):
     """Aggregates XGBoost, Neural Nets, Technical Signals, and Sentiment into a single consensus score."""
     t = ticker.upper().strip()
     return compute_ai_consensus(t)
+
+
+@router.get("/ml/benchmark/{ticker}")
+def get_model_benchmark_endpoint(ticker: str):
+    """Executes 5-fold walk-forward validation and compares model MAPE vs Naive and SMA baselines."""
+    t = ticker.upper().strip()
+    df = fetch_stock_data(t, period="2Y")
+    if df is None or len(df) < 50:
+        raise HTTPException(status_code=404, detail=f"Insufficient historical data for '{t}'.")
+    from backend.ml.benchmarking import run_walk_forward_benchmark
+    return run_walk_forward_benchmark(t, df)
+
+
+@router.get("/ml/models/registry")
+def get_model_registry_endpoint(ticker: Optional[str] = None):
+    """Returns versioned model artifacts, training timestamps, and accuracy metrics."""
+    from backend.data.database import get_registered_models
+    return get_registered_models(ticker)
+
+
+@router.get("/stock/{ticker}/forecast-bands")
+def get_forecast_bands_endpoint(ticker: str):
+    """Generates 7-day multi-step price forecast with 80% and 95% GARCH conditional volatility bands."""
+    t = ticker.upper().strip()
+    df = fetch_stock_data(t, period="1Y")
+    if df is None or len(df) < 30:
+        raise HTTPException(status_code=404, detail=f"Insufficient history for '{t}'.")
+    from backend.ml.forecast_bands import compute_forecast_bands
+    return compute_forecast_bands(t, df)
+
