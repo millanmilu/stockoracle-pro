@@ -245,6 +245,11 @@ def enrich_stock_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # 6. Candlestick Patterns
     df = detect_candlestick_patterns(df)
     
-    # Only drop rows if critical price columns are missing
-    df.dropna(subset=["date", "open", "high", "low", "close"], inplace=True)
+    # AGENTS.md invariant: NEVER drop raw price rows.
+    # Only remove rows where ALL core OHLCV price columns are simultaneously NaN
+    # (i.e. completely empty rows with no price information at all).
+    # 'date' may live in the index rather than a column — never include it in subset.
+    price_cols = [c for c in ["open", "high", "low", "close"] if c in df.columns]
+    if price_cols:
+        df = df[~df[price_cols].isna().all(axis=1)]
     return df
