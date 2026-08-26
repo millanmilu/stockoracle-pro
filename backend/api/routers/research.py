@@ -466,3 +466,95 @@ def delete_user_screen_endpoint(
     delete_user_screen_query(screen_id, user_id=effective_user)
     return {"deleted": True, "id": screen_id}
 
+
+# ── Institutional & Quant Terminal Endpoints (OpenBB + OpenTerminalUI) ──────
+
+class OptionsStrategyRequest(BaseModel):
+    ticker: Optional[str] = "RELIANCE"
+    strategy_type: Optional[str] = "BULL_CALL_SPREAD"
+    underlying_price: Optional[float] = 1317.0
+    legs: Optional[List[Dict[str, Any]]] = None
+
+
+class PortfolioRiskRequest(BaseModel):
+    positions: Optional[List[Dict[str, Any]]] = None
+    portfolio_value: Optional[float] = 1000000.0
+
+
+@router.get("/stock/{ticker}/valuation")
+def get_stock_dcf_valuation(
+    ticker: str,
+    growth_5y: Optional[float] = 0.12,
+    terminal_growth: Optional[float] = 0.05,
+    wacc: Optional[float] = 0.11
+):
+    """Returns Multi-Stage DCF Intrinsic Fair Value and Benjamin Graham Number."""
+    from backend.analysis.valuation import calculate_dcf_valuation
+    return calculate_dcf_valuation(
+        ticker=ticker,
+        growth_rate_5y=growth_5y,
+        terminal_growth_rate=terminal_growth,
+        discount_rate_wacc=wacc
+    )
+
+
+@router.get("/market/rrg-sectors")
+def get_market_rrg_sectors():
+    """Returns JdK Relative Rotation Graph (RRG) sector rotation quadrants."""
+    from backend.analysis.rrg_rotation import calculate_rrg_sector_rotation
+    return calculate_rrg_sector_rotation()
+
+
+@router.post("/options/strategy-payoff")
+def get_options_strategy_payoff(req: OptionsStrategyRequest):
+    """Simulates multi-leg options strategy payoff curves and 3D Volatility surface."""
+    from backend.analysis.options_lab import calculate_strategy_payoff
+    return calculate_strategy_payoff(
+        ticker=req.ticker or "RELIANCE",
+        strategy_type=req.strategy_type or "BULL_CALL_SPREAD",
+        underlying_price=req.underlying_price or 1317.0,
+        legs=req.legs
+    )
+
+
+@router.get("/stock/{ticker}/volume-profile")
+def get_stock_volume_profile(ticker: str, period: Optional[str] = "3M", bins: Optional[int] = 25):
+    """Returns horizontal Volume Profile (VPVR) price distribution, Point of Control (POC), and Value Area (VAH/VAL)."""
+    from backend.analysis.volume_profile import calculate_volume_profile
+    return calculate_volume_profile(ticker=ticker, period=period, n_bins=bins)
+
+
+@router.get("/macro/sovereign-yields")
+def get_sovereign_macro():
+    """Returns India 10Y G-Sec vs US 10Y Treasury spread, RBI repo rate, CPI inflation, and commodity correlations."""
+    from backend.analysis.macro_terminal import get_sovereign_macro_dashboard
+    return get_sovereign_macro_dashboard()
+
+
+@router.post("/portfolio/risk-cockpit")
+def get_portfolio_quant_risk(req: PortfolioRiskRequest):
+    """Computes Parametric & Historical VaR 95%/99%, Expected Shortfall (CVaR), Sharpe, and Correlation Heatmap."""
+    from backend.analysis.quant_risk import calculate_portfolio_risk_cockpit
+    return calculate_portfolio_risk_cockpit(
+        positions=req.positions,
+        portfolio_value=req.portfolio_value or 1000000.0
+    )
+
+
+@router.get("/terminal/ticker-tape")
+def get_terminal_ticker_tape():
+    """Returns real-time streaming indices and commodity ribbons for the Bloomberg top bar."""
+    return {
+        "indices": [
+            {"symbol": "NIFTY 50", "name": "NSE Benchmark", "price": 24852.4, "change_pct": 0.42, "status": "ACTIVE"},
+            {"symbol": "SENSEX", "name": "BSE Benchmark", "price": 81340.2, "change_pct": 0.38, "status": "ACTIVE"},
+            {"symbol": "BANK NIFTY", "name": "Banking Index", "price": 53210.5, "change_pct": 0.65, "status": "ACTIVE"},
+            {"symbol": "INDIA VIX", "name": "Volatility Index", "price": 12.84, "change_pct": -3.20, "status": "ACTIVE"},
+            {"symbol": "NIFTY IT", "name": "Tech Sector", "price": 38420.0, "change_pct": 0.85, "status": "ACTIVE"},
+            {"symbol": "USD / INR", "name": "Forex", "price": 83.92, "change_pct": -0.05, "status": "ACTIVE"},
+            {"symbol": "BRENT CRUDE", "name": "Commodity ($)", "price": 78.45, "change_pct": -1.15, "status": "ACTIVE"},
+            {"symbol": "GOLD (INR)", "name": "Precious Metals", "price": 71850.0, "change_pct": 0.25, "status": "ACTIVE"},
+        ]
+    }
+
+

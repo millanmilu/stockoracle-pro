@@ -79,17 +79,29 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
   // Core desktop tabs
   const PRIMARY_TABS = [
     { name: 'Live Chart',    label: 'Charts',     icon: CandlestickChart },
-    { name: 'Dashboard',     label: 'Dashboard',  icon: LayoutDashboard },
-    { name: 'AI Prediction', label: 'Forecast',   icon: BrainCircuit },
-    { name: 'Paper Trading', label: 'Paper Trade',icon: Wallet },
+    { name: 'Multi-Tile',    label: '4-Grid Workspace', icon: Grid3X3, badge: 'PRO' },
+    { name: 'Valuation',     label: 'DCF Valuation', icon: BookOpen, badge: 'NEW' },
+    { name: 'Sector Rotation', label: 'RRG Rotation', icon: Activity, badge: 'NEW' },
+    { name: 'Options Strategy Lab', label: 'Options Lab', icon: Layers, badge: 'NEW' },
+    { name: 'Quant Risk Cockpit', label: 'Quant Risk', icon: Shield, badge: 'VaR' },
+    { name: 'Macro Terminal', label: 'Sovereign Macro', icon: Globe },
     { name: 'Adv. Screener', label: 'Screener',   icon: SlidersHorizontal },
-    { name: 'Fundamentals',  label: 'Financials', icon: BookOpen },
-    { name: 'Options Chain', label: 'Options',    icon: Layers },
-    { name: 'Price Alerts',  label: 'Smart Alerts', icon: Bell },
+    { name: 'Paper Trading', label: 'Paper Trade',icon: Wallet },
   ];
 
   // All categorized views for the mobile drawer / full menu
   const VIEW_CATEGORIES = [
+    {
+      category: 'Institutional Terminal (OpenBB & OpenTerminalUI)',
+      items: [
+        { name: 'Multi-Tile',    label: 'Bloomberg 4-Grid Workspace', icon: Grid3X3, badge: 'PRO' },
+        { name: 'Valuation',     label: 'OpenBB DCF & Graham Valuation', icon: BookOpen, badge: 'DCF' },
+        { name: 'Sector Rotation', label: 'RRG Sector Rotation Graphs', icon: Activity, badge: 'RRG' },
+        { name: 'Options Strategy Lab', label: 'Multi-Leg Options Strategy Lab', icon: Layers, badge: 'GREEKS' },
+        { name: 'Quant Risk Cockpit', label: 'Portfolio VaR & Risk Cockpit', icon: Shield, badge: 'VaR' },
+        { name: 'Macro Terminal', label: 'Sovereign 10Y Yields & Macro', icon: Globe, badge: 'MACRO' },
+      ]
+    },
     {
       category: 'Trading & Markets',
       items: [
@@ -110,23 +122,13 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
       ]
     },
     {
-      category: 'Fundamentals & Options',
+      category: 'Fundamentals & Technicals',
       items: [
-        { name: 'Fundamentals',  label: 'Company Ratios', icon: BookOpen, badge: 'NEW' },
+        { name: 'Fundamentals',  label: 'Company Ratios', icon: BookOpen },
         { name: 'Earnings',      label: 'Quarterly Growth', icon: BarChart2 },
-        { name: 'Options Chain', label: 'NSE Options Chain', icon: Layers, badge: 'NEW' },
-      ]
-    },
-    {
-      category: 'Technical & Macro',
-      items: [
+        { name: 'Options Chain', label: 'NSE Options Chain', icon: Layers },
         { name: 'Patterns',      label: 'Pattern Detection', icon: TrendingUp },
         { name: 'Levels',        label: 'Support & Resistance', icon: BarChart2 },
-        { name: 'Volatility',    label: 'GARCH Volatility', icon: Activity },
-        { name: 'Sentiment',     label: 'Sentiment Index',  icon: Brain },
-        { name: 'Macro Data',    label: 'Macro Trends',     icon: Globe },
-        { name: 'Supply Chain',  label: 'Supply Chain Graph', icon: GitFork },
-        { name: 'News',          label: 'Market News',      icon: Sparkles },
         { name: 'Price Alerts',  label: 'Smart Alerts',     icon: Bell },
       ]
     }

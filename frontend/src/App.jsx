@@ -8,6 +8,9 @@ import Dashboard from './components/Dashboard';
 import LiveChartView from './components/LiveChartView';
 import ErrorBoundary from './components/ErrorBoundary';
 
+import BloombergTickerTape from './components/terminal/BloombergTickerTape';
+import CommandPalette from './components/terminal/CommandPalette';
+
 const MultiChartGrid = lazy(() => import('./components/MultiChartGrid'));
 const NewsPanel = lazy(() => import('./components/NewsPanel'));
 const PatternsPanel = lazy(() => import('./components/PatternsPanel'));
@@ -29,6 +32,14 @@ const EarningsPanel = lazy(() => import('./components/EarningsPanel'));
 const OptionsChainView = lazy(() => import('./components/OptionsChainView'));
 const PaperTradingView = lazy(() => import('./components/PaperTradingView'));
 
+// ── OpenBB & OpenTerminalUI Institutional Suite ──
+const ValuationTerminalView = lazy(() => import('./components/terminal/ValuationTerminalView'));
+const RRGRotationView = lazy(() => import('./components/terminal/RRGRotationView'));
+const OptionsStrategyLabView = lazy(() => import('./components/terminal/OptionsStrategyLabView'));
+const MacroTerminalView = lazy(() => import('./components/terminal/MacroTerminalView'));
+const QuantRiskCockpit = lazy(() => import('./components/terminal/QuantRiskCockpit'));
+const MultiTileWorkspace = lazy(() => import('./components/terminal/MultiTileWorkspace'));
+
 function LoadingFallback() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 300 }}>
@@ -49,12 +60,34 @@ function AIPredictionView() {
 export default function App() {
   const { activeView, trainingStatus, selectedSymbol } = useStore();
   const [showWatchlist, setShowWatchlist] = useState(false);
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+
+  // Global Keyboard Listener for / or Ctrl+K Command Palette
+  React.useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setShowCommandPalette(prev => !prev);
+      } else if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+        e.preventDefault();
+        setShowCommandPalette(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const renderView = () => {
     switch (activeView) {
       case 'Live Chart':        return <LiveChartView />;
+      case 'Multi-Tile':        return <Suspense fallback={<LoadingFallback />}><MultiTileWorkspace /></Suspense>;
       case 'Chart Grid':        return <Suspense fallback={<LoadingFallback />}><MultiChartGrid /></Suspense>;
       case 'Dashboard':         return <Dashboard />;
+      case 'Valuation':         return <Suspense fallback={<LoadingFallback />}><ValuationTerminalView ticker={selectedSymbol} /></Suspense>;
+      case 'Sector Rotation':   return <Suspense fallback={<LoadingFallback />}><RRGRotationView /></Suspense>;
+      case 'Options Strategy Lab': return <Suspense fallback={<LoadingFallback />}><OptionsStrategyLabView ticker={selectedSymbol} /></Suspense>;
+      case 'Macro Terminal':    return <Suspense fallback={<LoadingFallback />}><MacroTerminalView /></Suspense>;
+      case 'Quant Risk Cockpit': return <Suspense fallback={<LoadingFallback />}><QuantRiskCockpit /></Suspense>;
       case 'Paper Trading':     return <Suspense fallback={<LoadingFallback />}><PaperTradingView /></Suspense>;
       case 'AI Prediction':     return <Suspense fallback={<LoadingFallback />}><AIPredictionView /></Suspense>;
       case 'AI Chat':           return <Suspense fallback={<LoadingFallback />}><AIChatPanel ticker={selectedSymbol} /></Suspense>;
@@ -77,6 +110,7 @@ export default function App() {
     }
   };
 
+
   return (
     <div style={{
       display: 'flex',
@@ -89,11 +123,21 @@ export default function App() {
     }}>
       <Toaster position="top-right" toastOptions={{ style: { background: '#0F172A', color: '#F0F0FF', border: '1px solid rgba(99,102,241,0.3)' } }} />
       
+      {/* ── Bloomberg Top Streaming Ticker Tape Ribbon ── */}
+      <BloombergTickerTape />
+
+      {/* ── Global / or Ctrl+K Command Palette ── */}
+      <CommandPalette 
+        isOpen={showCommandPalette} 
+        onClose={() => setShowCommandPalette(false)} 
+      />
+
       {/* ── Top Global TradeOne Navigation ── */}
       <TradeOneNavbar 
         showWatchlist={showWatchlist} 
         onToggleWatchlist={() => setShowWatchlist(!showWatchlist)} 
       />
+
 
       {/* ── Global Training Progress Bar ── */}
       {trainingStatus && (
