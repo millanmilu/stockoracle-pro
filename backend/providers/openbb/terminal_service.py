@@ -5,7 +5,8 @@ Dedicated asynchronous financial data broker with TTL caching and multi-provider
 import asyncio
 import time
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
+
 import pandas as pd
 import numpy as np
 
