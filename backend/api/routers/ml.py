@@ -46,13 +46,20 @@ def predict_stock(symbol: str):
 
 @router.get("/stock/{symbol}/explain")
 def explain_prediction(symbol: str):
-    """Returns TreeSHAP feature importance ranking and directional impact bars."""
+    """Returns TreeSHAP feature importance percentages dict."""
+    sym = symbol.upper().strip()
+    from backend.analysis.explainer import get_top_features
+    return get_top_features(sym)
+
+
+@router.get("/stock/{symbol}/shap-drivers")
+def get_shap_drivers_endpoint(symbol: str):
+    """Returns detailed TreeSHAP signal driver cards and human-readable summaries."""
     sym = symbol.upper().strip()
     from backend.analysis.explainer import get_shap_explanation
     df = fetch_stock_data(sym, period="2Y")
-    if df is None or len(df) < 50:
-        raise HTTPException(status_code=404, detail=f"Insufficient data for '{sym}'.")
     return get_shap_explanation(sym, df)
+
 
 
 @router.post("/train/{ticker}")

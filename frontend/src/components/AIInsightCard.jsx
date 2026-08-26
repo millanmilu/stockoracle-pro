@@ -106,19 +106,25 @@ export default function AIInsightCard() {
         {/* Right side: Top Features */}
         <div style={{ flex: 1 }}>
           <h3 style={{ margin: '0 0 15px 0', color: '#aaa', fontSize: '0.9rem' }}>Key Drivers (XGBoost Gain)</h3>
-          {Object.entries(explainData || {}).map(([feature, pct]) => (
-            <div key={feature} style={{ marginBottom: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                <span style={{ color: '#ddd' }}>{String(feature || '').replace(/_/g, ' ').toUpperCase()}</span>
-                <span style={{ color: '#888' }}>{pct}%</span>
-              </div>
-              <div style={{ width: '100%', backgroundColor: 'var(--border, #333)', height: '6px', borderRadius: '3px' }}>
-                <div style={{ width: `${pct}%`, backgroundColor: '#0ea5e9', height: '100%', borderRadius: '3px' }} />
-              </div>
-            </div>
-          ))}
+          {Object.entries(explainData || {})
+            .filter(([_, val]) => typeof val === 'number' || (typeof val === 'string' && !isNaN(parseFloat(val))))
+            .map(([feature, pct]) => {
+              const numericPct = typeof pct === 'number' ? pct : parseFloat(pct) || 0;
+              return (
+                <div key={feature} style={{ marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
+                    <span style={{ color: '#ddd' }}>{String(feature || '').replace(/_/g, ' ').toUpperCase()}</span>
+                    <span style={{ color: '#888' }}>{numericPct}%</span>
+                  </div>
+                  <div style={{ width: '100%', backgroundColor: 'var(--border, #333)', height: '6px', borderRadius: '3px' }}>
+                    <div style={{ width: `${Math.min(100, Math.max(0, numericPct))}%`, backgroundColor: '#0ea5e9', height: '100%', borderRadius: '3px' }} />
+                  </div>
+                </div>
+              );
+            })}
         </div>
       </div>
+
 
       {/* 3-Engine AI Consensus Gauge */}
       <AIConsensusGauge ticker={selectedSymbol} />
