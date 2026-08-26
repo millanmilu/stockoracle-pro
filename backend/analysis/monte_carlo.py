@@ -1,23 +1,24 @@
 import numpy as np
 from typing import Dict, Any, List
 
-def run_monte_carlo_simulation(prices: List[float], simulations: int = 150, horizon: int = 30) -> Dict[str, Any]:
+def run_monte_carlo_simulation(prices: Any, simulations: int = 150, horizon: int = 30) -> Dict[str, Any]:
     """
     Simulates stock price paths using Geometric Brownian Motion (GBM).
-    
-    Args:
-        prices (List[float]): Historical closing prices.
-        simulations (int): Number of simulated paths.
-        horizon (int): Trading days forecast horizon.
-        
-    Returns:
-        Dict[str, Any]: Simulated percentile paths and risk metrics.
+    Accepts DataFrame, Series, or List of float prices.
     """
+    import pandas as pd
+    if isinstance(prices, pd.DataFrame):
+        prices = prices["close"].values.astype(float)
+    elif isinstance(prices, pd.Series):
+        prices = prices.values.astype(float)
+    elif not isinstance(prices, np.ndarray):
+        prices = np.array(prices, dtype=float)
+
     if len(prices) < 2:
         return {}
-        
-    prices = np.array(prices)
-    returns = np.log(prices[1:] / prices[:-1])
+
+    returns = np.log(prices[1:] / (prices[:-1] + 1e-9))
+
     
     # Estimate drift (mu) and volatility (sigma) from historical returns
     mu = np.mean(returns)

@@ -103,9 +103,10 @@ def get_stock_monte_carlo(ticker: str):
     if df is None or len(df) < 30:
         raise HTTPException(status_code=404, detail=f"Insufficient price history for '{t}'.")
 
-    result = run_monte_carlo_simulation(df)
+    result = run_monte_carlo_simulation(df["close"].values.astype(float).tolist())
     save_monte_carlo(t, result)
     return result
+
 
 
 @router.get("/stock/{ticker}/anomalies")
