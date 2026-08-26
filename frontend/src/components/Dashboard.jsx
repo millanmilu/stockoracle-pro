@@ -52,7 +52,7 @@ export default function Dashboard() {
   const isLoading = localLoading && !history;
 
   return (
-    <div style={{ padding: 'clamp(14px, 3vw, 24px)', display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1600px', margin: '0 auto' }}>
+    <div className="glass-card" style={{ padding: 'clamp(14px, 3vw, 24px)', display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1600px', margin: '0 auto', background: 'var(--bg-card)', borderRadius: 16, border: '1px solid rgba(99,102,241,0.18)' }}>
 
       {/* ── Asset Hero & Quick Metrics ── */}
       <div style={{

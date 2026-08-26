@@ -1,13 +1,13 @@
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState, lazy, Suspense, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import useStore from './store/useStore';
-import TradeOneNavbar from './components/TradeOneNavbar';
-import WatchlistDrawer from './components/WatchlistDrawer';
-import RightToolRail from './components/RightToolRail';
 import Dashboard from './components/Dashboard';
 import LiveChartView from './components/LiveChartView';
 import ErrorBoundary from './components/ErrorBoundary';
-import Sidebar from './components/Sidebar';
+
+import ProTopBar from './components/ProTopBar';
+import ProSidebar from './components/ProSidebar';
+import ProRightPanel from './components/ProRightPanel';
 
 import BloombergTickerTape from './components/terminal/BloombergTickerTape';
 
@@ -61,10 +61,10 @@ function AIPredictionView() {
 }
 
 export default function App() {
-  const { activeView, trainingStatus, selectedSymbol } = useStore();
-  const [showWatchlist, setShowWatchlist] = useState(false);
+  const { activeView, trainingStatus, selectedSymbol, theme } = useStore();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
-  const [showSidebar, setShowSidebar] = useState(false);
 
   // Global Keyboard Listener for / or Ctrl+K Command Palette
   React.useEffect(() => {
@@ -118,83 +118,62 @@ export default function App() {
 
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100vh',
-      width: '100vw',
-      backgroundColor: 'var(--bg-primary, #04050E)',
-      color: 'var(--text-primary, #F0F0FF)',
-      overflow: 'hidden',
-    }}>
+    <div className="app-shell" data-theme={theme}>
       <div className="scanline-overlay" />
       <Toaster position="top-right" toastOptions={{ style: { background: '#0F172A', color: '#F0F0FF', border: '1px solid rgba(99,102,241,0.3)' } }} />
+      <CommandPalette isOpen={showCommandPalette} onClose={() => setShowCommandPalette(false)} />
       
-      {/* ── Bloomberg Top Streaming Ticker Tape Ribbon ── */}
-      <BloombergTickerTape />
-
-      {/* ── Global / or Ctrl+K Command Palette ── */}
-      <CommandPalette 
-        isOpen={showCommandPalette} 
-        onClose={() => setShowCommandPalette(false)} 
-      />
-
-      {/* ── Top Global TradeOne Navigation ── */}
-      <TradeOneNavbar 
-        showWatchlist={showWatchlist} 
-        showSidebar={showSidebar}
-        onToggleWatchlist={() => setShowWatchlist(!showWatchlist)}
-        onToggleSidebar={() => setShowSidebar(!showSidebar)}
+      <ProTopBar 
+        onToggleSidebar={() => setSidebarCollapsed(c => !c)}
+        onToggleRight={() => setRightPanelOpen(r => !r)}
         onOpenCommandPalette={() => setShowCommandPalette(true)}
       />
-
-
-
-      {/* ── Global Training Progress Bar ── */}
-      {trainingStatus && (
-        <div style={{
-          backgroundColor: 'rgba(15, 23, 42, 0.95)',
-          padding: '6px 20px',
-          borderBottom: '1px solid rgba(99, 102, 241, 0.25)',
-          zIndex: 50,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '15px',
-        }}>
-          <div style={{ fontSize: '0.8rem', color: '#3B82F6', fontWeight: 'bold' }}>
-            Training AI Model for {trainingStatus.ticker || selectedSymbol}&hellip;
-          </div>
-          <div style={{ flex: 1, height: '4px', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: '2px', overflow: 'hidden' }}>
-            <div style={{ width: `${trainingStatus.progress || 0}%`, height: '100%', backgroundColor: '#3B82F6', transition: 'width 0.3s' }} />
-          </div>
-          <div style={{ fontSize: '0.72rem', color: '#9CA3AF', fontFamily: 'JetBrains Mono, monospace' }}>
-            {trainingStatus.progress || 0}%
-          </div>
-        </div>
-      )}
-
-      {/* ── Terminal Body: Left Sidebar + Left Watchlist + Main Center Canvas + Right Tool Rail ── */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
-        {/* Left Collapsible Pro Navigation Sidebar */}
-        {showSidebar && (
-          <Sidebar onClose={() => setShowSidebar(false)} />
-        )}
-
-        {/* Left Watchlist Drawer */}
-        {showWatchlist && (
-          <WatchlistDrawer onClose={() => setShowWatchlist(false)} />
-        )}
-
-        {/* Main Center Content Canvas */}
-        <main style={{ flex: 1, height: '100%', overflowY: 'auto', position: 'relative', backgroundColor: '#090C18' }}>
+      
+      <BloombergTickerTape />
+      
+      {trainingStatus && <TrainingBar trainingStatus={trainingStatus} selectedSymbol={selectedSymbol} />}
+      
+      <div className="app-body">
+        <ProSidebar collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(c => !c)} />
+        <main className="app-main">
           <ErrorBoundary key={activeView}>
             {renderView()}
           </ErrorBoundary>
         </main>
-
-        {/* Right Tool Rail */}
-        <RightToolRail onToggleWatchlist={() => setShowWatchlist(!showWatchlist)} />
+        {rightPanelOpen && <ProRightPanel onClose={() => setRightPanelOpen(false)} />}
       </div>
+      
+      <BottomStatusBar />
+    </div>
+  );
+}
+
+function TrainingBar({ trainingStatus, selectedSymbol }) {
+  return <div style={{ backgroundColor:'rgba(15,23,42,0.95)', padding:'6px 20px', borderBottom:'1px solid rgba(99,102,241,0.25)', display:'flex', alignItems:'center', gap:15 }}>
+    <div style={{ fontSize:'0.8rem', color:'#3B82F6', fontWeight:'bold' }}>Training AI Model for {trainingStatus.ticker || selectedSymbol}…</div>
+    <div style={{ flex:1, height:4, background:'rgba(255,255,255,0.08)', borderRadius:2, overflow:'hidden' }}>
+      <div style={{ width:`${trainingStatus.progress||0}%`, height:'100%', background:'#3B82F6', transition:'width 0.3s' }} />
+    </div>
+    <div style={{ fontSize:'0.72rem', color:'#9CA3AF', fontFamily:'JetBrains Mono,monospace' }}>{trainingStatus.progress||0}%</div>
+  </div>;
+}
+
+function BottomStatusBar() {
+  const [time, setTime] = useState(new Date());
+  useEffect(() => { const t = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(t); }, []);
+  const ist = time.toLocaleString('en-IN', { timeZone:'Asia/Kolkata', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
+  const dayOfWeek = time.toLocaleDateString('en-IN', { timeZone:'Asia/Kolkata', weekday:'short' });
+  const isWeekend = ['Sat','Sun'].includes(dayOfWeek);
+  const hour = parseInt(ist.split(':')[0]);
+  const min = parseInt(ist.split(':')[1]);
+  const isMarketHours = !isWeekend && ((hour===9 && min>=15) || (hour>9 && hour<15) || (hour===15 && min<=30));
+  const phase = isWeekend ? 'CLOSED (Weekend)' : isMarketHours ? 'MARKET OPEN' : 'MARKET CLOSED';
+  const phaseColor = isMarketHours ? '#10B981' : '#F43F5E';
+  return (
+    <div className="pro-status-bar">
+      <span><span style={{color:phaseColor,fontWeight:700}}>●</span> {phase}</span>
+      <span>NSE IST {ist}</span>
+      <span style={{color:'#10B981'}}>● WS Connected</span>
     </div>
   );
 }
