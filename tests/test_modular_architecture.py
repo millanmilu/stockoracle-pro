@@ -131,6 +131,9 @@ def test_modular_routes_mounted():
 
 def test_celery_task_registry():
     """Verify Celery task registry contains all defined background tasks."""
+    import backend.tasks.market_tasks
+    import backend.tasks.alert_tasks
+    import backend.tasks.ml_tasks
     from backend.tasks.celery_app import celery_app
     tasks = list(celery_app.tasks.keys())
 
@@ -138,3 +141,4 @@ def test_celery_task_registry():
     assert "tasks.prefetch_popular_tickers" in tasks
     assert "tasks.evaluate_all_alerts" in tasks
     assert "tasks.train_stock_model" in tasks
+
