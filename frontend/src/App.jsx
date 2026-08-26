@@ -7,8 +7,10 @@ import RightToolRail from './components/RightToolRail';
 import Dashboard from './components/Dashboard';
 import LiveChartView from './components/LiveChartView';
 import ErrorBoundary from './components/ErrorBoundary';
+import Sidebar from './components/Sidebar';
 
 import BloombergTickerTape from './components/terminal/BloombergTickerTape';
+
 import CommandPalette from './components/terminal/CommandPalette';
 
 const MultiChartGrid = lazy(() => import('./components/MultiChartGrid'));
@@ -135,7 +137,9 @@ export default function App() {
       {/* ── Top Global TradeOne Navigation ── */}
       <TradeOneNavbar 
         showWatchlist={showWatchlist} 
+        showSidebar={showSidebar}
         onToggleWatchlist={() => setShowWatchlist(!showWatchlist)}
+        onToggleSidebar={() => setShowSidebar(!showSidebar)}
         onOpenCommandPalette={() => setShowCommandPalette(true)}
       />
 
@@ -164,8 +168,13 @@ export default function App() {
         </div>
       )}
 
-      {/* ── Terminal Body: Left Watchlist + Main Center Canvas + Right Tool Rail ── */}
+      {/* ── Terminal Body: Left Sidebar + Left Watchlist + Main Center Canvas + Right Tool Rail ── */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+        {/* Left Collapsible Pro Navigation Sidebar */}
+        {showSidebar && (
+          <Sidebar onClose={() => setShowSidebar(false)} />
+        )}
+
         {/* Left Watchlist Drawer */}
         {showWatchlist && (
           <WatchlistDrawer onClose={() => setShowWatchlist(false)} />
@@ -184,5 +193,3 @@ export default function App() {
     </div>
   );
 }
-
-

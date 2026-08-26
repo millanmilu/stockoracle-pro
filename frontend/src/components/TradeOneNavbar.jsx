@@ -10,8 +10,9 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist, onOpenCommandPalette }) {
+export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist, showSidebar, onToggleSidebar, onOpenCommandPalette }) {
   const { activeView, setActiveView, selectedSymbol, setSelectedSymbol, theme, setTheme } = useStore();
+
   const { searchStocks } = useStock();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -139,17 +140,18 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist, onOpe
         zIndex: 100,
         userSelect: 'none',
       }}>
-        {/* ── Left: Hamburger (Mobile) + Logo + Quick Indices ── */}
+        {/* ── Left: Hamburger (Toggle Sidebar) + Logo + Quick Indices ── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-          {/* Mobile Menu Button */}
+          {/* Sidebar Toggle Button */}
           <button
-            onClick={() => setShowMobileMenu(!showMobileMenu)}
+            onClick={() => onToggleSidebar ? onToggleSidebar() : setShowMobileMenu(!showMobileMenu)}
             aria-label="Toggle navigation menu"
+            title="Toggle Navigation Sidebar"
             style={{
-              background: 'transparent',
+              background: showSidebar ? 'rgba(99,102,241,0.18)' : 'transparent',
               border: isDark ? '1px solid #1E2338' : '1px solid #CBD5E1',
               borderRadius: '8px',
-              color: isDark ? '#F0F0FF' : '#0F172A',
+              color: showSidebar ? '#818CF8' : (isDark ? '#F0F0FF' : '#0F172A'),
               padding: '6px',
               cursor: 'pointer',
               display: 'flex',
@@ -157,8 +159,9 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist, onOpe
               justifyContent: 'center',
             }}
           >
-            {showMobileMenu ? <X size={18} /> : <Menu size={18} />}
+            <Menu size={18} />
           </button>
+
 
           {/* Logo */}
           <div 
