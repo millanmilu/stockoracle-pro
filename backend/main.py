@@ -243,6 +243,7 @@ from backend.api.routers.paper import router as paper_router
 from backend.api.routers.alerts import router as alerts_router
 from backend.api.routers.ml import router as ml_router
 from backend.api.routers.ai_chat import router as aichat_router
+from backend.api.routers.sentiment_ta import router as sentiment_ta_router
 
 app.include_router(system_router)
 app.include_router(market_router)
@@ -252,6 +253,8 @@ app.include_router(paper_router)
 app.include_router(alerts_router)
 app.include_router(ml_router)
 app.include_router(aichat_router)
+app.include_router(sentiment_ta_router)
+
 
 
 # ── Legacy & Compatibility Endpoints ──────────────────────────────────────────

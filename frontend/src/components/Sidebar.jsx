@@ -64,6 +64,7 @@ const CATEGORIES = [
   {
     name: 'Technical Analysis',
     items: [
+      { name: 'Sentiment TA', icon: Activity,   badge: 'NEW' },
       { name: 'Patterns',   icon: TrendingUp, badge: '' },
       { name: 'Levels',     icon: BarChart3,  badge: '' },
       { name: 'Volatility', icon: Activity,   badge: '' },

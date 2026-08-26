@@ -34,13 +34,14 @@ const EarningsPanel = lazy(() => import('./components/EarningsPanel'));
 const OptionsChainView = lazy(() => import('./components/OptionsChainView'));
 const PaperTradingView = lazy(() => import('./components/PaperTradingView'));
 
-// ── OpenBB & OpenTerminalUI Institutional Suite ──
 const ValuationTerminalView = lazy(() => import('./components/terminal/ValuationTerminalView'));
 const RRGRotationView = lazy(() => import('./components/terminal/RRGRotationView'));
 const OptionsStrategyLabView = lazy(() => import('./components/terminal/OptionsStrategyLabView'));
 const MacroTerminalView = lazy(() => import('./components/terminal/MacroTerminalView'));
 const QuantRiskCockpit = lazy(() => import('./components/terminal/QuantRiskCockpit'));
 const MultiTileWorkspace = lazy(() => import('./components/terminal/MultiTileWorkspace'));
+const SentimentTAView = lazy(() => import('./components/SentimentTAView'));
+
 
 function LoadingFallback() {
   return (
@@ -102,7 +103,9 @@ export default function App() {
       case 'Backtest':          return <Suspense fallback={<LoadingFallback />}><BacktestPanel ticker={selectedSymbol} /></Suspense>;
       case 'Price Alerts':      return <Suspense fallback={<LoadingFallback />}><PriceAlerts /></Suspense>;
       case 'Sentiment':         return <Suspense fallback={<LoadingFallback />}><SentimentDashboard /></Suspense>;
+      case 'Sentiment TA':      return <Suspense fallback={<LoadingFallback />}><SentimentTAView ticker={selectedSymbol} /></Suspense>;
       case 'Adv. Screener':     return <Suspense fallback={<LoadingFallback />}><AdvancedScreener /></Suspense>;
+
       case 'Heatmap':           return <Suspense fallback={<LoadingFallback />}><MarketHeatmap /></Suspense>;
       case 'Macro Data':        return <Suspense fallback={<LoadingFallback />}><MacroPanel /></Suspense>;
       case 'Supply Chain':      return <Suspense fallback={<LoadingFallback />}><SupplyChainPanel /></Suspense>;
@@ -124,6 +127,7 @@ export default function App() {
       color: 'var(--text-primary, #F0F0FF)',
       overflow: 'hidden',
     }}>
+      <div className="scanline-overlay" />
       <Toaster position="top-right" toastOptions={{ style: { background: '#0F172A', color: '#F0F0FF', border: '1px solid rgba(99,102,241,0.3)' } }} />
       
       {/* ── Bloomberg Top Streaming Ticker Tape Ribbon ── */}
