@@ -76,13 +76,14 @@ export default function AdvancedScreener() {
         formula_query: activeQuery,
         sort_by: sortBy,
         sort_dir: sortDir,
-        limit: 50,
+        limit: 200,
       });
       setResults(data.results || []);
       setTotalCount(data.total || 0);
       setQueryAst(data.ast);
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Failed to execute screener query.');
+
     } finally {
       setLoading(false);
     }
@@ -245,6 +246,28 @@ export default function AdvancedScreener() {
 
       {/* ── Pre-Built Institutional Screen Presets ── */}
       <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+        <button
+          onClick={() => {
+            setFormulaQuery('MarketCap > 0');
+            setQueryMode('formula');
+            runScreen('MarketCap > 0');
+            toast.success('Loaded All NSE Stocks Universe (75+)');
+          }}
+          style={{
+            padding: '6px 14px',
+            borderRadius: 20,
+            background: formulaQuery === 'MarketCap > 0' ? 'rgba(16,185,129,0.25)' : 'rgba(255,255,255,0.06)',
+            border: formulaQuery === 'MarketCap > 0' ? '1px solid #10B981' : '1px solid rgba(255,255,255,0.12)',
+            color: formulaQuery === 'MarketCap > 0' ? '#10B981' : '#CBD5E1',
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            transition: 'all 0.15s'
+          }}
+        >
+          🌐 All NSE Stocks (75+)
+        </button>
         {prebuiltTemplates.map((tpl) => (
           <button
             key={tpl.id}
@@ -271,6 +294,7 @@ export default function AdvancedScreener() {
           </button>
         ))}
       </div>
+
 
       {/* ── Dual Mode Query Editor & Controls ── */}
       <div style={{
