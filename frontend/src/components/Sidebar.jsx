@@ -29,6 +29,17 @@ import {
 
 const CATEGORIES = [
   {
+    name: 'Institutional Terminal',
+    items: [
+      { name: 'Multi-Tile',        icon: Grid3X3,     badge: 'PRO' },
+      { name: 'Valuation',         icon: BookOpen,    badge: 'DCF' },
+      { name: 'Sector Rotation',   icon: Activity,    badge: 'RRG' },
+      { name: 'Options Strategy Lab', icon: Layers,   badge: 'GREEKS' },
+      { name: 'Quant Risk Cockpit', icon: Shield,     badge: 'VaR' },
+      { name: 'Macro Terminal',    icon: Globe,       badge: 'MACRO' },
+    ]
+  },
+  {
     name: 'Markets & Trading',
     items: [
       { name: 'Dashboard',     icon: LayoutDashboard, badge: '' },
@@ -38,6 +49,7 @@ const CATEGORIES = [
       { name: 'Heatmap',       icon: Grid3X3,           badge: '' },
     ]
   },
+
   {
     name: 'AI & Forecasting',
     items: [
