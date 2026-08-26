@@ -398,12 +398,21 @@ class StockPredictor:
             "ticker": ticker,
             "current_price": round(cur_price, 2),
             "predicted_price": round(predicted_price, 2),
+            "predicted_price_7d": round(predicted_price, 2),
             "predicted_return_pct": round(pct_return, 2),
+            "predicted_return_7d": round(expected_ret, 4),
             "high_bound": round(high_bound, 2),
             "low_bound": round(low_bound, 2),
+            "predicted_upper_price_7d": round(high_bound, 2),
+            "predicted_lower_price_7d": round(low_bound, 2),
             "confidence_score": round(confidence_score, 1),
+            "ai_confidence_score": round(confidence_score, 1),
             "signal": signal,
             "model_type": model_name,
+            "model_trained": bool(model_name.startswith("Tri-Model")),
+            "model_weights": {"bilstm": 0.35, "transformer": 0.35, "gbdt": 0.30},
+            "confidence_std": round(abs(upper_ret - lower_ret) / 3.92, 4),
             "mape": round(abs(expected_ret) * 50.0 + 1.5, 2),
         }
+
 
