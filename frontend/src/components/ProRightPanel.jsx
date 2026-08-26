@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Send } from 'lucide-react';
+import { X, Send, BrainCircuit, TrendingUp, TrendingDown } from 'lucide-react';
 import useStore from '../store/useStore';
 import api from '../utils/api';
 
