@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
+export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist, onOpenCommandPalette }) {
   const { activeView, setActiveView, selectedSymbol, setSelectedSymbol, theme, setTheme } = useStore();
   const { searchStocks } = useStock();
 
@@ -21,17 +21,6 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const searchInputRef = useRef(null);
 
-  // Keyboard shortcut Ctrl+K to open search
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setShowSearchModal(true);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
 
   // Search focus when modal opens
   useEffect(() => {
@@ -278,11 +267,35 @@ export default function TradeOneNavbar({ onToggleWatchlist, showWatchlist }) {
           })}
         </nav>
 
-        {/* ── Right: Theme + Fullscreen Controls ── */}
+        {/* ── Right: Search + Theme + Fullscreen Controls ── */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+          {/* Quick Search / Command Palette Trigger */}
+          <button
+            onClick={() => onOpenCommandPalette?.()}
+            title="Command Palette & Stock Search (Ctrl+K or /)"
+            style={{
+              background: 'rgba(99,102,241,0.12)',
+              border: '1px solid rgba(99,102,241,0.25)',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              color: '#818CF8',
+              padding: '5px 10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontSize: '0.75rem',
+              fontWeight: 600,
+            }}
+          >
+            <Search size={13} />
+            <span className="desktop-search-label">Search / Cmd</span>
+            <span style={{ fontSize: '0.65rem', background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: '4px', color: '#94A3B8' }}>⌘K</span>
+          </button>
+
           {/* Theme Toggle */}
           <button
             onClick={() => setTheme(isDark ? 'light' : 'dark')}
+
             title={isDark ? 'Light Theme' : 'Dark Theme'}
             style={{
               background: 'transparent',

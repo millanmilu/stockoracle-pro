@@ -24,8 +24,10 @@ import {
   BookOpen,
   BarChart2,
   Layers,
-  Wallet
+  Wallet,
+  Shield
 } from 'lucide-react';
+
 
 const CATEGORIES = [
   {

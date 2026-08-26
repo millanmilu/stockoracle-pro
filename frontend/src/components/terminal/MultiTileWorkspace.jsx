@@ -13,13 +13,15 @@ export default function MultiTileWorkspace() {
 
   return (
     <div style={{
-      height: 'calc(100vh - 86px)',
-      minHeight: 'calc(100vh - 86px)',
+      flex: 1,
+      height: '100%',
+      minHeight: 0,
       display: 'flex',
       flexDirection: 'column',
       background: '#04060E',
       overflow: 'hidden',
     }}>
+
 
       {/* Top Tile Control Ribbon */}
       <div style={{

@@ -488,13 +488,14 @@ def get_stock_dcf_valuation(
     terminal_growth: Optional[float] = 0.05,
     wacc: Optional[float] = 0.11
 ):
-    """Returns Multi-Stage DCF Intrinsic Fair Value and Benjamin Graham Number."""
-    from backend.analysis.valuation import calculate_dcf_valuation
-    return calculate_dcf_valuation(
-        ticker=ticker,
+    """Returns Multi-Stage DCF Intrinsic Fair Value and Benjamin Graham Number via OpenBB Core Adapter."""
+    from backend.providers.openbb.wrapper import get_openbb_client
+    obb = get_openbb_client()
+    return obb.get_dcf_valuation(
+        symbol=ticker,
         growth_rate_5y=growth_5y,
-        terminal_growth_rate=terminal_growth,
-        discount_rate_wacc=wacc
+        terminal_growth=terminal_growth,
+        wacc=wacc
     )
 
 
@@ -526,16 +527,18 @@ def get_stock_volume_profile(ticker: str, period: Optional[str] = "3M", bins: Op
 
 @router.get("/macro/sovereign-yields")
 def get_sovereign_macro():
-    """Returns India 10Y G-Sec vs US 10Y Treasury spread, RBI repo rate, CPI inflation, and commodity correlations."""
-    from backend.analysis.macro_terminal import get_sovereign_macro_dashboard
-    return get_sovereign_macro_dashboard()
+    """Returns India 10Y G-Sec vs US 10Y Treasury spread, RBI repo rate, CPI inflation, and commodity correlations via OpenBB Hub."""
+    from backend.providers.openbb.wrapper import get_openbb_client
+    obb = get_openbb_client()
+    return obb.get_sovereign_macro_hub()
 
 
 @router.post("/portfolio/risk-cockpit")
 def get_portfolio_quant_risk(req: PortfolioRiskRequest):
-    """Computes Parametric & Historical VaR 95%/99%, Expected Shortfall (CVaR), Sharpe, and Correlation Heatmap."""
-    from backend.analysis.quant_risk import calculate_portfolio_risk_cockpit
-    return calculate_portfolio_risk_cockpit(
+    """Computes Parametric & Historical VaR 95%/99%, Expected Shortfall (CVaR), Sharpe, and Correlation Heatmap via OpenBB Engine."""
+    from backend.providers.openbb.wrapper import get_openbb_client
+    obb = get_openbb_client()
+    return obb.calculate_portfolio_risk(
         positions=req.positions,
         portfolio_value=req.portfolio_value or 1000000.0
     )
@@ -543,6 +546,7 @@ def get_portfolio_quant_risk(req: PortfolioRiskRequest):
 
 @router.get("/terminal/ticker-tape")
 def get_terminal_ticker_tape():
+
     """Returns real-time streaming indices and commodity ribbons for the Bloomberg top bar."""
     return {
         "indices": [

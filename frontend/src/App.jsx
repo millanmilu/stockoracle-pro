@@ -135,8 +135,10 @@ export default function App() {
       {/* ── Top Global TradeOne Navigation ── */}
       <TradeOneNavbar 
         showWatchlist={showWatchlist} 
-        onToggleWatchlist={() => setShowWatchlist(!showWatchlist)} 
+        onToggleWatchlist={() => setShowWatchlist(!showWatchlist)}
+        onOpenCommandPalette={() => setShowCommandPalette(true)}
       />
+
 
 
       {/* ── Global Training Progress Bar ── */}
