@@ -250,6 +250,138 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_model_registry_ticker ON model_registry (ticker)"
         )
 
+        # 16. Companies Metadata
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS companies (
+                ticker              TEXT PRIMARY KEY,
+                name                TEXT NOT NULL,
+                sector              TEXT,
+                industry            TEXT,
+                market_cap_category TEXT,
+                about_text          TEXT,
+                website_url         TEXT,
+                bse_code            TEXT,
+                nse_symbol          TEXT
+            )
+        """)
+
+        # 17. Financial Statements (Quarterly & Annual)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS financial_statements (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker             TEXT NOT NULL,
+                period_type        TEXT NOT NULL,
+                period_label       TEXT NOT NULL,
+                revenue            REAL,
+                operating_profit   REAL,
+                opm_pct            REAL,
+                net_profit         REAL,
+                npm_pct            REAL,
+                eps                REAL,
+                balance_sheet_json TEXT,
+                cash_flow_json     TEXT
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_fin_stmt_ticker ON financial_statements (ticker, period_type)")
+
+        # 18. Financial Ratios
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS financial_ratios (
+                ticker          TEXT PRIMARY KEY,
+                pe_ratio        REAL,
+                pb_ratio        REAL,
+                roe_pct         REAL,
+                roce_pct        REAL,
+                debt_to_equity  REAL,
+                opm_pct         REAL,
+                npm_pct         REAL,
+                sales_growth_3y REAL,
+                profit_growth_3y REAL,
+                cagr_5y         REAL
+            )
+        """)
+
+        # 19. Shareholding Snapshots
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS shareholding_snapshots (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker        TEXT NOT NULL,
+                quarter_label TEXT NOT NULL,
+                promoter_pct  REAL,
+                fii_pct       REAL,
+                dii_pct       REAL,
+                public_pct    REAL,
+                others_pct    REAL
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_shareholding_ticker ON shareholding_snapshots (ticker)")
+
+        # 20. Screener Precomputed Daily Metrics Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS screener_daily_metrics (
+                ticker                TEXT PRIMARY KEY,
+                name                  TEXT NOT NULL,
+                sector                TEXT,
+                industry              TEXT,
+                market_cap_cr         REAL,
+                market_cap_cat        TEXT,
+                close_price           REAL NOT NULL,
+                change_1d_pct         REAL,
+                change_1w_pct         REAL,
+                change_1m_pct         REAL,
+                change_1y_pct         REAL,
+                distance_52w_high_pct REAL,
+                distance_52w_low_pct  REAL,
+                rsi_14                REAL,
+                macd_signal           TEXT,
+                sma_20                REAL,
+                sma_50                REAL,
+                sma_200               REAL,
+                volume_ratio_20d      REAL,
+                pe_ratio              REAL,
+                pb_ratio              REAL,
+                roe_pct               REAL,
+                roce_pct              REAL,
+                debt_to_equity        REAL,
+                sales_growth_3y       REAL,
+                profit_growth_3y      REAL,
+                pcr                   REAL,
+                max_pain              REAL,
+                iv                    REAL,
+                ai_consensus_score    REAL,
+                ai_signal             TEXT,
+                ai_confidence_score   REAL,
+                updated_at            TEXT NOT NULL
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_sector ON screener_daily_metrics (sector)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_mcap ON screener_daily_metrics (market_cap_cr)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_pe ON screener_daily_metrics (pe_ratio)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_roce ON screener_daily_metrics (roce_pct)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_rsi ON screener_daily_metrics (rsi_14)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_ai_score ON screener_daily_metrics (ai_consensus_score)")
+
+        # 21. User Screens & Formula AST
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS user_screens (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id         TEXT NOT NULL DEFAULT 'default_user',
+                name            TEXT NOT NULL,
+                description     TEXT,
+                formula_query   TEXT,
+                filter_ast_json TEXT NOT NULL DEFAULT '{}',
+                universe        TEXT NOT NULL DEFAULT 'NIFTY_500',
+                sort_by         TEXT NOT NULL DEFAULT 'market_cap_cr',
+                sort_dir        TEXT NOT NULL DEFAULT 'DESC',
+                is_public       INTEGER NOT NULL DEFAULT 0,
+                share_token     TEXT UNIQUE,
+                created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_screens_user ON user_screens (user_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_screens_token ON user_screens (share_token)")
+
         # Cleanup: purge any legacy intraday records that polluted the daily historical_prices table
         cursor.execute("DELETE FROM historical_prices WHERE length(date) != 10")
 
@@ -1115,6 +1247,235 @@ def get_registered_models(ticker: str = None) -> list:
             item["metrics"] = {}
         result.append(item)
     return result
+
+
+# ── Screener Platform Database Operations ────────────────────────────────────
+
+def upsert_screener_daily_metric(row_data: dict) -> None:
+    """Inserts or updates precomputed daily metrics for a ticker."""
+    now_str = datetime.now().isoformat()
+    ticker = str(row_data.get("ticker", "")).upper().strip()
+    if not ticker:
+        return
+
+    with get_db_connection() as conn:
+        conn.execute(
+            """
+            INSERT INTO screener_daily_metrics (
+                ticker, name, sector, industry, market_cap_cr, market_cap_cat,
+                close_price, change_1d_pct, change_1w_pct, change_1m_pct, change_1y_pct,
+                distance_52w_high_pct, distance_52w_low_pct, rsi_14, macd_signal,
+                sma_20, sma_50, sma_200, volume_ratio_20d, pe_ratio, pb_ratio,
+                roe_pct, roce_pct, debt_to_equity, sales_growth_3y, profit_growth_3y,
+                pcr, max_pain, iv, ai_consensus_score, ai_signal, ai_confidence_score, updated_at
+            ) VALUES (
+                :ticker, :name, :sector, :industry, :market_cap_cr, :market_cap_cat,
+                :close_price, :change_1d_pct, :change_1w_pct, :change_1m_pct, :change_1y_pct,
+                :distance_52w_high_pct, :distance_52w_low_pct, :rsi_14, :macd_signal,
+                :sma_20, :sma_50, :sma_200, :volume_ratio_20d, :pe_ratio, :pb_ratio,
+                :roe_pct, :roce_pct, :debt_to_equity, :sales_growth_3y, :profit_growth_3y,
+                :pcr, :max_pain, :iv, :ai_consensus_score, :ai_signal, :ai_confidence_score, :updated_at
+            )
+            ON CONFLICT(ticker) DO UPDATE SET
+                name=excluded.name, sector=excluded.sector, industry=excluded.industry,
+                market_cap_cr=excluded.market_cap_cr, market_cap_cat=excluded.market_cap_cat,
+                close_price=excluded.close_price, change_1d_pct=excluded.change_1d_pct,
+                change_1w_pct=excluded.change_1w_pct, change_1m_pct=excluded.change_1m_pct,
+                change_1y_pct=excluded.change_1y_pct, distance_52w_high_pct=excluded.distance_52w_high_pct,
+                distance_52w_low_pct=excluded.distance_52w_low_pct, rsi_14=excluded.rsi_14,
+                macd_signal=excluded.macd_signal, sma_20=excluded.sma_20, sma_50=excluded.sma_50,
+                sma_200=excluded.sma_200, volume_ratio_20d=excluded.volume_ratio_20d,
+                pe_ratio=excluded.pe_ratio, pb_ratio=excluded.pb_ratio, roe_pct=excluded.roe_pct,
+                roce_pct=excluded.roce_pct, debt_to_equity=excluded.debt_to_equity,
+                sales_growth_3y=excluded.sales_growth_3y, profit_growth_3y=excluded.profit_growth_3y,
+                pcr=excluded.pcr, max_pain=excluded.max_pain, iv=excluded.iv,
+                ai_consensus_score=excluded.ai_consensus_score, ai_signal=excluded.ai_signal,
+                ai_confidence_score=excluded.ai_confidence_score, updated_at=excluded.updated_at
+            """,
+            {
+                "ticker": ticker,
+                "name": row_data.get("name", ticker),
+                "sector": row_data.get("sector"),
+                "industry": row_data.get("industry"),
+                "market_cap_cr": row_data.get("market_cap_cr", 10000.0),
+                "market_cap_cat": row_data.get("market_cap_cat", "MID"),
+                "close_price": float(row_data.get("close_price", 100.0)),
+                "change_1d_pct": row_data.get("change_1d_pct", 0.0),
+                "change_1w_pct": row_data.get("change_1w_pct", 0.0),
+                "change_1m_pct": row_data.get("change_1m_pct", 0.0),
+                "change_1y_pct": row_data.get("change_1y_pct", 0.0),
+                "distance_52w_high_pct": row_data.get("distance_52w_high_pct", -5.0),
+                "distance_52w_low_pct": row_data.get("distance_52w_low_pct", 25.0),
+                "rsi_14": row_data.get("rsi_14", 50.0),
+                "macd_signal": row_data.get("macd_signal", "BULLISH"),
+                "sma_20": row_data.get("sma_20"),
+                "sma_50": row_data.get("sma_50"),
+                "sma_200": row_data.get("sma_200"),
+                "volume_ratio_20d": row_data.get("volume_ratio_20d", 1.0),
+                "pe_ratio": row_data.get("pe_ratio"),
+                "pb_ratio": row_data.get("pb_ratio"),
+                "roe_pct": row_data.get("roe_pct"),
+                "roce_pct": row_data.get("roce_pct"),
+                "debt_to_equity": row_data.get("debt_to_equity"),
+                "sales_growth_3y": row_data.get("sales_growth_3y"),
+                "profit_growth_3y": row_data.get("profit_growth_3y"),
+                "pcr": row_data.get("pcr"),
+                "max_pain": row_data.get("max_pain"),
+                "iv": row_data.get("iv"),
+                "ai_consensus_score": row_data.get("ai_consensus_score", 60.0),
+                "ai_signal": row_data.get("ai_signal", "BUY"),
+                "ai_confidence_score": row_data.get("ai_confidence_score", 75.0),
+                "updated_at": now_str,
+            }
+        )
+        conn.commit()
+
+
+def execute_screener_sql_query(
+    where_clause: str = "1=1",
+    params: dict = None,
+    sort_by: str = "market_cap_cr",
+    sort_dir: str = "DESC",
+    limit: int = 50,
+    offset: int = 0
+) -> dict:
+    """Executes indexed SQL filter query against screener_daily_metrics table."""
+    params = params or {}
+    allowed_sorts = {
+        "market_cap_cr", "close_price", "change_1d_pct", "rsi_14", "pe_ratio",
+        "pb_ratio", "roe_pct", "roce_pct", "debt_to_equity", "volume_ratio_20d",
+        "sales_growth_3y", "profit_growth_3y", "ai_consensus_score"
+    }
+    safe_sort = sort_by if sort_by in allowed_sorts else "market_cap_cr"
+    safe_dir = "ASC" if str(sort_dir).upper() == "ASC" else "DESC"
+
+    query_sql = f"""
+        SELECT *
+        FROM screener_daily_metrics
+        WHERE {where_clause}
+        ORDER BY {safe_sort} {safe_dir} NULLS LAST
+        LIMIT {max(1, min(limit, 200))} OFFSET {max(0, offset)}
+    """
+
+    count_sql = f"""
+        SELECT COUNT(*) as total_count
+        FROM screener_daily_metrics
+        WHERE {where_clause}
+    """
+
+    with get_db_connection() as conn:
+        total = conn.execute(count_sql, params).fetchone()["total_count"]
+        rows = conn.execute(query_sql, params).fetchall()
+
+    return {
+        "total": total,
+        "count": len(rows),
+        "results": [dict(r) for r in rows],
+    }
+
+
+def save_user_screen_query(
+    user_id: str,
+    name: str,
+    description: str = None,
+    formula_query: str = None,
+    filter_ast: dict = None,
+    universe: str = "NIFTY_500",
+    sort_by: str = "market_cap_cr",
+    sort_dir: str = "DESC",
+    is_public: bool = False
+) -> dict:
+    """Saves a user custom multi-factor screen and creates a unique share token."""
+    import uuid
+    import json as _json
+    share_token = str(uuid.uuid4())[:12]
+    now_str = datetime.now().isoformat()
+
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO user_screens (
+                user_id, name, description, formula_query, filter_ast_json,
+                universe, sort_by, sort_dir, is_public, share_token, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id, name.strip(), description, formula_query,
+                _json.dumps(filter_ast or {}), universe, sort_by, sort_dir,
+                1 if is_public else 0, share_token, now_str, now_str
+            )
+        )
+        conn.commit()
+        row_id = cursor.lastrowid
+
+    write_audit_log("CREATE", "user_screen", entity_id=row_id, details=f"name={name}", user_id=user_id)
+    return {
+        "id": row_id,
+        "user_id": user_id,
+        "name": name,
+        "share_token": share_token,
+        "formula_query": formula_query,
+    }
+
+
+def get_user_screens_list(user_id: str = "default_user") -> list:
+    """Returns saved screens for a user."""
+    import json as _json
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, name, description, formula_query, filter_ast_json,
+                   universe, sort_by, sort_dir, is_public, share_token, created_at, updated_at
+            FROM user_screens
+            WHERE user_id = ? OR is_public = 1
+            ORDER BY id DESC
+            """,
+            (user_id,)
+        ).fetchall()
+
+    res = []
+    for r in rows:
+        item = dict(r)
+        try:
+            item["filter_ast"] = _json.loads(item["filter_ast_json"] or "{}")
+        except Exception:
+            item["filter_ast"] = {}
+        res.append(item)
+    return res
+
+
+def get_user_screen_by_share_token(token: str) -> Optional[dict]:
+    """Retrieves public screen by share token."""
+    import json as _json
+    with get_db_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, user_id, name, description, formula_query, filter_ast_json,
+                   universe, sort_by, sort_dir, is_public, share_token, created_at
+            FROM user_screens
+            WHERE share_token = ?
+            """,
+            (token,)
+        ).fetchone()
+
+    if not row:
+        return None
+    item = dict(row)
+    try:
+        item["filter_ast"] = _json.loads(item["filter_ast_json"] or "{}")
+    except Exception:
+        item["filter_ast"] = {}
+    return item
+
+
+def delete_user_screen_query(screen_id: int, user_id: str = "default_user") -> bool:
+    """Deletes a saved user screen."""
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM user_screens WHERE id = ? AND user_id = ?", (screen_id, user_id))
+        conn.commit()
+    write_audit_log("DELETE", "user_screen", entity_id=screen_id, user_id=user_id)
+    return True
+
 
 
 

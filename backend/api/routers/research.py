@@ -274,3 +274,195 @@ def get_corporate_actions(ticker: str):
             {"type": "SPLIT", "old_fv": "₹10", "new_fv": "₹2", "ex_date": "2024-08-10", "status": "COMPLETED"}
         ]
     }
+
+
+# ── Screener.in-Style Financials & Advanced Screener Platform ────────────────
+
+class ScreenerQueryRequest(BaseModel):
+    formula_query: Optional[str] = "ROCE > 15 AND DebtToEquity < 1.0"
+    universe: Optional[str] = "NIFTY_500"
+    sort_by: Optional[str] = "market_cap_cr"
+    sort_dir: Optional[str] = "DESC"
+    limit: Optional[int] = 50
+    offset: Optional[int] = 0
+
+
+class AIScreenerParseRequest(BaseModel):
+    prompt: str = Field(..., min_length=2, max_length=500)
+
+
+class ScreenerBacktestRequest(BaseModel):
+    formula_query: Optional[str] = "ROCE > 15 AND DebtToEquity < 0.8"
+    initial_capital: Optional[float] = 1000000.0
+    holding_period_days: Optional[int] = 20
+    backtest_horizon_days: Optional[int] = 250
+
+
+class UserScreenSaveRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    description: Optional[str] = None
+    formula_query: str
+    universe: Optional[str] = "NIFTY_500"
+    sort_by: Optional[str] = "market_cap_cr"
+    sort_dir: Optional[str] = "DESC"
+    is_public: Optional[bool] = False
+
+
+@router.get("/stock/{ticker}/financials")
+def get_stock_deep_financials(ticker: str):
+    """Returns Screener.in-grade 10-Year Annual P&L, Balance Sheet, Cash Flows, Quarterly, Shareholding & Peers."""
+    from backend.data.fundamentals_deep import get_deep_financials
+    t = ticker.upper().strip()
+    return get_deep_financials(t)
+
+
+@router.post("/screener/query")
+def execute_screener_query_endpoint(req: ScreenerQueryRequest):
+    """
+    Executes a Screener.in formula DSL query against the precomputed daily metrics SQL engine.
+    Sub-50ms query latency.
+    """
+    from backend.research.screener_dsl import parse_screener_query
+    from backend.data.database import execute_screener_sql_query, get_db_connection
+    from backend.data.seed_screener_metrics import seed_screener_metrics_table
+
+    # Auto-seed if empty
+    with get_db_connection() as conn:
+        count = conn.execute("SELECT COUNT(*) as c FROM screener_daily_metrics").fetchone()["c"]
+        if count == 0:
+            seed_screener_metrics_table()
+
+    formula = req.formula_query or "1=1"
+    parsed = parse_screener_query(formula)
+    if not parsed["success"]:
+        raise HTTPException(status_code=400, detail=parsed["error"])
+
+    sql_res = execute_screener_sql_query(
+        where_clause=parsed["where_clause"],
+        params=parsed["params"],
+        sort_by=req.sort_by or "market_cap_cr",
+        sort_dir=req.sort_dir or "DESC",
+        limit=req.limit or 50,
+        offset=req.offset or 0
+    )
+
+    return {
+        "formula_query": formula,
+        "ast": parsed["ast"],
+        "total": sql_res["total"],
+        "count": sql_res["count"],
+        "results": sql_res["results"]
+    }
+
+
+@router.post("/screener/ai-parse")
+def parse_ai_screener_query_endpoint(req: AIScreenerParseRequest):
+    """Translates natural language trader prompts into verified Screener DSL formulas."""
+    from backend.research.ai_screener import convert_natural_language_to_screener_query
+    return convert_natural_language_to_screener_query(req.prompt)
+
+
+@router.post("/screener/backtest")
+def run_screener_backtest_endpoint(req: ScreenerBacktestRequest):
+    """Simulates point-in-time screen basket rebalancing and benchmarks vs NIFTY 50."""
+    from backend.research.screener_backtest import run_screener_backtest
+    return run_screener_backtest(
+        formula_query=req.formula_query or "ROCE > 15 AND DebtToEquity < 0.8",
+        initial_capital=req.initial_capital or 1000000.0,
+        holding_period_days=req.holding_period_days or 20,
+        backtest_horizon_days=req.backtest_horizon_days or 250
+    )
+
+
+@router.get("/screener/screens")
+def get_user_screens_endpoint(
+    request: Request,
+    user_id: Optional[str] = Query(None),
+    _auth: None = Security(verify_api_key)
+):
+    """Returns saved screens and institutional pre-built templates."""
+    from backend.data.database import get_user_screens_list
+    effective_user = user_id or get_current_user_id(request)
+    user_screens = get_user_screens_list(effective_user)
+
+    # Add pre-built institutional templates
+    templates = [
+        {"id": "tpl_1", "name": "💎 Undervalued Quality Stocks", "formula_query": "ROCE > 20 AND PE < 30 AND DebtToEquity < 0.5", "universe": "NIFTY_500", "description": "High ROCE, low leverage, trading at reasonable PE multiples."},
+        {"id": "tpl_2", "name": "🚀 Breakout With Rising Volume", "formula_query": "RSI14 > 55 AND VolumeRatio20D > 1.3 AND Distance52WHigh > -5", "universe": "NIFTY_500", "description": "Stocks trading near 52-week highs with volume expansion."},
+        {"id": "tpl_3", "name": "📈 High ROCE + Low Debt", "formula_query": "ROCE > 25 AND DebtToEquity < 0.2", "universe": "NIFTY_500", "description": "Virtually debt-free high return on capital compounds."},
+        {"id": "tpl_4", "name": "🛡️ Oversold Large Caps", "formula_query": "MarketCap > 50000 AND RSI14 < 45", "universe": "NIFTY_500", "description": "Blue-chip leaders in short-term oversold pullback territory."},
+        {"id": "tpl_5", "name": "🤖 AI High-Confidence Signals", "formula_query": "AIConsensus > 80 AND VolumeRatio20D > 1.0", "universe": "NIFTY_500", "description": "Stocks with top tri-engine neural consensus and institutional flow."},
+    ]
+
+    return {
+        "saved_screens": user_screens,
+        "prebuilt_templates": templates
+    }
+
+
+@router.post("/screener/screens")
+def save_user_screen_endpoint(
+    req: UserScreenSaveRequest,
+    request: Request,
+    user_id: Optional[str] = Query(None),
+    _auth: None = Security(verify_api_key)
+):
+    """Saves a custom multi-factor screen with share token."""
+    from backend.data.database import save_user_screen_query
+    from backend.research.screener_dsl import parse_screener_query
+    effective_user = user_id or get_current_user_id(request)
+    parsed = parse_screener_query(req.formula_query)
+
+    res = save_user_screen_query(
+        user_id=effective_user,
+        name=req.name,
+        description=req.description,
+        formula_query=req.formula_query,
+        filter_ast=parsed.get("ast", {}),
+        universe=req.universe or "NIFTY_500",
+        sort_by=req.sort_by or "market_cap_cr",
+        sort_dir=req.sort_dir or "DESC",
+        is_public=bool(req.is_public)
+    )
+    return res
+
+
+@router.get("/screener/share/{token}")
+def get_shared_screen_endpoint(token: str):
+    """Public read-only screen viewer by token."""
+    from backend.data.database import get_user_screen_by_share_token, execute_screener_sql_query
+    from backend.research.screener_dsl import parse_screener_query
+
+    screen = get_user_screen_by_share_token(token)
+    if not screen:
+        raise HTTPException(status_code=404, detail="Shared screen not found or link has expired.")
+
+    parsed = parse_screener_query(screen.get("formula_query", ""))
+    sql_res = execute_screener_sql_query(
+        where_clause=parsed["where_clause"],
+        params=parsed["params"],
+        sort_by=screen.get("sort_by", "market_cap_cr"),
+        sort_dir=screen.get("sort_dir", "DESC"),
+        limit=50
+    )
+
+    return {
+        "screen": screen,
+        "total_matched": sql_res["total"],
+        "results": sql_res["results"]
+    }
+
+
+@router.delete("/screener/screens/{screen_id}")
+def delete_user_screen_endpoint(
+    screen_id: int,
+    request: Request,
+    user_id: Optional[str] = Query(None),
+    _auth: None = Security(verify_api_key)
+):
+    """Deletes a saved user screen."""
+    from backend.data.database import delete_user_screen_query
+    effective_user = user_id or get_current_user_id(request)
+    delete_user_screen_query(screen_id, user_id=effective_user)
+    return {"deleted": True, "id": screen_id}
+

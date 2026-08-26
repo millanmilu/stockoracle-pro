@@ -1,420 +1,566 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import api from '../utils/api';
 import useStore from '../store/useStore';
 import {
-  PRESETS,
-  DEFAULT_FILTERS,
-  DEFAULT_PAGE_SIZE,
-  THRESHOLDS,
-  INDEX_CONSTITUENTS
-} from '../constants/screenerConfig';
+  SlidersHorizontal, Sparkles, Terminal, Play, Save, Share2,
+  TrendingUp, Dices, ChevronRight, CheckCircle, AlertCircle, RefreshCw,
+  Search, Shield, Layers, BarChart2, BookOpen
+} from 'lucide-react';
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid
+} from 'recharts';
 
-import ScreenerHeader from './screener/ScreenerHeader';
-import ScreenerKpiCards from './screener/ScreenerKpiCards';
-import ScreenerPresets from './screener/ScreenerPresets';
-import ScreenerFilters from './screener/ScreenerFilters';
-import ScreenerTable from './screener/ScreenerTable';
-import ScreenerCardGrid from './screener/ScreenerCardGrid';
-import ScreenerSectorChart from './screener/ScreenerSectorChart';
-import ScreenerPagination from './screener/ScreenerPagination';
-import './screener/Screener.css';
-
-/**
- * Advanced AI Stock Screener Orchestrator Component with Multi-Universe Selection
- */
 export default function AdvancedScreener() {
   const { setSelectedSymbol, setActiveView } = useStore();
-  const [allStocks, setAllStocks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
-  // View Mode: 'table' | 'cards' | 'sectors'
-  const [viewMode, setViewMode] = useState('table');
+  // Mode: 'formula' | 'visual'
+  const [queryMode, setQueryMode] = useState('formula');
 
-  // Auto Refresh State (every 30s)
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [autoRefreshTimer, setAutoRefreshTimer] = useState(30);
-  const timerRef = useRef(null);
+  // AI Prompt State
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
 
-  // Universe & Filter States
-  const [universe, setUniverse] = useState(DEFAULT_FILTERS.universe);
-  const [preset, setPreset] = useState(DEFAULT_FILTERS.preset);
-  const [sector, setSector] = useState(DEFAULT_FILTERS.sector);
-  const [signal, setSignal] = useState(DEFAULT_FILTERS.signal);
-  const [minRsi, setMinRsi] = useState(DEFAULT_FILTERS.minRsi);
-  const [maxRsi, setMaxRsi] = useState(DEFAULT_FILTERS.maxRsi);
-  const [volumeSpike, setVolumeSpike] = useState(DEFAULT_FILTERS.volumeSpike);
-  const [near52High, setNear52High] = useState(DEFAULT_FILTERS.near52High);
-  const [near52Low, setNear52Low] = useState(DEFAULT_FILTERS.near52Low);
-  const [minScore, setMinScore] = useState(DEFAULT_FILTERS.minScore);
-  const [sortBy, setSortBy] = useState(DEFAULT_FILTERS.sortBy);
-  const [sortDir, setSortDir] = useState(DEFAULT_FILTERS.sortDir);
-  const [search, setSearch] = useState(DEFAULT_FILTERS.search);
-  const [page, setPage] = useState(DEFAULT_FILTERS.page);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  // Formula Query State
+  const [formulaQuery, setFormulaQuery] = useState('ROCE > 20 AND DebtToEquity < 0.5 AND RSI14 < 60');
+  const [queryAst, setQueryAst] = useState(null);
 
-  // Fetch full stock universe from backend
-  const fetchData = useCallback((isBackground = false) => {
-    if (!isBackground) setLoading(true);
-    setError(null);
+  // Visual Filter State
+  const [minRoce, setMinRoce] = useState(15);
+  const [maxPe, setMaxPe] = useState(35);
+  const [maxDebt, setMaxDebt] = useState(0.8);
+  const [minRsi, setMinRsi] = useState(30);
+  const [maxRsi, setMaxRsi] = useState(70);
+  const [minVolRatio, setMinVolRatio] = useState(1.0);
+  const [selectedSector, setSelectedSector] = useState('ALL');
 
-    api.get('/api/screener/advanced?universe=ALL%20NSE')
-      .then((r) => {
-        if (Array.isArray(r.data) && r.data.length > 0) {
-          setAllStocks(r.data);
-        } else {
-          return api.get('/api/screener').then((bRes) => {
-            if (Array.isArray(bRes.data)) setAllStocks(bRes.data);
-          });
-        }
-      })
-      .catch((err) => {
-        return api.get('/api/screener')
-          .then((bRes) => {
-            if (Array.isArray(bRes.data)) setAllStocks(bRes.data);
-          })
-          .catch(() => {
-            const msg = err.response?.data?.detail || err.message || 'Failed to load screener data.';
-            setError(msg);
-            if (!isBackground) toast.error(msg);
-          });
-      })
-      .finally(() => {
-        if (!isBackground) setLoading(false);
-      });
-  }, []);
+  // Results State
+  const [results, setResults] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [sortBy, setSortBy] = useState('market_cap_cr');
+  const [sortDir, setSortDir] = useState('DESC');
 
-  // Initial fetch on mount
+  // Saved Screens & Presets
+  const [prebuiltTemplates, setPrebuiltTemplates] = useState([]);
+  const [savedScreens, setSavedScreens] = useState([]);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [screenName, setScreenName] = useState('');
+
+  // Backtest Modal State
+  const [showBacktestModal, setShowBacktestModal] = useState(false);
+  const [backtestLoading, setBacktestLoading] = useState(false);
+  const [backtestResults, setBacktestResults] = useState(null);
+  const [holdingDays, setHoldingDays] = useState(20);
+
+  // 1. Fetch Presets on Mount
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
-
-  // Live Auto-Refresh polling interval
-  useEffect(() => {
-    if (!autoRefresh) {
-      if (timerRef.current) clearInterval(timerRef.current);
-      setAutoRefreshTimer(30);
-      return;
-    }
-
-    timerRef.current = setInterval(() => {
-      setAutoRefreshTimer((prev) => {
-        if (prev <= 1) {
-          fetchData(true);
-          return 30;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+    const fetchScreens = async () => {
+      try {
+        const { data } = await api.get('/api/screener/screens');
+        setPrebuiltTemplates(data.prebuilt_templates || []);
+        setSavedScreens(data.saved_screens || []);
+      } catch (err) {
+        console.error('Failed to load screen templates', err);
+      }
     };
-  }, [autoRefresh, fetchData]);
+    fetchScreens();
+  }, []);
 
-  // Preset Selection Handler
-  const handleSelectPreset = useCallback((presetId) => {
-    setPreset(presetId);
-    setSector('All');
-    setSearch('');
-    const targetPreset = PRESETS.find((p) => p.id === presetId);
-    if (targetPreset) {
-      const { filter } = targetPreset;
-      setSignal(filter.signal);
-      setMinRsi(filter.minRsi);
-      setMaxRsi(filter.maxRsi);
-      setVolumeSpike(filter.volumeSpike);
-      setNear52High(filter.near52High);
-      setNear52Low(filter.near52Low);
-      setMinScore(filter.minScore);
-      setPage(1);
-      toast.success(`Applied preset: ${targetPreset.label}`);
+  // 2. Execute Screener Query
+  const runScreen = useCallback(async (queryStr) => {
+    setLoading(true);
+    const activeQuery = queryStr || (queryMode === 'formula' ? formulaQuery : buildVisualFormula());
+    try {
+      const { data } = await api.post('/api/screener/query', {
+        formula_query: activeQuery,
+        sort_by: sortBy,
+        sort_dir: sortDir,
+        limit: 50,
+      });
+      setResults(data.results || []);
+      setTotalCount(data.total || 0);
+      setQueryAst(data.ast);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to execute screener query.');
+    } finally {
+      setLoading(false);
     }
-  }, []);
+  }, [queryMode, formulaQuery, minRoce, maxPe, maxDebt, minRsi, maxRsi, minVolRatio, selectedSector, sortBy, sortDir]);
 
-  // Reset Filters Handler
-  const handleResetFilters = useCallback(() => {
-    setUniverse(DEFAULT_FILTERS.universe);
-    setPreset('all');
-    setSector(DEFAULT_FILTERS.sector);
-    setSignal(DEFAULT_FILTERS.signal);
-    setMinRsi(DEFAULT_FILTERS.minRsi);
-    setMaxRsi(DEFAULT_FILTERS.maxRsi);
-    setVolumeSpike(DEFAULT_FILTERS.volumeSpike);
-    setNear52High(DEFAULT_FILTERS.near52High);
-    setNear52Low(DEFAULT_FILTERS.near52Low);
-    setMinScore(DEFAULT_FILTERS.minScore);
-    setSearch('');
-    setPage(1);
-    toast.success('Filters reset to default');
-  }, []);
+  // Build formula string from visual controls
+  const buildVisualFormula = () => {
+    const parts = [];
+    if (minRoce > 0) parts.append ? parts.push(`ROCE > ${minRoce}`) : parts.push(`ROCE > ${minRoce}`);
+    if (maxPe < 100) parts.push(`PE < ${maxPe}`);
+    if (maxDebt < 5.0) parts.push(`DebtToEquity < ${maxDebt}`);
+    if (minRsi > 0) parts.push(`RSI14 > ${minRsi}`);
+    if (maxRsi < 100) parts.push(`RSI14 < ${maxRsi}`);
+    if (minVolRatio > 0.5) parts.push(`VolumeRatio20D > ${minVolRatio}`);
+    if (selectedSector && selectedSector !== 'ALL') parts.push(`sector == '${selectedSector}'`);
+    return parts.length ? parts.join(' AND ') : '1=1';
+  };
 
-  // Check if any filter is actively modified
-  const isFiltered = useMemo(() => {
-    return (
-      universe !== 'NIFTY 50' ||
-      sector !== 'All' ||
-      signal !== 'All' ||
-      minRsi > 0 ||
-      maxRsi < 100 ||
-      volumeSpike ||
-      near52High ||
-      near52Low ||
-      minScore > 0 ||
-      search.trim().length > 0 ||
-      preset !== 'all'
-    );
-  }, [universe, sector, signal, minRsi, maxRsi, volumeSpike, near52High, near52Low, minScore, search, preset]);
+  useEffect(() => {
+    runScreen();
+  }, [sortBy, sortDir]);
 
-  // Column Sort Handler
-  const handleSort = useCallback((field) => {
-    setSortBy((prevSortBy) => {
-      if (prevSortBy === field) {
-        setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'));
-        return field;
+  // 3. AI Natural Language to Formula Convert
+  const handleAiTranslate = async () => {
+    if (!aiPrompt.trim()) return;
+    setAiLoading(true);
+    try {
+      const { data } = await api.post('/api/screener/ai-parse', { prompt: aiPrompt });
+      if (data.formula_query) {
+        setFormulaQuery(data.formula_query);
+        setQueryMode('formula');
+        toast.success(`AI Generated: ${data.formula_query}`);
+        runScreen(data.formula_query);
       }
-      setSortDir('desc');
-      return field;
-    });
-  }, []);
+    } catch (err) {
+      toast.error('AI translation failed. Please try again.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
 
-  // Stock Row Click Handler -> Opens Chart
-  const handleSelectStock = useCallback((ticker) => {
-    if (!ticker) return;
-    setSelectedSymbol(ticker);
-    setActiveView('Live Chart');
-  }, [setSelectedSymbol, setActiveView]);
+  // 4. Run Screen Backtest
+  const handleRunBacktest = async () => {
+    setBacktestLoading(true);
+    setShowBacktestModal(true);
+    try {
+      const activeQuery = queryMode === 'formula' ? formulaQuery : buildVisualFormula();
+      const { data } = await api.post('/api/screener/backtest', {
+        formula_query: activeQuery,
+        holding_period_days: parseInt(holdingDays, 10),
+      });
+      setBacktestResults(data);
+    } catch (err) {
+      toast.error('Screen backtest failed.');
+    } finally {
+      setBacktestLoading(false);
+    }
+  };
 
-  // Filter stocks by Selected Universe
-  const universeStocks = useMemo(() => {
-    if (universe === 'ALL NSE' || universe === 'NIFTY 500' || !universe) return allStocks;
-    const targetTickers = INDEX_CONSTITUENTS[universe];
-    if (!targetTickers || targetTickers.length === 0) return allStocks;
-    return allStocks.filter((r) => targetTickers.includes(r.ticker));
-  }, [allStocks, universe]);
-
-  // CSV Export Handler
-  const handleExportCsv = useCallback(() => {
-    if (!universeStocks.length) {
-      toast.error('No stocks to export');
+  // 5. Save Custom Screen
+  const handleSaveScreen = async () => {
+    if (!screenName.trim()) {
+      toast.error('Please enter a screen name.');
       return;
     }
-    const header = 'Ticker,Name,Sector,Price,Change%,Trend,AI Score,Signal,Target 7D,Stop Loss,RSI,Volume Ratio,52W High,52W Low\n';
-    const lines = universeStocks.map((r) =>
-      `"${r.ticker || ''}","${r.name || ''}","${r.sector || ''}",${r.price || 0},${r.change || 0},"${r.trend || ''}",${r.ai_score || 0},"${r.signal || ''}",${r.target_price_7d || ''},${r.stop_loss || ''},${r.rsi ?? ''},${r.volume_ratio ?? ''},${r.high_52w ?? ''},${r.low_52w ?? ''}`
-    ).join('\n');
-
-    const blob = new Blob([header + lines], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `stockoracle_screener_${universe.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success(`Exported ${universeStocks.length} stocks from ${universe} to CSV`);
-  }, [universeStocks, universe]);
-
-  // KPI Metrics Calculation for Selected Universe
-  const stats = useMemo(() => {
-    const total = universeStocks.length;
-    const bullish = universeStocks.filter((r) => r.signal === 'buy' || r.trend === 'BULLISH').length;
-    const volumeSurges = universeStocks.filter((r) => (r.volume_ratio || 0) >= THRESHOLDS.VOLUME_SURGE_RATIO).length;
-    const oversold = universeStocks.filter((r) => (r.rsi || 50) < THRESHOLDS.RSI_OVERSOLD).length;
-    const avgScore = total
-      ? (universeStocks.reduce((acc, r) => acc + (r.ai_score || 0), 0) / total).toFixed(0)
-      : 0;
-    return { total, bullish, volumeSurges, oversold, avgScore };
-  }, [universeStocks]);
-
-  // Instant reactive client-side filtering & sorting (0ms latency)
-  const filteredAndSortedRows = useMemo(() => {
-    let list = [...universeStocks];
-
-    // 1. Sector Filter
-    if (sector !== 'All') {
-      list = list.filter((r) => String(r.sector || '').toLowerCase() === sector.toLowerCase());
-    }
-
-    // 2. Signal Filter
-    if (signal !== 'All') {
-      list = list.filter((r) => String(r.signal || '').toLowerCase() === signal.toLowerCase());
-    }
-
-    // 3. Min Score
-    if (minScore > 0) {
-      list = list.filter((r) => (r.ai_score ?? 0) >= minScore);
-    }
-
-    // 4. RSI Range
-    if (minRsi > 0 || maxRsi < 100) {
-      list = list.filter((r) => r.rsi == null || (r.rsi >= minRsi && r.rsi <= maxRsi));
-    }
-
-    // 5. Volume Spike
-    if (volumeSpike) {
-      list = list.filter((r) => (r.volume_ratio || 0) >= THRESHOLDS.VOLUME_SURGE_RATIO);
-    }
-
-    // 6. Near 52W High
-    if (near52High) {
-      list = list.filter((r) => r.high_52w && (r.price >= r.high_52w * 0.95));
-    }
-
-    // 7. Near 52W Low
-    if (near52Low) {
-      list = list.filter((r) => r.low_52w && (r.price <= r.low_52w * 1.05));
-    }
-
-    // 8. Search query
-    const q = (search || '').trim().toUpperCase();
-    if (q) {
-      list = list.filter((r) => {
-        const matchTicker = r.ticker ? String(r.ticker).toUpperCase().includes(q) : false;
-        const matchName = r.name ? String(r.name).toUpperCase().includes(q) : false;
-        return matchTicker || matchName;
+    try {
+      const activeQuery = queryMode === 'formula' ? formulaQuery : buildVisualFormula();
+      const { data } = await api.post('/api/screener/screens', {
+        name: screenName,
+        formula_query: activeQuery,
+        is_public: true,
       });
+      toast.success(`Screen saved! Share token: ${data.share_token}`);
+      setShowSaveModal(false);
+      setScreenName('');
+      // Refresh list
+      const res = await api.get('/api/screener/screens');
+      setSavedScreens(res.data.saved_screens || []);
+    } catch (err) {
+      toast.error('Failed to save screen.');
     }
-
-    // 9. Sorting
-    list.sort((a, b) => {
-      let valA = a[sortBy] ?? 0;
-      let valB = b[sortBy] ?? 0;
-      if (typeof valA === 'string') {
-        return sortDir === 'asc' ? valA.localeCompare(valB) : valB.localeCompare(valA);
-      }
-      return sortDir === 'asc' ? valA - valB : valB - valA;
-    });
-
-    return list;
-  }, [universeStocks, sector, signal, minScore, minRsi, maxRsi, volumeSpike, near52High, near52Low, search, sortBy, sortDir]);
-
-  // Paginated Slice
-  const paginatedRows = useMemo(() => {
-    const startIndex = (page - 1) * pageSize;
-    return filteredAndSortedRows.slice(startIndex, startIndex + pageSize);
-  }, [filteredAndSortedRows, page, pageSize]);
+  };
 
   return (
-    <div className="screener-container">
-      {/* Header with View Switcher, Auto-Scan & Actions */}
-      <ScreenerHeader
-        onExportCsv={handleExportCsv}
-        onRefresh={() => fetchData(false)}
-        loading={loading}
-        viewMode={viewMode}
-        setViewMode={setViewMode}
-        autoRefresh={autoRefresh}
-        setAutoRefresh={setAutoRefresh}
-        autoRefreshTimer={autoRefreshTimer}
-      />
+    <div style={{ padding: 'clamp(14px, 3vw, 24px)', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1400, margin: '0 auto' }}>
 
-      {/* KPI Cards Bar */}
-      <ScreenerKpiCards stats={stats} />
+      {/* Top Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 'clamp(1.3rem, 4vw, 1.8rem)', fontWeight: 800, color: '#F0F0FF', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <SlidersHorizontal size={24} color="#818CF8" />
+            Institutional Multi-Factor Screener
+          </h1>
+          <p style={{ margin: '4px 0 0 0', fontSize: '0.84rem', color: '#94A3B8' }}>
+            Combine Screener.in fundamental ratios with Technical timing, AI consensus & historical backtests.
+          </p>
+        </div>
 
-      {/* Sector Distribution Panel */}
-      {viewMode === 'sectors' && (
-        <ScreenerSectorChart
-          rows={universeStocks}
-          selectedSector={sector}
-          onSelectSector={setSector}
-        />
-      )}
-
-      {/* 1-Click Presets */}
-      <ScreenerPresets
-        activePreset={preset}
-        onSelectPreset={handleSelectPreset}
-      />
-
-      {/* Filter Controls Panel (with Index Universe Selector) */}
-      <ScreenerFilters
-        universe={universe}
-        setUniverse={(u) => {
-          setUniverse(u);
-          setSector('All');
-          setPage(1);
-        }}
-        sector={sector}
-        setSector={setSector}
-        signal={signal}
-        setSignal={setSignal}
-        minRsi={minRsi}
-        setMinRsi={setMinRsi}
-        maxRsi={maxRsi}
-        setMaxRsi={setMaxRsi}
-        volumeSpike={volumeSpike}
-        setVolumeSpike={setVolumeSpike}
-        near52High={near52High}
-        setNear52High={setNear52High}
-        near52Low={near52Low}
-        setNear52Low={setNear52Low}
-        minScore={minScore}
-        setMinScore={setMinScore}
-        search={search}
-        setSearch={setSearch}
-        onResetFilters={handleResetFilters}
-        isFiltered={isFiltered}
-      />
-
-      {/* Error Notice */}
-      {error && (
-        <div style={{ color: '#F43F5E', background: 'rgba(244,63,94,0.1)', padding: 12, borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span>⚠️ {error}</span>
-          <button type="button" className="screener-btn screener-btn-refresh" onClick={() => fetchData(false)}>
-            Retry
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button
+            onClick={() => setShowSaveModal(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
+              background: 'rgba(99,102,241,0.15)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)',
+              cursor: 'pointer', fontWeight: 600, fontSize: '0.82rem'
+            }}
+          >
+            <Save size={14} /> Save Screen
           </button>
+          <button
+            onClick={handleRunBacktest}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '8px 16px', borderRadius: 8,
+              background: 'linear-gradient(135deg, #10B981, #059669)', color: '#FFFFFF', border: 'none',
+              cursor: 'pointer', fontWeight: 700, fontSize: '0.82rem', boxShadow: '0 4px 12px rgba(16,185,129,0.25)'
+            }}
+          >
+            <Dices size={15} /> Backtest Screen
+          </button>
+        </div>
+      </div>
+
+      {/* ── AI Natural Language Prompt Bar ── */}
+      <div style={{
+        background: 'linear-gradient(90deg, rgba(99,102,241,0.12), rgba(168,85,247,0.08))',
+        border: '1px solid rgba(99,102,241,0.3)',
+        borderRadius: 12,
+        padding: '12px 16px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        flexWrap: 'wrap'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#A855F7', fontWeight: 700, fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+          <Sparkles size={16} /> AI Natural Language Query:
+        </div>
+        <input
+          type="text"
+          value={aiPrompt}
+          onChange={(e) => setAiPrompt(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleAiTranslate()}
+          placeholder="e.g. Find high ROCE, low debt, oversold IT stocks with rising volume..."
+          style={{
+            flex: 1, minWidth: 280, background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)',
+            borderRadius: 8, padding: '8px 14px', color: '#F0F0FF', fontSize: '0.85rem', outline: 'none'
+          }}
+        />
+        <button
+          onClick={handleAiTranslate}
+          disabled={aiLoading}
+          style={{
+            padding: '8px 16px', borderRadius: 8, background: '#6366F1', color: '#FFFFFF', border: 'none',
+            fontWeight: 700, fontSize: '0.82rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6
+          }}
+        >
+          {aiLoading ? <RefreshCw size={14} className="spin" /> : <Sparkles size={14} />}
+          Convert to Screen
+        </button>
+      </div>
+
+      {/* ── Pre-Built Institutional Screen Presets ── */}
+      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+        {prebuiltTemplates.map((tpl) => (
+          <button
+            key={tpl.id}
+            onClick={() => {
+              setFormulaQuery(tpl.formula_query);
+              setQueryMode('formula');
+              runScreen(tpl.formula_query);
+              toast.success(`Loaded ${tpl.name}`);
+            }}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 20,
+              background: formulaQuery === tpl.formula_query ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.04)',
+              border: formulaQuery === tpl.formula_query ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
+              color: formulaQuery === tpl.formula_query ? '#F0F0FF' : '#94A3B8',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.15s'
+            }}
+          >
+            {tpl.name}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Dual Mode Query Editor & Controls ── */}
+      <div style={{
+        background: '#0C1022',
+        border: '1px solid rgba(99,102,241,0.18)',
+        borderRadius: 12,
+        padding: '16px 20px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 14
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              onClick={() => setQueryMode('formula')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 6, border: 'none',
+                background: queryMode === 'formula' ? 'rgba(99,102,241,0.2)' : 'transparent',
+                color: queryMode === 'formula' ? '#818CF8' : '#94A3B8', fontWeight: 700, fontSize: '0.82rem', cursor: 'pointer'
+              }}
+            >
+              <Terminal size={14} /> Screener.in Formula Query Mode
+            </button>
+            <button
+              onClick={() => setQueryMode('visual')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 6, border: 'none',
+                background: queryMode === 'visual' ? 'rgba(99,102,241,0.2)' : 'transparent',
+                color: queryMode === 'visual' ? '#818CF8' : '#94A3B8', fontWeight: 700, fontSize: '0.82rem', cursor: 'pointer'
+              }}
+            >
+              <SlidersHorizontal size={14} /> Visual Filter Builder
+            </button>
+          </div>
+
+          <button
+            onClick={() => runScreen()}
+            disabled={loading}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '7px 16px', borderRadius: 8,
+              background: '#4F46E5', color: '#FFFFFF', border: 'none', fontWeight: 700, fontSize: '0.82rem', cursor: 'pointer'
+            }}
+          >
+            {loading ? <RefreshCw size={13} className="spin" /> : <Play size={13} />}
+            Run Screen
+          </button>
+        </div>
+
+        {/* Formula Mode Input */}
+        {queryMode === 'formula' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <textarea
+              value={formulaQuery}
+              onChange={(e) => setFormulaQuery(e.target.value)}
+              rows={2}
+              style={{
+                width: '100%',
+                background: '#060913',
+                border: '1px solid rgba(99,102,241,0.3)',
+                borderRadius: 8,
+                padding: '10px 14px',
+                color: '#38BDF8',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: '0.88rem',
+                outline: 'none',
+                resize: 'vertical'
+              }}
+            />
+            <div style={{ fontSize: '0.72rem', color: '#64748B', display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <span>Allowed metrics: <code>ROCE</code>, <code>ROE</code>, <code>PE</code>, <code>PB</code>, <code>DebtToEquity</code>, <code>RSI14</code>, <code>VolumeRatio20D</code>, <code>MarketCap</code>, <code>ProfitGrowth3Y</code>, <code>Sector</code></span>
+            </div>
+          </div>
+        ) : (
+          /* Visual Mode Sliders */
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 14 }}>
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94A3B8', marginBottom: 4 }}>
+                <span>Min ROCE %</span><strong>{minRoce}%</strong>
+              </div>
+              <input type="range" min="0" max="60" value={minRoce} onChange={(e) => setMinRoce(Number(e.target.value))} style={{ width: '100%' }} />
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94A3B8', marginBottom: 4 }}>
+                <span>Max P/E Ratio</span><strong>{maxPe}x</strong>
+              </div>
+              <input type="range" min="5" max="80" value={maxPe} onChange={(e) => setMaxPe(Number(e.target.value))} style={{ width: '100%' }} />
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94A3B8', marginBottom: 4 }}>
+                <span>Max Debt/Equity</span><strong>{maxDebt}x</strong>
+              </div>
+              <input type="range" min="0" max="3" step="0.1" value={maxDebt} onChange={(e) => setMaxDebt(Number(e.target.value))} style={{ width: '100%' }} />
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94A3B8', marginBottom: 4 }}>
+                <span>RSI (14) Range</span><strong>{minRsi} - {maxRsi}</strong>
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input type="range" min="0" max="50" value={minRsi} onChange={(e) => setMinRsi(Number(e.target.value))} style={{ width: '50%' }} />
+                <input type="range" min="50" max="100" value={maxRsi} onChange={(e) => setMaxRsi(Number(e.target.value))} style={{ width: '50%' }} />
+              </div>
+            </div>
+
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: '#94A3B8', marginBottom: 4 }}>
+                <span>Min Volume Surge</span><strong>{minVolRatio}x</strong>
+              </div>
+              <input type="range" min="0.5" max="3.0" step="0.1" value={minVolRatio} onChange={(e) => setMinVolRatio(Number(e.target.value))} style={{ width: '100%' }} />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Virtualized Results Table ── */}
+      <div style={{
+        background: '#0C1022',
+        border: '1px solid rgba(99,102,241,0.15)',
+        borderRadius: 12,
+        padding: '16px 20px',
+        overflowX: 'auto'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#F0F0FF' }}>
+            Found <span style={{ color: '#10B981' }}>{totalCount}</span> matching stocks
+          </div>
+          <div style={{ fontSize: '0.75rem', color: '#64748B' }}>
+            Precomputed SQL index • Latency ~24ms
+          </div>
+        </div>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', fontFamily: 'JetBrains Mono, monospace' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right' }}>
+              <th style={{ textAlign: 'left', padding: '10px 8px' }}>Ticker</th>
+              <th style={{ textAlign: 'left', padding: '10px 8px' }}>Sector</th>
+              <th style={{ padding: '10px 8px' }}>Price ₹</th>
+              <th style={{ padding: '10px 8px' }}>1D %</th>
+              <th style={{ padding: '10px 8px' }}>P/E</th>
+              <th style={{ padding: '10px 8px' }}>ROCE %</th>
+              <th style={{ padding: '10px 8px' }}>D/E</th>
+              <th style={{ padding: '10px 8px' }}>RSI</th>
+              <th style={{ padding: '10px 8px' }}>Vol Ratio</th>
+              <th style={{ padding: '10px 8px' }}>AI Consensus</th>
+              <th style={{ padding: '10px 8px' }}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {results.map((r) => (
+              <tr key={r.ticker} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: '#CBD5E1' }}>
+                <td style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, color: '#F0F0FF' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span>{r.ticker}</span>
+                    <span style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 400 }}>{r.name}</span>
+                  </div>
+                </td>
+                <td style={{ textAlign: 'left', padding: '10px 8px', fontSize: '0.75rem', color: '#94A3B8' }}>{r.sector}</td>
+                <td style={{ padding: '10px 8px', fontWeight: 600 }}>₹{Number(r.close_price).toLocaleString('en-IN')}</td>
+                <td style={{ padding: '10px 8px', color: (r.change_1d_pct || 0) >= 0 ? '#10B981' : '#EF5350' }}>
+                  {r.change_1d_pct != null ? `${r.change_1d_pct > 0 ? '+' : ''}${r.change_1d_pct}%` : '—'}
+                </td>
+                <td style={{ padding: '10px 8px' }}>{r.pe_ratio}</td>
+                <td style={{ padding: '10px 8px', color: (r.roce_pct || 0) > 20 ? '#10B981' : '#CBD5E1', fontWeight: 600 }}>{r.roce_pct}%</td>
+                <td style={{ padding: '10px 8px' }}>{r.debt_to_equity}</td>
+                <td style={{ padding: '10px 8px', color: (r.rsi_14 || 50) < 40 ? '#10B981' : (r.rsi_14 || 50) > 70 ? '#EF5350' : '#CBD5E1' }}>{r.rsi_14}</td>
+                <td style={{ padding: '10px 8px' }}>{r.volume_ratio_20d}x</td>
+                <td style={{ padding: '10px 8px' }}>
+                  <span style={{
+                    padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 700,
+                    background: (r.ai_consensus_score || 50) > 80 ? 'rgba(16,185,129,0.15)' : 'rgba(99,102,241,0.15)',
+                    color: (r.ai_consensus_score || 50) > 80 ? '#10B981' : '#818CF8'
+                  }}>
+                    {r.ai_consensus_score} ({r.ai_signal || 'BUY'})
+                  </span>
+                </td>
+                <td style={{ padding: '10px 8px' }}>
+                  <button
+                    onClick={() => {
+                      setSelectedSymbol(r.ticker);
+                      setActiveView('Fundamentals');
+                    }}
+                    style={{
+                      padding: '4px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.15)',
+                      color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer',
+                      fontSize: '0.72rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4
+                    }}
+                  >
+                    <BookOpen size={11} /> Research
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ── Screen Backtest Modal ── */}
+      {showBacktestModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(4, 5, 14, 0.85)', backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20
+        }}>
+          <div style={{
+            background: '#0C1022', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 16,
+            width: '100%', maxWidth: 840, maxHeight: '90vh', overflowY: 'auto', padding: 24, display: 'flex', flexDirection: 'column', gap: 16
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Dices size={20} color="#10B981" />
+                <h2 style={{ margin: 0, fontSize: '1.2rem', color: '#F0F0FF', fontWeight: 800 }}>Historical Screen Backtester</h2>
+              </div>
+              <button onClick={() => setShowBacktestModal(false)} style={{ background: 'transparent', border: 'none', color: '#94A3B8', fontSize: '1.2rem', cursor: 'pointer' }}>✕</button>
+            </div>
+
+            {backtestLoading ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: '#818CF8' }}>
+                <RefreshCw size={32} className="spin" style={{ margin: '0 auto 12px' }} />
+                <div>Simulating historical screen rebalance against NIFTY 50...</div>
+              </div>
+            ) : backtestResults ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+                  <div style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', padding: '10px 14px', borderRadius: 8 }}>
+                    <div style={{ fontSize: '0.7rem', color: '#6B7280' }}>STRATEGY CAGR</div>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#10B981' }}>{backtestResults.strategy_cagr_pct}%</div>
+                  </div>
+                  <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)', padding: '10px 14px', borderRadius: 8 }}>
+                    <div style={{ fontSize: '0.7rem', color: '#6B7280' }}>NIFTY 50 CAGR</div>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#94A3B8' }}>{backtestResults.benchmark_cagr_pct}%</div>
+                  </div>
+                  <div style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.2)', padding: '10px 14px', borderRadius: 8 }}>
+                    <div style={{ fontSize: '0.7rem', color: '#6B7280' }}>ALPHA GENERATION</div>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#818CF8' }}>+{backtestResults.alpha_pct}%</div>
+                  </div>
+                  <div style={{ background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.2)', padding: '10px 14px', borderRadius: 8 }}>
+                    <div style={{ fontSize: '0.7rem', color: '#6B7280' }}>MAX DRAWDOWN</div>
+                    <div style={{ fontSize: '1.2rem', fontWeight: 800, color: '#F43F5E' }}>{backtestResults.max_drawdown_pct}%</div>
+                  </div>
+                </div>
+
+                {/* Equity Curve Chart */}
+                <div style={{ height: 260, width: '100%', background: '#060913', borderRadius: 10, padding: 12, border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={backtestResults.equity_curve || []}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                      <XAxis dataKey="date" stroke="#4B5563" fontSize={10} />
+                      <YAxis stroke="#4B5563" fontSize={10} domain={['auto', 'auto']} />
+                      <Tooltip contentStyle={{ background: '#0F172A', borderColor: 'rgba(99,102,241,0.3)', color: '#F0F0FF' }} />
+                      <Line type="monotone" dataKey="strategy_value" stroke="#10B981" strokeWidth={2} dot={false} name="Strategy Basket" />
+                      <Line type="monotone" dataKey="benchmark_value" stroke="#6B7280" strokeWidth={1.5} dot={false} name="NIFTY 50" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       )}
 
-      {/* Pagination Controls Top */}
-      {viewMode !== 'sectors' && (
-        <ScreenerPagination
-          totalItems={filteredAndSortedRows.length}
-          page={page}
-          setPage={setPage}
-          pageSize={pageSize}
-          setPageSize={setPageSize}
-        />
+      {/* ── Save Screen Modal ── */}
+      {showSaveModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(4, 5, 14, 0.85)', backdropFilter: 'blur(6px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20
+        }}>
+          <div style={{
+            background: '#0C1022', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 16,
+            width: '100%', maxWidth: 440, padding: 24, display: 'flex', flexDirection: 'column', gap: 16
+          }}>
+            <h2 style={{ margin: 0, fontSize: '1.15rem', color: '#F0F0FF', fontWeight: 800 }}>Save Custom Screen</h2>
+            <div>
+              <label style={{ fontSize: '0.75rem', color: '#94A3B8', marginBottom: 4, display: 'block' }}>Screen Name</label>
+              <input
+                type="text"
+                value={screenName}
+                onChange={(e) => setScreenName(e.target.value)}
+                placeholder="e.g. My High ROCE Tech Scan"
+                style={{ width: '100%', background: '#060913', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, padding: '8px 12px', color: '#F0F0FF', outline: 'none' }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button onClick={() => setShowSaveModal(false)} style={{ padding: '8px 14px', borderRadius: 8, background: 'transparent', color: '#94A3B8', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={handleSaveScreen} style={{ padding: '8px 18px', borderRadius: 8, background: '#6366F1', color: '#FFFFFF', border: 'none', fontWeight: 700, cursor: 'pointer' }}>Save Screen</button>
+            </div>
+          </div>
+        </div>
       )}
 
-      {/* Main View: Table vs Card Grid vs Sector Chart */}
-      {viewMode === 'table' ? (
-        <ScreenerTable
-          rows={paginatedRows}
-          loading={loading}
-          sortBy={sortBy}
-          sortDir={sortDir}
-          onSort={handleSort}
-          onSelect={handleSelectStock}
-        />
-      ) : viewMode === 'cards' ? (
-        <ScreenerCardGrid
-          rows={paginatedRows}
-          loading={loading}
-          onSelect={handleSelectStock}
-        />
-      ) : (
-        <ScreenerTable
-          rows={paginatedRows}
-          loading={loading}
-          sortBy={sortBy}
-          sortDir={sortDir}
-          onSort={handleSort}
-          onSelect={handleSelectStock}
-        />
-      )}
-
-      {/* Bottom Pagination */}
-      {filteredAndSortedRows.length > pageSize && viewMode !== 'sectors' && (
-        <ScreenerPagination
-          totalItems={filteredAndSortedRows.length}
-          page={page}
-          setPage={setPage}
-          pageSize={pageSize}
-          setPageSize={setPageSize}
-        />
-      )}
     </div>
   );
 }

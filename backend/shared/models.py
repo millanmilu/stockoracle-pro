@@ -229,3 +229,140 @@ class SavedScan(Base):
         Index("idx_saved_scans_user", "user_id"),
     )
 
+
+class Company(Base):
+    """Company profile and classification metadata."""
+    __tablename__ = "companies"
+
+    ticker = Column(String(20), primary_key=True, nullable=False)
+    name = Column(String(150), nullable=False)
+    sector = Column(String(100), nullable=True, index=True)
+    industry = Column(String(100), nullable=True, index=True)
+    market_cap_category = Column(String(20), nullable=True, index=True)  # LARGE, MID, SMALL, MICRO
+    about_text = Column(Text, nullable=True)
+    website_url = Column(String(255), nullable=True)
+    bse_code = Column(String(20), nullable=True)
+    nse_symbol = Column(String(20), nullable=True)
+
+
+class FinancialStatement(Base):
+    """Quarterly and Annual Financial Statements (P&L, Balance Sheet, Cash Flows)."""
+    __tablename__ = "financial_statements"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String(20), nullable=False, index=True)
+    period_type = Column(String(20), nullable=False)  # 'QUARTERLY' | 'ANNUAL'
+    period_label = Column(String(30), nullable=False)  # 'Jun 2026', 'FY26'
+    revenue = Column(Float, nullable=True)
+    operating_profit = Column(Float, nullable=True)
+    opm_pct = Column(Float, nullable=True)
+    net_profit = Column(Float, nullable=True)
+    npm_pct = Column(Float, nullable=True)
+    eps = Column(Float, nullable=True)
+    balance_sheet_json = Column(Text, nullable=True)
+    cash_flow_json = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_fin_stmt_ticker_period", "ticker", "period_type"),
+    )
+
+
+class FinancialRatio(Base):
+    """Core financial and valuation ratios."""
+    __tablename__ = "financial_ratios"
+
+    ticker = Column(String(20), primary_key=True, nullable=False)
+    pe_ratio = Column(Float, nullable=True)
+    pb_ratio = Column(Float, nullable=True)
+    roe_pct = Column(Float, nullable=True)
+    roce_pct = Column(Float, nullable=True)
+    debt_to_equity = Column(Float, nullable=True)
+    opm_pct = Column(Float, nullable=True)
+    npm_pct = Column(Float, nullable=True)
+    sales_growth_3y = Column(Float, nullable=True)
+    profit_growth_3y = Column(Float, nullable=True)
+    cagr_5y = Column(Float, nullable=True)
+
+
+class ShareholdingSnapshot(Base):
+    """Quarterly shareholding patterns."""
+    __tablename__ = "shareholding_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    ticker = Column(String(20), nullable=False, index=True)
+    quarter_label = Column(String(30), nullable=False)
+    promoter_pct = Column(Float, nullable=True)
+    fii_pct = Column(Float, nullable=True)
+    dii_pct = Column(Float, nullable=True)
+    public_pct = Column(Float, nullable=True)
+    others_pct = Column(Float, nullable=True)
+
+
+class ScreenerDailyMetric(Base):
+    """Precomputed indexed daily metrics table for sub-50ms multi-factor SQL screener scans."""
+    __tablename__ = "screener_daily_metrics"
+
+    ticker = Column(String(20), primary_key=True, nullable=False)
+    name = Column(String(150), nullable=False)
+    sector = Column(String(100), nullable=True, index=True)
+    industry = Column(String(100), nullable=True, index=True)
+    market_cap_cr = Column(Float, nullable=True, index=True)
+    market_cap_cat = Column(String(20), nullable=True, index=True)
+    
+    # Prices & Returns
+    close_price = Column(Float, nullable=False, index=True)
+    change_1d_pct = Column(Float, nullable=True, index=True)
+    change_1w_pct = Column(Float, nullable=True)
+    change_1m_pct = Column(Float, nullable=True)
+    change_1y_pct = Column(Float, nullable=True)
+    distance_52w_high_pct = Column(Float, nullable=True, index=True)
+    distance_52w_low_pct = Column(Float, nullable=True)
+
+    # Technicals
+    rsi_14 = Column(Float, nullable=True, index=True)
+    macd_signal = Column(String(20), nullable=True, index=True)
+    sma_20 = Column(Float, nullable=True)
+    sma_50 = Column(Float, nullable=True)
+    sma_200 = Column(Float, nullable=True)
+    volume_ratio_20d = Column(Float, nullable=True, index=True)
+
+    # Fundamentals
+    pe_ratio = Column(Float, nullable=True, index=True)
+    pb_ratio = Column(Float, nullable=True, index=True)
+    roe_pct = Column(Float, nullable=True, index=True)
+    roce_pct = Column(Float, nullable=True, index=True)
+    debt_to_equity = Column(Float, nullable=True, index=True)
+    sales_growth_3y = Column(Float, nullable=True, index=True)
+    profit_growth_3y = Column(Float, nullable=True, index=True)
+
+    # Options
+    pcr = Column(Float, nullable=True)
+    max_pain = Column(Float, nullable=True)
+    iv = Column(Float, nullable=True)
+
+    # AI & Consensus
+    ai_consensus_score = Column(Float, nullable=True, index=True)
+    ai_signal = Column(String(30), nullable=True, index=True)
+    ai_confidence_score = Column(Float, nullable=True)
+    updated_at = Column(String(50), nullable=False)
+
+
+class UserScreen(Base):
+    """User-saved advanced multi-factor screens with formula DSL and share tokens."""
+    __tablename__ = "user_screens"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(100), nullable=False, default="default_user", index=True)
+    name = Column(String(120), nullable=False)
+    description = Column(String(300), nullable=True)
+    formula_query = Column(Text, nullable=True)
+    filter_ast_json = Column(Text, nullable=False, default="{}")
+    universe = Column(String(50), nullable=False, default="NIFTY_500")
+    sort_by = Column(String(50), nullable=False, default="market_cap_cr")
+    sort_dir = Column(String(10), nullable=False, default="DESC")
+    is_public = Column(Integer, nullable=False, default=0)
+    share_token = Column(String(64), nullable=True, unique=True, index=True)
+    created_at = Column(String(50), nullable=False)
+    updated_at = Column(String(50), nullable=False)
+
+
