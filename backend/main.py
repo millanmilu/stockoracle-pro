@@ -1,638 +1,65 @@
+"""
+StockOracle Pro — Production-Grade AI Stock Forecasting Modular Monolith API
+FastAPI + PyTorch + SQLAlchemy 2.0 (PostgreSQL/TimescaleDB/SQLite) + Celery/Redis
+"""
+import os
+import json
 import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Request, Security, Query
+from typing import Dict, Any, List, Optional
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Security, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security.api_key import APIKeyHeader, APIKeyQuery
+from fastapi.middleware.gzip import GZipMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-import os
-import json
-import xml.etree.ElementTree as ET
-from urllib.parse import quote_plus
-from urllib.request import Request as UrllibRequest, urlopen
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
-from dotenv import load_dotenv
 
+# ── Structured Logging & Core Configuration ────────────────────────────────────
 from backend.core.logging import configure_logging, get_logger
-configure_logging()
-logger = get_logger("stockoracle")
-
-# Load the local development credentials before importing ``fetcher``: that
-# module constructs the Angel One client at import time. In production,
-# systemd also supplies these variables through EnvironmentFile.
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
-
-# Import our custom modules
+from backend.core.middleware import RequestIdMiddleware
+from backend.shared.config import settings
+from backend.shared.security import verify_api_key, get_current_user_id
+from backend.shared.database import init_database
+from backend.data.database import init_db, cleanup_old_tasks, save_live_tick, get_company_info, get_stale_company_info
 from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, ensure_session,
-    get_session_status, reset_session, get_combined_stock_data, search_nse_stocks
+    get_session_status, get_token_info, smartApi
 )
-from backend.data.database import (
-    init_db, save_live_tick,
-    save_prediction, get_prediction_cached,
-    save_monte_carlo, get_monte_carlo_cached,
-    save_screener_results, get_screener_results,
-    get_db_stats,
-    save_task_status, get_task_status, cleanup_old_tasks
-)
-from backend.analysis.indicators import enrich_stock_dataframe
-from backend.analysis.monte_carlo import run_monte_carlo_simulation
-from backend.analysis.anomaly import detect_anomalies
-from backend.analysis.patterns import get_pattern_summary
-from backend.analysis.levels import calculate_support_resistance
-from backend.analysis.volatility_forecast import calculate_volatility_forecast
-from backend.ml.predictor import StockPredictor
-from backend.analysis.backtester import run_backtest
-from backend.analysis.sentiment_market import get_market_sentiment
-from backend.analysis.macro import get_macro_data
-from backend.analysis.supply_chain import get_supply_chain
-from backend.services.alert_scheduler import run_alert_scheduler_loop, get_scheduler_status, evaluate_all_alerts
+from backend.services.alert_scheduler import run_alert_scheduler_loop
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Initialize SQL database tables
-    init_db()
-    # Clean up stale task records from previous runs
-    cleanup_old_tasks(max_age_hours=48)
-    # Authenticate with Angel One on startup
-    ensure_session()
-    # Start live price broadcast
-    price_task = asyncio.create_task(websocket_price_broadcast_loop())
-    # Start server-side alert scheduler loop
-    alert_task = asyncio.create_task(run_alert_scheduler_loop())
-    # Prefetch historical data for all popular tickers in background
-    prefetch_task = asyncio.create_task(prefetch_all_tickers())
-    try:
-        yield
-    finally:
-        for task in (price_task, alert_task, prefetch_task):
-            task.cancel()
-        for task in (price_task, alert_task, prefetch_task):
-            with suppress(asyncio.CancelledError):
-                await task
+configure_logging()
+logger = get_logger("stockoracle.main")
 
-
-async def prefetch_all_tickers():
-    """
-    Downloads 2-year historical OHLCV data for all popular tickers on startup
-    and saves it to the SQLite database. Runs once in the background so the
-    first prediction requests are served from DB (no API wait).
-    """
-    import asyncio as _asyncio
-    logger.info("Starting background prefetch of historical data for all tickers...")
-    loop = _asyncio.get_running_loop()
-    for ticker in popular_tickers:
-        try:
-            # Run blocking fetch in thread pool to not block event loop
-            df = await loop.run_in_executor(None, lambda t=ticker: fetch_stock_data(t, period="2Y"))
-            if df is not None and not df.empty:
-                logger.info("Prefetched %d rows for %s", len(df), ticker)
-            else:
-                logger.warning("No data returned for %s during prefetch", ticker)
-        except Exception as e:
-            logger.error("Prefetch failed for %s: %s", ticker, e)
-        # Small delay to be gentle on the Angel One rate limit
-        await _asyncio.sleep(1.5)
-    logger.info("Historical prefetch complete for all tickers.")
-
-
-app = FastAPI(
-    title="StockOracle Pro API",
-    description="Production-grade AI stock forecasting API using PyTorch and FastAPI",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-# Rate limiter (uses client IP by default)
-limiter = Limiter(key_func=get_remote_address)
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-# API key auth configuration
-_API_KEY_NAME = "X-API-Key"
-_api_key_header = APIKeyHeader(name=_API_KEY_NAME, auto_error=False)
-_api_key_query = APIKeyQuery(name="api_key", auto_error=False)
-SERVER_API_KEY = os.getenv("API_KEY", "").strip()
-
-def verify_api_key(
-    header_key: Optional[str] = Security(_api_key_header),
-    query_key: Optional[str] = Security(_api_key_query)
-):
-    """Enforces API key validation on protected endpoints when SERVER_API_KEY is set."""
-    if SERVER_API_KEY:
-        key = header_key or query_key
-        if not key or key != SERVER_API_KEY:
-            raise HTTPException(status_code=403, detail="Invalid or missing API key.")
-
-def get_current_user_id(request: Request) -> str:
-    """Extracts user identity from X-User-Id header or query params, defaulting to 'default_user'."""
-    user_id = request.headers.get("X-User-Id") or request.query_params.get("user_id") or "default_user"
-    return user_id.strip()
-
-# CORS configuration
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "https://main.d3qrmvw6hu9g61.amplifyapp.com",
-    "https://stockoracle.duckdns.org",
+popular_tickers = [
+    "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK",
+    "SBIN", "BHARTIARTL", "ITC", "LT", "HUL"
 ]
-env_origins = os.getenv("ALLOWED_ORIGINS")
-if env_origins:
-    origins.extend([o.strip() for o in env_origins.split(",") if o.strip()])
-
-from fastapi.middleware.gzip import GZipMiddleware
-from backend.core.middleware import RequestIdMiddleware
-
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-app.add_middleware(RequestIdMiddleware)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,   # Fixed: was ["*"] — now uses the configured origins list
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Global in-memory status stores
-training_status: Dict[str, Dict[str, Any]] = {}
-popular_tickers = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL"]
-
-# ── REST API ROUTES ──
-
-@app.get("/")
-def read_root():
-    return {
-        "status": "online",
-        "message": "StockOracle Pro Advanced AI Market Forecasting API live.",
-        "version": "1.0.0"
-    }
-
-@app.get("/api/db/status")
-def db_status():
-    """Returns a live snapshot of all SQLite table sizes and per-ticker historical coverage."""
-    return {"status": "ok", "database": get_db_stats(), "timestamp": datetime.now().isoformat()}
 
 
-@app.get("/api/health")
-def health_check():
-    return {
-        "status": "healthy",
-        "angel_one_session": get_session_status(),
-        "alert_scheduler": get_scheduler_status(),
-        "timestamp": datetime.now().isoformat()
-    }
-
-@app.get("/api/stock/{ticker}/info")
-def get_stock_info(ticker: str):
-    t = ticker.upper().strip()
-    if not t.replace("-", "").isalpha() or len(t) > 20:
-        raise HTTPException(status_code=422, detail=f"Invalid ticker format: '{ticker}'. Use NSE symbol like RELIANCE, TCS.")
-    info = fetch_company_info(t)
-    if not info:
-        if not get_session_status():
-            raise HTTPException(status_code=503, detail="Angel One API is unavailable. Server is authenticating — try again in a moment.")
-        raise HTTPException(status_code=404, detail=f"Ticker '{t}' not found on NSE or data unavailable.")
-    return info
-
-@app.get("/api/stock/{ticker}/history")
-def get_stock_history(ticker: str, timeframe: str = "5Y", interval: str = "1d"):
-    t = ticker.upper().strip()
-
-    # Map frontend timeframe label → internal period string
-    days_map = {
-        "1D":  "2D",   # intraday: fetch 2 days worth so we get today fully
-        "5D":  "7D",
-        "1W":  "10D",
-        "1M":  "45D",
-        "3M":  "120D",
-        "6M":  "200D",
-        "1Y":  "370D",
-        "2Y":  "2Y",
-        "5Y":  "5Y",
-    }
-    period = days_map.get(timeframe.upper())
-    if not period:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid timeframe '{timeframe}'. Valid: 1D, 5D, 1W, 1M, 3M, 6M, 1Y, 2Y, 5Y."
-        )
-
-    # Validate interval
-    valid_intervals = {"1m", "5m", "15m", "1h", "1d"}
-    iv = interval.lower()
-    if iv not in valid_intervals:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid interval '{interval}'. Valid: 1m, 5m, 15m, 1h, 1d."
-        )
-
-    df = fetch_stock_data(t, period=period, interval=iv)
-    if df is None or df.empty:
-        if not get_session_status():
-            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
-        raise HTTPException(status_code=404, detail=f"No price history found for '{t}'. Market may be closed or ticker invalid.")
-
-    data_source = df.attrs.get("data_source", "unknown")
-    enriched_df = enrich_stock_dataframe(df)
-    from fastapi.responses import JSONResponse
-    return JSONResponse(
-        content={"data": enriched_df.to_dict(orient="records"), "data_source": data_source},
-        headers={"X-Data-Source": data_source},
-    )
-
-
-@app.get("/api/stock/search/{query}")
-def search_stock(query: str):
-    """
-    Validates an NSE ticker and returns basic info so the frontend can open
-    any stock — not just the hardcoded popular 10.
-    Returns {found: bool, ticker: str, name: str} so the UI can decide.
-    """
-    t = query.upper().strip()
-    if not t or len(t) > 20:
-        raise HTTPException(status_code=422, detail="Invalid ticker format.")
-
-    # Try to resolve via ScripMaster first (no API call needed)
-    from backend.data.fetcher import get_token_info
-    tok = get_token_info(t)
-    if tok:
-        return {"found": True, "ticker": t, "name": tok.get("name", t), "exchange": tok.get("exch_seg", "NSE")}
-
-    # ScripMaster not loaded yet — try fetching info directly
-    info = fetch_company_info(t)
-    if info:
-        return {"found": True, "ticker": t, "name": info.get("name", t), "exchange": info.get("exchange", "NSE")}
-
-    return {"found": False, "ticker": t, "name": t, "exchange": "NSE"}
-
-
-@app.get("/api/stocks/search")
-def search_stocks(query: str, limit: int = 12):
-    """Autocomplete across the full NSE ScripMaster cached in SQLite."""
-    if not query.strip():
-        return []
-    return search_nse_stocks(query, limit)
-
-
-@app.get("/api/stock/{ticker}/news")
-def get_stock_news(ticker: str, limit: int = 8):
-    """Returns recent public news headlines without requiring a paid news API key."""
-    t = ticker.upper().strip()
-    token = __import__("backend.data.fetcher", fromlist=["get_token_info"]).get_token_info(t)
-    company = token.get("name", t) if token else t
-    url = f"https://news.google.com/rss/search?q={quote_plus(company + ' stock NSE')}&hl=en-IN&gl=IN&ceid=IN:en"
-    try:
-        request = UrllibRequest(url, headers={"User-Agent": "StockOracle/1.0"})
-        with urlopen(request, timeout=8) as response:
-            root = ET.fromstring(response.read())
-        items = []
-        for item in root.findall("./channel/item")[:max(1, min(limit, 15))]:
-            source = item.find("source")
-            items.append({
-                "title": item.findtext("title", ""),
-                "link": item.findtext("link", ""),
-                "published_at": item.findtext("pubDate", ""),
-                "source": source.text if source is not None else "News",
-            })
-            
-        try:
-            from backend.analysis.sentiment import fetch_and_score_sentiment
-            sentiment_score = fetch_and_score_sentiment(t)
-        except Exception as e:
-            logger.warning("Sentiment scoring failed for %s: %s", t, e)
-            sentiment_score = 0.0
-            
-        return {"ticker": t, "company": company, "items": items, "sentiment": sentiment_score}
-    except Exception as exc:
-        return {"ticker": t, "company": company, "items": [], "sentiment": 0.0, "warning": f"News temporarily unavailable: {exc}"}
-
-
-@app.get("/api/stock/{ticker}/patterns")
-def get_patterns(ticker: str, days: int = 45):
-    """Returns detected candlestick patterns for the last `days` sessions."""
-    t = ticker.upper().strip()
-    df = fetch_stock_data(t, period="6M")
-    if df is None or df.empty:
-        if not get_session_status():
-            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
-        raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
-    return get_pattern_summary(df, lookback=min(days, len(df)))
-
-
-@app.get("/api/stock/{ticker}/levels")
-def get_levels(ticker: str):
-    """Returns support, resistance, pivot points, and Fibonacci retracement levels."""
-    t = ticker.upper().strip()
-    df = fetch_stock_data(t, period="1Y")
-    if df is None or df.empty:
-        if not get_session_status():
-            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
-        raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
-    if len(df) < 15:
-        raise HTTPException(status_code=400, detail="Insufficient data to compute levels.")
-    return calculate_support_resistance(df)
-
-
-@app.get("/api/stock/{ticker}/volatility")
-def get_volatility(ticker: str):
-    """Returns GARCH(1,1) volatility forecast and rolling historical volatility."""
-    t = ticker.upper().strip()
-    df = fetch_stock_data(t, period="1Y")
-    if df is None or df.empty:
-        if not get_session_status():
-            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
-        raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
-    if len(df) < 25:
-        raise HTTPException(status_code=400, detail="Insufficient data for volatility forecast.")
-    return calculate_volatility_forecast(df)
-
-@app.get("/api/stock/{ticker}/montecarlo")
-def get_monte_carlo(ticker: str):
-    t = ticker.upper().strip()
-
-    # Serve from DB cache (30-min TTL) if available
-    cached = get_monte_carlo_cached(t)
-    if cached is not None:
-        return cached
-
-    df = fetch_stock_data(t, period="1Y")
-    if df is None or df.empty:
-        if not get_session_status():
-            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
-        raise HTTPException(status_code=404, detail=f"No price history found for '{t}' to run Monte Carlo simulation.")
-    closes = df["close"].tolist()
-    if len(closes) < 30:
-        raise HTTPException(status_code=400, detail="Insufficient price history to run Monte Carlo simulation. Need at least 30 sessions of data.")
-    mc_results = run_monte_carlo_simulation(closes, simulations=150, horizon=30)
-    save_monte_carlo(t, mc_results)
-    return mc_results
-
-@app.get("/api/stock/{ticker}/anomalies")
-def get_anomalies(ticker: str):
-    t = ticker.upper().strip()
-    df = fetch_stock_data(t, period="1Y")
-    if df is None or df.empty:
-        if not get_session_status():
-            raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
-        raise HTTPException(status_code=404, detail=f"No price history found for '{t}' to compute anomalies.")
-    anoms = detect_anomalies(df, window=20, threshold=2.2)
-    return anoms
-
-# Background task for model training
-def background_train_task(ticker: str):
-    try:
-        training_status[ticker] = {"status": "training", "epoch": 0, "total_epochs": 60, "loss": 0.0, "val_loss": 0.0}
-        
-        df = fetch_stock_data(ticker, period="2Y")
-        if df is None or df.empty:
-            training_status[ticker] = {"status": "failed", "error": "No historical data to train."}
-            return
-            
-        predictor = StockPredictor(window_size=20)
-        
-        def progress_callback(epoch, total, loss, val_loss):
-            training_status[ticker] = {
-                "status": "training",
-                "epoch": epoch,
-                "total_epochs": total,
-                "loss": loss,
-                "val_loss": val_loss
-            }
-            
-        results = predictor.train_model(df, ticker, epochs=60, callback=progress_callback)
-        training_status[ticker] = {
-            "status": "completed",
-            "metrics": results
-        }
-    except Exception as e:
-        training_status[ticker] = {"status": "failed", "error": str(e)}
-
-from pydantic import BaseModel
-import uuid
-import asyncio
-
-class SimulationRequest(BaseModel):
-    sentiment: float = 0.0
-    volatility_multiplier: float = 1.0
-    volume_multiplier: float = 1.0
-
-# Global tracking for training tasks
-training_tasks = {}
-
-def _get_prediction_logic(symbol: str) -> dict:
-    from backend.analysis.trainer import predict_future
-    try:
-        res = predict_future(symbol.upper())
-        model_trained = True
-    except FileNotFoundError:
-        # Fallback rule-based prediction if model is not trained yet
-        from backend.data.fetcher import fetch_stock_data
-        df = fetch_stock_data(symbol.upper(), period="45D")
-        if df is not None and not df.empty and len(df) >= 20:
-            cur_price = float(df["close"].iloc[-1])
-            ma20 = float(df["close"].rolling(20).mean().iloc[-1])
-            predicted_price = cur_price * 1.005 if cur_price > ma20 else cur_price * 0.995
-            high_bound = predicted_price * 1.02
-            low_bound = predicted_price * 0.98
-        else:
-            cur_price = 100.0
-            predicted_price = 100.0
-            high_bound = 105.0
-            low_bound = 95.0
-
-        res = {
-            "current_price": cur_price,
-            "predicted_price": round(predicted_price, 2),
-            "high_bound": round(high_bound, 2),
-            "low_bound": round(low_bound, 2)
-        }
-        model_trained = False
-
-    cur_price = res.get('current_price', 0.0) or 1.0
-    predicted_return = (res['predicted_price'] - cur_price) / cur_price if cur_price > 0 else 0.0
-    signal = "buy" if res['predicted_price'] > cur_price * 1.01 else ("sell" if res['predicted_price'] < cur_price * 0.99 else "hold")
-
-    # Real confidence score: based on prediction spread width relative to price.
-    # Narrow spread = high confidence. Formula: 100 - (spread% * 10), clamped 0-100.
-    spread_pct = (res['high_bound'] - res['low_bound']) / (cur_price + 1e-9) * 100.0
-    ai_score = int(max(0, min(100, round(100.0 - spread_pct * 10.0))))
-
-    return {
-        "ticker": symbol.upper(),
-        "current_price": res['current_price'],
-        "predicted_price": res['predicted_price'],
-        "predicted_price_7d": res['predicted_price'],
-        "predicted_return_7d": predicted_return,
-        "high_bound": res['high_bound'],
-        "low_bound": res['low_bound'],
-        "ai_confidence_score": ai_score,
-        "signal": signal,
-        "model_trained": model_trained
-    }
-
-@app.get("/api/stock/{symbol}/predict")
-@limiter.limit("10/minute")
-def get_prediction(request: Request, symbol: str, background_tasks: BackgroundTasks):
-    try:
-        # Check staleness or existence of model
-        model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", f"{symbol.upper()}.json")
-        if os.path.exists(model_path):
-            try:
-                with open(model_path, 'r') as f:
-                    bundle = json.load(f)
-                trained_at_str = bundle.get("trained_at")
-                if trained_at_str:
-                    trained_at = datetime.fromisoformat(trained_at_str)
-                    if datetime.now() - trained_at > timedelta(days=7):
-                        logger.info("Model for %s is stale (> 7 days old). Triggering auto-retrain.", symbol)
-                        task_id = str(uuid.uuid4())
-                        save_task_status(task_id, symbol.upper(), "queued", 0)
-                        background_tasks.add_task(background_train_job, task_id, symbol.upper())
-            except Exception as se:
-                logger.warning("Failed to check model staleness: %s", se)
-        else:
-            # Trigger automatic initial training since model doesn't exist
-            logger.info("Model for %s does not exist. Triggering automatic initial training.", symbol)
-            task_id = str(uuid.uuid4())
-            save_task_status(task_id, symbol.upper(), "queued", 0)
-            background_tasks.add_task(background_train_job, task_id, symbol.upper())
-
-        return _get_prediction_logic(symbol)
-    except Exception as e:
-        logger.error("Prediction failed for %s: %s", symbol, e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/stock/{symbol}/explain")
-def get_explainability(symbol: str):
-    from backend.analysis.explainer import get_top_features
-    try:
-        top_features = get_top_features(symbol.upper(), top_n=3)
-        return top_features
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/api/stock/{symbol}/simulate")
-@limiter.limit("15/minute")
-def simulate_prediction(request: Request, symbol: str, req: SimulationRequest):
-    from backend.analysis.trainer import predict_future
-    try:
-        from backend.analysis.feature_engineer import get_features
-        df = get_features(symbol.upper())
-        if df.empty:
-            raise ValueError("No data")
-        latest = df.iloc[-1]
-
-        overrides = {
-            "sentiment": req.sentiment,
-            "volume": latest['volume'] * req.volume_multiplier,
-            "atr_14": latest['atr_14'] * req.volatility_multiplier,
-            "roll_std_20": latest['roll_std_20'] * req.volatility_multiplier
-        }
-
-        res = predict_future(symbol.upper(), override_features=overrides)
-        return {
-            "predicted_price": res['predicted_price'],
-            "high_bound": res['high_bound'],
-            "low_bound": res['low_bound']
-        }
-    except Exception as e:
-        logger.error("Simulation failed for %s: %s", symbol, e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-def background_train_job(task_id: str, symbol: str):
-    from backend.analysis.trainer import train_pipeline
-    try:
-        # Persist initial state to DB so it survives server restarts
-        save_task_status(task_id, symbol, "training", 50)
-        training_tasks[task_id] = {"status": "training", "progress": 50, "mape": None}
-        result = train_pipeline(symbol)
-        save_task_status(task_id, symbol, "completed", 100, mape=result['validation_mape'])
-        training_tasks[task_id] = {"status": "completed", "progress": 100, "mape": result['validation_mape']}
-    except Exception as e:
-        logger.error("Training job failed for %s: %s", symbol, e)
-        save_task_status(task_id, symbol, "failed", 0, error=str(e))
-        training_tasks[task_id] = {"status": "failed", "error": str(e), "progress": 0}
-
-@app.post("/api/stock/{symbol}/train")
-@limiter.limit("3/minute")
-def start_training(request: Request, symbol: str, background_tasks: BackgroundTasks):
-    task_id = str(uuid.uuid4())
-    save_task_status(task_id, symbol.upper(), "queued", 0)
-    training_tasks[task_id] = {"status": "queued", "progress": 0, "mape": None}
-    background_tasks.add_task(background_train_job, task_id, symbol.upper())
-    return {"task_id": task_id, "message": "Training started"}
-
-@app.get("/api/task/{task_id}/status")
-def get_task_status_endpoint(task_id: str):
-    # Check in-memory first (fastest), then fall back to DB (survives restarts)
-    task = training_tasks.get(task_id)
-    if not task:
-        task = get_task_status(task_id)
-    if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
-    return task
-
-@app.get("/api/stock/{ticker}/backtest")
-@limiter.limit("5/minute")
-def get_backtest(request: Request, ticker: str):
-    t_upper = ticker.upper().strip()
-    # Use combined data so backtest includes today's live prices
-    df = get_combined_stock_data(t_upper, period="2Y")
-    if df is None or df.empty:
-        raise HTTPException(status_code=404, detail=f"No price history found for {t_upper} to run backtest.")
-
-    results = run_backtest(df, t_upper)
-    if "error" in results:
-        raise HTTPException(status_code=400, detail=results["error"])
-    return results
-
-@app.get("/api/screener")
-@limiter.limit("60/minute")
-async def get_screener_list(request: Request, signal: str = "", min_score: int = 0):
-    """Returns basic screener list derived from the full advanced screener dataset."""
-    cached_results = get_screener_results(ttl_minutes=10)
-    if cached_results is None:
-        # Trigger advanced screener build
-        return await get_advanced_screener(request, universe="ALL NSE", signal=signal, min_score=min_score)
-
-    results = cached_results
-    if signal and signal.lower() != "all":
-        results = [r for r in results if r.get("signal", "").lower() == signal.lower()]
-    if min_score:
-        results = [r for r in results if r.get("ai_score", 0) >= min_score]
-    return results
-
-# ── WEBSOCKET LIVE PRICE FEED MANAGER ──
-
+# ── WebSocket Streaming Connection Manager ────────────────────────────────────
 class ConnectionManager:
-    """WebSocket manager with per-client ticker subscriptions."""
+    """Manages active WebSocket client connections and per-client ticker subscriptions."""
+
     def __init__(self):
-        # Map of websocket -> set of subscribed ticker symbols
         self.connections: Dict[WebSocket, set] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        # Default: subscribe to all popular tickers on connect
         self.connections[websocket] = set(popular_tickers)
 
     def disconnect(self, websocket: WebSocket):
         self.connections.pop(websocket, None)
 
-    def subscribe(self, websocket: WebSocket, tickers: List[str]):
-        """Update the set of tickers a specific client is interested in (capped to 50 max)."""
+    def subscribe(self, websocket: WebSocket, tickers: list):
         if websocket in self.connections:
-            # Enforce max 50 subscribed tickers per client
+            # Max 50 subscribed tickers per client
             capped_tickers = [t.upper().strip() for t in tickers if isinstance(t, str)][:50]
             self.connections[websocket] = set(capped_tickers)
 
     async def broadcast(self, message: dict):
-        """Sends the message only to clients subscribed to that ticker."""
+        """Sends the price tick only to clients subscribed to that ticker."""
         ticker = message.get("ticker", "")
         disconnected = []
         for ws, subscriptions in list(self.connections.items()):
@@ -649,20 +76,17 @@ class ConnectionManager:
     def active_connections(self) -> List[WebSocket]:
         return list(self.connections.keys())
 
+
 manager = ConnectionManager()
 
-# Background price broadcaster loop
-async def websocket_price_broadcast_loop():
-    from backend.data.fetcher import smartApi, get_token_info, fetch_company_info
-    from backend.data.database import get_company_info, get_stale_company_info
 
-    # Local price cache seeded with authentic prices
+# ── WebSocket Real-Time Price Broadcaster Loop ────────────────────────────────
+async def websocket_price_broadcast_loop():
     prices_cache: Dict[str, float] = {}
 
     while True:
         try:
             if manager.active_connections:
-                # Collect all tickers currently subscribed by active clients
                 active_subscribed = set()
                 for subs in manager.connections.values():
                     active_subscribed.update(subs)
@@ -686,7 +110,7 @@ async def websocket_price_broadcast_loop():
                                         payload = {
                                             "ticker": t,
                                             "price": round(ltp, 2),
-                                            "change_pct": round(change_pct * 100, 3)
+                                            "change_pct": round(change_pct * 100, 3),
                                         }
                                         save_live_tick(t, round(ltp, 2), round(change_pct * 100, 3))
                                         await manager.broadcast(payload)
@@ -695,7 +119,6 @@ async def websocket_price_broadcast_loop():
                         logger.debug("Live tick fetch failed for %s: %s", t, exc)
 
                     if not fetched:
-                        # Fallback: check cached company info or previous verified price
                         base_price = prices_cache.get(t)
                         if not base_price:
                             info = get_company_info(t) or get_stale_company_info(t)
@@ -707,878 +130,150 @@ async def websocket_price_broadcast_loop():
                             payload = {
                                 "ticker": t,
                                 "price": round(base_price, 2),
-                                "change_pct": 0.0
+                                "change_pct": 0.0,
                             }
                             await manager.broadcast(payload)
-                    
-                    # Yield slightly between tickers
+
                     await asyncio.sleep(0.5)
 
         except Exception as e:
             logger.warning("Error in websocket price broadcast loop: %s", e)
 
-        # Broadcast interval between rounds
         await asyncio.sleep(4.0)
 
 
-# Startup is now handled by the lifespan context manager above.
+# ── Background Prefetch Task ──────────────────────────────────────────────────
+async def prefetch_all_tickers():
+    """Downloads 2-year historical OHLCV for popular universe on startup."""
+    logger.info("Starting background prefetch of historical data for popular tickers...")
+    loop = asyncio.get_running_loop()
+    for ticker in popular_tickers:
+        try:
+            df = await loop.run_in_executor(None, lambda t=ticker: fetch_stock_data(t, period="2Y"))
+            if df is not None and not df.empty:
+                logger.info("Prefetched %d rows for %s", len(df), ticker)
+        except Exception as e:
+            logger.error("Prefetch failed for %s: %s", ticker, e)
+        await asyncio.sleep(1.5)
+    logger.info("Historical prefetch complete.")
 
+
+# ── Application Lifespan ──────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize SQLite and PostgreSQL/TimescaleDB tables
+    init_db()
+    init_database()
+    cleanup_old_tasks(max_age_hours=48)
+    ensure_session()
+
+    price_task = asyncio.create_task(websocket_price_broadcast_loop())
+    alert_task = asyncio.create_task(run_alert_scheduler_loop())
+    prefetch_task = asyncio.create_task(prefetch_all_tickers())
+
+    try:
+        yield
+    finally:
+        for task in (price_task, alert_task, prefetch_task):
+            task.cancel()
+        for task in (price_task, alert_task, prefetch_task):
+            with suppress(asyncio.CancelledError):
+                await task
+
+
+# ── FastAPI App Instance ──────────────────────────────────────────────────────
+app = FastAPI(
+    title="StockOracle Pro API",
+    description="Production-grade AI stock forecasting modular monolith API",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+# Rate limiter
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# CORS configuration
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://main.d3qrmvw6hu9g61.amplifyapp.com",
+    "https://stockoracle.duckdns.org",
+]
+if settings.ALLOWED_ORIGINS:
+    origins.extend([o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()])
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(RequestIdMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ── WebSocket Endpoint ────────────────────────────────────────────────────────
 @app.websocket("/ws/prices")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
-            # Listen for subscription control messages from client
-            # Expected format: {"subscribe": ["RELIANCE", "TCS", ...]}
             raw = await websocket.receive_text()
             try:
                 msg = json.loads(raw)
                 if "subscribe" in msg and isinstance(msg["subscribe"], list):
                     manager.subscribe(websocket, msg["subscribe"])
-            except (json.JSONDecodeError, Exception):
-                pass  # Ignore non-JSON keep-alive pings
+            except Exception:
+                pass
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
 
-# ── NEW FEATURE ENDPOINTS ──────────────────────────────────────────────────
+# ── Mount Modular Domain Routers ──────────────────────────────────────────────
+from backend.api.routers.system import router as system_router
+from backend.api.routers.market import router as market_router
+from backend.api.routers.research import router as research_router
+from backend.api.routers.portfolio import router as portfolio_router
+from backend.api.routers.paper import router as paper_router
+from backend.api.routers.alerts import router as alerts_router
+from backend.api.routers.ml import router as ml_router
+from backend.api.routers.ai_chat import router as aichat_router
 
+app.include_router(system_router)
+app.include_router(market_router)
+app.include_router(research_router)
+app.include_router(portfolio_router)
+app.include_router(paper_router)
+app.include_router(alerts_router)
+app.include_router(ml_router)
+app.include_router(aichat_router)
+
+
+# ── Legacy & Compatibility Endpoints ──────────────────────────────────────────
 @app.get("/api/sentiment/market")
-@limiter.limit("10/minute")
-async def get_market_sentiment_endpoint(request: Request):
-    """
-    Aggregates news sentiment for all popular tickers and returns a
-    composite Fear & Greed index plus per-ticker sentiment breakdown.
-    NOTE: This runs FinBERT/VADER for each ticker → can take 20-60s on cold start.
-    Results are served from a 30-minute in-memory cache on subsequent calls.
-    """
-    _cache_key = "_market_sentiment_cache"
-    _cache_ts_key = "_market_sentiment_ts"
-    from datetime import timedelta
-
-    # 30-minute in-memory cache
-    cached_val = getattr(app.state, _cache_key, None)
-    cached_ts  = getattr(app.state, _cache_ts_key, None)
-    if cached_val is not None and cached_ts is not None:
-        if datetime.now() - cached_ts < timedelta(minutes=30):
-            return cached_val
-
-    loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, lambda: get_market_sentiment(popular_tickers))
-    setattr(app.state, _cache_key, result)
-    return result
-
-
-# Multi-Index Constituent Universes (Comprehensive NSE Coverage)
-INDEX_UNIVERSES: Dict[str, List[str]] = {
-    "NIFTY 50": [
-        "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL",
-        "TATAMOTORS", "MARUTI", "AXISBANK", "WIPRO", "HCLTECH", "SUNPHARMA", "BAJFINANCE", "KOTAKBANK",
-        "TATASTEEL", "NTPC", "POWERGRID", "ONGC", "COALINDIA", "TITAN", "ULTRACEMCO", "ADANIENT",
-        "JSWSTEEL", "HDFCLIFE", "BPCL", "HEROMOTOCO", "BAJAJFINSV", "INDUSINDBK", "NESTLEIND", "HINDALCO",
-        "GRASIM", "TECHM", "CIPLA", "EICHERMOT", "DIVISLAB", "BRITANNIA", "TATACONSUM", "APOLLOHOSP",
-        "DRREDDY", "ADANIPORTS", "SBILIFE", "LTIM", "BEL", "SHRIRAMFIN", "ASIANPAINT", "M&M"
-    ],
-    "BANK NIFTY": [
-        "HDFCBANK", "ICICIBANK", "SBIN", "KOTAKBANK", "AXISBANK", "INDUSINDBK",
-        "PNB", "BANKBARODA", "FEDERALBNK", "IDFCFIRSTB", "AUBANK", "BANDHANBNK"
-    ],
-    "NIFTY PSU BANK": [
-        "SBIN", "PNB", "BANKBARODA", "CANBK", "UNIONBANK", "IOB", "INDIANB", "UCOBANK",
-        "BANKINDIA", "CENTRALBK", "PSB", "MAHABANK"
-    ],
-    "NIFTY IT": [
-        "TCS", "INFY", "HCLTECH", "WIPRO", "TECHM", "LTIM", "PERSISTENT", "COFORGE", "LTTS", "MPHASIS",
-        "TATAELXSI", "KPITTECH", "CYIENT", "SONACOMS", "ZENSARTECH", "BSOFT"
-    ],
-    "NIFTY AUTO": [
-        "TATAMOTORS", "MARUTI", "M&M", "BAJAJ-AUTO", "EICHERMOT", "HEROMOTOCO",
-        "TVSMOTOR", "BHARATFORG", "ASHOKLEY", "MOTHERSON", "MRF", "BALKRISIND", "BOSCHLTD", "APOLLOTYRE", "EXIDEIND"
-    ],
-    "NIFTY PHARMA": [
-        "SUNPHARMA", "DRREDDY", "CIPLA", "DIVISLAB", "APOLLOHOSP", "LUPIN",
-        "AUROPHARMA", "TORNTPHARM", "ZYDUSLIFE", "BIOCON", "MANKIND", "ALKEM", "GLENMARK", "ABBOTINDIA", "IPCALAB",
-        "LAURUSLABS", "NATCOPHARM", "SYNGENE", "GRANULES", "AJANTPHARM"
-    ],
-    "NIFTY FMCG": [
-        "ITC", "HUL", "NESTLEIND", "BRITANNIA", "TATACONSUM", "DABUR", "GODREJCP", "MARICO",
-        "COLPAL", "VBL", "PGHH", "EMAMILTD", "RADICO", "UBL", "BALRAMCHIN"
-    ],
-    "NIFTY METAL": [
-        "TATASTEEL", "JSWSTEEL", "HINDALCO", "VEDL", "JINDALSTEL", "SAIL", "NMDC", "NATIONALUM",
-        "HINDZINC", "APLAPOLLO", "RATNAMANI", "WELCORP", "HINDCOPPER", "JSL"
-    ],
-    "NIFTY ENERGY": [
-        "RELIANCE", "NTPC", "POWERGRID", "ONGC", "COALINDIA", "BPCL", "IOC", "GAIL",
-        "TATAPOWER", "ADANIGREEN", "ADANIPOWER", "ADANITRANS", "NHPC", "SJVN", "OIL"
-    ],
-    "NIFTY INFRA": [
-        "LT", "ULTRACEMCO", "ADANIENT", "ADANIPORTS", "GRASIM", "SIEMENS", "ABB", "DLF", "AMBUJACEM",
-        "BEL", "HAL", "GMRINFRA", "BHEL", "CONCOR", "IRCTC", "RVNL", "IRCON", "NBCC", "VOLTAS", "HAVELLS"
-    ],
-    "NIFTY REALTY": [
-        "DLF", "GODREJPROP", "LODHA", "OBEROIRLTY", "PHOENIXLTD", "BRIGADE", "PRESTIGE", "SOBHA", "SUNTECK", "MAHLIFE"
-    ],
-    "NIFTY 100": [
-        "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "SBIN", "BHARTIARTL", "ITC", "LT", "HUL",
-        "TATAMOTORS", "MARUTI", "AXISBANK", "WIPRO", "HCLTECH", "SUNPHARMA", "BAJFINANCE", "KOTAKBANK",
-        "TATASTEEL", "NTPC", "POWERGRID", "ONGC", "COALINDIA", "TITAN", "ULTRACEMCO", "ADANIENT",
-        "JSWSTEEL", "HDFCLIFE", "BPCL", "HEROMOTOCO", "BAJAJFINSV", "INDUSINDBK", "NESTLEIND", "HINDALCO",
-        "GRASIM", "TECHM", "CIPLA", "EICHERMOT", "DIVISLAB", "BRITANNIA", "TATACONSUM", "APOLLOHOSP",
-        "DRREDDY", "ADANIPORTS", "SBILIFE", "LTIM", "BEL", "SHRIRAMFIN", "ASIANPAINT", "M&M",
-        "PNB", "BANKBARODA", "FEDERALBNK", "IDFCFIRSTB", "AUBANK", "BANDHANBNK",
-        "PERSISTENT", "COFORGE", "LTTS", "MPHASIS", "BAJAJ-AUTO", "TVSMOTOR", "BHARATFORG", "ASHOKLEY",
-        "LUPIN", "AUROPHARMA", "TORNTPHARM", "ZYDUSLIFE", "BIOCON", "HAL", "VEDL", "IOC", "GAIL",
-        "CHOLAFIN", "HAVELLS", "PIDILITIND", "DABUR", "GODREJCP", "MARICO", "SIEMENS", "ABB", "DLF",
-        "AMBUJACEM", "TRENT", "ZOMATO", "JIOFIN", "CANBK", "UNIONBANK", "IRFC", "PFC", "RECLTD",
-        "TATAPOWER", "ADANIGREEN", "ADANIPOWER", "VBL", "POLYCAB", "JINDALSTEL", "MANKIND", "BOSCHLTD",
-        "CGPOWER", "MAXHEALTH", "SOLARINDS"
-    ]
-}
-
-# Comprehensive Master Sector Map
-EXPANDED_SECTOR_MAP = {
-    "RELIANCE": "Energy", "ONGC": "Energy", "IOC": "Energy", "BPCL": "Energy", "NTPC": "Energy", "POWERGRID": "Energy", "COALINDIA": "Energy", "GAIL": "Energy", "TATAPOWER": "Energy", "ADANIGREEN": "Energy", "ADANIPOWER": "Energy", "ADANITRANS": "Energy", "NHPC": "Energy", "SJVN": "Energy", "OIL": "Energy",
-    "TCS": "IT", "INFY": "IT", "WIPRO": "IT", "HCLTECH": "IT", "TECHM": "IT", "LTIM": "IT", "PERSISTENT": "IT", "COFORGE": "IT", "LTTS": "IT", "MPHASIS": "IT", "TATAELXSI": "IT", "KPITTECH": "IT", "CYIENT": "IT", "SONACOMS": "IT", "ZENSARTECH": "IT", "BSOFT": "IT",
-    "HDFCBANK": "Banking", "ICICIBANK": "Banking", "SBIN": "Banking", "AXISBANK": "Banking", "KOTAKBANK": "Banking", "BAJFINANCE": "Banking", "HDFCLIFE": "Banking",
-    "BAJAJFINSV": "Banking", "INDUSINDBK": "Banking", "PNB": "Banking", "BANKBARODA": "Banking", "FEDERALBNK": "Banking", "IDFCFIRSTB": "Banking", "AUBANK": "Banking",
-    "BANDHANBNK": "Banking", "SBILIFE": "Banking", "SHRIRAMFIN": "Banking", "CHOLAFIN": "Banking", "JIOFIN": "Banking", "CANBK": "Banking", "UNIONBANK": "Banking",
-    "IRFC": "Banking", "PFC": "Banking", "RECLTD": "Banking", "IOB": "Banking", "INDIANB": "Banking", "UCOBANK": "Banking", "BANKINDIA": "Banking", "CENTRALBK": "Banking", "PSB": "Banking", "MAHABANK": "Banking",
-    "BHARTIARTL": "Telecom", "IDEA": "Telecom", "INDUSTOWER": "Telecom", "TATACOMM": "Telecom",
-    "ITC": "FMCG", "HUL": "FMCG", "NESTLEIND": "FMCG", "BRITANNIA": "FMCG", "TATACONSUM": "FMCG", "DABUR": "FMCG", "GODREJCP": "FMCG", "MARICO": "FMCG", "COLPAL": "FMCG", "VBL": "FMCG", "PGHH": "FMCG", "EMAMILTD": "FMCG", "RADICO": "FMCG", "UBL": "FMCG", "BALRAMCHIN": "FMCG",
-    "LT": "Infrastructure", "ULTRACEMCO": "Infrastructure", "ADANIENT": "Infrastructure", "ADANIPORTS": "Infrastructure", "GRASIM": "Infrastructure", "SIEMENS": "Infrastructure", "ABB": "Infrastructure", "DLF": "Infrastructure", "AMBUJACEM": "Infrastructure", "BEL": "Infrastructure", "HAL": "Infrastructure", "GMRINFRA": "Infrastructure", "BHEL": "Infrastructure", "CONCOR": "Infrastructure", "IRCTC": "Infrastructure", "RVNL": "Infrastructure", "IRCON": "Infrastructure", "NBCC": "Infrastructure", "VOLTAS": "Infrastructure", "HAVELLS": "Infrastructure", "POLYCAB": "Infrastructure", "CGPOWER": "Infrastructure", "SOLARINDS": "Infrastructure",
-    "MARUTI": "Auto", "TATAMOTORS": "Auto", "HEROMOTOCO": "Auto", "M&M": "Auto", "EICHERMOT": "Auto", "BAJAJ-AUTO": "Auto", "TVSMOTOR": "Auto", "BHARATFORG": "Auto", "ASHOKLEY": "Auto", "MOTHERSON": "Auto", "MRF": "Auto", "BALKRISIND": "Auto", "BOSCHLTD": "Auto", "APOLLOTYRE": "Auto", "EXIDEIND": "Auto",
-    "SUNPHARMA": "Pharma", "DRREDDY": "Pharma", "CIPLA": "Pharma", "DIVISLAB": "Pharma", "APOLLOHOSP": "Pharma", "LUPIN": "Pharma", "AUROPHARMA": "Pharma", "TORNTPHARM": "Pharma", "ZYDUSLIFE": "Pharma", "BIOCON": "Pharma", "MANKIND": "Pharma", "ALKEM": "Pharma", "GLENMARK": "Pharma", "ABBOTINDIA": "Pharma", "IPCALAB": "Pharma", "LAURUSLABS": "Pharma", "NATCOPHARM": "Pharma", "SYNGENE": "Pharma", "GRANULES": "Pharma", "AJANTPHARM": "Pharma", "MAXHEALTH": "Pharma",
-    "TATASTEEL": "Metals", "JSWSTEEL": "Metals", "HINDALCO": "Metals", "VEDL": "Metals", "JINDALSTEL": "Metals", "SAIL": "Metals", "NMDC": "Metals", "NATIONALUM": "Metals", "HINDZINC": "Metals", "APLAPOLLO": "Metals", "RATNAMANI": "Metals", "WELCORP": "Metals", "HINDCOPPER": "Metals", "JSL": "Metals",
-    "TITAN": "Consumer", "PIDILITIND": "Consumer", "TRENT": "Consumer", "ZOMATO": "Consumer", "NYKAA": "Consumer", "PAYTM": "Consumer", "DELHIVERY": "Consumer",
-    "GODREJPROP": "Realty", "LODHA": "Realty", "OBEROIRLTY": "Realty", "PHOENIXLTD": "Realty", "BRIGADE": "Realty", "PRESTIGE": "Realty", "SOBHA": "Realty", "SUNTECK": "Realty", "MAHLIFE": "Realty",
-}
+async def get_market_sentiment_legacy():
+    from backend.analysis.sentiment_market import get_market_sentiment
+    return get_market_sentiment()
 
 
 @app.get("/api/screener/advanced")
-@limiter.limit("200/minute")
-async def get_advanced_screener(
-    request: Request,
-    universe: str = "ALL NSE",
-    sector: str = "",
-    min_rsi: float = 0.0,
-    max_rsi: float = 100.0,
-    signal: str = "",
-    volume_spike: bool = False,
-    near_52w_high: bool = False,
-    near_52w_low: bool = False,
-    min_score: int = 0,
-    sort_by: str = "ai_score",
-    sort_dir: str = "desc",
-):
-    """
-    Comprehensive multi-universe stock screener with full NSE universe support (500+ stocks).
-    """
-    from backend.data.database import get_all_stock_universe_tickers
-
-    selected_universe = universe.upper().strip()
-    is_all_universe = selected_universe in ["ALL NSE", "ALL", "NIFTY 500", ""]
-
-    target_tickers = INDEX_UNIVERSES.get(selected_universe) if not is_all_universe else None
-
-    # Re-use or build screener base results (60 min TTL)
-    cached_results = get_screener_results(ttl_minutes=60)
-
-    if cached_results is None or len(cached_results) == 0:
-        from concurrent.futures import ThreadPoolExecutor
-
-        def _process_ticker(t: str) -> Optional[dict]:
-            try:
-                info = fetch_company_info(t)
-                if not info or not info.get("current_price"):
-                    return None
-
-                cur_price = float(info["current_price"])
-                prev = float(info.get("previous_close") or cur_price)
-                change_pct = ((cur_price - prev) / prev) * 100 if prev > 0 else 0.0
-
-                high_52w = float(info.get("high_52w") or (cur_price * 1.15))
-                low_52w  = float(info.get("low_52w") or (cur_price * 0.85))
-
-                rng = (high_52w - low_52w) if high_52w > low_52w else cur_price * 0.2
-                pos_in_range = ((cur_price - low_52w) / rng) * 100 if rng > 0 else 50.0
-
-                rsi_val = round(min(88.0, max(22.0, 48.0 + (change_pct * 3.2) + (pos_in_range - 50.0) * 0.2)), 1)
-                trend = "BULLISH" if change_pct >= 0 and rsi_val >= 50 else ("BEARISH" if change_pct < 0 and rsi_val < 48 else "NEUTRAL")
-
-                ai_score = int(min(94, max(35, 55 + int(change_pct * 4) + int((pos_in_range - 50) * 0.3))))
-                if ai_score >= 65 or (change_pct > 1.2 and rsi_val > 52):
-                    sig = "buy"
-                elif ai_score <= 42 or change_pct < -1.5:
-                    sig = "sell"
-                else:
-                    sig = "hold"
-
-                pred_ret = 0.035 if sig == "buy" else (0.008 if sig == "hold" else -0.025)
-                target_7d = round(cur_price * (1.0 + pred_ret), 2)
-                stop_loss = round(cur_price * 0.96, 2)
-                vol_ratio = round(max(0.7, 1.0 + abs(change_pct) * 0.35), 2)
-
-                return {
-                    "ticker":          t,
-                    "name":            info.get("name", t),
-                    "price":           round(cur_price, 2),
-                    "change":          round(change_pct, 2),
-                    "ai_score":        ai_score,
-                    "signal":          sig,
-                    "predicted_pct":   round(pred_ret * 100, 2),
-                    "target_price_7d": target_7d,
-                    "stop_loss":       stop_loss,
-                    "trend":           trend,
-                    "rsi":             rsi_val,
-                    "macd_signal":     round((change_pct * 0.12), 3),
-                    "volume_ratio":    vol_ratio,
-                    "high_52w":        round(high_52w, 2),
-                    "low_52w":         round(low_52w, 2),
-                    "sector":          EXPANDED_SECTOR_MAP.get(t, "Other"),
-                }
-            except Exception:
-                return None
-
-        def _build():
-            master_set = set(EXPANDED_SECTOR_MAP.keys())
-            for syms in INDEX_UNIVERSES.values():
-                master_set.update(syms)
-            try:
-                db_tickers = get_all_stock_universe_tickers(limit=500)
-                if db_tickers:
-                    master_set.update(db_tickers)
-            except Exception:
-                pass
-
-            all_tickers = sorted(list(master_set))
-            fresh = []
-            with ThreadPoolExecutor(max_workers=24) as executor:
-                results_list = list(executor.map(_process_ticker, all_tickers))
-            for res in results_list:
-                if res is not None:
-                    fresh.append(res)
-            return fresh
-
-        loop = asyncio.get_running_loop()
-        cached_results = await loop.run_in_executor(None, _build)
-        save_screener_results(cached_results, ttl_minutes=60)
-
-    results = cached_results
-
-    # 1. Filter by Selected Index Universe (if specific index selected)
-    if target_tickers is not None:
-        results = [r for r in results if r.get("ticker", "") in target_tickers]
-
-    # 2. Sector Filter
-    if sector and sector.lower() != "all":
-        results = [r for r in results if r.get("sector", "").lower() == sector.lower()]
-
-    # 3. Signal Filter
-    if signal and signal.lower() != "all":
-        results = [r for r in results if r.get("signal", "").lower() == signal.lower()]
-
-    # 4. Min Score
-    if min_score:
-        results = [r for r in results if r.get("ai_score", 0) >= min_score]
-
-
-    # 5. RSI Range
-    if min_rsi > 0 or max_rsi < 100:
-        results = [r for r in results if r.get("rsi") is not None and min_rsi <= r["rsi"] <= max_rsi]
-
-    # 6. Volume Spike
-    if volume_spike:
-        results = [r for r in results if (r.get("volume_ratio") or 0) >= 1.5]
-
-    # 7. 52W Proximity
-    if near_52w_high:
-        results = [r for r in results if r.get("high_52w") and abs(r["price"] - r["high_52w"]) / r["high_52w"] <= 0.05]
-    if near_52w_low:
-        results = [r for r in results if r.get("low_52w") and abs(r["price"] - r["low_52w"]) / r["price"] <= 0.05]
-
-    # 8. Sorting
-    valid_sort_keys = {"ai_score", "change", "predicted_pct", "rsi", "volume_ratio", "price"}
-    sk = sort_by if sort_by in valid_sort_keys else "ai_score"
-    reverse = sort_dir.lower() != "asc"
-    results = sorted(results, key=lambda r: (r.get(sk) or 0), reverse=reverse)
-
-    return results
+def get_screener_advanced_legacy():
+    from backend.data.database import get_screener_results
+    return get_screener_results() or []
 
 
 @app.get("/api/market/heatmap")
-@limiter.limit("20/minute")
-async def get_market_heatmap(request: Request):
-    """
-    Returns sector-grouped heatmap data: ticker, price, change%, sector, market cap tier.
-    All popular tickers enriched with sector and live price change.
-    """
-    # Extended ticker list with sector metadata
-    heatmap_tickers = [
-        {"t": "RELIANCE",   "sector": "Energy",          "mcap_tier": 3},
-        {"t": "TCS",        "sector": "IT",              "mcap_tier": 3},
-        {"t": "HDFCBANK",   "sector": "Banking",         "mcap_tier": 3},
-        {"t": "INFY",       "sector": "IT",              "mcap_tier": 3},
-        {"t": "ICICIBANK",  "sector": "Banking",         "mcap_tier": 3},
-        {"t": "SBIN",       "sector": "Banking",         "mcap_tier": 2},
-        {"t": "BHARTIARTL", "sector": "Telecom",         "mcap_tier": 2},
-        {"t": "ITC",        "sector": "FMCG",            "mcap_tier": 2},
-        {"t": "LT",         "sector": "Infrastructure",  "mcap_tier": 2},
-        {"t": "HUL",        "sector": "FMCG",            "mcap_tier": 2},
-    ]
+def get_market_heatmap_legacy():
+    from backend.data.database import get_screener_results
+    return get_screener_results() or []
 
-    def _build_heatmap():
-        rows = []
-        for item in heatmap_tickers:
-            t = item["t"]
-            try:
-                info = fetch_company_info(t)
-                if not info:
-                    continue
-                prev = info.get("previous_close") or 1.0
-                change_pct = ((info["current_price"] - prev) / prev) * 100
-                rows.append({
-                    "ticker":     t,
-                    "name":       info["name"],
-                    "price":      info["current_price"],
-                    "change_pct": round(change_pct, 3),
-                    "sector":     item["sector"],
-                    "mcap_tier":  item["mcap_tier"],
-                })
-            except Exception:
-                rows.append({
-                    "ticker":    t,
-                    "name":      t,
-                    "price":     0,
-                    "change_pct":0,
-                    "sector":    item["sector"],
-                    "mcap_tier": item["mcap_tier"],
-                })
-        return rows
-
-    loop = asyncio.get_running_loop()
-    rows = await loop.run_in_executor(None, _build_heatmap)
-
-    # Group by sector
-    sectors: Dict[str, List] = {}
-    for row in rows:
-        s = row["sector"]
-        sectors.setdefault(s, []).append(row)
-
-    # Sector summary
-    sector_summaries = []
-    for sname, items in sectors.items():
-        avg_change = sum(i["change_pct"] for i in items) / len(items) if items else 0
-        sector_summaries.append({
-            "sector": sname,
-            "avg_change_pct": round(avg_change, 3),
-            "stocks": items,
-        })
-
-    sector_summaries.sort(key=lambda x: x["avg_change_pct"], reverse=True)
-    return {"sectors": sector_summaries, "timestamp": datetime.now().isoformat()}
-
-
-@app.get("/api/macro")
-@limiter.limit("30/minute")
-async def get_macro_endpoint(request: Request):
-    """
-    Returns live macro-economic indicators:
-    RBI Repo Rate, India CPI, USD/INR, US10Y Yield, India VIX, FII/DII net flows.
-    Data is cached for 3 hours server-side.
-    """
-    loop = asyncio.get_running_loop()
-    data = await loop.run_in_executor(None, get_macro_data)
-    return data
-
-
-@app.get("/api/stock/{ticker}/supply-chain")
-@limiter.limit("15/minute")
-async def get_supply_chain_endpoint(request: Request, ticker: str):
-    """
-    Returns the supply chain network for the given NSE ticker:
-    upstream suppliers, downstream customers, and rolling 60-day price correlations.
-    """
-    t = ticker.upper().strip()
-    loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, lambda: get_supply_chain(t))
-    return result
-
-
-# ── AI CHAT & INTELLIGENCE ENDPOINTS ────────────────────────────────────────
-
-class ChatRequest(BaseModel):
-    ticker: str
-    question: str
-
-
-class PortfolioPositionRequest(BaseModel):
-    ticker: str
-    shares: float
-    buy_price: float
-
-
-class SmartAlertRequest(BaseModel):
-    ticker: str
-    alert_type: str
-    param_value: dict = {}
-
-
-@app.post("/api/ai/chat")
-@limiter.limit("20/minute")
-async def ai_chat(request: Request, req: ChatRequest):
-    """
-    Gemini-powered AI chat. Builds full stock context (indicators, prediction,
-    patterns, levels, news) then answers the user's natural-language question.
-    """
-    from backend.ai.chat import build_stock_context, ask_gemini
-    from backend.analysis.patterns import get_pattern_summary
-    from backend.analysis.levels import calculate_support_resistance
-    from urllib.parse import quote_plus
-    from urllib.request import Request as UrllibRequest, urlopen
-    import xml.etree.ElementTree as _ET
-
-    t = req.ticker.upper().strip()
-    if not t or len(t) > 20:
-        raise HTTPException(status_code=422, detail="Invalid ticker.")
-
-    loop = asyncio.get_running_loop()
-
-    # 1. Enriched stock data
-    enriched_df = None
-    try:
-        df = await loop.run_in_executor(None, lambda: fetch_stock_data(t, period="3M"))
-        if df is not None and not df.empty:
-            enriched_df = enrich_stock_dataframe(df)
-    except Exception:
-        pass
-
-    # 2. AI Prediction
-    prediction_data = None
-    try:
-        prediction_data = _get_prediction_logic(t)
-    except Exception:
-        pass
-
-    # 3. Patterns
-    patterns = None
-    try:
-        df3m = await loop.run_in_executor(None, lambda: fetch_stock_data(t, period="6M"))
-        if df3m is not None and not df3m.empty:
-            patterns = get_pattern_summary(df3m, lookback=45)
-    except Exception:
-        pass
-
-    # 4. Levels
-    levels = None
-    try:
-        df1y = await loop.run_in_executor(None, lambda: fetch_stock_data(t, period="1Y"))
-        if df1y is not None and not df1y.empty and len(df1y) >= 15:
-            levels = calculate_support_resistance(df1y)
-    except Exception:
-        pass
-
-    # 5. News headlines
-    news_items = []
-    try:
-        from backend.data.fetcher import get_token_info as _gti
-        tok = _gti(t)
-        company = tok.get("name", t) if tok else t
-        rss_url = f"https://news.google.com/rss/search?q={quote_plus(company + ' stock NSE')}&hl=en-IN&gl=IN&ceid=IN:en"
-        rss_req = UrllibRequest(rss_url, headers={"User-Agent": "StockOracle/1.0"})
-        with urlopen(rss_req, timeout=5) as rss_resp:
-            root = _ET.fromstring(rss_resp.read())
-        for item in root.findall("./channel/item")[:5]:
-            source_el = item.find("source")
-            news_items.append({
-                "title": item.findtext("title", ""),
-                "source": source_el.text if source_el is not None else "News",
-            })
-    except Exception:
-        pass
-
-    # 6. Build context & ask Gemini
-    def _run_gemini():
-        context = build_stock_context(t, enriched_df, prediction_data, patterns, levels, news_items)
-        return ask_gemini(req.question, context)
-
-    answer = await loop.run_in_executor(None, _run_gemini)
-    return {"answer": answer, "ticker": t}
-
-
-@app.get("/api/stock/{ticker}/news-summary")
-@limiter.limit("10/minute")
-async def get_news_summary(request: Request, ticker: str):
-    """Uses Gemini to summarize recent news headlines for the given ticker."""
-    from backend.ai.news_summarizer import summarize_news
-    from urllib.parse import quote_plus
-    from urllib.request import Request as UrllibRequest, urlopen
-    import xml.etree.ElementTree as _ET
-
-    t = ticker.upper().strip()
-    headlines = []
-    try:
-        from backend.data.fetcher import get_token_info as _gti
-        tok = _gti(t)
-        company = tok.get("name", t) if tok else t
-        rss_url = f"https://news.google.com/rss/search?q={quote_plus(company + ' stock NSE')}&hl=en-IN&gl=IN&ceid=IN:en"
-        rss_req = UrllibRequest(rss_url, headers={"User-Agent": "StockOracle/1.0"})
-        with urlopen(rss_req, timeout=6) as rss_resp:
-            root = _ET.fromstring(rss_resp.read())
-        for item in root.findall("./channel/item")[:8]:
-            title = item.findtext("title", "")
-            if title:
-                headlines.append(title)
-    except Exception:
-        pass
-
-    loop = asyncio.get_running_loop()
-    summary = await loop.run_in_executor(None, lambda: summarize_news(t, headlines))
-    return summary
-
-
-@app.get("/api/stock/{symbol}/ai-trade-explain")
-@limiter.limit("10/minute")
-async def ai_trade_explain(request: Request, symbol: str):
-    """
-    Returns a Gemini-generated plain-English explanation of the AI trade signal,
-    grounded in the current indicator readings.
-    """
-    from backend.ai.chat import ask_gemini
-
-    sym = symbol.upper().strip()
-    loop = asyncio.get_running_loop()
-
-    # Get prediction and latest indicators
-    pred = None
-    enriched_df = None
-    try:
-        pred = _get_prediction_logic(sym)
-        df = await loop.run_in_executor(None, lambda: fetch_stock_data(sym, period="45D"))
-        if df is not None and not df.empty:
-            enriched_df = enrich_stock_dataframe(df)
-    except Exception:
-        pass
-
-    if not pred:
-        return {"explanation": "Prediction data unavailable.", "signal": "hold"}
-
-    # Build focused context
-    ctx_lines = [f"Stock: {sym}"]
-    ctx_lines.append(f"AI Signal: {pred.get('signal', 'hold').upper()}")
-    ctx_lines.append(f"Current Price: ₹{pred.get('current_price', 0):.2f}")
-    ctx_lines.append(f"Predicted Price (7d): ₹{pred.get('predicted_price', 0):.2f}")
-    ctx_lines.append(f"Expected Return: {float(pred.get('predicted_return_7d', 0))*100:+.2f}%")
-    ctx_lines.append(f"AI Confidence: {pred.get('ai_confidence_score', 0)}/100")
-    if enriched_df is not None and len(enriched_df) > 0:
-        row = enriched_df.iloc[-1]
-        ctx_lines.append(f"RSI(14): {float(row.get('rsi', 50)):.1f}")
-        ctx_lines.append(f"MACD Hist: {float(row.get('macd_hist', 0)):.4f}")
-        ctx_lines.append(f"ADX: {float(row.get('adx', 20)):.1f}")
-    context = "\n".join(ctx_lines)
-    question = (
-        f"Based on the data above, explain in 3-4 sentences WHY the AI is giving a "
-        f"{pred.get('signal', 'hold').upper()} signal for {sym}. "
-        f"Mention specific indicators, the confidence level, and one key risk to watch."
-    )
-
-    def _run():
-        return ask_gemini(question, context)
-
-    explanation = await loop.run_in_executor(None, _run)
-    return {"explanation": explanation, "signal": pred.get("signal", "hold")}
-
-
-@app.get("/api/stock/{ticker}/fundamentals")
-@limiter.limit("10/minute")
-async def get_fundamentals_endpoint(request: Request, ticker: str):
-    """Returns fundamental data (P/E, EPS, revenue, etc.) scraped from Screener.in."""
-    from backend.data.fundamentals import get_fundamentals
-    t = ticker.upper().strip()
-    loop = asyncio.get_running_loop()
-    data = await loop.run_in_executor(None, lambda: get_fundamentals(t))
-    return data
-
-
-@app.get("/api/stock/{ticker}/options-chain")
-@limiter.limit("20/minute")
-async def get_options_chain_endpoint(request: Request, ticker: str, expiry: str = None):
-    """Returns the NSE options chain with OI, IV, max pain, and PCR."""
-    from backend.data.options import get_options_chain
-    t = ticker.upper().strip()
-    loop = asyncio.get_running_loop()
-    data = await loop.run_in_executor(None, lambda: get_options_chain(t, expiry))
-    return data
-
-
-# ── PORTFOLIO ENDPOINTS ──────────────────────────────────────────────────────
-
-@app.get("/api/portfolio")
-@limiter.limit("30/minute")
-async def get_portfolio_endpoint(request: Request):
-    """Returns all portfolio positions enriched with live prices and P&L."""
-    from backend.data.database import get_portfolio as _get_portfolio
-    loop = asyncio.get_running_loop()
-    positions = _get_portfolio()
-    enriched = []
-    for pos in positions:
-        t = pos["ticker"]
-        current_price = pos["buy_price"]  # fallback
-        try:
-            info = await loop.run_in_executor(None, lambda tk=t: fetch_company_info(tk))
-            if info and info.get("current_price"):
-                current_price = float(info["current_price"])
-        except Exception:
-            pass
-        pnl = (current_price - pos["buy_price"]) * pos["shares"]
-        pnl_pct = ((current_price - pos["buy_price"]) / pos["buy_price"]) * 100 if pos["buy_price"] > 0 else 0.0
-        enriched.append({
-            "id": pos["id"],
-            "ticker": t,
-            "shares": pos["shares"],
-            "buy_price": pos["buy_price"],
-            "current_price": round(current_price, 2),
-            "pnl": round(pnl, 2),
-            "pnl_pct": round(pnl_pct, 2),
-            "sector": EXPANDED_SECTOR_MAP.get(t, "Other"),
-            "added_at": pos["added_at"],
-        })
-    return enriched
-
-
-# ── PORTFOLIO ENDPOINTS ────────────────────────────────────────────────────────
-
-@app.get("/api/portfolio")
-@limiter.limit("30/minute")
-async def get_portfolio_endpoint(request: Request):
-    """Returns all portfolio positions for the current user enriched with live price + P&L."""
-    from backend.data.database import get_portfolio
-    user_id = get_current_user_id(request)
-    positions = get_portfolio(user_id=user_id)
-    enriched = []
-    loop = asyncio.get_running_loop()
-
-    for pos in positions:
-        t = pos["ticker"]
-        current_price = pos["buy_price"]
-        try:
-            info = await loop.run_in_executor(None, lambda tk=t: fetch_company_info(tk))
-            if info and info.get("current_price"):
-                current_price = float(info["current_price"])
-        except Exception:
-            pass
-        pnl = (current_price - pos["buy_price"]) * pos["shares"]
-        pnl_pct = ((current_price - pos["buy_price"]) / pos["buy_price"]) * 100 if pos["buy_price"] > 0 else 0.0
-        enriched.append({
-            "id": pos["id"],
-            "ticker": t,
-            "shares": pos["shares"],
-            "buy_price": pos["buy_price"],
-            "current_price": round(current_price, 2),
-            "pnl": round(pnl, 2),
-            "pnl_pct": round(pnl_pct, 2),
-            "sector": EXPANDED_SECTOR_MAP.get(t, "Other"),
-            "added_at": pos["added_at"],
-        })
-    return enriched
-
-
-@app.post("/api/portfolio")
-@limiter.limit("10/minute")
-def add_portfolio_endpoint(request: Request, req: PortfolioPositionRequest, _auth: None = Security(verify_api_key)):
-    """Add a new portfolio position for the current user."""
-    from backend.data.database import add_portfolio_position as _add
-    user_id = get_current_user_id(request)
-    t = req.ticker.upper().strip()
-    if not t or req.shares <= 0 or req.buy_price <= 0:
-        raise HTTPException(status_code=422, detail="Invalid ticker, shares, or buy_price.")
-    position_id = _add(t, req.shares, req.buy_price, user_id=user_id)
-    return {"id": position_id, "message": f"Position in {t} added."}
-
-
-@app.delete("/api/portfolio/{position_id}")
-@limiter.limit("10/minute")
-def delete_portfolio_endpoint(request: Request, position_id: int, _auth: None = Security(verify_api_key)):
-    """Delete a portfolio position by id for the current user."""
-    from backend.data.database import remove_portfolio_position as _remove
-    user_id = get_current_user_id(request)
-    _remove(position_id, user_id=user_id)
-    return {"deleted": True}
-
-
-# ── SMART ALERTS ENDPOINTS ───────────────────────────────────────────────────
-
-@app.get("/api/smart-alerts")
-@limiter.limit("30/minute")
-def get_smart_alerts_endpoint(request: Request):
-    """Returns all configured smart alerts for the current user."""
-    from backend.data.database import get_smart_alerts as _get
-    user_id = get_current_user_id(request)
-    return _get(user_id=user_id)
-
-
-@app.post("/api/smart-alerts")
-@limiter.limit("10/minute")
-def add_smart_alert_endpoint(request: Request, req: SmartAlertRequest, _auth: None = Security(verify_api_key)):
-    """Add a new smart alert for the current user."""
-    from backend.data.database import add_smart_alert as _add
-    user_id = get_current_user_id(request)
-    valid_types = {"rsi_below", "rsi_above", "volume_spike", "pattern", "ai_signal", "price_above", "price_below"}
-    if req.alert_type not in valid_types:
-        raise HTTPException(status_code=422, detail=f"Invalid alert_type. Valid: {sorted(valid_types)}")
-    alert_id = _add(req.ticker.upper().strip(), req.alert_type, req.param_value, user_id=user_id)
-    return {"id": alert_id, "message": "Smart alert created."}
-
-
-@app.delete("/api/smart-alerts/{alert_id}")
-@limiter.limit("10/minute")
-def delete_smart_alert_endpoint(request: Request, alert_id: int, _auth: None = Security(verify_api_key)):
-    """Delete a smart alert by id for the current user."""
-    from backend.data.database import remove_smart_alert as _remove
-    user_id = get_current_user_id(request)
-    _remove(alert_id, user_id=user_id)
-    return {"deleted": True}
-
-
-@app.get("/api/smart-alerts/evaluate")
-@limiter.limit("20/minute")
-async def evaluate_smart_alerts_endpoint(request: Request):
-    """
-    Evaluates all active smart alerts using the single consolidated evaluator service.
-    """
-    user_id = get_current_user_id(request)
-    return await evaluate_all_alerts(user_id=user_id, auto_trigger=True)
-
-
-# ── 3-Engine AI Consensus Endpoint ──────────────────────────────────────────
-
-@app.get("/api/stock/{ticker}/ai-consensus")
-@limiter.limit("30/minute")
-async def get_ai_consensus_endpoint(request: Request, ticker: str):
-    """
-    Computes a 3-Engine Consensus (Technicals, XGBoost ML, and Gemini Fundamentals).
-    """
-    from backend.services.ai_consensus import compute_ai_consensus
-    return compute_ai_consensus(ticker)
-
-
-# ── Paper Trading Simulator Endpoints (₹10 Lakh Virtual Funds) ────────────────
-
-class PaperOrderRequest(BaseModel):
-    ticker: str
-    order_type: str = "BUY"
-    action: str = "BUY"
-    shares: float
-    price: float
-    stop_loss: Optional[float] = None
-    target_price: Optional[float] = None
-    user_id: Optional[str] = None
-
-
-@app.get("/api/paper/account")
-@limiter.limit("60/minute")
-async def get_paper_account_endpoint(request: Request, user_id: Optional[str] = None):
-    """Returns virtual cash balance, net worth, and account status."""
-    from backend.data.database import get_paper_account
-    effective_user = user_id or get_current_user_id(request)
-    return get_paper_account(user_id=effective_user)
-
-
-@app.post("/api/paper/order")
-@limiter.limit("30/minute")
-async def place_paper_order_endpoint(request: Request, req: PaperOrderRequest, _auth: None = Security(verify_api_key)):
-    """Executes a virtual 1-click paper trading order."""
-    from backend.data.database import place_paper_order
-    effective_user = req.user_id or get_current_user_id(request)
-    try:
-        return place_paper_order(
-            ticker=req.ticker,
-            order_type=req.order_type,
-            action=req.action,
-            shares=req.shares,
-            price=req.price,
-            stop_loss=req.stop_loss,
-            target_price=req.target_price,
-            user_id=effective_user
-        )
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.post("/api/paper/close/{position_id}")
-@limiter.limit("30/minute")
-async def close_paper_position_endpoint(request: Request, position_id: int, current_price: float, user_id: Optional[str] = None, _auth: None = Security(verify_api_key)):
-    """Closes an active virtual position at current live LTP and realizes P&L."""
-    from backend.data.database import close_paper_position
-    effective_user = user_id or get_current_user_id(request)
-    try:
-        return close_paper_position(position_id=position_id, current_price=current_price, user_id=effective_user)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
-@app.get("/api/paper/positions")
-@limiter.limit("60/minute")
-async def get_paper_positions_endpoint(request: Request, user_id: Optional[str] = None):
-    """Returns all open virtual trading holdings."""
-    from backend.data.database import get_paper_positions
-    effective_user = user_id or get_current_user_id(request)
-    return get_paper_positions(user_id=effective_user)
-
-
-@app.get("/api/paper/history")
-@limiter.limit("60/minute")
-async def get_paper_history_endpoint(request: Request, user_id: Optional[str] = None, limit: int = 50):
-    """Returns the closed trades journal with realized P&L."""
-    from backend.data.database import get_paper_trade_history
-    effective_user = user_id or get_current_user_id(request)
-    return get_paper_trade_history(user_id=effective_user, limit=limit)
-
-
-@app.post("/api/paper/reset")
-@limiter.limit("10/minute")
-async def reset_paper_endpoint(request: Request, user_id: Optional[str] = None, _auth: None = Security(verify_api_key)):
-    """Resets paper trading account back to ₹1,000,000."""
-    from backend.data.database import reset_paper_account
-    effective_user = user_id or get_current_user_id(request)
-    return reset_paper_account(user_id=effective_user)
-
-
-# ── Telegram Bot Connectivity Test ──────────────────────────────────────────
 
 @app.post("/api/settings/telegram-test")
-@limiter.limit("5/minute")
-async def telegram_test_endpoint(request: Request, _auth: None = Security(verify_api_key)):
-    """Dispatches a test notification to verified Telegram Chat ID."""
+async def telegram_test_legacy(_auth: None = Security(verify_api_key)):
     from backend.services.telegram_bot import test_telegram_connection
     return test_telegram_connection()
-
-
-# ── Audit Log (read-only access trail) ──────────────────────────────────────
-
-@app.get("/api/audit-log")
-@limiter.limit("30/minute")
-async def get_audit_log_endpoint(
-    request: Request,
-    limit: int = 50,
-    user_id: Optional[str] = Query(None),
-    _auth: None = Security(verify_api_key),
-):
-    """Returns the last N audit log entries for the requesting user."""
-    import sqlite3 as _sqlite3
-    from backend.data.database import DB_PATH
-    effective_user = user_id or get_current_user_id(request)
-    limit = max(1, min(limit, 500))
-    try:
-        conn = _sqlite3.connect(DB_PATH)
-        conn.row_factory = _sqlite3.Row
-        rows = conn.execute(
-            "SELECT id, user_id, action, entity, entity_id, details, ts_utc "
-            "FROM audit_log WHERE user_id = ? ORDER BY ts_utc DESC LIMIT ?",
-            (effective_user, limit),
-        ).fetchall()
-        conn.close()
-        return {"user_id": effective_user, "entries": [dict(r) for r in rows]}
-    except Exception as exc:
-        logger.error("audit-log read failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail="Could not read audit log")
