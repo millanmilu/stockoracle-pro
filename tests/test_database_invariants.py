@@ -46,9 +46,10 @@ def test_no_intraday_in_sqlite():
     
     with get_db_connection() as conn:
         rows = conn.execute("SELECT date, length(date) FROM historical_prices WHERE ticker = ?", (ticker,)).fetchall()
-        # Only the 10-char daily date should be saved
-        for r in rows:
-            assert len(r[0]) == 10, f"Found non-daily date in DB: {r[0]}"
+        # Exactly 1 row (the daily 2026-08-25) should be saved; the 2 intraday rows MUST be discarded
+        assert len(rows) == 1, f"Expected exactly 1 daily record, but got {len(rows)}"
+        assert rows[0][0] == "2026-08-25"
+        assert len(rows[0][0]) == 10
 
 
 def test_price_normalization():

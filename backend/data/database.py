@@ -273,9 +273,11 @@ def save_historical_prices(ticker: str, df: pd.DataFrame):
     rows = []
     for _, row in df.iterrows():
         try:
-            d_str = str(row["date"])[:10]  # Enforce YYYY-MM-DD
-            if not DATE_REGEX.match(d_str):
+            raw_d = str(row["date"]).strip()
+            if not DATE_REGEX.fullmatch(raw_d):
+                # Reject any non-daily format (intraday timestamps, invalid strings)
                 continue
+            d_str = raw_d
 
             o_val = _normalize_price(row["open"])
             h_val = _normalize_price(row["high"])

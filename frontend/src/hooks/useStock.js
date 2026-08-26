@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react';
 export function useStock() {
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState(null);
+  const [historyError, setHistoryError] = useState(null);
 
   const fetchInfo = useCallback(async (ticker) => {
     setLoading(true); setError(null);
@@ -11,16 +12,25 @@ export function useStock() {
       const { data } = await api.get(`/api/stock/${ticker}/info`);
       return data;
     } catch (e) {
-      setError(e.response?.data?.detail || 'Failed to fetch stock info');
+      const msg = e.response?.data?.detail || e.message || 'Failed to fetch stock info';
+      setError(msg);
       return null;
     } finally { setLoading(false); }
   }, []);
 
   const fetchHistory = useCallback(async (ticker, interval = '1d', timeframe = '5Y') => {
+    setHistoryError(null);
     try {
       const { data } = await api.get(`/api/stock/${ticker}/history`, { params: { interval, timeframe } });
-      return Array.isArray(data) ? data : [];
-    } catch (e) { return []; }
+      if (Array.isArray(data)) {
+        return data;
+      }
+      return [];
+    } catch (e) {
+      const msg = e.response?.data?.detail || e.message || 'Failed to load historical candles';
+      setHistoryError(msg);
+      return [];
+    }
   }, []);
 
   const fetchPredict = useCallback(async (ticker) => {
@@ -117,7 +127,7 @@ export function useStock() {
   }, []);
 
   return {
-    loading, error,
+    loading, error, historyError,
     fetchInfo, fetchHistory, fetchPredict, fetchMonteCarlo, fetchAnomalies,
     fetchScreener, fetchBacktest, fetchPatterns, fetchLevels, fetchVolatility,
     searchStock, searchStocks, fetchNews, startTraining, fetchTrainingStatus,

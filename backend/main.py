@@ -1,13 +1,12 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager, suppress
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Request, Security
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks, Request, Security, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security.api_key import APIKeyHeader
+from fastapi.security.api_key import APIKeyHeader, APIKeyQuery
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from fastapi.middleware.cors import CORSMiddleware
 import os
 import json
 import xml.etree.ElementTree as ET
@@ -49,10 +48,11 @@ from backend.analysis.backtester import run_backtest
 from backend.analysis.sentiment_market import get_market_sentiment
 from backend.analysis.macro import get_macro_data
 from backend.analysis.supply_chain import get_supply_chain
+from backend.services.alert_scheduler import run_alert_scheduler_loop, get_scheduler_status, evaluate_all_alerts
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize SQL database tables (including new task_status table)
+    # Initialize SQL database tables
     init_db()
     # Clean up stale task records from previous runs
     cleanup_old_tasks(max_age_hours=48)
@@ -60,14 +60,16 @@ async def lifespan(app: FastAPI):
     ensure_session()
     # Start live price broadcast
     price_task = asyncio.create_task(websocket_price_broadcast_loop())
+    # Start server-side alert scheduler loop
+    alert_task = asyncio.create_task(run_alert_scheduler_loop())
     # Prefetch historical data for all popular tickers in background
     prefetch_task = asyncio.create_task(prefetch_all_tickers())
     try:
         yield
     finally:
-        for task in (price_task, prefetch_task):
+        for task in (price_task, alert_task, prefetch_task):
             task.cancel()
-        for task in (price_task, prefetch_task):
+        for task in (price_task, alert_task, prefetch_task):
             with suppress(asyncio.CancelledError):
                 await task
 
@@ -108,15 +110,26 @@ limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Optional API key auth — only enforced when API_KEY env var is set
+# API key auth configuration
 _API_KEY_NAME = "X-API-Key"
 _api_key_header = APIKeyHeader(name=_API_KEY_NAME, auto_error=False)
+_api_key_query = APIKeyQuery(name="api_key", auto_error=False)
 SERVER_API_KEY = os.getenv("API_KEY", "").strip()
 
-def verify_api_key(key: str = Security(_api_key_header)):
-    """If SERVER_API_KEY is set, reject requests that don't include the correct key."""
-    if SERVER_API_KEY and key != SERVER_API_KEY:
-        raise HTTPException(status_code=403, detail="Invalid or missing X-API-Key header.")
+def verify_api_key(
+    header_key: Optional[str] = Security(_api_key_header),
+    query_key: Optional[str] = Security(_api_key_query)
+):
+    """Enforces API key validation on protected endpoints when SERVER_API_KEY is set."""
+    if SERVER_API_KEY:
+        key = header_key or query_key
+        if not key or key != SERVER_API_KEY:
+            raise HTTPException(status_code=403, detail="Invalid or missing API key.")
+
+def get_current_user_id(request: Request) -> str:
+    """Extracts user identity from X-User-Id header or query params, defaulting to 'default_user'."""
+    user_id = request.headers.get("X-User-Id") or request.query_params.get("user_id") or "default_user"
+    return user_id.strip()
 
 # CORS configuration
 origins = [
@@ -168,6 +181,7 @@ def health_check():
     return {
         "status": "healthy",
         "angel_one_session": get_session_status(),
+        "alert_scheduler": get_scheduler_status(),
         "timestamp": datetime.now().isoformat()
     }
 
@@ -603,9 +617,11 @@ class ConnectionManager:
         self.connections.pop(websocket, None)
 
     def subscribe(self, websocket: WebSocket, tickers: List[str]):
-        """Update the set of tickers a specific client is interested in."""
+        """Update the set of tickers a specific client is interested in (capped to 50 max)."""
         if websocket in self.connections:
-            self.connections[websocket] = {t.upper() for t in tickers}
+            # Enforce max 50 subscribed tickers per client
+            capped_tickers = [t.upper().strip() for t in tickers if isinstance(t, str)][:50]
+            self.connections[websocket] = set(capped_tickers)
 
     async def broadcast(self, message: dict):
         """Sends the message only to clients subscribed to that ticker."""
@@ -1322,24 +1338,63 @@ async def get_portfolio_endpoint(request: Request):
     return enriched
 
 
+# ── PORTFOLIO ENDPOINTS ────────────────────────────────────────────────────────
+
+@app.get("/api/portfolio")
+@limiter.limit("30/minute")
+async def get_portfolio_endpoint(request: Request):
+    """Returns all portfolio positions for the current user enriched with live price + P&L."""
+    from backend.data.database import get_portfolio
+    user_id = get_current_user_id(request)
+    positions = get_portfolio(user_id=user_id)
+    enriched = []
+    loop = asyncio.get_running_loop()
+
+    for pos in positions:
+        t = pos["ticker"]
+        current_price = pos["buy_price"]
+        try:
+            info = await loop.run_in_executor(None, lambda tk=t: fetch_company_info(tk))
+            if info and info.get("current_price"):
+                current_price = float(info["current_price"])
+        except Exception:
+            pass
+        pnl = (current_price - pos["buy_price"]) * pos["shares"]
+        pnl_pct = ((current_price - pos["buy_price"]) / pos["buy_price"]) * 100 if pos["buy_price"] > 0 else 0.0
+        enriched.append({
+            "id": pos["id"],
+            "ticker": t,
+            "shares": pos["shares"],
+            "buy_price": pos["buy_price"],
+            "current_price": round(current_price, 2),
+            "pnl": round(pnl, 2),
+            "pnl_pct": round(pnl_pct, 2),
+            "sector": EXPANDED_SECTOR_MAP.get(t, "Other"),
+            "added_at": pos["added_at"],
+        })
+    return enriched
+
+
 @app.post("/api/portfolio")
 @limiter.limit("10/minute")
-def add_portfolio_endpoint(request: Request, req: PortfolioPositionRequest):
-    """Add a new portfolio position."""
+def add_portfolio_endpoint(request: Request, req: PortfolioPositionRequest, _auth: None = Security(verify_api_key)):
+    """Add a new portfolio position for the current user."""
     from backend.data.database import add_portfolio_position as _add
+    user_id = get_current_user_id(request)
     t = req.ticker.upper().strip()
     if not t or req.shares <= 0 or req.buy_price <= 0:
         raise HTTPException(status_code=422, detail="Invalid ticker, shares, or buy_price.")
-    position_id = _add(t, req.shares, req.buy_price)
+    position_id = _add(t, req.shares, req.buy_price, user_id=user_id)
     return {"id": position_id, "message": f"Position in {t} added."}
 
 
 @app.delete("/api/portfolio/{position_id}")
 @limiter.limit("10/minute")
-def delete_portfolio_endpoint(request: Request, position_id: int):
-    """Delete a portfolio position by id."""
+def delete_portfolio_endpoint(request: Request, position_id: int, _auth: None = Security(verify_api_key)):
+    """Delete a portfolio position by id for the current user."""
     from backend.data.database import remove_portfolio_position as _remove
-    _remove(position_id)
+    user_id = get_current_user_id(request)
+    _remove(position_id, user_id=user_id)
     return {"deleted": True}
 
 
@@ -1348,134 +1403,43 @@ def delete_portfolio_endpoint(request: Request, position_id: int):
 @app.get("/api/smart-alerts")
 @limiter.limit("30/minute")
 def get_smart_alerts_endpoint(request: Request):
-    """Returns all configured smart alerts."""
+    """Returns all configured smart alerts for the current user."""
     from backend.data.database import get_smart_alerts as _get
-    return _get()
+    user_id = get_current_user_id(request)
+    return _get(user_id=user_id)
 
 
 @app.post("/api/smart-alerts")
 @limiter.limit("10/minute")
-def add_smart_alert_endpoint(request: Request, req: SmartAlertRequest):
-    """Add a new smart alert."""
+def add_smart_alert_endpoint(request: Request, req: SmartAlertRequest, _auth: None = Security(verify_api_key)):
+    """Add a new smart alert for the current user."""
     from backend.data.database import add_smart_alert as _add
+    user_id = get_current_user_id(request)
     valid_types = {"rsi_below", "rsi_above", "volume_spike", "pattern", "ai_signal", "price_above", "price_below"}
     if req.alert_type not in valid_types:
         raise HTTPException(status_code=422, detail=f"Invalid alert_type. Valid: {sorted(valid_types)}")
-    alert_id = _add(req.ticker.upper().strip(), req.alert_type, req.param_value)
+    alert_id = _add(req.ticker.upper().strip(), req.alert_type, req.param_value, user_id=user_id)
     return {"id": alert_id, "message": "Smart alert created."}
 
 
 @app.delete("/api/smart-alerts/{alert_id}")
 @limiter.limit("10/minute")
-def delete_smart_alert_endpoint(request: Request, alert_id: int):
-    """Delete a smart alert by id."""
+def delete_smart_alert_endpoint(request: Request, alert_id: int, _auth: None = Security(verify_api_key)):
+    """Delete a smart alert by id for the current user."""
     from backend.data.database import remove_smart_alert as _remove
-    _remove(alert_id)
+    user_id = get_current_user_id(request)
+    _remove(alert_id, user_id=user_id)
     return {"deleted": True}
 
 
 @app.get("/api/smart-alerts/evaluate")
 @limiter.limit("20/minute")
-def evaluate_smart_alerts_endpoint(request: Request):
+async def evaluate_smart_alerts_endpoint(request: Request):
     """
-    Evaluates all active smart alerts against current stock data, indicators, patterns, and AI signals.
+    Evaluates all active smart alerts using the single consolidated evaluator service.
     """
-    from backend.data.database import get_smart_alerts as _get, mark_alert_triggered as _mark
-    alerts = _get()
-    results = []
-
-    for a in alerts:
-        ticker = a.get("ticker", "")
-        alert_type = a.get("alert_type", "")
-        param = a.get("param_value") or {}
-        if isinstance(param, str):
-            import json
-            try: param = json.loads(param)
-            except: param = {}
-
-        triggered = False
-        reason = ""
-        current_val = None
-
-        try:
-            df = fetch_stock_data(ticker, period="3M")
-            if df is not None and not df.empty:
-                df = enrich_stock_dataframe(df)
-                last = df.iloc[-1]
-                close = float(last.get("close", 0))
-
-                if alert_type == "price_above":
-                    threshold = float(param.get("threshold", 0))
-                    current_val = close
-                    if close >= threshold:
-                        triggered = True
-                        reason = f"Price ₹{close:.2f} is above threshold ₹{threshold:.2f}"
-
-                elif alert_type == "price_below":
-                    threshold = float(param.get("threshold", 0))
-                    current_val = close
-                    if close <= threshold:
-                        triggered = True
-                        reason = f"Price ₹{close:.2f} is below threshold ₹{threshold:.2f}"
-
-                elif alert_type == "rsi_below":
-                    threshold = float(param.get("threshold", 30))
-                    rsi_val = float(last.get("rsi", 50))
-                    current_val = rsi_val
-                    if rsi_val <= threshold:
-                        triggered = True
-                        reason = f"RSI is oversold at {rsi_val:.1f} (<= {threshold})"
-
-                elif alert_type == "rsi_above":
-                    threshold = float(param.get("threshold", 70))
-                    rsi_val = float(last.get("rsi", 50))
-                    current_val = rsi_val
-                    if rsi_val >= threshold:
-                        triggered = True
-                        reason = f"RSI is overbought at {rsi_val:.1f} (>= {threshold})"
-
-                elif alert_type == "volume_spike":
-                    vol = float(last.get("volume", 0))
-                    vol_sma = float(last.get("vol_sma_20", vol) or vol)
-                    ratio = (vol / vol_sma) if vol_sma > 0 else 1.0
-                    multiplier = float(param.get("multiplier", 2.0))
-                    current_val = f"{ratio:.1f}x"
-                    if ratio >= multiplier:
-                        triggered = True
-                        reason = f"Volume spike of {ratio:.1f}x 20-day average volume"
-
-                elif alert_type == "ai_signal":
-                    target_sig = str(param.get("signal", "buy")).lower()
-                    pred = _get_prediction_logic(ticker)
-                    actual_sig = str(pred.get("signal", "")).lower()
-                    current_val = actual_sig.upper()
-                    if target_sig in actual_sig:
-                        triggered = True
-                        reason = f"AI Forecast triggered {actual_sig.upper()} signal"
-
-                elif alert_type == "pattern":
-                    target_pat = str(param.get("pattern", "")).lower()
-                    patterns_data = get_pattern_summary(df)
-                    recent_patterns = [p.get("pattern", "").lower() for p in patterns_data.get("recent_patterns", [])]
-                    current_val = ", ".join(recent_patterns[:2]) or "None"
-                    if any(target_pat in p for p in recent_patterns):
-                        triggered = True
-                        reason = f"Detected pattern matching '{target_pat}'"
-
-            if triggered and not a.get("triggered"):
-                _mark(a["id"])
-
-        except Exception as e:
-            reason = f"Evaluation error: {e}"
-
-        results.append({
-            **a,
-            "is_triggered": triggered,
-            "reason": reason,
-            "current_value": current_val,
-        })
-
-    return results
+    user_id = get_current_user_id(request)
+    return await evaluate_all_alerts(user_id=user_id, auto_trigger=True)
 
 
 # ── 3-Engine AI Consensus Endpoint ──────────────────────────────────────────
@@ -1500,22 +1464,24 @@ class PaperOrderRequest(BaseModel):
     price: float
     stop_loss: Optional[float] = None
     target_price: Optional[float] = None
-    user_id: str = "default_user"
+    user_id: Optional[str] = None
 
 
 @app.get("/api/paper/account")
 @limiter.limit("60/minute")
-async def get_paper_account_endpoint(request: Request, user_id: str = "default_user"):
+async def get_paper_account_endpoint(request: Request, user_id: Optional[str] = None):
     """Returns virtual cash balance, net worth, and account status."""
     from backend.data.database import get_paper_account
-    return get_paper_account(user_id=user_id)
+    effective_user = user_id or get_current_user_id(request)
+    return get_paper_account(user_id=effective_user)
 
 
 @app.post("/api/paper/order")
 @limiter.limit("30/minute")
-async def place_paper_order_endpoint(request: Request, req: PaperOrderRequest):
+async def place_paper_order_endpoint(request: Request, req: PaperOrderRequest, _auth: None = Security(verify_api_key)):
     """Executes a virtual 1-click paper trading order."""
     from backend.data.database import place_paper_order
+    effective_user = req.user_id or get_current_user_id(request)
     try:
         return place_paper_order(
             ticker=req.ticker,
@@ -1525,7 +1491,7 @@ async def place_paper_order_endpoint(request: Request, req: PaperOrderRequest):
             price=req.price,
             stop_loss=req.stop_loss,
             target_price=req.target_price,
-            user_id=req.user_id
+            user_id=effective_user
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -1533,44 +1499,48 @@ async def place_paper_order_endpoint(request: Request, req: PaperOrderRequest):
 
 @app.post("/api/paper/close/{position_id}")
 @limiter.limit("30/minute")
-async def close_paper_position_endpoint(request: Request, position_id: int, current_price: float, user_id: str = "default_user"):
+async def close_paper_position_endpoint(request: Request, position_id: int, current_price: float, user_id: Optional[str] = None, _auth: None = Security(verify_api_key)):
     """Closes an active virtual position at current live LTP and realizes P&L."""
     from backend.data.database import close_paper_position
+    effective_user = user_id or get_current_user_id(request)
     try:
-        return close_paper_position(position_id=position_id, current_price=current_price, user_id=user_id)
+        return close_paper_position(position_id=position_id, current_price=current_price, user_id=effective_user)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/api/paper/positions")
 @limiter.limit("60/minute")
-async def get_paper_positions_endpoint(request: Request, user_id: str = "default_user"):
+async def get_paper_positions_endpoint(request: Request, user_id: Optional[str] = None):
     """Returns all open virtual trading holdings."""
     from backend.data.database import get_paper_positions
-    return get_paper_positions(user_id=user_id)
+    effective_user = user_id or get_current_user_id(request)
+    return get_paper_positions(user_id=effective_user)
 
 
 @app.get("/api/paper/history")
 @limiter.limit("60/minute")
-async def get_paper_history_endpoint(request: Request, user_id: str = "default_user", limit: int = 50):
+async def get_paper_history_endpoint(request: Request, user_id: Optional[str] = None, limit: int = 50):
     """Returns the closed trades journal with realized P&L."""
     from backend.data.database import get_paper_trade_history
-    return get_paper_trade_history(user_id=user_id, limit=limit)
+    effective_user = user_id or get_current_user_id(request)
+    return get_paper_trade_history(user_id=effective_user, limit=limit)
 
 
 @app.post("/api/paper/reset")
 @limiter.limit("10/minute")
-async def reset_paper_endpoint(request: Request, user_id: str = "default_user"):
+async def reset_paper_endpoint(request: Request, user_id: Optional[str] = None, _auth: None = Security(verify_api_key)):
     """Resets paper trading account back to ₹1,000,000."""
     from backend.data.database import reset_paper_account
-    return reset_paper_account(user_id=user_id)
+    effective_user = user_id or get_current_user_id(request)
+    return reset_paper_account(user_id=effective_user)
 
 
 # ── Telegram Bot Connectivity Test ──────────────────────────────────────────
 
 @app.post("/api/settings/telegram-test")
 @limiter.limit("5/minute")
-async def telegram_test_endpoint(request: Request):
+async def telegram_test_endpoint(request: Request, _auth: None = Security(verify_api_key)):
     """Dispatches a test notification to verified Telegram Chat ID."""
     from backend.services.telegram_bot import test_telegram_connection
     return test_telegram_connection()

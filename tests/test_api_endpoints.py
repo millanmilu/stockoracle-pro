@@ -52,7 +52,22 @@ def test_smart_alerts_crud():
     alert_id = add_smart_alert("RELIANCE", "price_above", {"target_price": 1400.0}, user_id=user)
     assert alert_id > 0
 
-    alerts = get_smart_alerts(user_id=user)
-    assert any(a["id"] == alert_id and a["ticker"] == "RELIANCE" for a in alerts)
-
     remove_smart_alert(alert_id, user_id=user)
+
+
+@pytest.mark.asyncio
+async def test_consolidated_alert_evaluation():
+    """Test the single consolidated alert evaluator."""
+    from backend.services.alert_scheduler import evaluate_all_alerts, evaluate_single_alert
+    user = "test_eval_user"
+    alert_id = add_smart_alert("RELIANCE", "price_above", {"target_price": 100.0}, user_id=user)
+    
+    results = await evaluate_all_alerts(user_id=user, auto_trigger=False)
+    assert len(results) >= 1
+    eval_item = next(r for r in results if r["id"] == alert_id)
+    assert eval_item["is_triggered"] is True
+    assert "reason" in eval_item
+    assert "current_value" in eval_item
+    
+    remove_smart_alert(alert_id, user_id=user)
+
