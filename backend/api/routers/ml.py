@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 
 from backend.data.fetcher import fetch_stock_data, get_session_status
 from backend.analysis.backtester import run_backtest
-from backend.services.ai_consensus import get_ai_consensus
+from backend.services.ai_consensus import compute_ai_consensus
 
 logger = logging.getLogger("StockOracle.API.ML")
 
@@ -107,7 +107,7 @@ def get_stock_backtest(ticker: str, initial_capital: float = 100000.0, strategy:
 
 
 @router.get("/stock/{ticker}/ai-consensus")
-async def get_ai_consensus_endpoint(ticker: str):
+def get_ai_consensus_endpoint(ticker: str):
     """Aggregates XGBoost, Neural Nets, Technical Signals, and Sentiment into a single consensus score."""
     t = ticker.upper().strip()
-    return await get_ai_consensus(t)
+    return compute_ai_consensus(t)

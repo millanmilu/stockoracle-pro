@@ -54,10 +54,12 @@ class Settings(BaseSettings):
     # CORS
     ALLOWED_ORIGINS: Optional[str] = Field(default=None, alias="ALLOWED_ORIGINS")
 
-    class Config:
-        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-        env_file_encoding = "utf-8"
-        extra = "ignore"
+    model_config = {
+        "env_file": os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"),
+        "env_file_encoding": "utf-8",
+        "extra": "ignore",
+    }
 
 
 settings = Settings()
+

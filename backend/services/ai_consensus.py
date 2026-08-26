@@ -152,3 +152,8 @@ def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
             }
         }
     }
+
+
+# Alias for backwards compatibility
+get_ai_consensus = compute_ai_consensus
+
