@@ -1461,7 +1461,18 @@ export default function LiveChartView() {
   const scoreColor = score >= 70 ? '#26A69A' : score >= 50 ? '#F59E0B' : '#EF5350';
 
   return (
-    <div ref={cardContainerRef} style={{ padding:'20px', display:'flex', flexDirection:'column', gap:16, minHeight:'100vh', background:'#090C18' }}>
+    <div ref={cardContainerRef} style={{
+      padding: '6px 8px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6,
+      height: '100%',
+      maxHeight: '100%',
+      width: '100%',
+      background: '#07090F',
+      overflow: 'hidden',
+      boxSizing: 'border-box',
+    }}>
 
       {/* ── CSS Styles ── */}
       <style>{`
@@ -1474,30 +1485,32 @@ export default function LiveChartView() {
           to   { opacity:1; transform:translateY(0); }
         }
         .lc-stat { animation:fadeUp 0.35s ease both; transition:border-color 0.2s, background 0.2s; }
-        .lc-stat:hover { border-color:rgba(168,85,247,0.28)!important; background:rgba(168,85,247,0.05)!important; }
+        .lc-stat:hover { border-color:rgba(99,102,241,0.28)!important; background:rgba(99,102,241,0.05)!important; }
         .lc-btn  { transition:all 0.15s; }
         .lc-btn:hover { opacity:1!important; }
         .pill-btn { transition:all 0.2s; cursor:pointer; }
-        .pill-btn:hover { background:rgba(168,85,247,0.2)!important; color:#C084FC!important; }
+        .pill-btn:hover { background:rgba(99,102,241,0.2)!important; color:#818CF8!important; }
       `}</style>
 
-      {/* ── TradingView Style In-Chart Header ── */}
+      {/* ── TradingView Style Clean Compact Toolbar ── */}
       <div style={{
         display:'flex',
         alignItems:'center',
         justifyContent:'space-between',
-        flexWrap:'wrap',
+        flexWrap:'nowrap',
         gap:8,
-        background:'#0F1424',
-        border:'1px solid #1E2538',
-        borderRadius:10,
-        padding:'clamp(6px, 1.5vw, 10px) clamp(8px, 2vw, 14px)',
+        background:'#0B0F1C',
+        border:'1px solid rgba(99, 102, 241, 0.15)',
+        borderRadius:6,
+        padding:'4px 8px',
         position: 'relative',
         zIndex: 50,
+        flexShrink: 0,
+        height: 38,
       }}>
-        {/* Left: Symbol Selector · Interval · Exchange + Live OHLC Readout */}
-        <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-          {/* Symbol Selector Dropdown (TradingView Style with Realtime Suggestions) */}
+        {/* Left: Ticker Search Option + Timeframe Selector (Side-by-Side) */}
+        <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink: 0 }}>
+          {/* Symbol Search / Selector Dropdown */}
           <div style={{ position: 'relative' }}>
             <button
               onClick={() => {
@@ -1509,34 +1522,34 @@ export default function LiveChartView() {
                 alignItems: 'center',
                 gap: 6,
                 padding: '4px 10px',
-                borderRadius: 6,
-                background: 'rgba(59,130,246,0.15)',
-                border: '1px solid rgba(59,130,246,0.3)',
+                borderRadius: 5,
+                background: 'rgba(99,102,241,0.15)',
+                border: '1px solid rgba(99,102,241,0.35)',
                 color: '#F0F0FF',
-                fontSize: '0.92rem',
+                fontSize: '0.86rem',
                 fontWeight: 800,
                 fontFamily: 'JetBrains Mono, monospace',
                 cursor: 'pointer',
               }}
+              title="Search & Change Stock Ticker"
             >
-              <BarChart3 size={13} style={{ color: '#60A5FA' }} />
-              {selectedSymbol || 'STOCK'}
-              <span style={{ fontSize: '0.68rem', color: '#94A3B8' }}>▾</span>
+              <Search size={13} style={{ color: '#818CF8' }} />
+              <span>{selectedSymbol || 'STOCK'}</span>
+              <span style={{ fontSize: '0.65rem', color: '#94A3B8' }}>▾</span>
             </button>
-            <TrustBadge />
 
-            {/* Quick Symbol & Autocomplete Dropdown */}
+            {/* Quick Symbol Search & Autocomplete Modal */}
             {showSymbolModal && (
               <div
                 style={{
                   position: 'absolute',
-                  top: 'calc(100% + 6px)',
+                  top: 'calc(100% + 4px)',
                   left: 0,
                   width: 'min(90vw, 320px)',
                   backgroundColor: '#0F172A',
                   border: '1px solid rgba(99, 102, 241, 0.4)',
-                  borderRadius: 10,
-                  padding: 10,
+                  borderRadius: 8,
+                  padding: 8,
                   zIndex: 300,
                   boxShadow: '0 16px 36px rgba(0,0,0,0.85)',
                 }}
@@ -1559,6 +1572,7 @@ export default function LiveChartView() {
                       color: '#fff',
                       fontSize: '0.78rem',
                       outline: 'none',
+                      boxSizing: 'border-box',
                     }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
@@ -1614,13 +1628,13 @@ export default function LiveChartView() {
                           alignItems: 'center',
                           justifyContent: 'space-between',
                           borderBottom: '1px solid rgba(255,255,255,0.04)',
-                          backgroundColor: selectedSymbol === item.ticker ? 'rgba(59,130,246,0.18)' : 'transparent',
+                          backgroundColor: selectedSymbol === item.ticker ? 'rgba(99,102,241,0.18)' : 'transparent',
                         }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(59,130,246,0.14)'}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === item.ticker ? 'rgba(59,130,246,0.18)' : 'transparent'}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.14)'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === item.ticker ? 'rgba(99,102,241,0.18)' : 'transparent'}
                       >
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
-                          <span style={{ fontWeight: 800, color: '#60A5FA', fontFamily: 'JetBrains Mono, monospace' }}>
+                          <span style={{ fontWeight: 800, color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>
                             {item.ticker}
                           </span>
                           <span style={{ fontSize: '0.68rem', color: '#94A3B8', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1655,15 +1669,15 @@ export default function LiveChartView() {
                               borderRadius: 4,
                               fontSize: '0.75rem',
                               fontWeight: 700,
-                              color: selectedSymbol === sym ? '#60A5FA' : '#E2E8F0',
-                              backgroundColor: selectedSymbol === sym ? 'rgba(59,130,246,0.2)' : 'transparent',
+                              color: selectedSymbol === sym ? '#818CF8' : '#E2E8F0',
+                              backgroundColor: selectedSymbol === sym ? 'rgba(99,102,241,0.2)' : 'transparent',
                               cursor: 'pointer',
                               display: 'flex',
                               justifyContent: 'space-between',
                               alignItems: 'center',
                             }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(59,130,246,0.12)'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === sym ? 'rgba(59,130,246,0.2)' : 'transparent'}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.12)'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === sym ? 'rgba(99,102,241,0.2)' : 'transparent'}
                           >
                             <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{sym}</span>
                             <span style={{ fontSize: '0.65rem', color: '#64748B' }}>NSE</span>
@@ -1676,49 +1690,22 @@ export default function LiveChartView() {
             )}
           </div>
 
-          <span style={{ fontSize:'0.72rem', fontWeight:700, color:'#3B82F6' }}>
-            · {interval ? interval.toUpperCase() : '1D'} · NSE
-          </span>
+          <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }} />
 
-          {/* OHLC Readout Bar */}
-          {curPrice != null && (
-            <div style={{
-              display:'flex',
-              alignItems:'center',
-              gap:10,
-              fontSize:'0.73rem',
-              fontFamily:'JetBrains Mono, monospace',
-              color:'#94A3B8',
-              borderLeft:'1px solid #1E2538',
-              paddingLeft:12,
-            }}>
-              <span>O <strong style={{ color:'#F0F0FF' }}>{(activeCandleRef.current?.open ?? lastCandleClose ?? curPrice)?.toFixed(2)}</strong></span>
-              <span>H <strong style={{ color:'#10B981' }}>{(activeCandleRef.current?.high ?? curPrice)?.toFixed(2)}</strong></span>
-              <span>L <strong style={{ color:'#EF5350' }}>{(activeCandleRef.current?.low ?? curPrice)?.toFixed(2)}</strong></span>
-              <span>C <strong style={{ color: changeUp ? '#10B981' : '#EF5350' }}>{curPrice?.toFixed(2)}</strong></span>
-              <span style={{ color: changeUp ? '#10B981' : '#EF5350', fontWeight:700 }}>
-                {changeUp ? '+' : ''}{(liveChange ?? 0).toFixed(2)}%
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Right: Interval Buttons, Indicators Dropdown, TradingView Grid Switcher, Scalper Mode, Fullscreen */}
-        <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-          {/* Timeframe Interval Buttons */}
-          <div style={{ display:'flex', gap:2, background:'#0A0D1A', padding:'2px', borderRadius:6, border:'1px solid #1E2538' }}>
+          {/* Timeframe Interval Buttons (Placed right next to Ticker Search) */}
+          <div style={{ display:'flex', gap:2, background:'rgba(255,255,255,0.03)', padding:'2px', borderRadius:5, border:'1px solid rgba(255,255,255,0.06)' }}>
             {INTERVALS.map(iv => (
               <button
                 key={iv.value}
                 onClick={() => handleIntervalChange(iv.value)}
                 style={{
-                  padding:'4px 8px',
+                  padding:'3px 8px',
                   borderRadius:4,
                   border:'none',
-                  background: interval === iv.value ? 'rgba(59,130,246,0.25)' : 'transparent',
-                  color: interval === iv.value ? '#3B82F6' : '#64748B',
+                  background: interval === iv.value ? 'rgba(99,102,241,0.25)' : 'transparent',
+                  color: interval === iv.value ? '#818CF8' : '#64748B',
                   fontSize:'0.72rem',
-                  fontWeight: interval === iv.value ? 800 : 500,
+                  fontWeight: interval === iv.value ? 800 : 600,
                   cursor:'pointer',
                 }}
               >
@@ -1726,8 +1713,11 @@ export default function LiveChartView() {
               </button>
             ))}
           </div>
+        </div>
 
-          {/* ── TradingView Style Indicators Modal Button ── */}
+        {/* Right: Indicators, AI Overlays, Grid Switcher, Snapshot, Fullscreen */}
+        <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink: 0 }}>
+          {/* Indicators Modal Button */}
           <button
             onClick={() => setShowIndicatorsModal(true)}
             title="Indicators, metrics, and strategies"
@@ -1735,26 +1725,26 @@ export default function LiveChartView() {
               display: 'flex',
               alignItems: 'center',
               gap: 5,
-              padding: '4px 10px',
-              borderRadius: 6,
-              border: showIndicatorsModal ? '1px solid #2962FF' : '1px solid #1E2538',
-              background: showIndicatorsModal ? 'rgba(41,98,255,0.2)' : 'rgba(255,255,255,0.03)',
-              color: showIndicatorsModal ? '#60A5FA' : '#E2E8F0',
+              padding: '4px 9px',
+              borderRadius: 5,
+              border: showIndicatorsModal ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.08)',
+              background: showIndicatorsModal ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
+              color: showIndicatorsModal ? '#818CF8' : '#E2E8F0',
               fontSize: '0.74rem',
               fontWeight: 700,
               cursor: 'pointer',
             }}
           >
-            <Activity size={13} style={{ color: '#2962FF' }} />
+            <Activity size={13} style={{ color: '#818CF8' }} />
             <span>Indicators</span>
             {Object.values(activeIndicatorsMap).filter(Boolean).length > 0 && (
-              <span style={{ backgroundColor: '#2962FF', color: '#fff', fontSize: '0.62rem', padding: '1px 5px', borderRadius: 10, fontWeight: 800 }}>
+              <span style={{ backgroundColor: '#6366F1', color: '#fff', fontSize: '0.62rem', padding: '1px 5px', borderRadius: 10, fontWeight: 800 }}>
                 {Object.values(activeIndicatorsMap).filter(Boolean).length}
               </span>
             )}
           </button>
 
-          {/* ── Auto-Drawing AI Overlays (S/R, Pivots, Fibs) ── */}
+          {/* Auto-Drawing AI Overlays (S/R, Pivots, Fibs) */}
           <button
             onClick={() => {
               setShowKeyLevels((prev) => !prev);
@@ -1765,7 +1755,7 @@ export default function LiveChartView() {
               alignItems: 'center',
               gap: 5,
               padding: '4px 9px',
-              borderRadius: 6,
+              borderRadius: 5,
               border: showKeyLevels ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
               background: showKeyLevels ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
               color: showKeyLevels ? '#818CF8' : '#E2E8F0',
@@ -1780,15 +1770,15 @@ export default function LiveChartView() {
           </button>
 
           {/* TradingView Multi-Chart Layout Switcher [ 1x1 | 1x2 | 2x1 | 2x2 ] */}
-          <div style={{ display:'flex', alignItems:'center', gap:2, background:'#0A0D1A', padding:'2px', borderRadius:6, border:'1px solid #1E2538' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:2, background:'rgba(255,255,255,0.03)', padding:'2px', borderRadius:5, border:'1px solid rgba(255,255,255,0.06)' }}>
             <button
               onClick={() => setChartLayout('1x1')}
               title="Single Chart (1x1)"
               style={{
-                padding:'4px 7px',
-                borderRadius:4,
+                padding:'3px 6px',
+                borderRadius:3,
                 border:'none',
-                background: chartLayout === '1x1' ? '#2962FF' : 'transparent',
+                background: chartLayout === '1x1' ? '#6366F1' : 'transparent',
                 color: chartLayout === '1x1' ? '#fff' : '#64748B',
                 cursor:'pointer',
                 display:'flex',
@@ -1801,10 +1791,10 @@ export default function LiveChartView() {
               onClick={() => setChartLayout('1x2')}
               title="Side-by-Side (1x2)"
               style={{
-                padding:'4px 7px',
-                borderRadius:4,
+                padding:'3px 6px',
+                borderRadius:3,
                 border:'none',
-                background: chartLayout === '1x2' ? '#2962FF' : 'transparent',
+                background: chartLayout === '1x2' ? '#6366F1' : 'transparent',
                 color: chartLayout === '1x2' ? '#fff' : '#64748B',
                 cursor:'pointer',
                 display:'flex',
@@ -1817,10 +1807,10 @@ export default function LiveChartView() {
               onClick={() => setChartLayout('2x1')}
               title="Stacked (2x1)"
               style={{
-                padding:'4px 7px',
-                borderRadius:4,
+                padding:'3px 6px',
+                borderRadius:3,
                 border:'none',
-                background: chartLayout === '2x1' ? '#2962FF' : 'transparent',
+                background: chartLayout === '2x1' ? '#6366F1' : 'transparent',
                 color: chartLayout === '2x1' ? '#fff' : '#64748B',
                 cursor:'pointer',
                 display:'flex',
@@ -1833,10 +1823,10 @@ export default function LiveChartView() {
               onClick={() => setChartLayout('2x2')}
               title="Quad Grid (2x2)"
               style={{
-                padding:'4px 7px',
-                borderRadius:4,
+                padding:'3px 6px',
+                borderRadius:3,
                 border:'none',
-                background: chartLayout === '2x2' ? '#2962FF' : 'transparent',
+                background: chartLayout === '2x2' ? '#6366F1' : 'transparent',
                 color: chartLayout === '2x2' ? '#fff' : '#64748B',
                 cursor:'pointer',
                 display:'flex',
@@ -1851,39 +1841,41 @@ export default function LiveChartView() {
           <button
             onClick={handleSnapshot}
             title="Download Snapshot"
-            style={{ padding:'5px', borderRadius:6, border:'1px solid #1E2538', background:'transparent', color:'#94A3B8', cursor:'pointer' }}
+            style={{ padding:'4px 6px', borderRadius:5, border:'1px solid rgba(255,255,255,0.08)', background:'transparent', color:'#94A3B8', cursor:'pointer' }}
           >
-            <Camera size={14} />
+            <Camera size={13} />
           </button>
 
           {/* Fullscreen */}
           <button
             onClick={toggleFullscreen}
             title="Fullscreen Chart"
-            style={{ padding:'5px', borderRadius:6, border:'1px solid #1E2538', background:'transparent', color:'#94A3B8', cursor:'pointer' }}
+            style={{ padding:'4px 6px', borderRadius:5, border:'1px solid rgba(255,255,255,0.08)', background:'transparent', color:'#94A3B8', cursor:'pointer' }}
           >
-            {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
           </button>
         </div>
       </div>
 
 
-      {/* ── Main Chart Body: Multi-Chart Grid OR Single Chart Workstation ── */}
+      {/* ── Main Chart Body: Multi-Chart Grid OR Single Chart Workstation (Fills Available Height) ── */}
       {chartLayout !== '1x1' ? (
-        <div style={{ flex: 1, minHeight: 650, height: 'calc(100vh - 120px)', width: '100%' }}>
+        <div style={{ flex: 1, minHeight: 0, height: '100%', width: '100%', overflow: 'hidden' }}>
           <MultiChartGrid layout={chartLayout} onLayoutChange={setChartLayout} />
         </div>
       ) : (
-      <div style={{ display:'grid', gridTemplateColumns: isSplitView ? '1fr 1fr' : '1fr', gap:16 }}>
+      <div style={{ flex: 1, minHeight: 0, height: '100%', display:'grid', gridTemplateColumns: isSplitView ? '1fr 1fr' : '1fr', gap: 6, overflow: 'hidden' }}>
         
         {/* Chart 1 Container with TradingView Left Drawing Sidebar */}
         <div style={{
           background:'rgba(255,255,255,0.015)',
-          border:'1px solid rgba(168,85,247,0.10)',
-          borderRadius:18, overflow:'hidden',
+          border:'1px solid rgba(99,102,241,0.12)',
+          borderRadius: 8, overflow:'hidden',
           position:'relative',
           display: 'flex',
-          height: 600,
+          height: '100%',
+          flex: 1,
+          minHeight: 0,
         }}>
 
           {/* ── TradingView Style Vertical Left Drawing Sidebar ── */}
@@ -2184,22 +2176,24 @@ export default function LiveChartView() {
 
       {/* ── Compact Space-Saving Bottom Status Bar with Expandable Insights ── */}
       {isDaily && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
           <div style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '6px 14px',
-            backgroundColor: '#0F121A',
-            border: '1px solid rgba(255,255,255,0.06)',
-            borderRadius: 8,
-            fontSize: '0.74rem',
+            padding: '3px 10px',
+            backgroundColor: '#0B0F1C',
+            border: '1px solid rgba(99,102,241,0.12)',
+            borderRadius: 6,
+            fontSize: '0.72rem',
             color: '#94A3B8',
+            height: 26,
+            flexShrink: 0,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-              <span>LTP: <strong style={{ color: '#FFF' }}>{curPrice ? `₹${curPrice.toFixed(2)}` : '—'}</strong></span>
-              <span>7D Target: <strong style={{ color: '#A855F7' }}>{prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toFixed(2)}` : '—'}</strong></span>
-              <span>Return: <strong style={{ color: (prediction?.predicted_return_7d || 0) >= 0 ? '#26A69A' : '#EF5350' }}>{prediction?.predicted_return_7d != null ? `${prediction.predicted_return_7d >= 0 ? '+' : ''}${(prediction.predicted_return_7d * 100).toFixed(2)}%` : '—'}</strong></span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+              <span>LTP: <strong style={{ color: '#FFF', fontFamily: 'JetBrains Mono, monospace' }}>{curPrice ? `₹${curPrice.toFixed(2)}` : '—'}</strong></span>
+              <span>7D Target: <strong style={{ color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>{prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toFixed(2)}` : '—'}</strong></span>
+              <span>Return: <strong style={{ color: (prediction?.predicted_return_7d || 0) >= 0 ? '#10B981' : '#EF5350' }}>{prediction?.predicted_return_7d != null ? `${prediction.predicted_return_7d >= 0 ? '+' : ''}${(prediction.predicted_return_7d * 100).toFixed(2)}%` : '—'}</strong></span>
               <span>Signal: <strong style={{ color: sigMeta.color }}>{predLoading ? 'Loading…' : sigMeta.label}</strong></span>
               <span>Confidence: <strong style={{ color: scoreColor }}>{score}/100</strong></span>
             </div>
@@ -2210,35 +2204,35 @@ export default function LiveChartView() {
                 background: 'rgba(255,255,255,0.04)',
                 border: '1px solid rgba(255,255,255,0.08)',
                 borderRadius: 4,
-                padding: '3px 8px',
-                color: '#60A5FA',
+                padding: '2px 6px',
+                color: '#818CF8',
                 cursor: 'pointer',
-                fontSize: '0.7rem',
+                fontSize: '0.68rem',
                 fontWeight: 600,
               }}
             >
-              {showBottomStats ? '▴ Collapse Panel' : '▾ Expand Stats'}
+              {showBottomStats ? '▴ Hide' : '▾ Stats'}
             </button>
           </div>
 
           {/* Expanded Cards (Shown only on demand) */}
           {showBottomStats && (
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(138px, 1fr))', gap:8 }}>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))', gap:6 }}>
               {[
                 { label:'CURRENT PRICE',   value: curPrice ? `₹${curPrice.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : '—', color:'#F0F0FF' },
-                { label:'AI TARGET (7D)',  value: prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : predLoading ? 'Loading…' : '—', color:'#A855F7' },
+                { label:'AI TARGET (7D)',  value: prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : predLoading ? 'Loading…' : '—', color:'#818CF8' },
                 { label:'EXPECTED RETURN', value: prediction?.predicted_return_7d != null ? `${prediction.predicted_return_7d>=0?'+':''}${(prediction.predicted_return_7d*100).toFixed(2)}%` : predLoading ? 'Loading…' : '—',
-                  color: prediction?.predicted_return_7d >= 0 ? '#26A69A' : '#EF5350' },
+                  color: prediction?.predicted_return_7d >= 0 ? '#10B981' : '#EF5350' },
                 { label:'AI CONFIDENCE',   value: prediction?.ai_confidence_score != null ? `${prediction.ai_confidence_score}/100` : predLoading ? 'Loading…' : '—', color:scoreColor },
-                { label:'95% UPPER',       value:(prediction?.predicted_upper_price_7d??prediction?.high_bound) ? `₹${(prediction.predicted_upper_price_7d??prediction.high_bound).toFixed(2)}` : predLoading?'Loading…':'—', color:'#26A69A' },
+                { label:'95% UPPER',       value:(prediction?.predicted_upper_price_7d??prediction?.high_bound) ? `₹${(prediction.predicted_upper_price_7d??prediction.high_bound).toFixed(2)}` : predLoading?'Loading…':'—', color:'#10B981' },
                 { label:'95% LOWER',       value:(prediction?.predicted_lower_price_7d??prediction?.low_bound)  ? `₹${(prediction.predicted_lower_price_7d??prediction.low_bound).toFixed(2)}`  : predLoading?'Loading…':'—', color:'#EF5350' },
               ].map(({ label, value, color }) => (
                 <div key={label} style={{
-                  background:'rgba(255,255,255,0.02)', border:'1px solid rgba(168,85,247,0.09)',
-                  borderRadius:8, padding:'8px 12px',
+                  background:'rgba(255,255,255,0.02)', border:'1px solid rgba(99,102,241,0.12)',
+                  borderRadius:6, padding:'6px 10px',
                 }}>
-                  <div style={{ fontSize:'0.62rem', color:'#64748B', letterSpacing:'0.06em', marginBottom:3 }}>{label}</div>
-                  <div style={{ fontSize:'0.82rem', fontWeight:700, color, fontFamily:'JetBrains Mono, monospace' }}>{value}</div>
+                  <div style={{ fontSize:'0.58rem', color:'#64748B', letterSpacing:'0.06em', marginBottom:2 }}>{label}</div>
+                  <div style={{ fontSize:'0.78rem', fontWeight:700, color, fontFamily:'JetBrains Mono, monospace' }}>{value}</div>
                 </div>
               ))}
             </div>
