@@ -1,1 +1,1 @@
-" \\StockOracle Pro — Shared Infrastructure Package\\\
+# StockOracle Pro Shared Package
