@@ -63,6 +63,7 @@ export default function App() {
   const { activeView, trainingStatus, selectedSymbol } = useStore();
   const [showWatchlist, setShowWatchlist] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
 
   // Global Keyboard Listener for / or Ctrl+K Command Palette
   React.useEffect(() => {
