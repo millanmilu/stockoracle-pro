@@ -100,15 +100,23 @@ def calculate_portfolio_risk_cockpit(
     calmar_ratio = round(annualized_return_pct / max(1.0, max_drawdown_pct), 2)
 
     # 5. Correlation Matrix Heatmap
-    corr_matrix = np.corrcoef(returns_matrix, rowvar=False)
+    if len(tickers) == 1:
+        corr_matrix = np.array([[1.0]])
+    else:
+        corr_matrix = np.corrcoef(returns_matrix, rowvar=False)
+        if corr_matrix.ndim == 0:
+            corr_matrix = np.array([[float(corr_matrix)]])
+
     heatmap = []
     for i, t1 in enumerate(tickers):
         for j, t2 in enumerate(tickers):
+            corr_val = 1.0 if t1 == t2 else float(corr_matrix[i, j]) if corr_matrix.ndim == 2 else 0.5
             heatmap.append({
                 "ticker_a": t1,
                 "ticker_b": t2,
-                "correlation": round(float(corr_matrix[i, j]), 2),
+                "correlation": round(corr_val, 2),
             })
+
 
     return {
         "portfolio_value": portfolio_value,

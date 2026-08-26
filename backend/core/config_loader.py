@@ -5,7 +5,7 @@ Merges Host Project, OpenBB Data Providers, and OpenTerminalUI settings into a u
 import os
 from pathlib import Path
 from typing import Dict, Any, Optional
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
 
@@ -13,6 +13,8 @@ class UnifiedSettings(BaseSettings):
     """
     Centralized configuration management for StockOracle Pro, OpenBB engines, and Terminal UI.
     """
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
     # ── Host Application Settings ──
     APP_NAME: str = "StockOracle Pro"
     APP_ENV: str = Field(default="production", alias="ENVIRONMENT")
@@ -50,10 +52,6 @@ class UnifiedSettings(BaseSettings):
     TERMINAL_ENABLE_ANIMATIONS: bool = True
     TERMINAL_SOUND_ALERTS: bool = False
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
 
 
 # Global singleton instance
