@@ -22,14 +22,19 @@ export function useStock() {
     setHistoryError(null);
     try {
       const { data } = await api.get(`/api/stock/${ticker}/history`, { params: { interval, timeframe } });
-      if (Array.isArray(data)) {
-        return data;
+      // API returns { data: [...], data_source: "angel_one" | "sqlite" | ... }
+      if (data && Array.isArray(data.data)) {
+        return { candles: data.data, dataSource: data.data_source || 'unknown' };
       }
-      return [];
+      // Backward-compat: plain array (should not happen after this release)
+      if (Array.isArray(data)) {
+        return { candles: data, dataSource: 'unknown' };
+      }
+      return { candles: [], dataSource: 'unknown' };
     } catch (e) {
       const msg = e.response?.data?.detail || e.message || 'Failed to load historical candles';
       setHistoryError(msg);
-      return [];
+      return { candles: [], dataSource: 'error' };
     }
   }, []);
 

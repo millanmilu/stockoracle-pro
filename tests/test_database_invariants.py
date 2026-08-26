@@ -83,3 +83,42 @@ def test_portfolio_user_isolation():
     # Clean up
     remove_portfolio_position(id_a, user_id=user_a)
     remove_portfolio_position(id_b, user_id=user_b)
+
+
+def test_audit_log_portfolio():
+    """Verify audit log records ADD and REMOVE for portfolio operations."""
+    from backend.data.database import write_audit_log
+
+    # Add and remove a position
+    pos_id = add_portfolio_position("AUDIT_TEST", 1, 100.0, user_id="audit_user")
+    remove_portfolio_position(pos_id, user_id="audit_user")
+
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT action, entity, entity_id, user_id FROM audit_log WHERE user_id = ? ORDER BY id ASC",
+            ("audit_user",)
+        ).fetchall()
+
+    actions = [(r[0], r[1]) for r in rows]
+    assert ("ADD", "portfolio") in actions, f"Expected ADD portfolio in audit log, got: {actions}"
+    assert ("REMOVE", "portfolio") in actions, f"Expected REMOVE portfolio in audit log, got: {actions}"
+
+
+def test_audit_log_alert_triggered():
+    """Verify audit log records TRIGGERED when mark_alert_triggered is called."""
+    from backend.data.database import mark_alert_triggered
+
+    alert_id = add_smart_alert("TATASTEEL", "price_above", {"threshold": 120.0}, user_id="audit_trigger_user")
+    mark_alert_triggered(alert_id)
+
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT action, entity FROM audit_log WHERE user_id = ? AND entity_id = ?",
+            ("audit_trigger_user", str(alert_id))
+        ).fetchall()
+
+    triggered_entries = [(r[0], r[1]) for r in rows]
+    assert ("TRIGGERED", "smart_alert") in triggered_entries, f"Expected TRIGGERED smart_alert, got: {triggered_entries}"
+
+    # Cleanup
+    remove_smart_alert(alert_id, user_id="audit_trigger_user")

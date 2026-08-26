@@ -6,6 +6,9 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Tuple
 from dotenv import load_dotenv
+from backend.core.logging import get_logger
+
+logger = get_logger("stockoracle.fetcher")
 
 # Load .env file automatically
 _env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
@@ -63,18 +66,18 @@ def ensure_session() -> bool:
 
     # Auto-refresh if session is expired
     if _session_active and _session_expires_at and datetime.now() >= _session_expires_at:
-        print("⏰ Angel One session expired — refreshing...")
+        logger.warning("Angel One session expired — refreshing...")
         reset_session()
 
     if _session_active:
         return True
 
     if not smartApi:
-        print("⚠️  Angel One SmartAPI not initialized: ANGEL_API_KEY is missing.")
+        logger.warning("Angel One SmartAPI not initialized: ANGEL_API_KEY is missing.")
         return False
 
     if not (ANGEL_CLIENT_ID and ANGEL_PASSWORD and ANGEL_TOTP_SECRET):
-        print("⚠️  Angel One credentials incomplete. Check .env for ANGEL_CLIENT_ID / ANGEL_PASSWORD / ANGEL_TOTP_SECRET.")
+        logger.warning("Angel One credentials incomplete. Check .env for ANGEL_CLIENT_ID / ANGEL_PASSWORD / ANGEL_TOTP_SECRET.")
         return False
 
     try:
@@ -84,15 +87,15 @@ def ensure_session() -> bool:
         if data and data.get("status"):
             _session_active    = True
             _session_expires_at = datetime.now() + timedelta(hours=SESSION_REFRESH_HOURS)
-            print("✅ Angel One SmartAPI login successful.")
+            logger.info("Angel One SmartAPI login successful.")
             return True
         else:
             msg = data.get("message", "No response") if data else "No response"
-            print(f"❌ Angel One login failed: {msg}")
+            logger.error("Angel One login failed: %s", msg)
             return False
 
     except Exception as e:
-        print(f"❌ Exception during Angel One login: {e}")
+        logger.error("Exception during Angel One login: %s", e, exc_info=True)
         return False
 
 
@@ -118,7 +121,7 @@ def _call_api(fn, *args, retries: int = 2, retry_delay: float = 1.5, **kwargs):
                         or "token" in msg.lower()
                         or "session" in msg.lower()
                         or "unauthorized" in msg.lower()):
-                    print(f"🔄 Auth error detected ({err_code}: {msg}) — re-authenticating...")
+                    logger.warning("Auth error detected (%s: %s) — re-authenticating...", err_code, msg)
                     reset_session()
                     if ensure_session() and attempt < retries:
                         time.sleep(retry_delay)
@@ -126,7 +129,7 @@ def _call_api(fn, *args, retries: int = 2, retry_delay: float = 1.5, **kwargs):
 
                 # Rate-limit error — wait longer before retrying
                 if "rate" in msg.lower() or "too many" in msg.lower():
-                    print(f"⏳ Rate limit hit — waiting {retry_delay * 2}s before retry...")
+                    logger.warning("Rate limit hit — waiting %.1fs before retry...", retry_delay * 2)
                     time.sleep(retry_delay * 2)
                     if attempt < retries:
                         continue
@@ -138,10 +141,10 @@ def _call_api(fn, *args, retries: int = 2, retry_delay: float = 1.5, **kwargs):
             # Network-level errors — retry with backoff
             if attempt < retries:
                 wait = retry_delay * (attempt + 1)
-                print(f"⚠️  API call failed (attempt {attempt + 1}/{retries + 1}): {e}. Retrying in {wait}s...")
+                logger.warning("API call failed (attempt %d/%d): %s. Retrying in %.1fs...", attempt + 1, retries + 1, e, wait)
                 time.sleep(wait)
             else:
-                print(f"❌ API call permanently failed after {retries + 1} attempts: {e}")
+                logger.error("API call permanently failed after %d attempts: %s", retries + 1, e)
                 return None
 
     return None
@@ -162,7 +165,7 @@ def _load_scrip_master(force: bool = False):
     if _scrip_map_failed and not force:
         return              # Already failed, wait for explicit retry
 
-    print("📥 Downloading Angel One ScripMaster …")
+    logger.info("Downloading Angel One ScripMaster ...")
     try:
         response = requests.get(SCRIP_MASTER_URL, timeout=30)
         response.raise_for_status()
@@ -188,10 +191,10 @@ def _load_scrip_master(force: bool = False):
                 })
 
         save_stock_universe(records_to_save)
-        print(f"✅ ScripMaster loaded — {len(records_to_save)} NSE equity symbols indexed.")
+        logger.info("ScripMaster loaded — %d NSE equity symbols indexed.", len(records_to_save))
         _scrip_map_failed = False
     except Exception as e:
-        print(f"❌ Error downloading ScripMaster: {e}")
+        logger.error("Error downloading ScripMaster: %s", e, exc_info=True)
         _scrip_map_failed = True
 
 
@@ -264,9 +267,16 @@ def _set_cached(key: str, data):
 
 def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> Optional[pd.DataFrame]:
     """
-    Fetches historical OHLCV data. 
+    Fetches historical OHLCV data.
     First checks local SQLite DB. If missing or stale, tries Angel One SmartAPI,
     falls back to Yahoo Finance for daily candles, updates SQLite DB, and returns.
+
+    Sets df.attrs['data_source'] on every returned DataFrame:
+      'memory_cache'  — served from in-memory LRU cache
+      'sqlite'        — freshly read from local SQLite (up-to-date)
+      'angel_one'     — live data from Angel One SmartAPI
+      'yahoo_finance' — fallback from Yahoo Finance (stored to SQLite)
+      'sqlite_stale'  — last-resort SQLite data (possibly outdated)
     """
     ticker = ticker.upper().strip()
     cache_key = f"hist_{ticker}_{period}_{interval}"
@@ -274,6 +284,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
     # 1. Check in-memory fast cache first
     fresh = _get_cached(cache_key)
     if fresh is not None:
+        fresh.attrs["data_source"] = "memory_cache"
         return fresh
 
     token_info = get_token_info(ticker)
@@ -291,6 +302,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
     if period.upper() == "5Y" and not interval.lower() in ["1m", "5m", "15m", "1h"]:
         backfilled = backfill_5y_history(ticker)
         if backfilled is not None and not backfilled.empty:
+            backfilled.attrs["data_source"] = "angel_one"
             return backfilled
 
     todate = datetime.now()
@@ -310,6 +322,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
             is_up_to_date = (todate - latest_db_date).days <= 4
             expected_trading_days = int(days * (5/7))
             if is_up_to_date and len(db_df) >= expected_trading_days * 0.8:
+                db_df.attrs["data_source"] = "sqlite"
                 _set_cached(cache_key, db_df)
                 return db_df
 
@@ -341,7 +354,8 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
             )
             df = df.astype({"open": float, "high": float, "low": float,
                             "close": float, "volume": int})
-            
+            df.attrs["data_source"] = "angel_one"
+
             if is_intraday:
                 df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d %H:%M:%S")
                 df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
@@ -350,12 +364,13 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
             else:
                 df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")
                 df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
-                
+
                 # Save daily records to local SQLite database (UPSERT)
                 save_historical_prices(ticker, df)
-                
+
                 merged_df = get_historical_prices(ticker, fromdate_str, todate_str)
                 final_df = merged_df if (merged_df is not None and not merged_df.empty) else df
+                final_df.attrs["data_source"] = "angel_one"
                 _set_cached(cache_key, final_df)
                 return final_df
 
@@ -380,7 +395,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
                     yf_df.columns = [c[0].lower() for c in yf_df.columns]
                 else:
                     yf_df.columns = [str(c).lower() for c in yf_df.columns]
-                
+
                 date_col = "date" if "date" in yf_df.columns else "datetime"
                 yf_df = yf_df.rename(columns={date_col: "date"})
                 yf_df["date"] = pd.to_datetime(yf_df["date"]).dt.strftime("%Y-%m-%d")
@@ -388,18 +403,19 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
                 if not yf_df.empty:
                     save_historical_prices(ticker, yf_df)
                     _set_cached(cache_key, yf_df)
-                    print(f"✅ Fallback: Stored {len(yf_df)} Yahoo Finance records in SQLite for {ticker}.")
+                    logger.info("Fallback: Stored %d Yahoo Finance records in SQLite for %s.", len(yf_df), ticker)
                     return yf_df
         except Exception as e:
-            print(f"⚠️ Yahoo Finance fallback failed for {ticker}: {e}")
+            logger.warning("Yahoo Finance fallback failed for %s: %s", ticker, e)
 
     # Fallback to local database
     if db_df is not None and not db_df.empty:
-        print(f"⚠️  Returning existing SQLite data for {ticker}.")
+        logger.warning("Returning existing SQLite data for %s.", ticker)
         return db_df
 
-    print(f"❌ Failed to fetch history for {ticker}")
+    logger.error("Failed to fetch history for %s", ticker)
     return None
+
 
 
 # ── fetch_company_info ──
@@ -565,7 +581,7 @@ def get_combined_stock_data(ticker: str, period: str = "2Y") -> Optional[pd.Data
         new_row = pd.DataFrame([today_candle])
         df = pd.concat([df, new_row], ignore_index=True)
 
-    print(f"📊 Combined data for {ticker}: {len(df)} rows (historical + live tick for {today_str})")
+    logger.info("Combined data for %s: %d rows (historical + live tick for %s)", ticker, len(df), today_str)
     return df
 
 
@@ -575,7 +591,7 @@ def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
     using Angel One SmartAPI in 1-year chunks and bulk saves into SQLite DB.
     """
     ticker = ticker.upper().strip()
-    print(f"📥 Fetching 5-year historical data via Angel One SmartAPI for {ticker}...")
+    logger.info("Fetching 5-year historical data via Angel One SmartAPI for %s...", ticker)
 
     todate = datetime.now()
     fromdate = todate - timedelta(days=1825)
@@ -585,17 +601,17 @@ def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
     # Check if DB already has 5Y history (> 1000 records)
     existing_df = get_historical_prices(ticker, fromdate_str, todate_str)
     if existing_df is not None and len(existing_df) >= 1000:
-        print(f"✅ Found existing {len(existing_df)} 5-year records in SQLite DB for {ticker}.")
+        logger.info("Found existing %d 5-year records in SQLite DB for %s.", len(existing_df), ticker)
         return existing_df
 
     token_info = get_token_info(ticker)
     if not token_info:
-        print(f"❌ Token not found for '{ticker}'.")
+        logger.error("Token not found for '%s'.", ticker)
         return existing_df
 
     ensure_session()
     if not _session_active or not smartApi:
-        print(f"⚠️ Angel One session inactive — returning current DB history for {ticker}.")
+        logger.warning("Angel One session inactive — returning current DB history for %s.", ticker)
         return existing_df
 
     # Chunk 5 years into 365-day blocks (Angel One max per request)
@@ -626,7 +642,7 @@ def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
                 cdf["date"] = pd.to_datetime(cdf["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")
                 all_chunks.append(cdf)
         except Exception as e:
-            print(f"⚠️ Chunk fetch error ({chunk_start} to {chunk_end}): {e}")
+            logger.warning("Chunk fetch error (%s to %s): %s", chunk_start, chunk_end, e)
 
         chunk_end = chunk_start - timedelta(days=1)
         if chunk_end <= fromdate:
@@ -641,7 +657,7 @@ def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
             from backend.data.database import clear_ticker_history
             clear_ticker_history(ticker)
             save_historical_prices(ticker, clean_df)
-            print(f"✅ Stored {len(clean_df)} 5-year Angel One records in SQLite for {ticker}.")
+            logger.info("Stored %d 5-year Angel One records in SQLite for %s.", len(clean_df), ticker)
             return clean_df
 
     return existing_df

@@ -33,8 +33,9 @@ export default function Dashboard() {
   useEffect(() => {
     if (historyCache[cacheKey]) return;
     setLocalLoading(true);
-    fetchHistory(selectedSymbol, interval).then(data => {
-      if (data && data.length > 0) setHistoryCache(cacheKey, data);
+    fetchHistory(selectedSymbol, interval).then(result => {
+      const candles = result?.candles ?? [];
+      if (candles.length > 0) setHistoryCache(cacheKey, candles);
       setLocalLoading(false);
     });
   }, [selectedSymbol, interval]);

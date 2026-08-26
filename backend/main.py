@@ -16,8 +16,9 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 from dotenv import load_dotenv
 
-logger = logging.getLogger("stockoracle")
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+from backend.core.logging import configure_logging, get_logger
+configure_logging()
+logger = get_logger("stockoracle")
 
 # Load the local development credentials before importing ``fetcher``: that
 # module constructs the Angel One client at import time. In production,
@@ -81,21 +82,21 @@ async def prefetch_all_tickers():
     first prediction requests are served from DB (no API wait).
     """
     import asyncio as _asyncio
-    print("⏳ Starting background prefetch of historical data for all tickers...")
+    logger.info("Starting background prefetch of historical data for all tickers...")
     loop = _asyncio.get_running_loop()
     for ticker in popular_tickers:
         try:
             # Run blocking fetch in thread pool to not block event loop
             df = await loop.run_in_executor(None, lambda t=ticker: fetch_stock_data(t, period="2Y"))
             if df is not None and not df.empty:
-                print(f"✅ Prefetched {len(df)} rows for {ticker}")
+                logger.info("Prefetched %d rows for %s", len(df), ticker)
             else:
-                print(f"⚠️  No data returned for {ticker} during prefetch")
+                logger.warning("No data returned for %s during prefetch", ticker)
         except Exception as e:
-            print(f"❌ Prefetch failed for {ticker}: {e}")
+            logger.error("Prefetch failed for %s: %s", ticker, e)
         # Small delay to be gentle on the Angel One rate limit
         await _asyncio.sleep(1.5)
-    print("✅ Historical prefetch complete for all tickers.")
+    logger.info("Historical prefetch complete for all tickers.")
 
 
 app = FastAPI(
@@ -145,8 +146,10 @@ if env_origins:
     origins.extend([o.strip() for o in env_origins.split(",") if o.strip()])
 
 from fastapi.middleware.gzip import GZipMiddleware
+from backend.core.middleware import RequestIdMiddleware
 
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(RequestIdMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -235,8 +238,13 @@ def get_stock_history(ticker: str, timeframe: str = "5Y", interval: str = "1d"):
             raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")
         raise HTTPException(status_code=404, detail=f"No price history found for '{t}'. Market may be closed or ticker invalid.")
 
+    data_source = df.attrs.get("data_source", "unknown")
     enriched_df = enrich_stock_dataframe(df)
-    return enriched_df.to_dict(orient="records")
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        content={"data": enriched_df.to_dict(orient="records"), "data_source": data_source},
+        headers={"X-Data-Source": data_source},
+    )
 
 
 @app.get("/api/stock/search/{query}")
@@ -1546,4 +1554,31 @@ async def telegram_test_endpoint(request: Request, _auth: None = Security(verify
     return test_telegram_connection()
 
 
+# ── Audit Log (read-only access trail) ──────────────────────────────────────
 
+@app.get("/api/audit-log")
+@limiter.limit("30/minute")
+async def get_audit_log_endpoint(
+    request: Request,
+    limit: int = 50,
+    user_id: Optional[str] = Query(None),
+    _auth: None = Security(verify_api_key),
+):
+    """Returns the last N audit log entries for the requesting user."""
+    import sqlite3 as _sqlite3
+    from backend.data.database import DB_PATH
+    effective_user = user_id or get_current_user_id(request)
+    limit = max(1, min(limit, 500))
+    try:
+        conn = _sqlite3.connect(DB_PATH)
+        conn.row_factory = _sqlite3.Row
+        rows = conn.execute(
+            "SELECT id, user_id, action, entity, entity_id, details, ts_utc "
+            "FROM audit_log WHERE user_id = ? ORDER BY ts_utc DESC LIMIT ?",
+            (effective_user, limit),
+        ).fetchall()
+        conn.close()
+        return {"user_id": effective_user, "entries": [dict(r) for r in rows]}
+    except Exception as exc:
+        logger.error("audit-log read failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not read audit log")

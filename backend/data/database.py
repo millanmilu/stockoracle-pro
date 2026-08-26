@@ -6,6 +6,9 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional, Any
+from backend.core.logging import get_logger
+
+logger = get_logger("stockoracle.db")
 
 # Absolute path for the SQLite database file
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stockoracle.db")
@@ -23,7 +26,7 @@ def get_db_connection() -> sqlite3.Connection:
 
 def init_db():
     """Initializes the database schema and creates all tables if they do not exist."""
-    print(f"📦 Initializing SQLite database at: {DB_PATH}")
+    logger.info("Initializing SQLite database at: %s", DB_PATH)
     with get_db_connection() as conn:
         cursor = conn.cursor()
 
@@ -194,11 +197,65 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_smart_alerts_ticker ON smart_alerts (ticker)"
         )
 
+        # 13. Audit Log — immutable event trail (timestamps stored in UTC ISO-8601)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     TEXT    NOT NULL DEFAULT 'default_user',
+                action      TEXT    NOT NULL,
+                entity      TEXT    NOT NULL,
+                entity_id   TEXT,
+                details     TEXT,
+                ts_utc      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log (user_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log (ts_utc)"
+        )
+
         # Cleanup: purge any legacy intraday records that polluted the daily historical_prices table
         cursor.execute("DELETE FROM historical_prices WHERE length(date) != 10")
 
         conn.commit()
-    print("✅ SQLite database initialization complete.")
+    logger.info("SQLite database initialization complete.")
+
+
+def write_audit_log(
+    action: str,
+    entity: str,
+    entity_id: str = None,
+    details: str = None,
+    user_id: str = "default_user",
+) -> None:
+    """
+    Appends one immutable row to the audit_log table.
+    Timestamps are stored as UTC ISO-8601 strings.
+    Call this on every portfolio add/remove, paper order, alert create/trigger/delete.
+
+    Args:
+        action:    Verb describing the change, e.g. 'ADD', 'REMOVE', 'TRIGGERED', 'RESET'.
+        entity:    Domain entity, e.g. 'portfolio', 'smart_alert', 'paper_order'.
+        entity_id: ID of the affected row (can be str representation of int PK).
+        details:   Optional JSON-serialisable string with extra context.
+        user_id:   Owning user.
+    """
+    try:
+        with get_db_connection() as conn:
+            conn.execute(
+                """
+                INSERT INTO audit_log (user_id, action, entity, entity_id, details, ts_utc)
+                VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                """,
+                (user_id, action.upper(), entity, str(entity_id) if entity_id is not None else None, details),
+            )
+            conn.commit()
+    except Exception as e:
+        # Audit write must never crash the caller; log and continue
+        import logging
+        logging.getLogger("stockoracle.db").error("audit_log write failed: %s", e)
 
 
 # ── Historical Prices ──────────────────────────────────────────────────────────
@@ -211,7 +268,7 @@ def clear_ticker_history(ticker: str):
     with get_db_connection() as conn:
         conn.execute("DELETE FROM historical_prices WHERE ticker = ?", (ticker,))
         conn.commit()
-    print(f"🧹 Cleared old historical DB records for {ticker}.")
+    logger.info("Cleared old historical DB records for %s.", ticker)
 
 
 def _normalize_price(v):
@@ -282,7 +339,7 @@ def clean_paise_and_outliers(ticker: str = None):
             if not paise_candidates.empty:
                 for rid, old_val in zip(paise_candidates["rowid"], paise_candidates["close"]):
                     conn.execute("UPDATE historical_prices SET open = open/100.0, high = high/100.0, low = low/100.0, close = close/100.0 WHERE rowid = ?", (rid,))
-                print(f"🛠️ Normalized {len(paise_candidates)} paise records to rupees for {t}.")
+                logger.info("Normalized %d paise records to rupees for %s.", len(paise_candidates), t)
 
         # Delete invalid <= 0 rows
         conn.execute("DELETE FROM historical_prices WHERE close <= 0 OR high <= 0 OR open <= 0 OR low <= 0 OR length(date) != 10")
@@ -442,7 +499,7 @@ def save_live_tick(ticker: str, price: float, change_pct: float):
             )
             conn.commit()
     except Exception as e:
-        print(f"Error saving live tick to database: {e}")
+        logger.error("Error saving live tick for %s: %s", ticker, e, exc_info=True)
 
 
 # ── Generic JSON Cache Helpers ─────────────────────────────────────────────────
@@ -486,7 +543,7 @@ def _get_json(table: str, key_col: str, key_val: str, ttl_minutes: int = 5) -> O
         if row:
             return json.loads(row["data_json"])
     except Exception as e:
-        print(f"DB cache read error ({table}): {e}")
+        logger.warning("DB cache read error (%s): %s", table, e)
     return None
 
 
@@ -506,7 +563,7 @@ def _get_stale_json(table: str, key_col: str, key_val: str) -> Optional[Any]:
         if row:
             return json.loads(row["data_json"])
     except Exception as e:
-        print(f"DB stale-cache read error ({table}): {e}")
+        logger.error("DB stale-cache read error (%s): %s", table, e)
     return None
 
 
@@ -564,7 +621,7 @@ def save_task_status(task_id: str, ticker: str, status: str, progress: int,
             )
             conn.commit()
     except Exception as e:
-        print(f"Error saving task status for {task_id}: {e}")
+        logger.error("Error saving task status for %s: %s", task_id, e)
 
 
 def get_task_status(task_id: str) -> Optional[dict]:
@@ -579,7 +636,7 @@ def get_task_status(task_id: str) -> Optional[dict]:
         if row:
             return dict(row)
     except Exception as e:
-        print(f"Error reading task status for {task_id}: {e}")
+        logger.error("Error reading task status for %s: %s", task_id, e)
     return None
 
 
@@ -591,7 +648,7 @@ def cleanup_old_tasks(max_age_hours: int = 24):
             conn.execute("DELETE FROM task_status WHERE updated_at < ?", (cutoff,))
             conn.commit()
     except Exception as e:
-        print(f"Error cleaning old tasks: {e}")
+        logger.error("Error cleaning old tasks: %s", e)
 
 
 # ── Monte Carlo ────────────────────────────────────────────────────────────────
@@ -627,7 +684,7 @@ def get_recent_live_ticks(ticker: str, limit: int = 200) -> Optional[pd.DataFram
             )
         return df if not df.empty else None
     except Exception as e:
-        print(f"Error reading live ticks for {ticker}: {e}")
+        logger.error("Error reading live ticks for %s: %s", ticker, e)
         return None
 
 
@@ -662,7 +719,7 @@ def get_live_tick_ohlcv(ticker: str) -> Optional[dict]:
             "volume": len(df),
         }
     except Exception as e:
-        print(f"Error building live OHLCV for {ticker}: {e}")
+        logger.error("Error building live OHLCV for %s: %s", ticker, e)
         return None
 
 
@@ -702,7 +759,11 @@ def add_portfolio_position(ticker: str, shares: float, buy_price: float, user_id
             (user_id, ticker.upper(), shares, buy_price),
         )
         conn.commit()
-        return cursor.lastrowid
+        row_id = cursor.lastrowid
+    write_audit_log("ADD", "portfolio", entity_id=row_id,
+                    details=f"ticker={ticker} shares={shares} buy_price={buy_price}",
+                    user_id=user_id)
+    return row_id
 
 
 def get_portfolio(user_id: str = "default_user") -> list:
@@ -720,6 +781,7 @@ def remove_portfolio_position(position_id: int, user_id: str = "default_user"):
     with get_db_connection() as conn:
         conn.execute("DELETE FROM portfolio WHERE id = ? AND user_id = ?", (position_id, user_id))
         conn.commit()
+    write_audit_log("REMOVE", "portfolio", entity_id=position_id, user_id=user_id)
 
 
 # ── Smart Alert Functions ──────────────────────────────────────────────────────
@@ -733,7 +795,11 @@ def add_smart_alert(ticker: str, alert_type: str, param_value: dict, user_id: st
             (user_id, ticker.upper(), alert_type, _json.dumps(param_value)),
         )
         conn.commit()
-        return cursor.lastrowid
+        row_id = cursor.lastrowid
+    write_audit_log("ADD", "smart_alert", entity_id=row_id,
+                    details=f"ticker={ticker} type={alert_type} params={param_value}",
+                    user_id=user_id)
+    return row_id
 
 
 def get_smart_alerts(user_id: str = "default_user") -> list:
@@ -760,13 +826,20 @@ def remove_smart_alert(alert_id: int, user_id: str = "default_user"):
     with get_db_connection() as conn:
         conn.execute("DELETE FROM smart_alerts WHERE id = ? AND user_id = ?", (alert_id, user_id))
         conn.commit()
+    write_audit_log("REMOVE", "smart_alert", entity_id=alert_id, user_id=user_id)
 
 
 def mark_alert_triggered(alert_id: int):
     """Mark a smart alert as triggered."""
     with get_db_connection() as conn:
+        # Fetch user_id for audit
+        row = conn.execute("SELECT user_id, ticker, alert_type FROM smart_alerts WHERE id = ?", (alert_id,)).fetchone()
         conn.execute("UPDATE smart_alerts SET triggered = 1 WHERE id = ?", (alert_id,))
         conn.commit()
+    if row:
+        write_audit_log("TRIGGERED", "smart_alert", entity_id=alert_id,
+                        details=f"ticker={row['ticker']} type={row['alert_type']}",
+                        user_id=row["user_id"])
 
 
 # ── Paper Trading Functions (₹10 Lakh Virtual Funds) ──────────────────────────
@@ -835,6 +908,9 @@ def place_paper_order(ticker: str, order_type: str, action: str, shares: float, 
                 (user_id, ticker, order_type, shares, price, now_str)
             )
             conn.commit()
+            write_audit_log("BUY", "paper_order", entity_id=pos_id,
+                            details=f"ticker={ticker} shares={shares} price={price} cost={total_cost:.2f}",
+                            user_id=user_id)
             return {"status": "SUCCESS", "position_id": pos_id, "action": "BUY", "ticker": ticker, "shares": shares, "price": price, "remaining_cash": new_cash}
 
         else:
@@ -872,7 +948,10 @@ def close_paper_position(position_id: int, current_price: float, user_id: str = 
         conn.execute("DELETE FROM paper_positions WHERE id = ?", (position_id,))
         conn.commit()
 
-        return {"status": "CLOSED", "position_id": position_id, "ticker": pos["ticker"], "shares": shares, "exit_price": current_price, "realized_pnl": round(pnl, 2), "new_cash": round(new_cash, 2)}
+    write_audit_log("SELL", "paper_order", entity_id=position_id,
+                    details=f"ticker={pos['ticker']} shares={shares} exit_price={current_price} pnl={pnl:.2f}",
+                    user_id=user_id)
+    return {"status": "CLOSED", "position_id": position_id, "ticker": pos["ticker"], "shares": shares, "exit_price": current_price, "realized_pnl": round(pnl, 2), "new_cash": round(new_cash, 2)}
 
 
 def get_paper_trade_history(user_id: str = "default_user", limit: int = 50) -> list:
@@ -893,5 +972,6 @@ def reset_paper_account(user_id: str = "default_user") -> dict:
         conn.execute("DELETE FROM paper_orders WHERE user_id = ?", (user_id,))
         conn.execute("UPDATE paper_accounts SET cash_balance = 1000000.0, starting_balance = 1000000.0, updated_at = ? WHERE user_id = ?", (now_str, user_id))
         conn.commit()
+    write_audit_log("RESET", "paper_account", details="reset to ₹10,00,000", user_id=user_id)
     return {"status": "RESET", "cash_balance": 1000000.0}
 

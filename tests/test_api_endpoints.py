@@ -71,3 +71,13 @@ async def test_consolidated_alert_evaluation():
     
     remove_smart_alert(alert_id, user_id=user)
 
+
+def test_structured_logging_module():
+    """Verify structured logger creation and configuration."""
+    from backend.core.logging import get_logger, configure_logging
+    configure_logging()
+    log = get_logger("test_module")
+    assert log is not None
+    assert log.name == "test_module"
+
+

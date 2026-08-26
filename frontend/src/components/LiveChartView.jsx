@@ -444,6 +444,7 @@ export default function LiveChartView() {
   const [wsConnected, setWsConnected] = useState(false);
   const [loading,     setLoading]     = useState(true);
   const [predLoading, setPredLoading] = useState(true);
+  const [dataSource,  setDataSource]  = useState('unknown');
 
   // TradingView Multi-Chart Grid Layout State ('1x1' | '1x2' | '2x1' | '2x2')
   const [chartLayout, setChartLayout] = useState('1x1');
@@ -951,8 +952,9 @@ export default function LiveChartView() {
     setLiveChange(null);
     activeCandleRef.current = null;
 
-    fetchHistory(selectedSymbol, interval, timeframe).then(hist => {
-      setRawHistory(hist);
+    fetchHistory(selectedSymbol, interval, timeframe).then(result => {
+      setRawHistory(result?.candles ?? []);
+      if (result?.dataSource) setDataSource(result.dataSource);
       setLoading(false);
     });
 
@@ -971,8 +973,8 @@ export default function LiveChartView() {
 
   useEffect(() => {
     if (!isSplitView) return;
-    fetchHistory(compareSymbol, interval, timeframe).then(hist => {
-      setRawHistoryCompare(hist);
+    fetchHistory(compareSymbol, interval, timeframe).then(result => {
+      setRawHistoryCompare(result?.candles ?? []);
     });
   }, [isSplitView, compareSymbol, interval, timeframe]);
 
