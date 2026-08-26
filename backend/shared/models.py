@@ -212,3 +212,20 @@ class ModelRegistry(Base):
     metrics_json = Column(Text, nullable=True)
     trained_at = Column(String(50), nullable=False)
     is_active = Column(Integer, nullable=False, default=1)
+
+
+class SavedScan(Base):
+    """User-saved custom screener scans and criteria presets."""
+    __tablename__ = "saved_scans"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String(100), nullable=False, default="default_user", index=True)
+    name = Column(String(100), nullable=False)
+    description = Column(String(255), nullable=True)
+    filters_json = Column(Text, nullable=False, default="{}")
+    created_at = Column(String(50), nullable=False)
+
+    __table_args__ = (
+        Index("idx_saved_scans_user", "user_id"),
+    )
+

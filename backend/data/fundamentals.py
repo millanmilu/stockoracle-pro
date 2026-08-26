@@ -1,21 +1,23 @@
-import time
-import logging
+"""
+StockOracle Pro — Deep Financial Fundamentals & Earnings Trends Engine
+Scrapes and parses Screener.in with QoQ growth metrics and Redis distributed caching.
+"""
 import re
-from typing import Optional
+import logging
+from typing import Optional, Dict, Any, List
+
+from backend.shared.cache import cache_get, cache_set
 
 logger = logging.getLogger("stockoracle.fundamentals")
 
-# In-memory cache: { ticker: (data_dict, timestamp) }
-_cache: dict = {}
 _CACHE_TTL = 4 * 3600  # 4 hours
 
 
 def _parse_number(text: str) -> Optional[float]:
-    """Extract first numeric value from a string like '23.45 %' or '1,234.56'."""
+    """Extracts first numeric value from a string."""
     if not text:
         return None
     text = text.strip().replace(",", "")
-    # Remove currency symbols, %, Cr etc.
     text = re.sub(r"[₹%CrLakh\s]+", " ", text).strip()
     match = re.search(r"-?\d+\.?\d*", text)
     if match:
@@ -28,17 +30,15 @@ def _parse_number(text: str) -> Optional[float]:
 
 def get_fundamentals(ticker: str) -> dict:
     """
-    Scrapes Screener.in for fundamental data for the given NSE ticker.
-    Returns a dict with ratios, quarterly results, and 5-year trends.
-    Results are cached for 4 hours.
+    Fetches fundamental financial metrics and quarterly earnings for an NSE ticker.
+    Includes calculated QoQ revenue and net profit growth percentages.
     """
     ticker = ticker.upper().strip()
+    cache_key = f"fundamentals_{ticker}"
 
-    # Check cache
-    if ticker in _cache:
-        data, ts = _cache[ticker]
-        if time.time() - ts < _CACHE_TTL:
-            return data
+    cached = cache_get(cache_key)
+    if cached:
+        return cached
 
     empty = {
         "ticker": ticker,
@@ -47,6 +47,7 @@ def get_fundamentals(ticker: str) -> dict:
         "pb_ratio": None,
         "eps": None,
         "roe": None,
+        "roce": None,
         "debt_to_equity": None,
         "promoter_holding": None,
         "fii_holding": None,
@@ -59,142 +60,114 @@ def get_fundamentals(ticker: str) -> dict:
         import requests
         from bs4 import BeautifulSoup
 
+        url = f"https://www.screener.in/company/{ticker}/consolidated/"
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
+                "Chrome/124.0.0.0 Safari/537.36"
+            )
         }
 
-        url = f"https://www.screener.in/company/{ticker}/consolidated/"
         resp = requests.get(url, headers=headers, timeout=10)
         if resp.status_code == 404:
-            # Try standalone (non-consolidated)
+            # Try standalone URL if consolidated not available
             url = f"https://www.screener.in/company/{ticker}/"
-            resp = requests.get(url, headers=headers, timeout=10)
+            resp = requests.get(url, headers=headers, timeout=8)
 
         if resp.status_code != 200:
-            logger.warning("Screener.in returned %s for %s", resp.status_code, ticker)
-            _cache[ticker] = (empty, time.time())
+            logger.warning("Screener.in returned HTTP %d for %s", resp.status_code, ticker)
+            cache_set(cache_key, empty, ttl_seconds=600)
             return empty
 
         soup = BeautifulSoup(resp.text, "html.parser")
         data = dict(empty)
 
-        # ── Key Ratios ────────────────────────────────────────────────────────
-        ratio_items = soup.select("#top-ratios li, .company-ratios li, ul.company-ratios li")
-        if not ratio_items:
-            ratio_container = soup.find(id="top-ratios") or soup.find("div", class_="company-ratios")
-            if ratio_container:
-                ratio_items = ratio_container.find_all("li")
+        # 1. Parse top ratios
+        ratios_list = soup.find("ul", id="top-ratios")
+        if ratios_list:
+            for li in ratios_list.find_all("li"):
+                name_span = li.find("span", class_="name")
+                val_span = li.find("span", class_="value") or li.find("span", class_="number")
+                if not name_span or not val_span:
+                    continue
+                name = name_span.get_text(strip=True).lower()
+                val_text = val_span.get_text(strip=True)
+                val_num = _parse_number(val_text)
 
-        for li in ratio_items:
-            name_el = li.find(class_="name") or li.find("span")
-            val_el = li.find(class_="value") or li.find(class_="nowrap") or li.find(class_="number")
-            
-            text_full = li.get_text(" ", strip=True).lower()
-            name = name_el.get_text(strip=True).lower() if name_el else text_full
-            val_text = val_el.get_text(strip=True) if val_el else li.get_text(strip=True)
-            val = _parse_number(val_text)
+                if "market cap" in name:
+                    data["market_cap"] = val_text
+                elif "stock p/e" in name or name == "p/e":
+                    data["pe_ratio"] = val_num
+                elif "book value" in name:
+                    data["pb_ratio"] = val_num
+                elif "roce" in name:
+                    data["roce"] = val_num
+                elif "roe" in name:
+                    data["roe"] = val_num
+                elif "promoter holding" in name:
+                    data["promoter_holding"] = val_num
+                elif "debt to equity" in name:
+                    data["debt_to_equity"] = val_num
 
-            if "market cap" in name or "market cap" in text_full:
-                data["market_cap"] = val_text.strip()
-            elif "stock p/e" in name or "p/e" in name:
-                data["pe_ratio"] = val
-            elif "book value" in name or "p/b" in name:
-                data["pb_ratio"] = val
-            elif "roce" in name or "return on capital" in name:
-                data["roce"] = val
-            elif "return on equity" in name or "roe" in name:
-                data["roe"] = val
-            elif "eps" in name:
-                data["eps"] = val
-            elif ("debt" in name and "equity" in name) or "debt to equity" in text_full:
-                data["debt_to_equity"] = val
-
-        # ── Shareholding — Promoter & FII ─────────────────────────────────────
-        share_section = soup.find("section", id="shareholding") or soup.find(id="shareholding")
-        if share_section:
-            rows = share_section.find_all("tr")
-            for row in rows:
-                cells = row.find_all("td")
-                if not cells:
-                    cells = row.find_all("th")
-                if len(cells) >= 2:
-                    label = cells[0].get_text(strip=True).lower()
-                    val = _parse_number(cells[-1].get_text(strip=True))
-                    if "promoter" in label:
-                        data["promoter_holding"] = val
-                    elif "fii" in label or "foreign" in label:
-                        data["fii_holding"] = val
-
-        # ── Quarterly Results ─────────────────────────────────────────────────
-        quarterly = []
-        results_section = soup.find("section", id="quarters")
-        if results_section:
-            table = results_section.find("table")
+        # 2. Parse Quarterly Results with QoQ Growth calculation
+        q_section = soup.find("section", id="quarters")
+        if q_section:
+            table = q_section.find("table")
             if table:
-                headers_row = table.find("thead")
-                periods = []
-                if headers_row:
-                    for th in headers_row.find_all("th")[1:]:
-                        periods.append(th.get_text(strip=True))
+                headers_row = table.find("tr")
+                periods = [th.get_text(strip=True) for th in headers_row.find_all("th")[1:]] if headers_row else []
 
-                rows_data = {}
-                for tr in table.find("tbody", {}).find_all("tr") if table.find("tbody") else []:
-                    cells = tr.find_all("td")
+                sales_vals = []
+                profit_vals = []
+                eps_vals = []
+
+                for row in table.find_all("tr"):
+                    cells = row.find_all("td")
                     if not cells:
                         continue
-                    row_label = cells[0].get_text(strip=True).lower()
+                    row_name = cells[0].get_text(strip=True).lower()
                     values = [_parse_number(c.get_text(strip=True)) for c in cells[1:]]
-                    rows_data[row_label] = values
 
-                for i, period in enumerate(periods[:8]):
-                    q = {"period": period, "revenue": None, "net_profit": None, "eps": None}
-                    for key in rows_data:
-                        if "sales" in key or "revenue" in key:
-                            q["revenue"] = rows_data[key][i] if i < len(rows_data[key]) else None
-                        elif "net profit" in key or "profit after" in key:
-                            q["net_profit"] = rows_data[key][i] if i < len(rows_data[key]) else None
-                        elif key == "eps":
-                            q["eps"] = rows_data[key][i] if i < len(rows_data[key]) else None
-                    quarterly.append(q)
-        data["quarterly_results"] = quarterly
+                    if "sales" in row_name or "revenue" in row_name:
+                        sales_vals = values
+                    elif "net profit" in row_name:
+                        profit_vals = values
+                    elif "eps" in row_name:
+                        eps_vals = values
 
-        # ── Annual Revenue & Profit (5Y) ──────────────────────────────────────
-        revenue_5y = []
-        profit_5y = []
-        annual_section = soup.find("section", id="profit-loss")
-        if annual_section:
-            table = annual_section.find("table")
-            if table:
-                header_row = table.find("thead")
-                years = []
-                if header_row:
-                    for th in header_row.find_all("th")[1:6]:
-                        years.append(th.get_text(strip=True))
+                quarterly = []
+                prev_rev = None
+                prev_profit = None
 
-                for tr in table.find("tbody", {}).find_all("tr") if table.find("tbody") else []:
-                    cells = tr.find_all("td")
-                    if not cells:
-                        continue
-                    row_label = cells[0].get_text(strip=True).lower()
-                    values = [_parse_number(c.get_text(strip=True)) for c in cells[1:6]]
-                    if "sales" in row_label or "revenue" in row_label:
-                        revenue_5y = [{"year": y, "value": v} for y, v in zip(years, values)]
-                    elif "net profit" in row_label:
-                        profit_5y = [{"year": y, "value": v} for y, v in zip(years, values)]
+                for i, period in enumerate(periods[-8:]):  # Last 8 quarters
+                    idx = len(periods) - 8 + i
+                    rev = sales_vals[idx] if idx < len(sales_vals) else None
+                    profit = profit_vals[idx] if idx < len(profit_vals) else None
+                    eps = eps_vals[idx] if idx < len(eps_vals) else None
 
-        data["revenue_5y"] = revenue_5y
-        data["profit_5y"] = profit_5y
+                    # Calculate QoQ growth
+                    rev_qoq = round(((rev - prev_rev) / abs(prev_rev)) * 100, 2) if (rev is not None and prev_rev and prev_rev != 0) else None
+                    profit_qoq = round(((profit - prev_profit) / abs(prev_profit)) * 100, 2) if (profit is not None and prev_profit and prev_profit != 0) else None
 
-        _cache[ticker] = (data, time.time())
+                    quarterly.append({
+                        "period": period,
+                        "revenue": rev,
+                        "net_profit": profit,
+                        "eps": eps,
+                        "revenue_qoq_pct": rev_qoq,
+                        "profit_qoq_pct": profit_qoq,
+                    })
+
+                    prev_rev = rev
+                    prev_profit = profit
+
+                data["quarterly_results"] = quarterly
+
+        cache_set(cache_key, data, ttl_seconds=_CACHE_TTL)
         return data
 
     except Exception as exc:
-        logger.warning("Fundamentals scraping failed for %s: %s", ticker, exc)
-        _cache[ticker] = (empty, time.time())
+        logger.warning("Fundamentals scraper error for %s: %s", ticker, exc)
+        cache_set(cache_key, empty, ttl_seconds=600)
         return empty

@@ -216,6 +216,21 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log (ts_utc)"
         )
 
+        # 14. Saved Custom Screener Scans
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS saved_scans (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id      TEXT    NOT NULL DEFAULT 'default_user',
+                name         TEXT    NOT NULL,
+                description  TEXT,
+                filters_json TEXT    NOT NULL DEFAULT '{}',
+                created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            )
+        """)
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_saved_scans_user ON saved_scans (user_id)"
+        )
+
         # Cleanup: purge any legacy intraday records that polluted the daily historical_prices table
         cursor.execute("DELETE FROM historical_prices WHERE length(date) != 10")
 
@@ -974,4 +989,57 @@ def reset_paper_account(user_id: str = "default_user") -> dict:
         conn.commit()
     write_audit_log("RESET", "paper_account", details="reset to ₹10,00,000", user_id=user_id)
     return {"status": "RESET", "cash_balance": 1000000.0}
+
+
+# ── Saved Screener Scans Functions ───────────────────────────────────────────
+
+def add_saved_scan(name: str, filters: dict, description: str = None, user_id: str = "default_user") -> int:
+    """Saves a custom screener filter preset."""
+    import json as _json
+    with get_db_connection() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO saved_scans (user_id, name, description, filters_json)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, name.strip(), description, _json.dumps(filters)),
+        )
+        conn.commit()
+        row_id = cursor.lastrowid
+    write_audit_log("CREATE", "saved_scan", entity_id=row_id, details=f"name={name}", user_id=user_id)
+    return row_id
+
+
+def get_saved_scans(user_id: str = "default_user") -> list:
+    """Returns all saved screener scans for a user."""
+    import json as _json
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, user_id, name, description, filters_json, created_at
+            FROM saved_scans
+            WHERE user_id = ?
+            ORDER BY id DESC
+            """,
+            (user_id,),
+        ).fetchall()
+    result = []
+    for r in rows:
+        item = dict(r)
+        try:
+            item["filters"] = _json.loads(item["filters_json"] or "{}")
+        except Exception:
+            item["filters"] = {}
+        result.append(item)
+    return result
+
+
+def delete_saved_scan(scan_id: int, user_id: str = "default_user") -> bool:
+    """Deletes a saved screener scan by ID."""
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM saved_scans WHERE id = ? AND user_id = ?", (scan_id, user_id))
+        conn.commit()
+    write_audit_log("DELETE", "saved_scan", entity_id=scan_id, user_id=user_id)
+    return True
+
 
