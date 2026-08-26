@@ -9,7 +9,23 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Minimal loading placeholder — replaced by React on mount -->
+      <div id="init-loader" style="display:flex;align-items:center;justify-content:center;height:100vh;background:#04050E;color:#818CF8;font-family:monospace;flex-direction:column;gap:12px">
+        <div style="font-size:1.4rem;font-weight:800">⚡ StockOracle Pro</div>
+        <div style="font-size:0.85rem;color:#475569">Loading terminal…</div>
+      </div>
+    </div>
+    <script>
+      // Global JS error fallback — surfaces any crash as visible text instead of blank screen
+      window.addEventListener('error', function(e) {
+        var root = document.getElementById('root');
+        if (root && !document.getElementById('error-display')) {
+          root.innerHTML = '<div id="error-display" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;background:#04050E;color:#F8FAFC;font-family:monospace;padding:24px;text-align:center"><div style="font-size:2rem;margin-bottom:12px">⚠️</div><h2 style="color:#EF4444;margin-bottom:8px">App Crash: ' + (e.message || 'Unknown error') + '</h2><pre style="background:#0F172A;padding:16px;border-radius:8px;font-size:0.75rem;color:#94A3B8;max-width:700px;overflow:auto;text-align:left">' + (e.filename ? e.filename + ':' + e.lineno : '') + '\n' + (e.error && e.error.stack ? e.error.stack : '') + '</pre><button onclick="location.reload()" style="margin-top:16px;padding:8px 20px;background:#3B82F6;border:none;border-radius:8px;color:#fff;font-weight:700;cursor:pointer;font-size:0.9rem">Reload</button></div>';
+        }
+      });
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
+
