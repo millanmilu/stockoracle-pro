@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 import pandas as pd
 import numpy as np
 from datetime import datetime
@@ -67,6 +67,27 @@ class TestDataInvariants(unittest.TestCase):
         # Each returned date string must be strictly 10 characters (YYYY-MM-DD)
         for d in retrieved["date"]:
             self.assertEqual(len(str(d)), 10, f"Database returned non-daily date: {d}")
+
+    def test_validate_and_sanitize_candles(self):
+        """Ensure OHLC sanity constraint: low <= open/close <= high and duplicate removal."""
+        from backend.data.database import validate_and_sanitize_candles
+        corrupt_df = pd.DataFrame([
+            {"date": "2026-08-10", "open": 100.0, "high": 90.0, "low": 110.0, "close": 105.0, "volume": 1000}, # Inverted H/L
+            {"date": "2026-08-11", "open": -50.0, "high": 60.0, "low": 40.0, "close": 55.0, "volume": 500},    # Negative price
+            {"date": "2026-08-12", "open": 200.0, "high": 210.0, "low": 195.0, "close": 205.0, "volume": 2000},
+            {"date": "2026-08-12", "open": 200.0, "high": 215.0, "low": 195.0, "close": 208.0, "volume": 2500}, # Duplicate date
+        ])
+        clean = validate_and_sanitize_candles(corrupt_df)
+        
+        # 1. Negative price row dropped
+        self.assertNotIn("2026-08-11", clean["date"].values)
+        # 2. Duplicate 2026-08-12 deduped to 1 row
+        self.assertEqual(len(clean[clean["date"] == "2026-08-12"]), 1)
+        # 3. Inverted high/low fixed
+        row_10 = clean[clean["date"] == "2026-08-10"].iloc[0]
+        self.assertTrue(row_10["high"] >= max(row_10["open"], row_10["close"]))
+        self.assertTrue(row_10["low"] <= min(row_10["open"], row_10["close"]))
+
 
 if __name__ == "__main__":
     unittest.main()

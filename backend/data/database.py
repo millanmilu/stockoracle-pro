@@ -227,6 +227,35 @@ def _normalize_price(v):
         return None
 
 
+def validate_and_sanitize_candles(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Validates and sanitizes an OHLCV DataFrame:
+    1. Ensures all prices are positive and normalized.
+    2. Enforces OHLC invariant: low <= min(open, close) and high >= max(open, close).
+    3. Removes duplicate timestamps preserving the latest record.
+    """
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    clean_df = df.copy()
+    if "date" in clean_df.columns:
+        clean_df = clean_df.drop_duplicates(subset=["date"], keep="last")
+
+    # Enforce positive prices
+    for col in ["open", "high", "low", "close"]:
+        if col in clean_df.columns:
+            clean_df[col] = pd.to_numeric(clean_df[col], errors="coerce")
+            clean_df = clean_df[clean_df[col] > 0]
+
+    if clean_df.empty:
+        return clean_df
+
+    # Sanitize high and low bounds
+    clean_df["high"] = clean_df[["high", "open", "close"]].max(axis=1)
+    clean_df["low"] = clean_df[["low", "open", "close"]].min(axis=1)
+    return clean_df
+
+
 def clean_paise_and_outliers(ticker: str = None):
     """
     Scans historical_prices table in SQLite, auto-corrects paise-to-rupee unit mismatches
