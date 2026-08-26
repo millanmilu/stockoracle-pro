@@ -66,19 +66,30 @@ class StockPredictor:
             if row.get("pattern_marubozu"):
                 pattern_score += 0.5 if row["close"] > row["open"] else -0.5
 
+            close_val = float(row["close"]) if "close" in row else closes[idx]
+            rsi_val = float(row.get("rsi", row.get("rsi_14", 50.0)))
+            macd_hist_val = float(row.get("macd_hist", 0.0))
+            vol_val = float(row.get("volatility", row.get("volatility_30", 0.015)))
+            bb_val = float(row.get("bb_pct_b", row.get("bb_percentage", 0.5)))
+            sma20_val = float(row.get("sma_20", close_val))
+            sma50_val = float(row.get("sma_50", close_val))
+            adx_val = float(row.get("adx", row.get("adx_14", 25.0)))
+            atr_val = float(row.get("atr", row.get("atr_14", 0.0)))
+
             feat_matrix[idx] = [
                 float(np.clip(log_rets[idx], -0.20, 0.20)),
-                float(row["rsi"] / 100.0),
-                float(np.tanh(row["macd_hist"] / (row["close"] + 1e-9) * 100.0)),
-                float(np.tanh(row["volatility"] * 10.0)),
-                float(np.clip(row["bb_pct_b"], -1.0, 2.0)),
-                float((row["close"] / (row["sma_20"] + 1e-9)) - 1.0),
-                float((row["close"] / (row["sma_50"] + 1e-9)) - 1.0),
-                float(row.get("adx", 25.0) / 100.0),
-                float(row.get("atr", 0.0) / (row["close"] + 1e-9) * 10.0),
+                float(rsi_val / 100.0),
+                float(np.tanh(macd_hist_val / (close_val + 1e-9) * 100.0)),
+                float(np.tanh(vol_val * 10.0)),
+                float(np.clip(bb_val, -1.0, 2.0)),
+                float((close_val / (sma20_val + 1e-9)) - 1.0),
+                float((close_val / (sma50_val + 1e-9)) - 1.0),
+                float(adx_val / 100.0),
+                float(atr_val / (close_val + 1e-9) * 10.0),
                 float(pattern_score)
             ]
         return feat_matrix
+
 
     def _prepare_data(self, df: pd.DataFrame, fit_scaler: bool = False) -> Tuple[np.ndarray, np.ndarray]:
         """
