@@ -486,7 +486,8 @@ def get_stock_dcf_valuation(
     ticker: str,
     growth_5y: Optional[float] = 0.12,
     terminal_growth: Optional[float] = 0.05,
-    wacc: Optional[float] = 0.11
+    wacc: Optional[float] = 0.11,
+    _auth: None = Security(verify_api_key),
 ):
     """Returns Multi-Stage DCF Intrinsic Fair Value and Benjamin Graham Number via OpenBB Core Adapter."""
     from backend.providers.openbb.wrapper import get_openbb_client
@@ -500,14 +501,19 @@ def get_stock_dcf_valuation(
 
 
 @router.get("/market/rrg-sectors")
-def get_market_rrg_sectors():
+def get_market_rrg_sectors(
+    _auth: None = Security(verify_api_key),
+):
     """Returns JdK Relative Rotation Graph (RRG) sector rotation quadrants."""
     from backend.analysis.rrg_rotation import calculate_rrg_sector_rotation
     return calculate_rrg_sector_rotation()
 
 
 @router.post("/options/strategy-payoff")
-def get_options_strategy_payoff(req: OptionsStrategyRequest):
+def get_options_strategy_payoff(
+    req: OptionsStrategyRequest,
+    _auth: None = Security(verify_api_key),
+):
     """Simulates multi-leg options strategy payoff curves and 3D Volatility surface."""
     from backend.analysis.options_lab import calculate_strategy_payoff
     return calculate_strategy_payoff(
@@ -519,46 +525,68 @@ def get_options_strategy_payoff(req: OptionsStrategyRequest):
 
 
 @router.get("/stock/{ticker}/volume-profile")
-def get_stock_volume_profile(ticker: str, period: Optional[str] = "3M", bins: Optional[int] = 25):
-    """Returns horizontal Volume Profile (VPVR) price distribution, Point of Control (POC), and Value Area (VAH/VAL)."""
+def get_stock_volume_profile(
+    ticker: str,
+    period: Optional[str] = "3M",
+    bins: Optional[int] = 25,
+    _auth: None = Security(verify_api_key),
+):
+    """Returns horizontal Volume Profile (VPVR), Point of Control (POC), and Value Area."""
     from backend.analysis.volume_profile import calculate_volume_profile
     return calculate_volume_profile(ticker=ticker, period=period, n_bins=bins)
 
 
 @router.get("/macro/sovereign-yields")
-def get_sovereign_macro():
-    """Returns India 10Y G-Sec vs US 10Y Treasury spread, RBI repo rate, CPI inflation, and commodity correlations via OpenBB Hub."""
+def get_sovereign_macro(
+    _auth: None = Security(verify_api_key),
+):
+    """Returns India 10Y G-Sec vs US 10Y Treasury spread, RBI repo rate, CPI, and commodity correlations."""
     from backend.providers.openbb.wrapper import get_openbb_client
     obb = get_openbb_client()
     return obb.get_sovereign_macro_hub()
 
 
 @router.post("/portfolio/risk-cockpit")
-def get_portfolio_quant_risk(req: PortfolioRiskRequest):
-    """Computes Parametric & Historical VaR 95%/99%, Expected Shortfall (CVaR), Sharpe, and Correlation Heatmap via OpenBB Engine."""
+def get_portfolio_quant_risk(
+    req: PortfolioRiskRequest,
+    _auth: None = Security(verify_api_key),
+):
+    """Computes Parametric & Historical VaR 95%/99%, CVaR, Sharpe, and Correlation Heatmap."""
     from backend.providers.openbb.wrapper import get_openbb_client
     obb = get_openbb_client()
     return obb.calculate_portfolio_risk(
         positions=req.positions,
-        portfolio_value=req.portfolio_value or 1000000.0
+        portfolio_value=req.portfolio_value or 1_000_000.0,
     )
 
 
 @router.get("/terminal/ticker-tape")
-def get_terminal_ticker_tape():
+def get_terminal_ticker_tape(
+    _auth: None = Security(verify_api_key),
+):
+    """
+    Real-time index ribbon for the Bloomberg top bar.
+    Data is served from macro_terminal service; if unavailable the
+    status field is set to 'CACHED' or 'UNAVAILABLE' — never fake prices.
+    """
+    from backend.analysis.macro_terminal import get_sovereign_macro_dashboard
+    try:
+        macro = get_sovereign_macro_dashboard()
+        indices_raw = macro.get("indices", [])
+        if indices_raw:
+            return {"indices": indices_raw, "source": "live"}
+    except Exception:
+        pass
 
-    """Returns real-time streaming indices and commodity ribbons for the Bloomberg top bar."""
+    # Explicit unavailable state — no fake prices
     return {
+        "source": "unavailable",
         "indices": [
-            {"symbol": "NIFTY 50", "name": "NSE Benchmark", "price": 24852.4, "change_pct": 0.42, "status": "ACTIVE"},
-            {"symbol": "SENSEX", "name": "BSE Benchmark", "price": 81340.2, "change_pct": 0.38, "status": "ACTIVE"},
-            {"symbol": "BANK NIFTY", "name": "Banking Index", "price": 53210.5, "change_pct": 0.65, "status": "ACTIVE"},
-            {"symbol": "INDIA VIX", "name": "Volatility Index", "price": 12.84, "change_pct": -3.20, "status": "ACTIVE"},
-            {"symbol": "NIFTY IT", "name": "Tech Sector", "price": 38420.0, "change_pct": 0.85, "status": "ACTIVE"},
-            {"symbol": "USD / INR", "name": "Forex", "price": 83.92, "change_pct": -0.05, "status": "ACTIVE"},
-            {"symbol": "BRENT CRUDE", "name": "Commodity ($)", "price": 78.45, "change_pct": -1.15, "status": "ACTIVE"},
-            {"symbol": "GOLD (INR)", "name": "Precious Metals", "price": 71850.0, "change_pct": 0.25, "status": "ACTIVE"},
-        ]
+            {"symbol": "NIFTY 50",   "name": "NSE Benchmark",    "price": None, "change_pct": None, "status": "UNAVAILABLE"},
+            {"symbol": "SENSEX",     "name": "BSE Benchmark",    "price": None, "change_pct": None, "status": "UNAVAILABLE"},
+            {"symbol": "BANK NIFTY", "name": "Banking Index",    "price": None, "change_pct": None, "status": "UNAVAILABLE"},
+            {"symbol": "INDIA VIX",  "name": "Volatility Index", "price": None, "change_pct": None, "status": "UNAVAILABLE"},
+            {"symbol": "USD / INR",  "name": "Forex",            "price": None, "change_pct": None, "status": "UNAVAILABLE"},
+            {"symbol": "BRENT CRUDE","name": "Commodity ($)",    "price": None, "change_pct": None, "status": "UNAVAILABLE"},
+        ],
     }
-
-

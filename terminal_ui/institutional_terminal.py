@@ -431,10 +431,29 @@ class InstitutionalTerminalApp(App):
             viewport.symbol = sym
             watchlist.selected_symbol = sym
 
+    # ── Initial symbol propagation (from --symbol CLI arg) ─────────────────
+
+    def on_mount(self) -> None:
+        """Apply CLI-supplied symbol to viewport and watchlist on first mount."""
+        initial = getattr(self, "_initial_symbol", "RELIANCE")
+        if initial and initial != "RELIANCE":
+            try:
+                viewport  = self.query_one(MainAnalyticsViewport)
+                watchlist = self.query_one(InteractiveWatchlist)
+                viewport.symbol          = initial
+                watchlist.selected_symbol = initial
+            except Exception:
+                pass  # Widgets not yet mounted — they will read _initial_symbol themselves
+
+
 
 def launch_institutional_terminal(symbol: str = "RELIANCE") -> None:
-    """Launches the full interactive Textual Institutional Terminal."""
-    InstitutionalTerminalApp().run()
+    """Launches the full interactive Textual Institutional Terminal with the given symbol pre-selected."""
+    app = InstitutionalTerminalApp()
+    # Propagate the CLI-supplied symbol before the event loop starts
+    app._initial_symbol = symbol.upper().strip()
+    app.run()
+
 
 
 if __name__ == "__main__":

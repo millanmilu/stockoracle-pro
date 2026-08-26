@@ -60,7 +60,13 @@ async def evaluate_single_alert(alert: dict, auto_trigger: bool = True) -> dict:
             info = fetch_company_info(ticker)
             if info and info.get("current_price"):
                 cur_p = float(info["current_price"])
-                target = float(param.get("target_price") or param.get("price") or 0)
+                # Canonical field is "threshold"; fall back to legacy "target_price" / "price"
+                target = float(
+                    param.get("threshold")
+                    or param.get("target_price")
+                    or param.get("price")
+                    or 0
+                )
                 current_val = f"₹{cur_p:,.2f}"
 
                 if target > 0:
@@ -70,6 +76,7 @@ async def evaluate_single_alert(alert: dict, auto_trigger: bool = True) -> dict:
                     elif alert_type == "price_below" and cur_p <= target:
                         triggered = True
                         reason = f"Price dropped BELOW target ₹{target:,.2f} (Current: ₹{cur_p:,.2f})"
+
 
         # 2. RSI Alerts
         elif alert_type in ["rsi_below", "rsi_above"]:
