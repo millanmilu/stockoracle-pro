@@ -70,17 +70,17 @@ export default function Dashboard() {
         {/* Left: Ticker & Live Price */}
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h1 style={{ margin: 0, fontSize: 'clamp(1.3rem, 4vw, 1.85rem)', fontWeight: 800, color: '#F0F0FF', letterSpacing: '-0.02em' }}>
+            <h1 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, color: '#F0F0FF', letterSpacing: '-0.01em' }}>
               {selectedSymbol}
             </h1>
-            <span style={{ fontSize: '0.72rem', padding: '3px 8px', borderRadius: '6px', background: 'rgba(99,102,241,0.15)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)', fontWeight: 700 }}>
+            <span style={{ fontSize: '0.68rem', padding: '2px 8px', borderRadius: '5px', background: 'rgba(99,102,241,0.15)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)', fontWeight: 700 }}>
               NSE EQUITIES
             </span>
           </div>
 
           {currentPrice !== null ? (
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '12px', marginTop: '6px' }}>
-              <span style={{ fontSize: '1.9rem', fontWeight: 800, color: '#F0F0FF', fontFamily: 'Space Grotesk, sans-serif' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px', marginTop: '4px' }}>
+              <span style={{ fontSize: '1.45rem', fontWeight: 800, color: '#F0F0FF', fontFamily: 'JetBrains Mono, monospace' }}>
                 ₹{currentPrice.toFixed(2)}
               </span>
               {priceChange !== null && pctChange !== null && (
@@ -88,21 +88,21 @@ export default function Dashboard() {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '4px',
-                  padding: '3px 8px',
-                  borderRadius: '6px',
+                  padding: '2px 7px',
+                  borderRadius: '5px',
                   background: isUp ? 'rgba(16,185,129,0.12)' : 'rgba(239,83,80,0.12)',
                   border: `1px solid ${isUp ? 'rgba(16,185,129,0.3)' : 'rgba(239,83,80,0.3)'}`,
                   color: isUp ? '#10B981' : '#EF5350',
                   fontWeight: 700,
-                  fontSize: '0.85rem',
+                  fontSize: '0.78rem',
                 }}>
-                  {isUp ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
+                  {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
                   <span>{isUp ? '+' : ''}{priceChange.toFixed(2)} ({isUp ? '+' : ''}{pctChange.toFixed(2)}%)</span>
                 </div>
               )}
             </div>
           ) : (
-            <div style={{ fontSize: '0.85rem', color: '#9CA3AF', marginTop: '6px' }}>Fetching market data…</div>
+            <div style={{ fontSize: '0.8rem', color: '#9CA3AF', marginTop: '4px' }}>Fetching market data…</div>
           )}
         </div>
 

@@ -63,11 +63,20 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 13.5px;
+  line-height: 1.55;
   min-height: 100vh;
   overflow-x: hidden;
 }
+
+/* ── Standardized Typography Scale ── */
+h1 { font-size: 1.25rem; font-weight: 800; color: var(--text-primary); letter-spacing: -0.01em; }
+h2 { font-size: 1.15rem; font-weight: 700; color: var(--text-primary); }
+h3 { font-size: 0.92rem; font-weight: 700; color: var(--text-primary); }
+h4 { font-size: 0.82rem; font-weight: 600; color: var(--text-secondary); }
+p  { font-size: 0.8rem; color: var(--text-secondary); line-height: 1.55; }
+button { font-family: inherit; font-size: 0.76rem; }
+input, select, textarea { font-family: inherit; font-size: 0.78rem; }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 5px; }

@@ -173,11 +173,11 @@ export default function AdvancedScreener() {
       {/* Top Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 'clamp(1.3rem, 4vw, 1.8rem)', fontWeight: 800, color: '#F0F0FF', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <SlidersHorizontal size={24} color="#818CF8" />
+          <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#F0F0FF', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <SlidersHorizontal size={20} color="#818CF8" />
             Institutional Multi-Factor Screener
           </h1>
-          <p style={{ margin: '4px 0 0 0', fontSize: '0.84rem', color: '#94A3B8' }}>
+          <p style={{ margin: '3px 0 0 0', fontSize: '0.8rem', color: '#94A3B8' }}>
             Combine Screener.in fundamental ratios with Technical timing, AI consensus & historical backtests.
           </p>
         </div>

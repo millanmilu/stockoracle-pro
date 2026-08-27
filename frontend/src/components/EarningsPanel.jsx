@@ -28,8 +28,8 @@ export default function EarningsPanel({ ticker: propTicker }) {
 
   return (
     <div style={{ padding: "clamp(14px, 3vw, 24px)", display: "flex", flexDirection: "column", gap: 20, maxWidth: 1100, margin: "0 auto" }}>
-      <h1 style={{ margin: 0, fontSize: "clamp(1.2rem, 4vw, 1.5rem)", fontWeight: 800, color: "#F0F0FF", display: "flex", alignItems: "center", gap: 10 }}>
-        <BarChart2 size={22} color="#818CF8" />Earnings — {ticker}
+      <h1 style={{ margin: 0, fontSize: "1.25rem", fontWeight: 800, color: "#F0F0FF", display: "flex", alignItems: "center", gap: 8 }}>
+        <BarChart2 size={20} color="#818CF8" />Earnings — {ticker}
       </h1>
 
       {quarterly.length > 0 ? (

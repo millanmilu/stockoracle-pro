@@ -263,12 +263,12 @@ export default function SupplyChainPanel() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800,
+          <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800,
             background: 'linear-gradient(135deg, #8B5CF6, #06B6D4)', WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent' }}>
             Supply Chain Analysis
           </h2>
-          <p style={{ margin: '4px 0 0', color: '#6B7280', fontSize: '0.85rem' }}>
+          <p style={{ margin: '3px 0 0', color: '#94A3B8', fontSize: '0.8rem' }}>
             <span style={{ color: '#F0F0FF', fontWeight: 700 }}>{ticker}</span>
             {' · '}
             <span style={{ color: '#6366F1' }}>{sector}</span>

@@ -39,23 +39,23 @@ export default function PatternsPanel({ ticker }) {
         border: '1px solid rgba(99,102,241,0.15)', borderRadius: 14,
       }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: '0.72rem', color: '#6B7280', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+          <div style={{ fontSize: '0.68rem', color: '#6B7280', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
             Pattern Bias (last 45 days)
           </div>
-          <div style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: '1.5rem', fontWeight: 800, color: biasColor }}>
+          <div style={{ fontFamily: 'Space Grotesk, sans-serif', fontSize: '1.25rem', fontWeight: 800, color: biasColor }}>
             {bias_label}
           </div>
-          <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: '0.78rem' }}>
+          <div style={{ display: 'flex', gap: 14, marginTop: 4, fontSize: '0.74rem' }}>
             <span style={{ color: '#10B981' }}>🟢 {bullish} Bullish</span>
             <span style={{ color: '#F43F5E' }}>🔴 {bearish} Bearish</span>
             <span style={{ color: '#F59E0B' }}>🟡 {neutral} Neutral</span>
           </div>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <div style={{ fontSize: '0.7rem', color: '#6B7280', marginBottom: 4 }}>BIAS SCORE</div>
+          <div style={{ fontSize: '0.68rem', color: '#6B7280', marginBottom: 3, fontWeight: 600 }}>BIAS SCORE</div>
           <div style={{
             fontFamily: 'JetBrains Mono, monospace', fontWeight: 800,
-            fontSize: '2rem', color: biasColor,
+            fontSize: '1.45rem', color: biasColor,
           }}>{bias_score}</div>
           <div style={{ fontSize: '0.68rem', color: '#4B5563' }}>/ 100</div>
         </div>

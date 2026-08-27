@@ -91,14 +91,14 @@ export default function AIInsightCard() {
       <div style={{ display: 'flex', gap: '30px', flexWrap: 'wrap' }}>
         {/* Left side: Price */}
         <div style={{ flex: 1 }}>
-          <h3 style={{ margin: '0 0 10px 0', color: '#aaa', fontSize: '0.9rem' }}>Tomorrow's Prediction</h3>
-          <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: color }}>
+          <h3 style={{ margin: '0 0 8px 0', color: '#94A3B8', fontSize: '0.85rem', fontWeight: 700 }}>Tomorrow's Prediction</h3>
+          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: color, fontFamily: 'JetBrains Mono, monospace' }}>
             {formatPrice(predicted_price)}
           </div>
-          <div style={{ color: '#888', marginTop: '5px' }}>
+          <div style={{ color: '#94A3B8', marginTop: '4px', fontSize: '0.78rem' }}>
             Current: {formatPrice(current_price)} {pct_change !== null && !isNaN(pct_change) ? `(${pct_change > 0 ? '+' : ''}${pct_change.toFixed(2)}%)` : ''}
           </div>
-          <div style={{ color: '#888', marginTop: '5px' }}>
+          <div style={{ color: '#64748B', marginTop: '3px', fontSize: '0.72rem' }}>
             Confidence Range: {formatPrice(low_bound)} - {formatPrice(high_bound)}
           </div>
         </div>

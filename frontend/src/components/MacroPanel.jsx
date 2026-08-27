@@ -68,15 +68,15 @@ function MacroCard({ data, isLarge }) {
 
       {/* Value */}
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <span style={{ fontSize: isLarge ? '2.2rem' : '1.8rem', fontWeight: 900,
-          color: sc.text, fontFamily: 'Space Grotesk, sans-serif',
+        <span style={{ fontSize: isLarge ? '1.45rem' : '1.25rem', fontWeight: 800,
+          color: sc.text, fontFamily: 'JetBrains Mono, monospace',
           textShadow: `0 0 20px ${sc.text}40`,
         }}>
           {unit && unit !== '%' && unit !== '' && !unit.startsWith('₹') ? '' : ''}
           {unit === '₹' || unit === '₹Cr' ? unit : ''}{displayValue}{unit === '%' ? '%' : ''}
           {unit === '₹Cr' ? '' : ''}
         </span>
-        <span style={{ fontSize: '1rem', fontWeight: 700, color: trendColor }}>
+        <span style={{ fontSize: '0.9rem', fontWeight: 700, color: trendColor }}>
           {trendIcon}
         </span>
       </div>

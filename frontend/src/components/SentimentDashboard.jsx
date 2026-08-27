@@ -158,12 +158,12 @@ export default function SentimentDashboard() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800, color: '#F0F0FF',
+          <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#F0F0FF',
             background: 'linear-gradient(135deg, #6366F1, #8B5CF6)', WebkitBackgroundClip: 'text',
             WebkitTextFillColor: 'transparent' }}>
             Market Sentiment Analysis
           </h2>
-          <p style={{ margin: '4px 0 0', color: '#6B7280', fontSize: '0.85rem' }}>
+          <p style={{ margin: '3px 0 0', color: '#94A3B8', fontSize: '0.8rem' }}>
             AI-powered news sentiment across NSE blue chips · Powered by FinBERT
           </p>
         </div>

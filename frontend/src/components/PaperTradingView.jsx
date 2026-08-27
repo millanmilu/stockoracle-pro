@@ -141,16 +141,16 @@ export default function PaperTradingView() {
       {/* Header Bar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Wallet size={24} color="#6366F1" />
-            <h1 style={{ margin: 0, fontSize: '1.4rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Wallet size={20} color="#6366F1" />
+            <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, letterSpacing: '-0.01em' }}>
               1-Click Paper Trading Simulator
             </h1>
-            <span style={{ fontSize: '0.72rem', background: 'rgba(99,102,241,0.15)', color: '#818CF8', padding: '2px 8px', borderRadius: '6px', fontWeight: 700 }}>
+            <span style={{ fontSize: '0.68rem', background: 'rgba(99,102,241,0.15)', color: '#818CF8', padding: '2px 8px', borderRadius: '6px', fontWeight: 700 }}>
               Virtual ₹10 Lakhs
             </span>
           </div>
-          <p style={{ margin: '4px 0 0 0', color: '#94A3B8', fontSize: '0.82rem' }}>
+          <p style={{ margin: '3px 0 0 0', color: '#94A3B8', fontSize: '0.8rem' }}>
             Test AI prediction signals & execute risk-free simulated trades in live NSE market conditions.
           </p>
         </div>

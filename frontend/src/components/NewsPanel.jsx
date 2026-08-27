@@ -107,14 +107,14 @@ export default function NewsPanel() {
   ];
 
   return (
-    <div style={{ padding: '20px' }}>
-      <h2 style={{ margin: '0 0 20px 0', color: '#fff' }}>Market Sentiment</h2>
+    <div style={{ padding: 'clamp(14px, 2.5vw, 24px)', maxWidth: '1200px', margin: '0 auto' }}>
+      <h2 style={{ margin: '0 0 16px 0', fontSize: '1.25rem', fontWeight: 800, color: '#F0F0FF' }}>Market Sentiment & News Analysis</h2>
 
       {/* AI News Summary — new addition */}
       <AiNewsSummary ticker={selectedSymbol} />
 
       {/* Half Donut Gauge */}
-      <div style={{ height: '200px', width: '100%', position: 'relative' }}>
+      <div style={{ height: '180px', width: '100%', position: 'relative' }}>
         <ResponsiveContainer>
           <PieChart>
             <Pie
@@ -123,8 +123,8 @@ export default function NewsPanel() {
               cy="100%"
               startAngle={180}
               endAngle={0}
-              innerRadius={80}
-              outerRadius={100}
+              innerRadius={70}
+              outerRadius={90}
               paddingAngle={0}
               dataKey="value"
               stroke="none"
@@ -137,11 +137,12 @@ export default function NewsPanel() {
         </ResponsiveContainer>
         <div style={{ 
           position: 'absolute', 
-          bottom: '10px', 
+          bottom: '8px', 
           width: '100%', 
           textAlign: 'center', 
-          fontSize: '1.5rem', 
-          fontWeight: 'bold',
+          fontSize: '1.3rem', 
+          fontWeight: 800,
+          fontFamily: 'JetBrains Mono, monospace',
           color: data[0].color
         }}>
           {sentimentScore > 0 ? '+' : ''}{sentimentScore.toFixed(2)}
@@ -149,7 +150,7 @@ export default function NewsPanel() {
       </div>
 
       {/* Headlines */}
-      <h3 style={{ marginTop: '30px', color: '#aaa', fontSize: '1rem' }}>Top Headlines</h3>
+      <h3 style={{ marginTop: '24px', color: '#94A3B8', fontSize: '0.9rem', fontWeight: 700 }}>Top Headlines</h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '15px' }}>
         {news.map((item, idx) => (
           <div key={idx} style={{ backgroundColor: 'var(--card-bg, #1e1e1e)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border, #333)' }}>

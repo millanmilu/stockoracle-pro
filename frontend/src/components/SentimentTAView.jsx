@@ -170,12 +170,12 @@ export default function SentimentTAView({ ticker: propTicker }) {
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 'clamp(1.2rem,4vw,1.7rem)', fontWeight: 900, color: '#F0F0FF',
-            display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Activity size={22} color="#6366F1" />
+          <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#F0F0FF',
+            display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Activity size={20} color="#6366F1" />
             Sentiment + TA — {d.company_name || ticker}
           </h1>
-          <p style={{ margin: '4px 0 0', color: '#6B7280', fontSize: '0.82rem' }}>
+          <p style={{ margin: '3px 0 0', color: '#94A3B8', fontSize: '0.8rem' }}>
             FinBERT News · RSI · MACD · Bollinger Bands · Options PCR · AI Verdict
           </p>
         </div>

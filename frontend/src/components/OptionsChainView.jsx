@@ -9,9 +9,9 @@ function GaugeLabel({ value, label }) {
   if (value < 0.8) color = "#EF5350";
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
-      <div style={{ fontSize: "0.65rem", color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
-      <div style={{ fontSize: "1.5rem", fontWeight: 800, color, fontFamily: "JetBrains Mono, monospace" }}>{value?.toFixed(2) ?? "—"}</div>
-      <div style={{ fontSize: "0.68rem", color }}>
+      <div style={{ fontSize: "0.68rem", color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: "1.25rem", fontWeight: 800, color, fontFamily: "JetBrains Mono, monospace" }}>{value?.toFixed(2) ?? "—"}</div>
+      <div style={{ fontSize: "0.7rem", color, fontWeight: 600 }}>
         {value > 1.2 ? "Bullish" : value < 0.8 ? "Bearish" : "Neutral"}
       </div>
     </div>
@@ -76,21 +76,21 @@ export default function OptionsChainView({ ticker: propTicker }) {
     <div style={{ padding: "clamp(12px, 2.5vw, 24px)", display: "flex", flexDirection: "column", gap: 16, maxWidth: 1300, margin: "0 auto" }}>
 
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-        <h1 style={{ margin: 0, fontSize: "clamp(1.2rem, 4vw, 1.5rem)", fontWeight: 800, color: "#F0F0FF", display: "flex", alignItems: "center", gap: 10 }}>
-          <Layers size={22} color="#818CF8" />Options Chain — {ticker}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+        <h1 style={{ margin: 0, fontSize: "1.25rem", fontWeight: 800, color: "#F0F0FF", display: "flex", alignItems: "center", gap: 8 }}>
+          <Layers size={18} color="#818CF8" />Options Chain — {ticker}
         </h1>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {data?.expiry_dates?.length > 0 && (
             <select
               value={selectedExpiry || ""}
               onChange={handleExpiryChange}
-              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid rgba(99,102,241,0.3)", background: "#0C1022", color: "#F0F0FF", fontSize: "0.82rem" }}
+              style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid rgba(99,102,241,0.3)", background: "#0C1022", color: "#F0F0FF", fontSize: "0.78rem" }}
             >
               {data.expiry_dates.map(d => <option key={d} value={d}>{d}</option>)}
             </select>
           )}
-          <button onClick={() => fetchData(selectedExpiry)} style={{ padding: "6px 12px", borderRadius: 8, background: "rgba(99,102,241,0.1)", color: "#818CF8", border: "1px solid rgba(99,102,241,0.2)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: "0.78rem" }}>
+          <button onClick={() => fetchData(selectedExpiry)} style={{ padding: "5px 12px", borderRadius: 6, background: "rgba(99,102,241,0.1)", color: "#818CF8", border: "1px solid rgba(99,102,241,0.2)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontSize: "0.75rem", fontWeight: 600 }}>
             <RefreshCw size={12} />Refresh
           </button>
         </div>
@@ -98,18 +98,18 @@ export default function OptionsChainView({ ticker: propTicker }) {
 
       {/* Summary Bar */}
       {data && (
-        <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-          <div style={{ background: "#0C1022", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 12, padding: "14px 24px", display: "flex", alignItems: "center", gap: 10 }}>
-            <div style={{ fontSize: "0.68rem", color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em" }}>Underlying</div>
-            <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#F0F0FF", fontFamily: "JetBrains Mono, monospace" }}>₹{fmt(underlying, 2)}</div>
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+          <div style={{ background: "#0C1022", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 10, padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: "0.68rem", color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Underlying</div>
+            <div style={{ fontSize: "1.25rem", fontWeight: 800, color: "#F0F0FF", fontFamily: "JetBrains Mono, monospace" }}>₹{fmt(underlying, 2)}</div>
           </div>
-          <div style={{ background: "#0C1022", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 12, padding: "14px 24px" }}>
+          <div style={{ background: "#0C1022", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 10, padding: "12px 18px" }}>
             <GaugeLabel value={data.pcr} label="PCR (Put/Call Ratio)" />
           </div>
           {data.max_pain != null && (
-            <div style={{ background: "#0C1022", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 12, padding: "14px 24px", display: "flex", flexDirection: "column", alignItems: "center" }}>
-              <div style={{ fontSize: "0.68rem", color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em" }}>Max Pain</div>
-              <div style={{ fontSize: "1.5rem", fontWeight: 800, color: "#F59E0B", fontFamily: "JetBrains Mono, monospace" }}>₹{fmt(data.max_pain, 0)}</div>
+            <div style={{ background: "#0C1022", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 10, padding: "12px 18px", display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <div style={{ fontSize: "0.68rem", color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>Max Pain</div>
+              <div style={{ fontSize: "1.25rem", fontWeight: 800, color: "#F59E0B", fontFamily: "JetBrains Mono, monospace" }}>₹{fmt(data.max_pain, 0)}</div>
             </div>
           )}
         </div>

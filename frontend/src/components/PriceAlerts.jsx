@@ -172,10 +172,10 @@ export default function PriceAlerts() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 'clamp(1.3rem, 4vw, 1.6rem)', color: '#F0F0FF', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Bell size={24} style={{ color: '#F59E0B' }} /> Smart Alerts Hub
+          <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#F0F0FF', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Bell size={20} style={{ color: '#F59E0B' }} /> Smart Alerts Hub
           </h1>
-          <div style={{ fontSize: '0.8rem', color: '#9CA3AF', marginTop: 4 }}>
+          <div style={{ fontSize: '0.78rem', color: '#94A3B8', marginTop: 3 }}>
             Real-time triggers for Price Targets, RSI Overbought/Oversold, Volume Surges & AI Forecasts
           </div>
         </div>
