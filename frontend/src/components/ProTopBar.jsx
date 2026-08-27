@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Menu, Zap, Sun, Moon, Maximize2, Minimize2, Search } from 'lucide-react';
 import useStore from '../store/useStore';
+import api from '../utils/api';
 
 export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenCommandPalette }) {
   const { selectedSymbol, theme, setTheme } = useStore();
@@ -19,9 +20,9 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
     const fetchIndices = async () => {
       try {
         const [nRes, sRes, bRes] = await Promise.allSettled([
-          fetch('/api/stock/NIFTY50/info').then(r => r.ok ? r.json() : null),
-          fetch('/api/stock/SENSEX/info').then(r => r.ok ? r.json() : null),
-          fetch('/api/stock/BANKNIFTY/info').then(r => r.ok ? r.json() : null),
+          api.get('/api/stock/NIFTY50/info').then(r => r.data).catch(() => null),
+          api.get('/api/stock/SENSEX/info').then(r => r.data).catch(() => null),
+          api.get('/api/stock/BANKNIFTY/info').then(r => r.data).catch(() => null),
         ]);
         if (nRes.status === 'fulfilled' && nRes.value && (nRes.value.price || nRes.value.current_price)) {
           setNifty(nRes.value);
@@ -45,11 +46,8 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
     if (query.length > 1) {
       const fetchSearch = async () => {
         try {
-          const res = await fetch(`/api/market/search?q=${query}`);
-          if (res.ok) {
-            const data = await res.json();
-            setResults(data.results || data);
-          }
+          const { data } = await api.get('/api/stocks/search', { params: { query } });
+          setResults(data.results || data || []);
         } catch (e) {}
       };
       const to = setTimeout(fetchSearch, 300);

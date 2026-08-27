@@ -218,8 +218,8 @@ async def get_sentiment_ta(ticker: str, period: Optional[str] = "3M"):
     pcr: Optional[float] = None
     pcr_sentiment_label = "N/A"
     try:
-        from backend.data.options import get_nse_options_chain
-        opts = await loop.run_in_executor(None, lambda: get_nse_options_chain(t))
+        from backend.data.options import get_options_chain
+        opts = await loop.run_in_executor(None, lambda: get_options_chain(t))
         pcr = opts.get("put_call_ratio")
         pcr_sentiment_label = opts.get("pcr_sentiment", "N/A")
     except Exception as e:

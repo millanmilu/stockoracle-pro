@@ -56,6 +56,7 @@ export default function OrderFlow({ candles, showImbalance = true }) {
     }
     
     // Calculate statistics safely without call stack overflow
+    const deltas = flowMetrics.map(m => m.delta);
     const maxDelta = deltas.length > 0 ? deltas.reduce((m, v) => (v > m ? v : m), -Infinity) : 0;
     const minDelta = deltas.length > 0 ? deltas.reduce((m, v) => (v < m ? v : m), Infinity) : 0;
     const avgDelta = deltas.length > 0 ? deltas.reduce((a, b) => a + b, 0) / deltas.length : 0;

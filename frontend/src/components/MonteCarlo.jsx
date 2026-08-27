@@ -56,12 +56,12 @@ export default function MonteCarlo({ ticker }) {
       tooltip: {
         backgroundColor: '#0C1022', borderColor: 'rgba(99,102,241,0.3)', borderWidth: 1,
         titleColor: '#F0F0FF', bodyColor: '#9CA3AF',
-        callbacks: { label: ctx => ` ${ctx.dataset.label}: $${Number(ctx.raw).toFixed(2)}` }
+        callbacks: { label: ctx => ` ${ctx.dataset.label}: ₹${Number(ctx.raw).toFixed(2)}` }
       }
     },
     scales: {
       x: { ticks: { color: '#4B5563', maxTicksLimit: 8, font: { size: 10 } }, grid: { color: 'rgba(99,102,241,0.06)' } },
-      y: { ticks: { color: '#4B5563', font: { size: 10 }, callback: v => `$${v.toFixed(0)}` }, grid: { color: 'rgba(99,102,241,0.06)' } }
+      y: { ticks: { color: '#4B5563', font: { size: 10 }, callback: v => `₹${v.toFixed(0)}` }, grid: { color: 'rgba(99,102,241,0.06)' } }
     }
   }
 
@@ -71,10 +71,10 @@ export default function MonteCarlo({ ticker }) {
 
   const stats = [
     { label: 'Prob. Up',        value: `${probUp}%`,           color: mc.prob_up > 0.5 ? '#10B981' : '#F43F5E' },
-    { label: 'VaR 95%',         value: `$${mc.var_95.toFixed(2)}`,  color: '#F43F5E' },
-    { label: 'CVaR 95%',        value: `$${mc.cvar_95.toFixed(2)}`, color: '#F43F5E' },
+    { label: 'VaR 95%',         value: `₹${mc.var_95.toFixed(2)}`,  color: '#F43F5E' },
+    { label: 'CVaR 95%',        value: `₹${mc.cvar_95.toFixed(2)}`, color: '#F43F5E' },
     { label: 'Expected Return',  value: `${expRet}%`,           color: mc.expected_return >= 0 ? '#10B981' : '#F43F5E' },
-    { label: 'Median Target',    value: `$${medianPrice.toFixed(2)}`, color: '#6366F1' },
+    { label: 'Median Target',    value: `₹${medianPrice.toFixed(2)}`, color: '#6366F1' },
     { label: 'Horizon',          value: '30 Days',              color: '#9CA3AF' },
   ]
 

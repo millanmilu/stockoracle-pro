@@ -14,6 +14,7 @@ export default function MultiTileWorkspace() {
   const { selectedSymbol, setSelectedSymbol } = useStore();
   const [workspaceMode, setWorkspaceMode] = useState('institutional-4'); // 'institutional-4' | '4-charts' | '2-split'
   const [maximizedTile, setMaximizedTile] = useState(null); // null | 1 | 2 | 3 | 4
+  const [tileInterval, setTileInterval] = useState('1d');
 
   const toggleMaximize = (tileId) => {
     setMaximizedTile(maximizedTile === tileId ? null : tileId);
@@ -233,11 +234,11 @@ export default function MultiTileWorkspace() {
                 <ChartPane
                   paneId={0}
                   symbol={selectedSymbol}
-                  interval="1d"
+                  interval={tileInterval}
                   isActive={true}
                   onSelectPane={() => {}}
                   onSymbolChange={(id, s) => setSelectedSymbol(s)}
-                  onIntervalChange={() => {}}
+                  onIntervalChange={(id, intv) => setTileInterval(intv)}
                   onToggleMaximize={() => toggleMaximize(1)}
                   isMaximized={maximizedTile === 1}
                 />
@@ -292,11 +293,11 @@ export default function MultiTileWorkspace() {
                 <ChartPane
                   paneId={0}
                   symbol={selectedSymbol}
-                  interval="1d"
+                  interval={tileInterval}
                   isActive={true}
                   onSelectPane={() => {}}
                   onSymbolChange={(id, s) => setSelectedSymbol(s)}
-                  onIntervalChange={() => {}}
+                  onIntervalChange={(id, intv) => setTileInterval(intv)}
                   onToggleMaximize={() => toggleMaximize(1)}
                   isMaximized={maximizedTile === 1}
                 />

@@ -78,14 +78,13 @@ def trigger_training(ticker: str, background_tasks: BackgroundTasks, epochs: int
         train_stock_model_task.delay(task_id, t, epochs)
     except Exception:
         # Fallback to local background task
-        from backend.analysis.trainer import train_model
+        from backend.analysis.trainer import train_pipeline
         def _run_training():
             try:
                 save_task_status(task_id, t, "training", 20)
-                df = fetch_stock_data(t, period="2Y")
-                if df is not None:
-                    mape = train_model(t, df, epochs=epochs)
-                    save_task_status(task_id, t, "completed", 100, mape=mape)
+                result = train_pipeline(t)
+                mape = result.get("validation_mape", 0.0)
+                save_task_status(task_id, t, "completed", 100, mape=mape)
             except Exception as e:
                 save_task_status(task_id, t, "failed", 0, error=str(e))
         background_tasks.add_task(_run_training)
@@ -110,7 +109,7 @@ def get_stock_backtest(ticker: str, initial_capital: float = 100000.0, strategy:
     df = fetch_stock_data(t, period="2Y")
     if df is None or len(df) < 50:
         raise HTTPException(status_code=404, detail=f"Insufficient history for '{t}'.")
-    return run_backtest(t, df, initial_capital=initial_capital, strategy_type=strategy)
+    return run_backtest(df, t, initial_capital=initial_capital)
 
 
 @router.get("/stock/{ticker}/ai-consensus")

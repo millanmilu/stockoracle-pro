@@ -261,7 +261,8 @@ app.include_router(sentiment_ta_router)
 @app.get("/api/sentiment/market")
 async def get_market_sentiment_legacy():
     from backend.analysis.sentiment_market import get_market_sentiment
-    return get_market_sentiment()
+    _default_tickers = ["RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK", "HINDUNILVR", "SBIN", "BHARTIARTL", "ITC", "KOTAKBANK", "LT", "AXISBANK", "BAJFINANCE", "MARUTI", "TITAN"]
+    return get_market_sentiment(_default_tickers)
 
 
 @app.get("/api/screener/advanced")

@@ -32,7 +32,7 @@ export default function PaperTradingView() {
   // Fetch current ticker LTP
   useEffect(() => {
     if (!ticker) return;
-    api.get(`/api/stock/${ticker}`)
+    api.get(`/api/stock/${ticker}/info`)
       .then((res) => {
         if (res.data?.current_price) {
           setCurrentLtp(res.data.current_price);
@@ -98,10 +98,10 @@ export default function PaperTradingView() {
   // Close / Exit Position
   const handleClosePosition = async (posId, posTicker) => {
     try {
-      const liveRes = await api.get(`/api/stock/${posTicker}`);
+      const liveRes = await api.get(`/api/stock/${posTicker}/info`);
       const exitPrice = liveRes.data?.current_price || currentLtp || 100.0;
 
-      await api.post(`/api/paper/close/${posId}`, null, { params: { current_price: exitPrice } });
+      await api.post('/api/paper/close', { position_id: posId, current_price: exitPrice });
       toast.success(`Closed position for ${posTicker} @ ₹${exitPrice.toFixed(2)}`);
       fetchPaperData();
     } catch (err) {

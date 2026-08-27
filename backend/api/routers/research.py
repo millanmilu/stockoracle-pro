@@ -590,3 +590,25 @@ def get_terminal_ticker_tape(
             {"symbol": "BRENT CRUDE","name": "Commodity ($)",    "price": None, "change_pct": None, "status": "UNAVAILABLE"},
         ],
     }
+
+
+@router.post("/stock/{ticker}/simulate")
+def simulate_scenario(ticker: str, req: dict):
+    """Runs what-if scenario using trained model with overridden feature inputs."""
+    t = ticker.upper().strip()
+    try:
+        from backend.analysis.trainer import predict_future
+        overrides = {}
+        if "sentiment" in req:
+            overrides["sentiment_score"] = float(req["sentiment"])
+        if "volatility_multiplier" in req:
+            overrides["volatility"] = float(req.get("volatility_multiplier", 1.0))
+        if "volume_multiplier" in req:
+            overrides["volume_ratio"] = float(req.get("volume_multiplier", 1.0))
+        result = predict_future(t, override_features=overrides if overrides else None)
+        return result
+    except FileNotFoundError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"No trained model found for {t}. Train it first.")
+    except Exception as e:
+        return {"error": str(e)}

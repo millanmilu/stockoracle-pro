@@ -14,6 +14,9 @@ def calculate_support_resistance(df: pd.DataFrame, window: int = 10) -> Dict[str
     highs  = df["high"].values.astype(float)
     lows   = df["low"].values.astype(float)
 
+    if len(closes) < 2:
+        return {"current_price": float(closes[-1]) if len(closes) > 0 else 0, "pivot_points": {}, "swing_levels": [], "fibonacci": {}}
+
     current_price = float(closes[-1])
 
     # ── 1. Classic Pivot Points (last session) ──────────────────────────────

@@ -154,11 +154,11 @@ export default function NewsPanel() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '15px', marginTop: '15px' }}>
         {news.map((item, idx) => (
           <div key={idx} style={{ backgroundColor: 'var(--card-bg, #1e1e1e)', padding: '15px', borderRadius: '8px', border: '1px solid var(--border, #333)' }}>
-            <a href={item.link} target="_blank" rel="noreferrer" style={{ color: '#0ea5e9', textDecoration: 'none', fontWeight: 'bold' }}>
+            <a href={item.url || item.link} target="_blank" rel="noreferrer" style={{ color: '#0ea5e9', textDecoration: 'none', fontWeight: 'bold' }}>
               {item.title}
             </a>
             <div style={{ color: '#666', fontSize: '0.8rem', marginTop: '8px' }}>
-              {item.source} • {new Date(item.published).toLocaleDateString()}
+              {item.source} • {new Date(item.published_at || item.published).toLocaleDateString()}
             </div>
           </div>
         ))}

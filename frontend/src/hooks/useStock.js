@@ -68,7 +68,7 @@ export function useStock() {
 
   const startTraining = useCallback(async (ticker) => {
     try {
-      const { data } = await api.post(`/api/stock/${ticker}/train`);
+      const { data } = await api.post(`/api/train/${ticker}`);
       return data;
     } catch (e) { return null; }
   }, []);

@@ -17,7 +17,7 @@ export default function ProRightPanel({ onClose }) {
   const fetchQuotes = async () => {
     try {
       const results = await Promise.allSettled(
-        DEFAULT_TICKERS.map(t => fetch(`/api/stock/${t}/info`).then(r => r.json()))
+        DEFAULT_TICKERS.map(t => api.get(`/api/stock/${t}/info`).then(r => r.data))
       );
       const newQuotes = {};
       results.forEach((res, i) => {

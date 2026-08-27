@@ -20,7 +20,7 @@ export default function AITraining() {
     stopPolling()
 
     try {
-      const { data } = await api.post(`/api/stock/${sym}/train`);
+      const { data } = await api.post(`/api/train/${sym}`);
       const taskId = data.task_id;
       setStatus({ status: 'training', progress: 10, total_epochs: 60 });
 

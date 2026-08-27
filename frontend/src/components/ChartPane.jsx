@@ -108,7 +108,6 @@ export default function ChartPane({
   const upperLineRef = useRef(null);
   const lowerLineRef = useRef(null);
 
-  const activeCandleRef = useRef(null);
   const lastPriceRef = useRef(null);
 
   const [history, setHistory] = useState([]);

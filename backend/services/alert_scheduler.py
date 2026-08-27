@@ -115,8 +115,8 @@ async def evaluate_single_alert(alert: dict, auto_trigger: bool = True) -> dict:
         # 4. AI Signal Alerts
         elif alert_type == "ai_signal":
             try:
-                from backend.main import _get_prediction_logic
-                pred = _get_prediction_logic(ticker)
+                from backend.analysis.trainer import predict_future
+                pred = predict_future(ticker)
                 actual_sig = str(pred.get("signal", "")).upper()
                 target_sig = str(param.get("signal", "buy")).upper()
                 current_val = actual_sig

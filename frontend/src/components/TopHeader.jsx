@@ -93,7 +93,7 @@ export default function TopHeader() {
     if (isRetraining) return;
     setIsRetraining(true);
     try {
-      const { data } = await api.post(`/api/stock/${selectedSymbol}/train`);
+      const { data } = await api.post(`/api/train/${selectedSymbol}`);
       toast.success(`AI Model training started for ${selectedSymbol}`);
 
       const interval = setInterval(async () => {

@@ -193,6 +193,18 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_paper_pos_user ON paper_positions (user_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_paper_ord_user ON paper_orders (user_id)")
 
+        # 12. Smart Alerts
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS smart_alerts (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     TEXT    NOT NULL DEFAULT 'default_user',
+                ticker      TEXT    NOT NULL,
+                alert_type  TEXT    NOT NULL,
+                param_value TEXT,
+                created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                triggered   INTEGER NOT NULL DEFAULT 0
+            )
+        """)
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_smart_alerts_ticker ON smart_alerts (ticker)"
         )

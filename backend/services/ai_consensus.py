@@ -68,8 +68,8 @@ def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
     # ── Engine 2: Machine Learning Prediction Engine ──
     ml_score = 52.0
     try:
-        from backend.main import _get_prediction_logic
-        pred = _get_prediction_logic(ticker)
+        from backend.analysis.trainer import predict_future
+        pred = predict_future(ticker)
         pred_conf = pred.get("ai_confidence_score", 55)
         pred_return = pred.get("predicted_return_7d", 0.02)
         ml_signal_raw = pred.get("signal", "hold").upper()
