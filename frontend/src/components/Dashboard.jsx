@@ -21,7 +21,10 @@ function SkeletonChart() {
 }
 
 export default function Dashboard() {
-  const { selectedSymbol, setActiveView, historyCache, setHistoryCache } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
+  const setActiveView = useStore(s => s.setActiveView);
+  const historyCache = useStore(s => s.historyCache);
+  const setHistoryCache = useStore(s => s.setHistoryCache);
   const { fetchHistory } = useStock();
   const [interval, setInterval] = useState('1d');
   const [localLoading, setLocalLoading] = useState(false);

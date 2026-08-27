@@ -215,7 +215,9 @@ function CorrelationTable({ upstream, downstream, onSelect }) {
 }
 
 export default function SupplyChainPanel() {
-  const { selectedSymbol, setSelectedSymbol, setActiveView } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
+  const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
+  const setActiveView = useStore(s => s.setActiveView);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

@@ -12,7 +12,8 @@ import {
 } from 'lucide-react';
 
 export default function MultiTileWorkspace() {
-  const { selectedSymbol, setSelectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
+  const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
   const [workspaceMode, setWorkspaceMode] = useState('institutional-4'); // 'institutional-4' | '4-charts' | '2-split'
   const [maximizedTile, setMaximizedTile] = useState(null); // null | 1 | 2 | 3 | 4
   const [tileInterval, setTileInterval] = useState('1d');

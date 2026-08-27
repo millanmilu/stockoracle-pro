@@ -8,7 +8,8 @@ import { Activity, RefreshCw, Compass, ArrowUpRight, Zap } from 'lucide-react';
 import useStore from '../../store/useStore';
 
 export default function RRGRotationView() {
-  const { setSelectedSymbol, setActiveView } = useStore();
+  const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
+  const setActiveView = useStore(s => s.setActiveView);
   const [rrgData, setRrgData] = useState(null);
   const [loading, setLoading] = useState(true);
 

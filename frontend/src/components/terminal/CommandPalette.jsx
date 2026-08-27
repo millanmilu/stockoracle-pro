@@ -19,7 +19,8 @@ const COMMANDS = [
 ];
 
 export default function CommandPalette({ isOpen, onClose }) {
-  const { setSelectedSymbol, setActiveView } = useStore();
+  const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
+  const setActiveView = useStore(s => s.setActiveView);
   const [query, setQuery] = useState('');
   const inputRef = useRef(null);
 

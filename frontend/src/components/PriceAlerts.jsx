@@ -19,7 +19,7 @@ const ALERT_CATEGORIES = [
 ];
 
 export default function PriceAlerts() {
-  const { selectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [evaluating, setEvaluating] = useState(false);

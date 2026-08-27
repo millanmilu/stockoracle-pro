@@ -8,7 +8,7 @@ import {
 import toast from 'react-hot-toast';
 
 export default function ValuationTerminalView({ ticker: propTicker, compact = false }) {
-  const { selectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
   const ticker = propTicker || selectedSymbol;
 
   const [growth5y, setGrowth5y] = useState(12);

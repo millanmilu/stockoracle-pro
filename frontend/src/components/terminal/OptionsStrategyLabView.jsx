@@ -10,7 +10,7 @@ import {
 import toast from 'react-hot-toast';
 
 export default function OptionsStrategyLabView({ ticker: propTicker, compact = false }) {
-  const { selectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
   const ticker = propTicker || selectedSymbol;
 
   const [strategyType, setStrategyType] = useState('BULL_CALL_SPREAD');

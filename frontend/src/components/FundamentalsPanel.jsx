@@ -33,7 +33,7 @@ function RatioCard({ label, value, unit = '', colorFn }) {
 }
 
 export default function FundamentalsPanel({ ticker: propTicker }) {
-  const { selectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
   const ticker = propTicker || selectedSymbol;
 
   const [activeTab, setActiveTab] = useState('overview');

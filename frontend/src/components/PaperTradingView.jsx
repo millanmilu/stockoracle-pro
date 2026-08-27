@@ -8,7 +8,10 @@ import {
 import toast from 'react-hot-toast';
 
 export default function PaperTradingView() {
-  const { selectedSymbol, setSelectedSymbol, setActiveView, theme } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
+  const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
+  const setActiveView = useStore(s => s.setActiveView);
+  const theme = useStore(s => s.theme);
   const isDark = theme !== 'light';
 
   const [account, setAccount] = useState({ cash_balance: 1000000.0, starting_balance: 1000000.0 });

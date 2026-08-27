@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import useStore from "../store/useStore";
 import api from "../utils/api";
 import { Layers, RefreshCw, AlertTriangle } from "lucide-react";
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 function GaugeLabel({ value, label }) {
   let color = "#F59E0B";
@@ -19,13 +20,23 @@ function GaugeLabel({ value, label }) {
 }
 
 export default function OptionsChainView({ ticker: propTicker }) {
-  const { selectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
   const ticker = propTicker || selectedSymbol;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedExpiry, setSelectedExpiry] = useState(null);
   const [lastRefresh, setLastRefresh] = useState(null);
+
+  const chain = data?.chain || [];
+
+  const parentRef = useRef(null);
+  const rowVirtualizer = useVirtualizer({
+    count: chain.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 40,
+    overscan: 20,
+  });
 
   const fetchData = useCallback(async (expiry) => {
     setLoading(true);
@@ -59,7 +70,6 @@ export default function OptionsChainView({ ticker: propTicker }) {
     fetchData(exp);
   };
 
-  const chain = data?.chain || [];
   const underlying = data?.underlying_value;
   const maxOI = Math.max(...chain.map(c => Math.max(c.call_oi, c.put_oi)), 1);
 
@@ -132,7 +142,7 @@ export default function OptionsChainView({ ticker: propTicker }) {
 
       {/* Options Chain Table */}
       {!loading && chain.length > 0 && (
-        <div style={{ background: "#0C1022", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 12, overflowX: "auto" }}>
+        <div ref={parentRef} style={{ background: "#0C1022", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 12, overflowX: "auto", overflowY: "auto", height: 600 }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.78rem" }}>
             <thead>
               <tr style={{ borderBottom: "2px solid rgba(255,255,255,0.08)" }}>
@@ -151,14 +161,18 @@ export default function OptionsChainView({ ticker: propTicker }) {
               </tr>
             </thead>
             <tbody>
-              {chain.map((row, i) => {
+              {rowVirtualizer.getVirtualItems()[0]?.start > 0 && (
+                <tr style={{ height: rowVirtualizer.getVirtualItems()[0].start }} />
+              )}
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const row = chain[virtualRow.index];
                 const isATM = row.strike_price === atmStrike;
-                const rowBg = isATM ? "rgba(245,158,11,0.06)" : i % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)";
+                const rowBg = isATM ? "rgba(245,158,11,0.06)" : virtualRow.index % 2 === 0 ? "transparent" : "rgba(255,255,255,0.01)";
                 const callOIPct = (row.call_oi / maxOI) * 100;
                 const putOIPct = (row.put_oi / maxOI) * 100;
                 const oiChgColor = (chg) => chg > 0 ? "#10B981" : chg < 0 ? "#EF5350" : "#6B7280";
                 return (
-                  <tr key={i} style={{ background: rowBg, borderBottom: "1px solid rgba(255,255,255,0.03)", borderLeft: isATM ? "3px solid #F59E0B" : "3px solid transparent" }}>
+                  <tr key={virtualRow.index} ref={rowVirtualizer.measureElement} data-index={virtualRow.index} style={{ background: rowBg, borderBottom: "1px solid rgba(255,255,255,0.03)", borderLeft: isATM ? "3px solid #F59E0B" : "3px solid transparent" }}>
                     {/* Call columns */}
                     <td style={{ padding: "6px 10px", textAlign: "right", position: "relative" }}>
                       <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: `${callOIPct}%`, background: "rgba(16,185,129,0.08)", maxWidth: "100%" }} />
@@ -185,6 +199,9 @@ export default function OptionsChainView({ ticker: propTicker }) {
                   </tr>
                 );
               })}
+              {rowVirtualizer.getVirtualItems().length > 0 && (
+                <tr style={{ height: rowVirtualizer.getTotalSize() - rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1].end }} />
+              )}
             </tbody>
           </table>
         </div>

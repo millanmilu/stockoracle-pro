@@ -6,7 +6,8 @@ import api from '../utils/api';
 const DEFAULT_TICKERS = ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'AXISBANK', 'WIPRO', 'LT', 'TATAMOTORS'];
 
 export default function ProRightPanel({ onClose }) {
-  const { selectedSymbol, setSelectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
+  const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
   const [filter, setFilter] = useState('');
   const [quotes, setQuotes] = useState({});
   const [chatInput, setChatInput] = useState('');

@@ -5,7 +5,9 @@ import { Sparkles } from 'lucide-react';
 import AIConsensusGauge from './AIConsensusGauge';
 
 export default function AIInsightCard() {
-  const { selectedSymbol, predictionData, setPredictionData } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
+  const predictionData = useStore(s => s.predictionData);
+  const setPredictionData = useStore(s => s.setPredictionData);
   const [explainData, setExplainData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);

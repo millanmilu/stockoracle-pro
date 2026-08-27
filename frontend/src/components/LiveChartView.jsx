@@ -432,7 +432,8 @@ function BacktestOverlayPanel({ symbol, showBacktest, setShowBacktest, backtestD
 /* ─── Main Component ─────────────────────────────────────────────────────────── */
 
 export default function LiveChartView() {
-  const { selectedSymbol, setSelectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
+  const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
   const { fetchHistory, fetchPredict, searchStock, searchStocks, fetchBacktest } = useStock();
 
   const [interval,    setInterval]    = useState('1d');

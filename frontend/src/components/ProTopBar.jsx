@@ -4,7 +4,9 @@ import useStore from '../store/useStore';
 import api from '../utils/api';
 
 export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenCommandPalette }) {
-  const { selectedSymbol, theme, setTheme } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
+  const theme = useStore(s => s.theme);
+  const setTheme = useStore(s => s.setTheme);
   const [nifty, setNifty] = useState({ price: 24852.40, change: 104.20, changePercent: 0.42 });
   const [sensex, setSensex] = useState({ price: 81340.20, change: 308.10, changePercent: 0.38 });
   const [bankNifty, setBankNifty] = useState({ price: 53210.50, change: 345.80, changePercent: 0.65 });

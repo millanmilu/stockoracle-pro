@@ -13,7 +13,8 @@ const DEFAULT_PANES = [
 ];
 
 export default function MultiChartGrid({ layout: controlledLayout, onLayoutChange }) {
-  const { selectedSymbol, setSelectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
+  const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
   const [internalLayout, setInternalLayout] = useState('1x2'); // '1x1' | '1x2' | '2x1' | '2x2'
   const layout = controlledLayout || internalLayout;
   const [activePaneId, setActivePaneId] = useState(0);

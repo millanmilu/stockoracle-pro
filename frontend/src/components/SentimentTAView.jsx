@@ -122,7 +122,7 @@ function Card({ title, icon: Icon, color = '#6366F1', children, style = {} }) {
 
 /* ─── Main Component ─────────────────────────────────────────────────────── */
 export default function SentimentTAView({ ticker: propTicker }) {
-  const { selectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
   const ticker = (propTicker || selectedSymbol || 'RELIANCE').toUpperCase();
 
   const [data, setData]       = useState(null);

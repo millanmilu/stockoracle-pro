@@ -149,7 +149,8 @@ function ColorLegend() {
 }
 
 export default function MarketHeatmap() {
-  const { setSelectedSymbol, setActiveView } = useStore();
+  const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
+  const setActiveView = useStore(s => s.setActiveView);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);

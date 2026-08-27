@@ -14,7 +14,7 @@ const QUICK_PROMPTS = [
 const isDark = true; // component always in dark right rail
 
 export default function AIChatPanel({ ticker: propTicker }) {
-  const { selectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
   const ticker = propTicker || selectedSymbol;
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');

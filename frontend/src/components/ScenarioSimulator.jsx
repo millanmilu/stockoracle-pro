@@ -3,7 +3,9 @@ import useStore from '../store/useStore';
 import api from '../utils/api';
 
 export default function ScenarioSimulator() {
-  const { selectedSymbol, predictionData, setPredictionData } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
+  const predictionData = useStore(s => s.predictionData);
+  const setPredictionData = useStore(s => s.setPredictionData);
   const [sentiment, setSentiment] = useState(0);
   const [volatility, setVolatility] = useState(1);
   const [volume, setVolume] = useState(1);

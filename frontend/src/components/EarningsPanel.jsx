@@ -7,7 +7,7 @@ import { BarChart2 } from "lucide-react";
 const cardStyle = { background: "#0C1022", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 12, padding: "18px 20px" };
 
 export default function EarningsPanel({ ticker: propTicker }) {
-  const { selectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
   const ticker = propTicker || selectedSymbol;
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);

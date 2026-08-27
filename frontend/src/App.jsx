@@ -61,7 +61,10 @@ function AIPredictionView() {
 }
 
 export default function App() {
-  const { activeView, trainingStatus, selectedSymbol, theme } = useStore();
+  const activeView = useStore(s => s.activeView);
+  const trainingStatus = useStore(s => s.trainingStatus);
+  const selectedSymbol = useStore(s => s.selectedSymbol);
+  const theme = useStore(s => s.theme);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [showCommandPalette, setShowCommandPalette] = useState(false);

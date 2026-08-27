@@ -8,7 +8,8 @@ import {
 import useStore from '../store/useStore';
 
 export default function ProSidebar({ collapsed, onToggleCollapse }) {
-  const { activeView, setActiveView } = useStore();
+  const activeView = useStore(s => s.activeView);
+  const setActiveView = useStore(s => s.setActiveView);
 
   const sections = [
     {

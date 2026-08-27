@@ -10,9 +10,11 @@ import {
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid
 } from 'recharts';
+import { useVirtualizer } from '@tanstack/react-virtual';
 
 export default function AdvancedScreener() {
-  const { setSelectedSymbol, setActiveView } = useStore();
+  const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
+  const setActiveView = useStore(s => s.setActiveView);
 
   // Mode: 'formula' | 'visual'
   const [queryMode, setQueryMode] = useState('formula');
@@ -52,6 +54,14 @@ export default function AdvancedScreener() {
   const [backtestLoading, setBacktestLoading] = useState(false);
   const [backtestResults, setBacktestResults] = useState(null);
   const [holdingDays, setHoldingDays] = useState(20);
+
+  const parentRef = React.useRef(null);
+  const rowVirtualizer = useVirtualizer({
+    count: results.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 58,
+    overscan: 10,
+  });
 
   // 1. Fetch Presets on Mount
   useEffect(() => {
@@ -412,13 +422,18 @@ export default function AdvancedScreener() {
       </div>
 
       {/* ── Virtualized Results Table ── */}
-      <div style={{
-        background: '#0C1022',
-        border: '1px solid rgba(99,102,241,0.15)',
-        borderRadius: 12,
-        padding: '16px 20px',
-        overflowX: 'auto'
-      }}>
+      <div 
+        ref={parentRef}
+        style={{
+          background: '#0C1022',
+          border: '1px solid rgba(99,102,241,0.15)',
+          borderRadius: 12,
+          padding: '16px 20px',
+          overflowX: 'auto',
+          overflowY: 'auto',
+          height: '600px'
+        }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
           <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#F0F0FF' }}>
             Found <span style={{ color: '#10B981' }}>{totalCount}</span> matching stocks
@@ -445,50 +460,59 @@ export default function AdvancedScreener() {
             </tr>
           </thead>
           <tbody>
-            {results.map((r) => (
-              <tr key={r.ticker} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: '#CBD5E1' }}>
-                <td style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, color: '#F0F0FF' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column' }}>
-                    <span>{r.ticker}</span>
-                    <span style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 400 }}>{r.name}</span>
-                  </div>
-                </td>
-                <td style={{ textAlign: 'left', padding: '10px 8px', fontSize: '0.75rem', color: '#94A3B8' }}>{r.sector}</td>
-                <td style={{ padding: '10px 8px', fontWeight: 600 }}>₹{Number(r.close_price).toLocaleString('en-IN')}</td>
-                <td style={{ padding: '10px 8px', color: (r.change_1d_pct || 0) >= 0 ? '#10B981' : '#EF5350' }}>
-                  {r.change_1d_pct != null ? `${r.change_1d_pct > 0 ? '+' : ''}${r.change_1d_pct}%` : '—'}
-                </td>
-                <td style={{ padding: '10px 8px' }}>{r.pe_ratio}</td>
-                <td style={{ padding: '10px 8px', color: (r.roce_pct || 0) > 20 ? '#10B981' : '#CBD5E1', fontWeight: 600 }}>{r.roce_pct}%</td>
-                <td style={{ padding: '10px 8px' }}>{r.debt_to_equity}</td>
-                <td style={{ padding: '10px 8px', color: (r.rsi_14 || 50) < 40 ? '#10B981' : (r.rsi_14 || 50) > 70 ? '#EF5350' : '#CBD5E1' }}>{r.rsi_14}</td>
-                <td style={{ padding: '10px 8px' }}>{r.volume_ratio_20d}x</td>
-                <td style={{ padding: '10px 8px' }}>
-                  <span style={{
-                    padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 700,
-                    background: (r.ai_consensus_score || 50) > 80 ? 'rgba(16,185,129,0.15)' : 'rgba(99,102,241,0.15)',
-                    color: (r.ai_consensus_score || 50) > 80 ? '#10B981' : '#818CF8'
-                  }}>
-                    {r.ai_consensus_score} ({r.ai_signal || 'BUY'})
-                  </span>
-                </td>
-                <td style={{ padding: '10px 8px' }}>
-                  <button
-                    onClick={() => {
-                      setSelectedSymbol(r.ticker);
-                      setActiveView('Fundamentals');
-                    }}
-                    style={{
-                      padding: '4px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.15)',
-                      color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer',
-                      fontSize: '0.72rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4
-                    }}
-                  >
-                    <BookOpen size={11} /> Research
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {rowVirtualizer.getVirtualItems()[0]?.start > 0 && (
+              <tr style={{ height: rowVirtualizer.getVirtualItems()[0].start }} />
+            )}
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const r = results[virtualRow.index];
+              return (
+                <tr key={r.ticker} ref={rowVirtualizer.measureElement} data-index={virtualRow.index} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: '#CBD5E1' }}>
+                  <td style={{ textAlign: 'left', padding: '10px 8px', fontWeight: 700, color: '#F0F0FF' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span>{r.ticker}</span>
+                      <span style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 400 }}>{r.name}</span>
+                    </div>
+                  </td>
+                  <td style={{ textAlign: 'left', padding: '10px 8px', fontSize: '0.75rem', color: '#94A3B8' }}>{r.sector}</td>
+                  <td style={{ padding: '10px 8px', fontWeight: 600 }}>₹{Number(r.close_price).toLocaleString('en-IN')}</td>
+                  <td style={{ padding: '10px 8px', color: (r.change_1d_pct || 0) >= 0 ? '#10B981' : '#EF5350' }}>
+                    {r.change_1d_pct != null ? `${r.change_1d_pct > 0 ? '+' : ''}${r.change_1d_pct}%` : '—'}
+                  </td>
+                  <td style={{ padding: '10px 8px' }}>{r.pe_ratio}</td>
+                  <td style={{ padding: '10px 8px', color: (r.roce_pct || 0) > 20 ? '#10B981' : '#CBD5E1', fontWeight: 600 }}>{r.roce_pct}%</td>
+                  <td style={{ padding: '10px 8px' }}>{r.debt_to_equity}</td>
+                  <td style={{ padding: '10px 8px', color: (r.rsi_14 || 50) < 40 ? '#10B981' : (r.rsi_14 || 50) > 70 ? '#EF5350' : '#CBD5E1' }}>{r.rsi_14}</td>
+                  <td style={{ padding: '10px 8px' }}>{r.volume_ratio_20d}x</td>
+                  <td style={{ padding: '10px 8px' }}>
+                    <span style={{
+                      padding: '2px 6px', borderRadius: 4, fontSize: '0.72rem', fontWeight: 700,
+                      background: (r.ai_consensus_score || 50) > 80 ? 'rgba(16,185,129,0.15)' : 'rgba(99,102,241,0.15)',
+                      color: (r.ai_consensus_score || 50) > 80 ? '#10B981' : '#818CF8'
+                    }}>
+                      {r.ai_consensus_score} ({r.ai_signal || 'BUY'})
+                    </span>
+                  </td>
+                  <td style={{ padding: '10px 8px' }}>
+                    <button
+                      onClick={() => {
+                        setSelectedSymbol(r.ticker);
+                        setActiveView('Fundamentals');
+                      }}
+                      style={{
+                        padding: '4px 10px', borderRadius: 6, background: 'rgba(99,102,241,0.15)',
+                        color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer',
+                        fontSize: '0.72rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4
+                      }}
+                    >
+                      <BookOpen size={11} /> Research
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {rowVirtualizer.getVirtualItems().length > 0 && (
+              <tr style={{ height: rowVirtualizer.getTotalSize() - rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1].end }} />
+            )}
           </tbody>
         </table>
       </div>

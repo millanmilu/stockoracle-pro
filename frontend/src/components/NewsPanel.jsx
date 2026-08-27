@@ -78,7 +78,7 @@ function AiNewsSummary({ ticker }) {
 // ── Main NewsPanel ─────────────────────────────────────────────────────────────
 
 export default function NewsPanel() {
-  const { selectedSymbol } = useStore();
+  const selectedSymbol = useStore(s => s.selectedSymbol);
   const [news, setNews] = useState([]);
   const [sentimentScore, setSentimentScore] = useState(0);
 
