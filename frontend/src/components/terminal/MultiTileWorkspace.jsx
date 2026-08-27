@@ -1,125 +1,359 @@
 import React, { useState } from 'react';
 import useStore from '../../store/useStore';
-import LiveChartView from '../LiveChartView';
+import ChartPane from '../ChartPane';
+import MultiChartGrid from '../MultiChartGrid';
 import ValuationTerminalView from './ValuationTerminalView';
 import OptionsStrategyLabView from './OptionsStrategyLabView';
 import QuantRiskCockpit from './QuantRiskCockpit';
-import RRGRotationView from './RRGRotationView';
-import { Grid3X3, Columns, Maximize2, RefreshCw } from 'lucide-react';
+import { 
+  Grid2X2, Columns, LayoutGrid, Maximize2, Minimize2, 
+  CandlestickChart, Calculator, Layers, ShieldAlert, Sparkles, RefreshCw
+} from 'lucide-react';
 
 export default function MultiTileWorkspace() {
-  const { selectedSymbol } = useStore();
-  const [layoutMode, setLayoutMode] = useState('4-grid'); // '2-split' | '4-grid'
+  const { selectedSymbol, setSelectedSymbol } = useStore();
+  const [workspaceMode, setWorkspaceMode] = useState('institutional-4'); // 'institutional-4' | '4-charts' | '2-split'
+  const [maximizedTile, setMaximizedTile] = useState(null); // null | 1 | 2 | 3 | 4
+
+  const toggleMaximize = (tileId) => {
+    setMaximizedTile(maximizedTile === tileId ? null : tileId);
+  };
+
+  const renderTileHeader = (tileId, title, icon, color, badgeText) => {
+    const Icon = icon;
+    const isMax = maximizedTile === tileId;
+    return (
+      <div style={{
+        height: '36px',
+        background: '#090D1E',
+        borderBottom: '1px solid rgba(99, 102, 241, 0.18)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 12px',
+        flexShrink: 0,
+        userSelect: 'none',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{
+            fontSize: '0.65rem',
+            fontWeight: 800,
+            color: '#FFFFFF',
+            background: color || '#6366F1',
+            padding: '1px 6px',
+            borderRadius: '4px',
+            fontFamily: 'JetBrains Mono, monospace'
+          }}>
+            T{tileId}
+          </span>
+          <Icon size={14} color={color || '#818CF8'} />
+          <span style={{ fontSize: '0.76rem', fontWeight: 700, color: '#F0F0FF', letterSpacing: '0.02em' }}>
+            {title}
+          </span>
+          {badgeText && (
+            <span style={{
+              fontSize: '0.64rem',
+              color: '#818CF8',
+              background: 'rgba(99,102,241,0.12)',
+              border: '1px solid rgba(99,102,241,0.25)',
+              padding: '1px 6px',
+              borderRadius: '4px',
+              fontWeight: 600
+            }}>
+              {badgeText}
+            </span>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            onClick={() => toggleMaximize(tileId)}
+            title={isMax ? "Restore Tile" : "Maximize Tile"}
+            style={{
+              background: isMax ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: 4,
+              padding: '3px 7px',
+              color: isMax ? '#818CF8' : '#94A3B8',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: '0.68rem',
+              fontWeight: 600,
+              transition: 'all 0.15s'
+            }}
+          >
+            {isMax ? <Minimize2 size={11} /> : <Maximize2 size={11} />}
+            <span>{isMax ? 'Restore' : 'Maximize'}</span>
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div style={{
-      flex: 1,
+      width: '100%',
       height: '100%',
-      minHeight: 0,
       display: 'flex',
       flexDirection: 'column',
-      background: '#04060E',
+      background: '#04050E',
       overflow: 'hidden',
     }}>
 
-
-      {/* Top Tile Control Ribbon */}
+      {/* ── Top Workspace Ribbon ── */}
       <div style={{
         height: '42px',
-        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-        background: '#090C18',
+        background: '#070A17',
+        borderBottom: '1px solid rgba(99, 102, 241, 0.2)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '0 16px',
-        zIndex: 10
+        flexShrink: 0,
+        zIndex: 20
       }}>
+        {/* Left: Workspace Title & Active Asset */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <Grid3X3 size={16} color="#818CF8" />
-          <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#F0F0FF', letterSpacing: '0.04em' }}>
-            BLOOMBERG PRO MULTI-TILE WORKSPACE — {selectedSymbol}
+          <Grid2X2 size={16} color="#818CF8" />
+          <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#F0F0FF', letterSpacing: '0.03em' }}>
+            MULTI-TILE WORKSPACE
+          </span>
+          <span style={{
+            fontSize: '0.7rem',
+            padding: '2px 8px',
+            borderRadius: '5px',
+            background: 'rgba(99,102,241,0.15)',
+            border: '1px solid rgba(99,102,241,0.3)',
+            color: '#818CF8',
+            fontFamily: 'JetBrains Mono, monospace',
+            fontWeight: 700
+          }}>
+            {selectedSymbol}
           </span>
         </div>
 
-        <div style={{ display: 'flex', gap: 8 }}>
+        {/* Right: Mode Toggles */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <button
-            onClick={() => setLayoutMode('2-split')}
+            onClick={() => { setWorkspaceMode('institutional-4'); setMaximizedTile(null); }}
             style={{
-              padding: '4px 12px',
+              padding: '4px 10px',
               borderRadius: 6,
-              border: 'none',
-              background: layoutMode === '2-split' ? '#4F46E5' : 'rgba(255,255,255,0.06)',
-              color: '#FFFFFF',
-              fontSize: '0.75rem',
+              border: workspaceMode === 'institutional-4' ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.08)',
+              background: workspaceMode === 'institutional-4' ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.03)',
+              color: workspaceMode === 'institutional-4' ? '#F0F0FF' : '#94A3B8',
+              fontSize: '0.74rem',
               fontWeight: 700,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: 6
+              gap: 5,
+              transition: 'all 0.15s'
             }}
           >
-            <Columns size={12} /> 2-Split View
+            <LayoutGrid size={13} />
+            <span>4-Quadrant Suite</span>
           </button>
+
           <button
-            onClick={() => setLayoutMode('4-grid')}
+            onClick={() => { setWorkspaceMode('4-charts'); setMaximizedTile(null); }}
             style={{
-              padding: '4px 12px',
+              padding: '4px 10px',
               borderRadius: 6,
-              border: 'none',
-              background: layoutMode === '4-grid' ? '#4F46E5' : 'rgba(255,255,255,0.06)',
-              color: '#FFFFFF',
-              fontSize: '0.75rem',
+              border: workspaceMode === '4-charts' ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.08)',
+              background: workspaceMode === '4-charts' ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.03)',
+              color: workspaceMode === '4-charts' ? '#F0F0FF' : '#94A3B8',
+              fontSize: '0.74rem',
               fontWeight: 700,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: 6
+              gap: 5,
+              transition: 'all 0.15s'
             }}
           >
-            <Grid3X3 size={12} /> 4-Grid Bloomberg View
+            <CandlestickChart size={13} />
+            <span>4-Chart Grid</span>
+          </button>
+
+          <button
+            onClick={() => { setWorkspaceMode('2-split'); setMaximizedTile(null); }}
+            style={{
+              padding: '4px 10px',
+              borderRadius: 6,
+              border: workspaceMode === '2-split' ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.08)',
+              background: workspaceMode === '2-split' ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.03)',
+              color: workspaceMode === '2-split' ? '#F0F0FF' : '#94A3B8',
+              fontSize: '0.74rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              transition: 'all 0.15s'
+            }}
+          >
+            <Columns size={13} />
+            <span>2-Split View</span>
           </button>
         </div>
       </div>
 
-      {/* Dynamic Grid Layout */}
-      {layoutMode === '2-split' ? (
-        <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr', overflow: 'hidden', gap: 1, background: 'rgba(255,255,255,0.06)' }}>
-          <div style={{ background: '#090C18', overflowY: 'auto' }}>
-            <LiveChartView />
-          </div>
-          <div style={{ background: '#090C18', overflowY: 'auto' }}>
-            <ValuationTerminalView ticker={selectedSymbol} />
-          </div>
+      {/* ── Mode 1: 4-Chart Grid (Multi-Asset Candlesticks) ── */}
+      {workspaceMode === '4-charts' ? (
+        <div style={{ flex: 1, width: '100%', height: '100%', overflow: 'hidden' }}>
+          <MultiChartGrid layout="2x2" />
         </div>
-      ) : (
+      ) : workspaceMode === '2-split' ? (
+        /* ── Mode 2: 2-Split View (Pro Chart + DCF Valuation) ── */
         <div style={{
           flex: 1,
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gridTemplateRows: '1fr 1fr',
+          gridTemplateColumns: maximizedTile === 1 ? '1fr' : (maximizedTile === 2 ? '1fr' : '1fr 1fr'),
+          gap: 6,
+          padding: 6,
           overflow: 'hidden',
-          gap: 1,
-          background: 'rgba(255,255,255,0.08)'
+          background: '#04050E'
         }}>
-          {/* Tile 1: Live Pro Chart */}
-          <div style={{ background: '#090C18', overflowY: 'auto', borderRight: '1px solid rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            <LiveChartView />
-          </div>
+          {(maximizedTile === null || maximizedTile === 1) && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              background: '#070A17',
+              borderRadius: 8,
+              border: '1px solid rgba(99,102,241,0.2)',
+              overflow: 'hidden',
+              height: '100%'
+            }}>
+              {renderTileHeader(1, `Pro Chart — ${selectedSymbol}`, CandlestickChart, '#6366F1', 'Real-time OHLCV')}
+              <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+                <ChartPane
+                  paneId={0}
+                  symbol={selectedSymbol}
+                  interval="1d"
+                  isActive={true}
+                  onSelectPane={() => {}}
+                  onSymbolChange={(id, s) => setSelectedSymbol(s)}
+                  onIntervalChange={() => {}}
+                  onToggleMaximize={() => toggleMaximize(1)}
+                  isMaximized={maximizedTile === 1}
+                />
+              </div>
+            </div>
+          )}
 
-          {/* Tile 2: DCF Valuation Model */}
-          <div style={{ background: '#090C18', overflowY: 'auto', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-            <ValuationTerminalView ticker={selectedSymbol} />
-          </div>
+          {(maximizedTile === null || maximizedTile === 2) && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              background: '#070A17',
+              borderRadius: 8,
+              border: '1px solid rgba(99,102,241,0.2)',
+              overflow: 'hidden',
+              height: '100%'
+            }}>
+              {renderTileHeader(2, `Valuation Terminal — ${selectedSymbol}`, Calculator, '#10B981', 'DCF & Multiples')}
+              <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+                <ValuationTerminalView ticker={selectedSymbol} />
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ── Mode 3: 4-Quadrant Institutional Analysis Suite ── */
+        <div style={{
+          flex: 1,
+          display: 'grid',
+          gridTemplateColumns: maximizedTile ? '1fr' : '1fr 1fr',
+          gridTemplateRows: maximizedTile ? '1fr' : '1fr 1fr',
+          gap: 6,
+          padding: 6,
+          overflow: 'hidden',
+          background: '#04050E'
+        }}>
+          {/* Quadrant 1: Pro Trading Chart */}
+          {(maximizedTile === null || maximizedTile === 1) && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              background: '#070A17',
+              borderRadius: 8,
+              border: '1px solid rgba(99,102,241,0.2)',
+              overflow: 'hidden',
+              height: '100%'
+            }}>
+              {renderTileHeader(1, `Pro Chart — ${selectedSymbol}`, CandlestickChart, '#6366F1', 'Live Market')}
+              <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+                <ChartPane
+                  paneId={0}
+                  symbol={selectedSymbol}
+                  interval="1d"
+                  isActive={true}
+                  onSelectPane={() => {}}
+                  onSymbolChange={(id, s) => setSelectedSymbol(s)}
+                  onIntervalChange={() => {}}
+                  onToggleMaximize={() => toggleMaximize(1)}
+                  isMaximized={maximizedTile === 1}
+                />
+              </div>
+            </div>
+          )}
 
-          {/* Tile 3: Options Strategy Lab */}
-          <div style={{ background: '#090C18', overflowY: 'auto', borderRight: '1px solid rgba(255,255,255,0.05)' }}>
-            <OptionsStrategyLabView ticker={selectedSymbol} />
-          </div>
+          {/* Quadrant 2: DCF Valuation Model */}
+          {(maximizedTile === null || maximizedTile === 2) && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              background: '#070A17',
+              borderRadius: 8,
+              border: '1px solid rgba(99,102,241,0.2)',
+              overflow: 'hidden',
+              height: '100%'
+            }}>
+              {renderTileHeader(2, `Valuation Terminal — ${selectedSymbol}`, Calculator, '#10B981', 'DCF Model')}
+              <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+                <ValuationTerminalView ticker={selectedSymbol} />
+              </div>
+            </div>
+          )}
 
-          {/* Tile 4: Quant Risk Cockpit */}
-          <div style={{ background: '#090C18', overflowY: 'auto' }}>
-            <QuantRiskCockpit />
-          </div>
+          {/* Quadrant 3: Options Strategy Lab */}
+          {(maximizedTile === null || maximizedTile === 3) && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              background: '#070A17',
+              borderRadius: 8,
+              border: '1px solid rgba(99,102,241,0.2)',
+              overflow: 'hidden',
+              height: '100%'
+            }}>
+              {renderTileHeader(3, `Options Strategy Lab — ${selectedSymbol}`, Layers, '#F59E0B', 'Payoff & Greeks')}
+              <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+                <OptionsStrategyLabView ticker={selectedSymbol} />
+              </div>
+            </div>
+          )}
+
+          {/* Quadrant 4: Quant Risk Cockpit */}
+          {(maximizedTile === null || maximizedTile === 4) && (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              background: '#070A17',
+              borderRadius: 8,
+              border: '1px solid rgba(99,102,241,0.2)',
+              overflow: 'hidden',
+              height: '100%'
+            }}>
+              {renderTileHeader(4, `Quant Risk Cockpit — ${selectedSymbol}`, ShieldAlert, '#EC4899', 'VaR & Stress Test')}
+              <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
+                <QuantRiskCockpit ticker={selectedSymbol} />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
