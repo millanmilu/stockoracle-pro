@@ -313,13 +313,26 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
 
     is_intraday = interval.lower() in ["1m", "5m", "15m", "1h"]
 
+    def _expected_latest_trading_day() -> str:
+        now = datetime.now()
+        if now.weekday() == 5:
+            target = now - timedelta(days=1)
+        elif now.weekday() == 6:
+            target = now - timedelta(days=2)
+        elif now.hour < 9 or (now.hour == 9 and now.minute < 15):
+            target = now - timedelta(days=(3 if now.weekday() == 0 else 1))
+        else:
+            target = now
+        return target.strftime("%Y-%m-%d")
+
     # 2. Check SQLite local database (ONLY FOR DAILY INTERVAL '1d')
     db_df = None
     if not is_intraday:
         db_df = get_historical_prices(ticker, fromdate_str, todate_str)
         if db_df is not None and not db_df.empty:
-            latest_db_date = pd.to_datetime(db_df["date"].max(), format='mixed', errors='coerce')
-            is_up_to_date = (todate - latest_db_date).days <= 4
+            latest_db_date_str = str(db_df["date"].max())[:10]
+            expected_date_str = _expected_latest_trading_day()
+            is_up_to_date = latest_db_date_str >= expected_date_str
             expected_trading_days = int(days * (5/7))
             if is_up_to_date and len(db_df) >= expected_trading_days * 0.8:
                 db_df.attrs["data_source"] = "sqlite"
