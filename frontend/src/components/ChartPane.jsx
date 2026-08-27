@@ -257,16 +257,25 @@ export default function ChartPane({
     });
 
     // Resize Observer for responsive pane layout
+    let animationFrameId = null;
     const resizeObserver = new ResizeObserver((entries) => {
       if (!entries || entries.length === 0) return;
       const { width, height } = entries[0].contentRect;
       if (width > 0 && height > 0) {
-        chart.applyOptions({ width, height });
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+        animationFrameId = requestAnimationFrame(() => {
+          if (chartRef.current) {
+            chart.applyOptions({ width, height });
+          }
+        });
       }
     });
-    resizeObserver.observe(containerRef.current);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
 
     return () => {
+      if (animationFrameId) cancelAnimationFrame(animationFrameId);
       resizeObserver.disconnect();
       chart.remove();
       chartRef.current = null;

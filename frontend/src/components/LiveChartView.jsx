@@ -781,20 +781,27 @@ export default function LiveChartView() {
     upperLineRef.current = upperLine;
 
     const lowerLine = chart.addLineSeries({ color: 'rgba(239,83,80,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
-    lowerLineRef.current = lowerLine;
-
+    let roAnimFrame = null;
     const ro = new ResizeObserver(entries => {
       if (entries[0] && chartRef.current) {
         const { width, height } = entries[0].contentRect;
         if (width > 0 && height > 0) {
-          chartRef.current.applyOptions({ width, height });
+          if (roAnimFrame) cancelAnimationFrame(roAnimFrame);
+          roAnimFrame = requestAnimationFrame(() => {
+            if (chartRef.current) {
+              chartRef.current.applyOptions({ width, height });
+            }
+          });
         }
       }
     });
-    ro.observe(containerRef.current);
+    if (containerRef.current) {
+      ro.observe(containerRef.current);
+    }
     setChartReady((c) => c + 1);
 
     return () => {
+      if (roAnimFrame) cancelAnimationFrame(roAnimFrame);
       setChartReady(0);
       ro.disconnect();
       chart.remove();
@@ -926,14 +933,26 @@ export default function LiveChartView() {
     const candle2 = chart2.addCandlestickSeries(CANDLE_STYLE);
     candleRef2.current = candle2;
 
+    let ro2AnimFrame = null;
     const ro2 = new ResizeObserver(entries => {
       if (entries[0] && chartRef2.current) {
-        chartRef2.current.applyOptions({ width: entries[0].contentRect.width });
+        const w = entries[0].contentRect.width;
+        if (w > 0) {
+          if (ro2AnimFrame) cancelAnimationFrame(ro2AnimFrame);
+          ro2AnimFrame = requestAnimationFrame(() => {
+            if (chartRef2.current) {
+              chartRef2.current.applyOptions({ width: w });
+            }
+          });
+        }
       }
     });
-    ro2.observe(containerRef2.current);
+    if (containerRef2.current) {
+      ro2.observe(containerRef2.current);
+    }
 
     return () => {
+      if (ro2AnimFrame) cancelAnimationFrame(ro2AnimFrame);
       ro2.disconnect();
       chart2.remove();
       chartRef2.current = null;
