@@ -55,64 +55,64 @@ export default function ValuationTerminalView({ ticker: propTicker }) {
     <div style={{ padding: 'clamp(14px, 3vw, 24px)', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1280, margin: '0 auto' }}>
 
       {/* Top Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 'clamp(1.2rem, 4vw, 1.6rem)', fontWeight: 800, color: '#F0F0FF', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Calculator size={22} color="#818CF8" />
+          <h1 style={{ margin: 0, fontSize: 'clamp(1rem, 2.5vw, 1.25rem)', fontWeight: 800, color: '#F0F0FF', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Calculator size={18} color="#818CF8" />
             OpenBB Intrinsic Valuation & DCF Model — {ticker}
           </h1>
-          <p style={{ margin: '4px 0 0 0', fontSize: '0.84rem', color: '#94A3B8' }}>
+          <p style={{ margin: '3px 0 0 0', fontSize: '0.78rem', color: '#94A3B8' }}>
             Multi-stage Free Cash Flow to Firm (FCFF) + Benjamin Graham Intrinsic Formula
           </p>
         </div>
-        <button onClick={fetchValuation} style={{ padding: '7px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.1)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}>
-          <RefreshCw size={13} /> Recalculate
+        <button onClick={fetchValuation} style={{ padding: '6px 12px', borderRadius: 6, background: 'rgba(99,102,241,0.1)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', fontWeight: 600 }}>
+          <RefreshCw size={12} /> Recalculate
         </button>
       </div>
 
       {/* Main KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-        <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.2)', padding: '18px 20px', borderRadius: 12 }}>
-          <div style={{ fontSize: '0.72rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4 }}>CURRENT MARKET PRICE (CMP)</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#F0F0FF', fontFamily: 'JetBrains Mono, monospace' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+        <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.2)', padding: '14px 16px', borderRadius: 10 }}>
+          <div style={{ fontSize: '0.68rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '0.04em', fontWeight: 600 }}>CURRENT MARKET PRICE (CMP)</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#F0F0FF', fontFamily: 'JetBrains Mono, monospace' }}>
             ₹{valData?.cmp?.toLocaleString('en-IN')}
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: 4 }}>Live NSE Trade Price</div>
+          <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginTop: 2 }}>Live NSE Trade Price</div>
         </div>
 
-        <div style={{ background: '#0C1022', border: '1px solid rgba(16,185,129,0.3)', padding: '18px 20px', borderRadius: 12 }}>
-          <div style={{ fontSize: '0.72rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4 }}>DCF INTRINSIC VALUE</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#10B981', fontFamily: 'JetBrains Mono, monospace' }}>
+        <div style={{ background: '#0C1022', border: '1px solid rgba(16,185,129,0.3)', padding: '14px 16px', borderRadius: 10 }}>
+          <div style={{ fontSize: '0.68rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '0.04em', fontWeight: 600 }}>DCF INTRINSIC VALUE</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#10B981', fontFamily: 'JetBrains Mono, monospace' }}>
             ₹{valData?.dcf_intrinsic_value?.toLocaleString('en-IN')}
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#10B981', marginTop: 4 }}>5Y Cash Flow + Terminal Value</div>
+          <div style={{ fontSize: '0.72rem', color: '#10B981', marginTop: 2 }}>5Y Cash Flow + Terminal Value</div>
         </div>
 
-        <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.2)', padding: '18px 20px', borderRadius: 12 }}>
-          <div style={{ fontSize: '0.72rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4 }}>GRAHAM NUMBER (V)</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>
+        <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.2)', padding: '14px 16px', borderRadius: 10 }}>
+          <div style={{ fontSize: '0.68rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '0.04em', fontWeight: 600 }}>GRAHAM NUMBER (V)</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>
             ₹{valData?.graham_number?.toLocaleString('en-IN')}
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: 4 }}>√(22.5 × EPS × BVPS)</div>
+          <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginTop: 2 }}>√(22.5 × EPS × BVPS)</div>
         </div>
 
         <div style={{
           background: isUndervalued ? 'rgba(16,185,129,0.08)' : 'rgba(239,83,80,0.08)',
           border: isUndervalued ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(239,83,80,0.3)',
-          padding: '18px 20px',
-          borderRadius: 12
+          padding: '14px 16px',
+          borderRadius: 10
         }}>
-          <div style={{ fontSize: '0.72rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4 }}>MARGIN OF SAFETY</div>
+          <div style={{ fontSize: '0.68rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '0.04em', fontWeight: 600 }}>MARGIN OF SAFETY</div>
           <div style={{
-            fontSize: '1.5rem', fontWeight: 800,
+            fontSize: '1.25rem', fontWeight: 800,
             color: isUndervalued ? '#10B981' : '#EF5350',
             fontFamily: 'JetBrains Mono, monospace'
           }}>
             {valData?.margin_of_safety_pct > 0 ? '+' : ''}{valData?.margin_of_safety_pct}%
           </div>
           <div style={{
-            fontSize: '0.75rem', fontWeight: 700,
-            color: isUndervalued ? '#10B981' : '#EF5350', marginTop: 4
+            fontSize: '0.72rem', fontWeight: 700,
+            color: isUndervalued ? '#10B981' : '#EF5350', marginTop: 2
           }}>
             {valData?.valuation_status}
           </div>

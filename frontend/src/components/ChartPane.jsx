@@ -425,15 +425,16 @@ export default function ChartPane({
             <button
               onClick={(e) => { e.stopPropagation(); setShowSymbolPicker(!showSymbolPicker); }}
               style={{
-                background: 'rgba(99, 102, 241, 0.12)',
-                border: '1px solid rgba(99, 102, 241, 0.3)',
-                borderRadius: 4,
-                padding: '3px 8px',
+                background: 'rgba(99, 102, 241, 0.15)',
+                border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: 5,
+                padding: '3px 9px',
                 color: '#F0F0FF',
-                fontSize: '0.78rem',
+                fontSize: '0.8rem',
                 fontWeight: 700,
                 cursor: 'pointer',
-                letterSpacing: '0.04em',
+                fontFamily: 'JetBrains Mono, monospace',
+                letterSpacing: '0.03em',
               }}
             >
               {symbol} ▾
@@ -447,12 +448,12 @@ export default function ChartPane({
                   top: '100%',
                   left: 0,
                   marginTop: 4,
-                  width: 170,
+                  width: 180,
                   backgroundColor: '#0F172A',
-                  border: '1px solid rgba(99, 102, 241, 0.35)',
+                  border: '1px solid rgba(99, 102, 241, 0.4)',
                   borderRadius: 6,
                   zIndex: 100,
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.7)',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.75)',
                   padding: 6,
                 }}
                 onClick={(e) => e.stopPropagation()}
@@ -465,12 +466,12 @@ export default function ChartPane({
                   autoFocus
                   style={{
                     width: '100%',
-                    padding: '4px 6px',
+                    padding: '5px 8px',
                     borderRadius: 4,
-                    border: '1px solid rgba(255,255,255,0.1)',
+                    border: '1px solid rgba(255,255,255,0.12)',
                     background: '#090C18',
                     color: '#fff',
-                    fontSize: '0.72rem',
+                    fontSize: '0.74rem',
                     outline: 'none',
                     marginBottom: 6,
                   }}
@@ -495,16 +496,16 @@ export default function ChartPane({
                           setPaneSearchQuery('');
                         }}
                         style={{
-                          padding: '5px 8px',
-                          fontSize: '0.73rem',
+                          padding: '6px 8px',
+                          fontSize: '0.75rem',
                           fontWeight: 600,
-                          color: s === symbol ? '#6366F1' : '#E2E8F0',
-                          backgroundColor: s === symbol ? 'rgba(99,102,241,0.15)' : 'transparent',
+                          color: s === symbol ? '#818CF8' : '#E2E8F0',
+                          backgroundColor: s === symbol ? 'rgba(99,102,241,0.2)' : 'transparent',
                           cursor: 'pointer',
-                          borderRadius: 3,
+                          borderRadius: 4,
                         }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.1)'}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = s === symbol ? 'rgba(99,102,241,0.15)' : 'transparent'}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.12)'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = s === symbol ? 'rgba(99,102,241,0.2)' : 'transparent'}
                       >
                         {s}
                       </div>
@@ -515,14 +516,14 @@ export default function ChartPane({
           </div>
 
           {currentPriceDisplay && (
-            <span style={{ fontSize: '0.8rem', fontWeight: 700, color: '#F0F0FF', fontFamily: 'JetBrains Mono, monospace' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#F0F0FF', fontFamily: 'JetBrains Mono, monospace' }}>
               ₹{Number(currentPriceDisplay).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
             </span>
           )}
         </div>
 
         {/* Timeframe Intervals */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'rgba(255,255,255,0.03)', padding: '2px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.06)' }}>
           {INTERVALS.map((tf) => (
             <button
               key={tf.value}
@@ -531,11 +532,11 @@ export default function ChartPane({
                 onIntervalChange(paneId, tf.value);
               }}
               style={{
-                background: interval === tf.value ? '#6366F1' : 'transparent',
-                color: interval === tf.value ? '#FFFFFF' : '#9CA3AF',
+                background: interval === tf.value ? 'rgba(99,102,241,0.25)' : 'transparent',
+                color: interval === tf.value ? '#818CF8' : '#9CA3AF',
                 border: 'none',
                 borderRadius: 3,
-                padding: '2px 6px',
+                padding: '2px 7px',
                 fontSize: '0.72rem',
                 fontWeight: interval === tf.value ? 700 : 500,
                 cursor: 'pointer',
@@ -547,7 +548,7 @@ export default function ChartPane({
         </div>
 
         {/* Overlay Badges & Maximize */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           {/* AI Cone Toggle */}
           {isDaily && (
             <button
@@ -558,11 +559,11 @@ export default function ChartPane({
                 alignItems: 'center',
                 gap: 4,
                 background: showAICone ? 'rgba(168, 85, 247, 0.2)' : 'rgba(255, 255, 255, 0.04)',
-                border: showAICone ? '1px solid rgba(168, 85, 247, 0.5)' : '1px solid rgba(255, 255, 255, 0.1)',
+                border: showAICone ? '1px solid rgba(168, 85, 247, 0.45)' : '1px solid rgba(255, 255, 255, 0.08)',
                 color: showAICone ? '#C084FC' : '#9CA3AF',
                 borderRadius: 4,
-                padding: '2px 6px',
-                fontSize: '0.68rem',
+                padding: '3px 7px',
+                fontSize: '0.7rem',
                 fontWeight: 600,
                 cursor: 'pointer',
               }}
@@ -576,12 +577,12 @@ export default function ChartPane({
           <button
             onClick={(e) => { e.stopPropagation(); setShowSMA(!showSMA); }}
             style={{
-              background: showSMA ? 'rgba(245, 158, 11, 0.15)' : 'transparent',
-              color: showSMA ? '#F59E0B' : '#6B7280',
-              border: 'none',
-              borderRadius: 3,
-              padding: '2px 5px',
-              fontSize: '0.68rem',
+              background: showSMA ? 'rgba(245, 158, 11, 0.18)' : 'rgba(255,255,255,0.03)',
+              border: showSMA ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid rgba(255,255,255,0.06)',
+              color: showSMA ? '#F59E0B' : '#9CA3AF',
+              borderRadius: 4,
+              padding: '3px 7px',
+              fontSize: '0.7rem',
               fontWeight: 600,
               cursor: 'pointer',
             }}
@@ -600,10 +601,10 @@ export default function ChartPane({
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              padding: 2,
+              padding: 3,
             }}
           >
-            {isMaximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            {isMaximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
         </div>
       </div>

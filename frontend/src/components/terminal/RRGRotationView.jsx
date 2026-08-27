@@ -34,18 +34,18 @@ export default function RRGRotationView() {
     <div style={{ padding: 'clamp(14px, 3vw, 24px)', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1280, margin: '0 auto' }}>
 
       {/* Top Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 'clamp(1.2rem, 4vw, 1.6rem)', fontWeight: 800, color: '#F0F0FF', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Compass size={22} color="#818CF8" />
+          <h1 style={{ margin: 0, fontSize: 'clamp(1rem, 2.5vw, 1.25rem)', fontWeight: 800, color: '#F0F0FF', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Compass size={18} color="#818CF8" />
             Relative Rotation Graphs (RRG) — Sector Rotation Matrix
           </h1>
-          <p style={{ margin: '4px 0 0 0', fontSize: '0.84rem', color: '#94A3B8' }}>
+          <p style={{ margin: '3px 0 0 0', fontSize: '0.78rem', color: '#94A3B8' }}>
             JdK RS-Ratio vs RS-Momentum tracking institutional capital flows relative to NIFTY 50.
           </p>
         </div>
-        <button onClick={fetchRRG} style={{ padding: '7px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.1)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}>
-          <RefreshCw size={13} /> Refresh Rotation
+        <button onClick={fetchRRG} style={{ padding: '6px 12px', borderRadius: 6, background: 'rgba(99,102,241,0.1)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', fontWeight: 600 }}>
+          <RefreshCw size={12} /> Refresh Rotation
         </button>
       </div>
 

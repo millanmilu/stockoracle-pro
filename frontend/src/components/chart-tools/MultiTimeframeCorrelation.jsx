@@ -196,8 +196,8 @@ export default function MultiTimeframeCorrelation({ candles, symbol }) {
               borderRadius: 6,
               border: selectedCorrelation === cf.id ? '1px solid #A855F7' : '1px solid rgba(75,85,99,0.3)',
               background: selectedCorrelation === cf.id ? 'rgba(168,85,247,0.15)' : 'transparent',
-              color: selectedCorrelation === cf.id ? '#C084FC' : '#6B7280',
-              fontSize: '0.6rem',
+              color: selectedCorrelation === cf.id ? '#C084FC' : '#9CA3AF',
+              fontSize: '0.68rem',
               fontWeight: 600,
               cursor: 'pointer',
             }}
@@ -216,11 +216,11 @@ export default function MultiTimeframeCorrelation({ candles, symbol }) {
         textAlign: 'center',
         marginBottom: 8
       }}>
-        <div style={{ fontSize: '0.62rem', color: '#6B7280', marginBottom: 4 }}>
+        <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 4 }}>
           {selected?.label} Correlation
         </div>
         <div style={{ 
-          fontSize: '1.4rem', 
+          fontSize: '1.15rem', 
           fontWeight: 800, 
           color: getCorrelationColor(selectedCorr),
           fontFamily: 'JetBrains Mono, monospace'
@@ -228,9 +228,10 @@ export default function MultiTimeframeCorrelation({ candles, symbol }) {
           {selectedCorr.toFixed(3)}
         </div>
         <div style={{ 
-          fontSize: '0.65rem', 
+          fontSize: '0.7rem', 
           color: getCorrelationColor(selectedCorr),
-          marginTop: 2
+          marginTop: 2,
+          fontWeight: 600
         }}>
           {getCorrelationLabel(selectedCorr)}
         </div>

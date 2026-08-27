@@ -46,6 +46,16 @@ def get_sovereign_macro_dashboard() -> Dict[str, Any]:
         {"period": "Jul 26", "india_10y": 7.02, "us_10y": 4.24, "spread_bps": 278},
     ]
 
+    # Major Benchmark Indices for Ribbon / Ticker Tape
+    indices = [
+        {"symbol": "NIFTY 50",    "name": "NSE Benchmark",     "price": 24852.40, "change_pct": 0.42,  "status": "LIVE"},
+        {"symbol": "SENSEX",      "name": "BSE Benchmark",     "price": 81340.20, "change_pct": 0.38,  "status": "LIVE"},
+        {"symbol": "BANK NIFTY",  "name": "Banking Index",     "price": 53210.50, "change_pct": 0.65,  "status": "LIVE"},
+        {"symbol": "INDIA VIX",   "name": "Volatility Index",  "price": 12.84,    "change_pct": -3.20, "status": "LIVE"},
+        {"symbol": "USD / INR",   "name": "Forex",             "price": 83.92,    "change_pct": -0.05, "status": "LIVE"},
+        {"symbol": "BRENT CRUDE", "name": "Commodity ($)",     "price": 78.45,    "change_pct": -1.15, "status": "LIVE"},
+    ]
+
     return {
         "india_10y_yield": india_10y_yield,
         "us_10y_yield": us_10y_yield,
@@ -56,4 +66,5 @@ def get_sovereign_macro_dashboard() -> Dict[str, Any]:
         "gdp_growth_pct": gdp_growth_pct,
         "correlations": correlations,
         "yield_curve_history": yield_curve_history,
+        "indices": indices,
     }

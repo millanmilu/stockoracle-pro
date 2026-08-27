@@ -53,7 +53,7 @@ function LoadingFallback() {
 
 function AIPredictionView() {
   return (
-    <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+    <div style={{ padding: 'clamp(14px, 2.5vw, 24px)', display: 'flex', flexDirection: 'column', gap: '20px', maxWidth: '1600px', margin: '0 auto', width: '100%' }}>
       <AIInsightCard />
       <ScenarioSimulator />
     </div>

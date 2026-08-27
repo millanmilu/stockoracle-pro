@@ -384,7 +384,15 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
                 "TATAMTRDVR": "TATAMOTORS.NS",
                 "NIFTY50": "^NSEI",
                 "NIFTY": "^NSEI",
+                "NIFTY 50": "^NSEI",
+                "SENSEX": "^BSESN",
                 "BANKNIFTY": "^NSEBANK",
+                "BANK NIFTY": "^NSEBANK",
+                "INDIAVIX": "^INDIAVIX",
+                "INDIA VIX": "^INDIAVIX",
+                "USDINR": "USDINR=X",
+                "USD / INR": "USDINR=X",
+                "BRENT CRUDE": "BZ=F",
             }
             yf_ticker = YF_ALIAS_MAP.get(ticker, f"{ticker}.NS" if not ticker.endswith(".NS") else ticker)
             yf_period = "1y" if period.upper() in ["1Y", "370D", "200D", "6M"] else ("5y" if period.upper() == "5Y" else "6mo")
@@ -515,14 +523,26 @@ def fetch_company_info(ticker: str) -> Optional[dict]:
         fifty_two_week_high = round(current_price * 1.15, 2)
         fifty_two_week_low = round(current_price * 0.85, 2)
 
+    change = round(current_price - prev_close, 2) if prev_close > 0 else 0.0
+    change_pct = round((change / prev_close) * 100, 2) if prev_close > 0 else 0.0
+    company_name = token_info.get("name", ticker) if token_info else ticker
+
     info = {
-        "name":                token_info.get("name", ticker) if token_info else ticker,
+        "ticker":              ticker,
+        "symbol":              ticker,
+        "name":                company_name,
+        "companyName":         company_name,
         "sector":              "Indian Equities",
         "industry":            token_info.get("exch_seg", "NSE") if token_info else "NSE",
         "exchange":            token_info.get("exch_seg", "NSE") if token_info else "NSE",
         "currency":            "INR",
         "market_cap":          0,
+        "price":               current_price,
         "current_price":       current_price,
+        "ltp":                 current_price,
+        "change":              change,
+        "change_pct":          change_pct,
+        "changePercent":       change_pct,
         "day_high":            day_high,
         "day_low":             day_low,
         "open":                open_price,

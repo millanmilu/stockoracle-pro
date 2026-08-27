@@ -32,53 +32,53 @@ export default function MacroTerminalView() {
     <div style={{ padding: 'clamp(14px, 3vw, 24px)', display: 'flex', flexDirection: 'column', gap: 20, maxWidth: 1280, margin: '0 auto' }}>
 
       {/* Top Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: 'clamp(1.2rem, 4vw, 1.6rem)', fontWeight: 800, color: '#F0F0FF', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Globe size={22} color="#818CF8" />
-            Sovereign Macro & Econometrics Hub
+          <h1 style={{ margin: 0, fontSize: 'clamp(1rem, 2.5vw, 1.25rem)', fontWeight: 800, color: '#F0F0FF', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Globe2 size={18} color="#818CF8" />
+            Sovereign Macro & Yield Curve Terminal
           </h1>
-          <p style={{ margin: '4px 0 0 0', fontSize: '0.84rem', color: '#94A3B8' }}>
+          <p style={{ margin: '3px 0 0 0', fontSize: '0.78rem', color: '#94A3B8' }}>
             India 10Y G-Sec vs US 10Y Treasury spread, RBI monetary policy stance, and cross-asset correlations.
           </p>
         </div>
-        <button onClick={fetchMacro} style={{ padding: '7px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.1)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}>
-          <RefreshCw size={13} /> Refresh Macro
+        <button onClick={fetchMacro} style={{ padding: '6px 12px', borderRadius: 6, background: 'rgba(99,102,241,0.1)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.75rem', fontWeight: 600 }}>
+          <RefreshCw size={12} /> Refresh Macro
         </button>
       </div>
 
       {/* Macro Indicators KPI Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
-        <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.2)', padding: '18px 20px', borderRadius: 12 }}>
-          <div style={{ fontSize: '0.72rem', color: '#6B7280', textTransform: 'uppercase' }}>INDIA 10Y G-SEC YIELD</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#38BDF8', fontFamily: 'JetBrains Mono, monospace' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+        <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.2)', padding: '14px 16px', borderRadius: 10 }}>
+          <div style={{ fontSize: '0.68rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '0.04em', fontWeight: 600 }}>INDIA 10Y G-SEC YIELD</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#38BDF8', fontFamily: 'JetBrains Mono, monospace' }}>
             {macroData?.india_10y_yield}%
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: 4 }}>Benchmark Sovereign Debt</div>
+          <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginTop: 2 }}>Benchmark Sovereign Debt</div>
         </div>
 
-        <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.2)', padding: '18px 20px', borderRadius: 12 }}>
-          <div style={{ fontSize: '0.72rem', color: '#6B7280', textTransform: 'uppercase' }}>US 10Y TREASURY YIELD</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#F59E0B', fontFamily: 'JetBrains Mono, monospace' }}>
+        <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.2)', padding: '14px 16px', borderRadius: 10 }}>
+          <div style={{ fontSize: '0.68rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '0.04em', fontWeight: 600 }}>US 10Y TREASURY YIELD</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#F59E0B', fontFamily: 'JetBrains Mono, monospace' }}>
             {macroData?.us_10y_yield}%
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: 4 }}>Risk-Free US Benchmark</div>
+          <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginTop: 2 }}>Risk-Free US Benchmark</div>
         </div>
 
-        <div style={{ background: '#0C1022', border: '1px solid rgba(16,185,129,0.3)', padding: '18px 20px', borderRadius: 12 }}>
-          <div style={{ fontSize: '0.72rem', color: '#6B7280', textTransform: 'uppercase' }}>SOVEREIGN YIELD SPREAD</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#10B981', fontFamily: 'JetBrains Mono, monospace' }}>
+        <div style={{ background: '#0C1022', border: '1px solid rgba(16,185,129,0.3)', padding: '14px 16px', borderRadius: 10 }}>
+          <div style={{ fontSize: '0.68rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '0.04em', fontWeight: 600 }}>SOVEREIGN YIELD SPREAD</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#10B981', fontFamily: 'JetBrains Mono, monospace' }}>
             +{macroData?.yield_spread_bps} bps
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#10B981', marginTop: 4 }}>India Premium Over US</div>
+          <div style={{ fontSize: '0.72rem', color: '#10B981', marginTop: 2 }}>India Premium Over US</div>
         </div>
 
-        <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.2)', padding: '18px 20px', borderRadius: 12 }}>
-          <div style={{ fontSize: '0.72rem', color: '#6B7280', textTransform: 'uppercase' }}>RBI POLICY REPO RATE</div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>
+        <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.2)', padding: '14px 16px', borderRadius: 10 }}>
+          <div style={{ fontSize: '0.68rem', color: '#6B7280', textTransform: 'uppercase', marginBottom: 4, letterSpacing: '0.04em', fontWeight: 600 }}>RBI POLICY REPO RATE</div>
+          <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>
             {macroData?.rbi_repo_rate}%
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#94A3B8', marginTop: 4 }}>Stance: {macroData?.rbi_policy_stance}</div>
+          <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginTop: 2 }}>Stance: {macroData?.rbi_policy_stance}</div>
         </div>
       </div>
 

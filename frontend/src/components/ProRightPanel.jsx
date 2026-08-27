@@ -79,32 +79,45 @@ export default function ProRightPanel({ onClose }) {
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {filteredTickers.map(t => {
           const q = quotes[t];
+          const price = q?.price ?? q?.current_price ?? q?.ltp;
+          const change = q?.change;
+          const changePct = q?.changePercent ?? q?.change_pct;
+          const isUp = (change ?? changePct ?? 0) >= 0;
+          const hasPrice = price != null && Number(price) > 0;
+
           return (
             <div 
               key={t} 
               onClick={() => setSelectedSymbol(t)}
               style={{ 
-                padding: '10px 14px', 
-                borderBottom: '1px solid rgba(255,255,255,0.03)', 
+                padding: '9px 12px', 
+                borderBottom: '1px solid rgba(255,255,255,0.04)', 
                 cursor: 'pointer',
-                background: selectedSymbol === t ? 'rgba(99,102,241,0.1)' : 'transparent',
+                background: selectedSymbol === t ? 'rgba(99,102,241,0.15)' : 'transparent',
+                borderLeft: selectedSymbol === t ? '2px solid #6366F1' : '2px solid transparent',
                 display: 'flex', 
                 justifyContent: 'space-between',
-                alignItems: 'center'
+                alignItems: 'center',
+                transition: 'background 0.15s',
               }}
             >
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: '0.8rem', color: '#818CF8' }}>{t}</span>
-                <span style={{ fontSize: '0.65rem', color: '#6B7280', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 100 }}>
-                  {q?.companyName || t}
+              <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, marginRight: 8 }}>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: '0.82rem', color: '#818CF8' }}>{t}</span>
+                <span style={{ fontSize: '0.67rem', color: '#94A3B8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 110 }}>
+                  {q?.companyName || q?.name || t}
                 </span>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.8rem', color: '#FFF' }}>
-                  {q?.price ? q.price.toFixed(2) : '---'}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.82rem', fontWeight: 700, color: '#FFF' }}>
+                  {hasPrice ? `₹${Number(price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                 </span>
-                <span style={{ fontSize: '0.7rem', fontWeight: 600, color: q?.change > 0 ? '#10B981' : q?.change < 0 ? '#F43F5E' : '#9CA3AF' }}>
-                  {q?.changePercent ? `${q.change > 0 ? '+' : ''}${q.changePercent.toFixed(2)}%` : '---'}
+                <span style={{ 
+                  fontSize: '0.68rem', 
+                  fontWeight: 600, 
+                  color: !hasPrice ? '#6B7280' : isUp ? '#10B981' : '#EF5350',
+                  fontFamily: 'JetBrains Mono, monospace',
+                }}>
+                  {hasPrice && changePct != null ? `${isUp ? '+' : ''}${Number(changePct).toFixed(2)}%` : ''}
                 </span>
               </div>
             </div>

