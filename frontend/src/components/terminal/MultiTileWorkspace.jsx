@@ -225,10 +225,11 @@ export default function MultiTileWorkspace() {
               borderRadius: 8,
               border: '1px solid rgba(99,102,241,0.2)',
               overflow: 'hidden',
-              height: '100%'
+              height: '100%',
+              minHeight: 0
             }}>
-              {renderTileHeader(1, `Pro Chart — ${selectedSymbol}`, CandlestickChart, '#6366F1', 'Real-time OHLCV')}
-              <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+              {renderTileHeader(1, `Pro Chart — ${selectedSymbol}`, CandlestickChart, '#6366F1', 'Live Market')}
+              <div style={{ flex: 1, minHeight: 0, height: '100%', position: 'relative' }}>
                 <ChartPane
                   paneId={0}
                   symbol={selectedSymbol}
@@ -252,11 +253,12 @@ export default function MultiTileWorkspace() {
               borderRadius: 8,
               border: '1px solid rgba(99,102,241,0.2)',
               overflow: 'hidden',
-              height: '100%'
+              height: '100%',
+              minHeight: 0
             }}>
-              {renderTileHeader(2, `Valuation Terminal — ${selectedSymbol}`, Calculator, '#10B981', 'DCF & Multiples')}
-              <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-                <ValuationTerminalView ticker={selectedSymbol} />
+              {renderTileHeader(2, `DCF Valuation — ${selectedSymbol}`, Calculator, '#10B981', 'Fair Value')}
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                <ValuationTerminalView ticker={selectedSymbol} compact={maximizedTile === null} />
               </div>
             </div>
           )}
@@ -282,10 +284,11 @@ export default function MultiTileWorkspace() {
               borderRadius: 8,
               border: '1px solid rgba(99,102,241,0.2)',
               overflow: 'hidden',
-              height: '100%'
+              height: '100%',
+              minHeight: 0
             }}>
               {renderTileHeader(1, `Pro Chart — ${selectedSymbol}`, CandlestickChart, '#6366F1', 'Live Market')}
-              <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+              <div style={{ flex: 1, minHeight: 0, height: '100%', position: 'relative' }}>
                 <ChartPane
                   paneId={0}
                   symbol={selectedSymbol}
@@ -310,11 +313,12 @@ export default function MultiTileWorkspace() {
               borderRadius: 8,
               border: '1px solid rgba(99,102,241,0.2)',
               overflow: 'hidden',
-              height: '100%'
+              height: '100%',
+              minHeight: 0
             }}>
-              {renderTileHeader(2, `Valuation Terminal — ${selectedSymbol}`, Calculator, '#10B981', 'DCF Model')}
-              <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-                <ValuationTerminalView ticker={selectedSymbol} />
+              {renderTileHeader(2, `DCF Valuation — ${selectedSymbol}`, Calculator, '#10B981', 'Fair Value')}
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                <ValuationTerminalView ticker={selectedSymbol} compact={maximizedTile === null} />
               </div>
             </div>
           )}
@@ -328,11 +332,12 @@ export default function MultiTileWorkspace() {
               borderRadius: 8,
               border: '1px solid rgba(99,102,241,0.2)',
               overflow: 'hidden',
-              height: '100%'
+              height: '100%',
+              minHeight: 0
             }}>
-              {renderTileHeader(3, `Options Strategy Lab — ${selectedSymbol}`, Layers, '#F59E0B', 'Payoff & Greeks')}
-              <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-                <OptionsStrategyLabView ticker={selectedSymbol} />
+              {renderTileHeader(3, `Options Strategy — ${selectedSymbol}`, Layers, '#F59E0B', 'Payoff & Greeks')}
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                <OptionsStrategyLabView ticker={selectedSymbol} compact={maximizedTile === null} />
               </div>
             </div>
           )}
@@ -346,11 +351,12 @@ export default function MultiTileWorkspace() {
               borderRadius: 8,
               border: '1px solid rgba(99,102,241,0.2)',
               overflow: 'hidden',
-              height: '100%'
+              height: '100%',
+              minHeight: 0
             }}>
-              {renderTileHeader(4, `Quant Risk Cockpit — ${selectedSymbol}`, ShieldAlert, '#EC4899', 'VaR & Stress Test')}
-              <div style={{ flex: 1, overflowY: 'auto', padding: 8 }}>
-                <QuantRiskCockpit ticker={selectedSymbol} />
+              {renderTileHeader(4, `Quant Risk (VaR) — ${selectedSymbol}`, ShieldAlert, '#EC4899', 'Portfolio Risk')}
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                <QuantRiskCockpit compact={maximizedTile === null} />
               </div>
             </div>
           )}

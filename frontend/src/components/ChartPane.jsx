@@ -130,6 +130,7 @@ export default function ChartPane({
 
   // ── Fetch Historical Candles ───────────────────────────────────────────────
   const fetchCandles = useCallback(async () => {
+    if (!symbol) return;
     setLoading(true);
     setError(null);
     try {
@@ -137,10 +138,10 @@ export default function ChartPane({
       const res = await api.get(`/api/stock/${symbol.toUpperCase()}/history`, {
         params: { timeframe, interval },
       });
-      const data = res.data;
-      if (Array.isArray(data) && data.length > 0) {
-        setHistory(data);
-        const lastClose = Number(data[data.length - 1]?.close);
+      const raw = Array.isArray(res.data?.data) ? res.data.data : (Array.isArray(res.data) ? res.data : []);
+      if (raw.length > 0) {
+        setHistory(raw);
+        const lastClose = Number(raw[raw.length - 1]?.close);
         if (lastClose > 0) {
           lastPriceRef.current = lastClose;
           setLivePrice(lastClose);
@@ -621,7 +622,7 @@ export default function ChartPane({
       {/* ── Main Canvas ── */}
       <div 
         ref={containerRef} 
-        style={{ flex: 1, position: 'relative', width: '100%', height: '100%' }}
+        style={{ flex: 1, minHeight: 0, position: 'relative', width: '100%', height: '100%' }}
       >
         {loading && (
           <div style={{
