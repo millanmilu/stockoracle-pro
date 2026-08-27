@@ -28,7 +28,7 @@ export default function AdvancedScreener() {
   const [aiLoading, setAiLoading] = useState(false);
 
   // Sorting
-  const [sortColumn, setSortColumn] = useState('ai_consensus_score');
+  const [sortColumn, setSortColumn] = useState('market_cap_cr');
   const [sortDirection, setSortDirection] = useState('desc'); // 'asc' | 'desc'
 
   // Formula State
@@ -68,7 +68,7 @@ export default function AdvancedScreener() {
         setPrebuiltTemplates(data.prebuilt_templates || []);
         setSavedScreens(data.saved_screens || []);
       } catch (err) {
-        console.error('Failed to load screens', err);
+        console.error('Failed to load screen presets', err);
       }
       runScreen('MarketCap > 0');
     };
@@ -84,45 +84,51 @@ export default function AdvancedScreener() {
     return formula;
   };
 
-  // 3. Run Screen API
+  // 3. Run Screen API (/api/screener/query)
   const runScreen = async (query = null) => {
     setLoading(true);
     const activeQuery = query || (queryMode === 'formula' ? formulaQuery : buildVisualFormula());
     try {
-      const { data } = await api.post('/api/screener/run', {
-        formula_query: activeQuery,
-        sort_by: sortColumn,
-        sort_desc: sortDirection === 'desc',
-        limit: 300
+      const { data } = await api.post('/api/screener/query', {
+        formula_query: activeQuery || "MarketCap > 0",
+        sort_by: sortColumn || "market_cap_cr",
+        sort_dir: sortDirection === 'asc' ? "ASC" : "DESC",
+        limit: 100,
+        offset: 0
       });
       setResults(data.results || []);
-      setTotalCount(data.total_matches || 0);
+      setTotalCount(data.total || data.count || (data.results ? data.results.length : 0));
     } catch (err) {
+      console.error('Screener query error:', err);
       toast.error(err.response?.data?.detail || 'Screener query failed');
     } finally {
       setLoading(false);
     }
   };
 
-  // 4. AI Translate Natural Language
+  // 4. AI Translate Natural Language (/api/screener/ai-parse)
   const handleAiTranslate = async () => {
     if (!aiPrompt.trim()) return;
     setAiLoading(true);
     try {
-      const { data } = await api.post('/api/screener/nl-to-screen', { nl_query: aiPrompt });
-      setFormulaQuery(data.formula_query);
-      setQueryMode('formula');
-      setActivePresetId(null);
-      runScreen(data.formula_query);
-      toast.success('AI mapped query to formula criteria!');
+      const { data } = await api.post('/api/screener/ai-parse', { prompt: aiPrompt });
+      if (data.formula_query) {
+        setFormulaQuery(data.formula_query);
+        setQueryMode('formula');
+        setActivePresetId(null);
+        runScreen(data.formula_query);
+        toast.success(`AI Query: ${data.formula_query}`);
+      } else {
+        toast.error('Could not generate formula.');
+      }
     } catch (err) {
-      toast.error('AI could not parse your query.');
+      toast.error(err.response?.data?.detail || 'AI query error');
     } finally {
       setAiLoading(false);
     }
   };
 
-  // 5. Backtest Runner
+  // 5. Backtest Runner (/api/screener/backtest)
   const handleRunBacktest = async () => {
     setShowBacktestModal(true);
     setBacktestLoading(true);
@@ -155,7 +161,7 @@ export default function AdvancedScreener() {
         formula_query: activeQuery,
         is_public: true,
       });
-      toast.success(`Screen saved: ${data.share_token}`);
+      toast.success(`Screen saved!`);
       setShowSaveModal(false);
       setScreenName('');
       const res = await api.get('/api/screener/screens');
@@ -544,7 +550,8 @@ export default function AdvancedScreener() {
           background: '#080C1A',
           border: '1px solid rgba(255,255,255,0.08)',
           borderRadius: 8,
-          position: 'relative'
+          position: 'relative',
+          minHeight: '400px'
         }}
       >
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.7rem', fontFamily: 'JetBrains Mono, monospace' }}>
