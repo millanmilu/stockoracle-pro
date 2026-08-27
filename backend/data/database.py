@@ -1366,7 +1366,7 @@ def execute_screener_sql_query(
         FROM screener_daily_metrics
         WHERE {where_clause}
         ORDER BY {safe_sort} {safe_dir} NULLS LAST
-        LIMIT {max(1, min(limit, 200))} OFFSET {max(0, offset)}
+        LIMIT {max(1, min(limit, 2000))} OFFSET {max(0, offset)}
     """
 
     count_sql = f"""

@@ -93,7 +93,7 @@ export default function AdvancedScreener() {
         formula_query: activeQuery || "MarketCap > 0",
         sort_by: sortColumn || "market_cap_cr",
         sort_dir: sortDirection === 'asc' ? "ASC" : "DESC",
-        limit: 100,
+        limit: 2000,
         offset: 0
       });
       setResults(data.results || []);
@@ -233,7 +233,7 @@ export default function AdvancedScreener() {
 
   // Pre-configured Quick Strategy Pills
   const quickPills = [
-    { id: 'all-nse', name: '🌐 All Stocks (75+)', query: 'MarketCap > 0' },
+    { id: 'all-nse', name: '🌐 All NSE Stocks (1,500+)', query: 'MarketCap > 0' },
     { id: 'high-roce', name: '💎 High ROCE (>20%)', query: 'ROCE > 20 AND DebtToEquity < 0.5' },
     { id: 'value-growth', name: '🔥 Growth at Fair Value', query: 'ROCE > 18 AND PE < 28 AND DebtToEquity < 1.0' },
     { id: 'oversold', name: '⚡ Oversold Momentum', query: 'RSI14 < 40 AND VolumeRatio20D > 1.2' },
