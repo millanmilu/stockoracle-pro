@@ -5,6 +5,7 @@ import MultiChartGrid from '../MultiChartGrid';
 import ValuationTerminalView from './ValuationTerminalView';
 import OptionsStrategyLabView from './OptionsStrategyLabView';
 import QuantRiskCockpit from './QuantRiskCockpit';
+import ErrorBoundary from '../ErrorBoundary';
 import { 
   Grid2X2, Columns, LayoutGrid, Maximize2, Minimize2, 
   CandlestickChart, Calculator, Layers, ShieldAlert, Sparkles, RefreshCw
@@ -231,17 +232,19 @@ export default function MultiTileWorkspace() {
             }}>
               {renderTileHeader(1, `Pro Chart — ${selectedSymbol}`, CandlestickChart, '#6366F1', 'Live Market')}
               <div style={{ flex: 1, minHeight: 0, height: '100%', position: 'relative' }}>
-                <ChartPane
-                  paneId={0}
-                  symbol={selectedSymbol}
-                  interval={tileInterval}
-                  isActive={true}
-                  onSelectPane={() => {}}
-                  onSymbolChange={(id, s) => setSelectedSymbol(s)}
-                  onIntervalChange={(id, intv) => setTileInterval(intv)}
-                  onToggleMaximize={() => toggleMaximize(1)}
-                  isMaximized={maximizedTile === 1}
-                />
+                <ErrorBoundary>
+                  <ChartPane
+                    paneId={0}
+                    symbol={selectedSymbol}
+                    interval={tileInterval}
+                    isActive={true}
+                    onSelectPane={() => {}}
+                    onSymbolChange={(id, s) => setSelectedSymbol(s)}
+                    onIntervalChange={(id, intv) => setTileInterval(intv)}
+                    onToggleMaximize={() => toggleMaximize(1)}
+                    isMaximized={maximizedTile === 1}
+                  />
+                </ErrorBoundary>
               </div>
             </div>
           )}
@@ -259,7 +262,9 @@ export default function MultiTileWorkspace() {
             }}>
               {renderTileHeader(2, `DCF Valuation — ${selectedSymbol}`, Calculator, '#10B981', 'Fair Value')}
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                <ValuationTerminalView ticker={selectedSymbol} compact={maximizedTile === null} />
+                <ErrorBoundary>
+                  <ValuationTerminalView ticker={selectedSymbol} compact={maximizedTile === null} />
+                </ErrorBoundary>
               </div>
             </div>
           )}
@@ -290,17 +295,19 @@ export default function MultiTileWorkspace() {
             }}>
               {renderTileHeader(1, `Pro Chart — ${selectedSymbol}`, CandlestickChart, '#6366F1', 'Live Market')}
               <div style={{ flex: 1, minHeight: 0, height: '100%', position: 'relative' }}>
-                <ChartPane
-                  paneId={0}
-                  symbol={selectedSymbol}
-                  interval={tileInterval}
-                  isActive={true}
-                  onSelectPane={() => {}}
-                  onSymbolChange={(id, s) => setSelectedSymbol(s)}
-                  onIntervalChange={(id, intv) => setTileInterval(intv)}
-                  onToggleMaximize={() => toggleMaximize(1)}
-                  isMaximized={maximizedTile === 1}
-                />
+                <ErrorBoundary>
+                  <ChartPane
+                    paneId={0}
+                    symbol={selectedSymbol}
+                    interval={tileInterval}
+                    isActive={true}
+                    onSelectPane={() => {}}
+                    onSymbolChange={(id, s) => setSelectedSymbol(s)}
+                    onIntervalChange={(id, intv) => setTileInterval(intv)}
+                    onToggleMaximize={() => toggleMaximize(1)}
+                    isMaximized={maximizedTile === 1}
+                  />
+                </ErrorBoundary>
               </div>
             </div>
           )}
@@ -319,7 +326,9 @@ export default function MultiTileWorkspace() {
             }}>
               {renderTileHeader(2, `DCF Valuation — ${selectedSymbol}`, Calculator, '#10B981', 'Fair Value')}
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                <ValuationTerminalView ticker={selectedSymbol} compact={maximizedTile === null} />
+                <ErrorBoundary>
+                  <ValuationTerminalView ticker={selectedSymbol} compact={maximizedTile === null} />
+                </ErrorBoundary>
               </div>
             </div>
           )}
@@ -338,7 +347,9 @@ export default function MultiTileWorkspace() {
             }}>
               {renderTileHeader(3, `Options Strategy — ${selectedSymbol}`, Layers, '#F59E0B', 'Payoff & Greeks')}
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                <OptionsStrategyLabView ticker={selectedSymbol} compact={maximizedTile === null} />
+                <ErrorBoundary>
+                  <OptionsStrategyLabView ticker={selectedSymbol} compact={maximizedTile === null} />
+                </ErrorBoundary>
               </div>
             </div>
           )}
@@ -357,7 +368,9 @@ export default function MultiTileWorkspace() {
             }}>
               {renderTileHeader(4, `Quant Risk (VaR) — ${selectedSymbol}`, ShieldAlert, '#EC4899', 'Portfolio Risk')}
               <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-                <QuantRiskCockpit compact={maximizedTile === null} />
+                <ErrorBoundary>
+                  <QuantRiskCockpit compact={maximizedTile === null} />
+                </ErrorBoundary>
               </div>
             </div>
           )}

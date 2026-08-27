@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import useStore from '../store/useStore';
 import api from '../utils/api';
 import { Send, Bot, User, Sparkles, RotateCcw } from 'lucide-react';
@@ -75,9 +75,15 @@ export default function AIChatPanel({ ticker: propTicker }) {
     ]);
   };
 
-  const formatContent = (text) => {
-    // Simple bold markdown
-    return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  const renderFormattedContent = (text) => {
+    if (!text) return null;
+    const parts = text.split(/(\*\*.*?\*\*)/g);
+    return parts.map((part, idx) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        return <strong key={idx} style={{ color: '#F0F0FF', fontWeight: 700 }}>{part.slice(2, -2)}</strong>;
+      }
+      return <span key={idx}>{part}</span>;
+    });
   };
 
   return (
@@ -163,9 +169,9 @@ export default function AIChatPanel({ ticker: propTicker }) {
               color: '#E2E8F0',
               fontSize: '0.8rem',
               lineHeight: 1.55,
-            }}
-              dangerouslySetInnerHTML={{ __html: formatContent(msg.content) }}
-            />
+            }}>
+              {renderFormattedContent(msg.content)}
+            </div>
           </div>
         ))}
 

@@ -123,24 +123,34 @@ export default function App() {
       <Toaster position="top-right" toastOptions={{ style: { background: '#0F172A', color: '#F0F0FF', border: '1px solid rgba(99,102,241,0.3)' } }} />
       <CommandPalette isOpen={showCommandPalette} onClose={() => setShowCommandPalette(false)} />
       
-      <ProTopBar 
-        onToggleSidebar={() => setSidebarCollapsed(c => !c)}
-        onToggleRight={() => setRightPanelOpen(r => !r)}
-        onOpenCommandPalette={() => setShowCommandPalette(true)}
-      />
+      <ErrorBoundary>
+        <ProTopBar 
+          onToggleSidebar={() => setSidebarCollapsed(c => !c)}
+          onToggleRight={() => setRightPanelOpen(r => !r)}
+          onOpenCommandPalette={() => setShowCommandPalette(true)}
+        />
+      </ErrorBoundary>
       
-      <BloombergTickerTape />
+      <ErrorBoundary>
+        <BloombergTickerTape />
+      </ErrorBoundary>
       
       {trainingStatus && <TrainingBar trainingStatus={trainingStatus} selectedSymbol={selectedSymbol} />}
       
       <div className="app-body">
-        <ProSidebar collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(c => !c)} />
+        <ErrorBoundary>
+          <ProSidebar collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(c => !c)} />
+        </ErrorBoundary>
         <main className="app-main">
           <ErrorBoundary key={activeView}>
             {renderView()}
           </ErrorBoundary>
         </main>
-        {rightPanelOpen && <ProRightPanel onClose={() => setRightPanelOpen(false)} />}
+        {rightPanelOpen && (
+          <ErrorBoundary>
+            <ProRightPanel onClose={() => setRightPanelOpen(false)} />
+          </ErrorBoundary>
+        )}
       </div>
       
       <BottomStatusBar />
@@ -159,6 +169,7 @@ function TrainingBar({ trainingStatus, selectedSymbol }) {
 }
 
 function BottomStatusBar() {
+  const wsConnected = useStore((s) => s.wsConnected);
   const [time, setTime] = useState(new Date());
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(t); }, []);
   const ist = time.toLocaleString('en-IN', { timeZone:'Asia/Kolkata', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
@@ -173,7 +184,9 @@ function BottomStatusBar() {
     <div className="pro-status-bar">
       <span><span style={{color:phaseColor,fontWeight:700}}>●</span> {phase}</span>
       <span>NSE IST {ist}</span>
-      <span style={{color:'#10B981'}}>● WS Connected</span>
+      <span style={{color: wsConnected ? '#10B981' : '#F59E0B'}}>
+        ● {wsConnected ? 'WS Live' : 'WS Reconnecting…'}
+      </span>
     </div>
   );
 }

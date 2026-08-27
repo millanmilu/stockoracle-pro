@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../utils/api';
 import {
-  Globe, RefreshCw, TrendingUp, TrendingDown, DollarSign, Percent,
+  Globe, Globe2, RefreshCw, TrendingUp, TrendingDown, DollarSign, Percent,
   Activity, ShieldCheck, Scale, BarChart2
 } from 'lucide-react';
 import {

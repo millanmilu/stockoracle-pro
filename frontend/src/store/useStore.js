@@ -26,7 +26,9 @@ const useStore = create(
         set((s) => ({ historyCache: { ...s.historyCache, [key]: data } })),
       clearHistoryCache: () => set({ historyCache: {} }),
 
-      // ── Live Prices (populated by WebSocket ticker subscriptions) ───────────
+      // ── Live Prices & WebSocket Status ──────────────────────────────────────
+      wsConnected: false,
+      setWsConnected: (val) => set({ wsConnected: val }),
       livePrices: {},   // { RELIANCE: { price: 1420, change_pct: 0.5 } }
       setLivePrice: (ticker, payload) =>
         set((s) => ({ livePrices: { ...s.livePrices, [ticker]: payload } })),

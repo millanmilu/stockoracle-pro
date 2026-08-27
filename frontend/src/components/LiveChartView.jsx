@@ -997,44 +997,88 @@ export default function LiveChartView() {
     });
   }, [isSplitView, compareSymbol, interval, timeframe]);
 
-  /* ── WebSocket Feed ───────────────────────────────────────── */
+  /* ── WebSocket Feed with Auto-Reconnect & Heartbeat ─────────── */
 
   useEffect(() => {
-    if (wsRef.current) wsRef.current.close();
+    let unmounted = false;
+    let reconnectTimeout = null;
+    let pingInterval = null;
+    let retryDelay = 1000;
 
-    const ws = new WebSocket(getWsUrl());
-    wsRef.current = ws;
-
-    ws.onopen  = () => {
-      setWsConnected(true);
-      const subs = [selectedSymbol];
-      if (isSplitView && compareSymbol) {
-        subs.push(compareSymbol);
+    const connectWs = () => {
+      if (unmounted) return;
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch {}
       }
-      ws.send(JSON.stringify({ subscribe: subs }));
-    };
-    ws.onclose = () => setWsConnected(false);
-    ws.onerror = () => setWsConnected(false);
-    ws.onmessage = e => {
-      try {
-        const { ticker, price, change_pct } = JSON.parse(e.data);
-        if (ticker === selectedSymbol) {
-          setLivePrice(price);
-          setLiveChange(change_pct);
 
-          if (targetAlertPrice && Math.abs(price - Number(targetAlertPrice)) < 1) {
-            toast.success(`🔔 ALERT TRIGGERED: ${selectedSymbol} hit target ₹${price}`);
-            setTargetAlertPrice('');
-          }
+      const ws = new WebSocket(getWsUrl());
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (unmounted) return;
+        setWsConnected(true);
+        useStore.getState().setWsConnected?.(true);
+        retryDelay = 1000;
+        const subs = [selectedSymbol];
+        if (isSplitView && compareSymbol) {
+          subs.push(compareSymbol);
         }
-      } catch {}
+        try {
+          ws.send(JSON.stringify({ subscribe: subs }));
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        if (unmounted) return;
+        setWsConnected(false);
+        useStore.getState().setWsConnected?.(false);
+        reconnectTimeout = setTimeout(() => {
+          retryDelay = Math.min(retryDelay * 1.5, 15000);
+          connectWs();
+        }, retryDelay);
+      };
+
+      ws.onerror = () => {
+        if (unmounted) return;
+        setWsConnected(false);
+        useStore.getState().setWsConnected?.(false);
+        try { ws.close(); } catch {}
+      };
+
+      ws.onmessage = e => {
+        try {
+          const { ticker, price, change_pct } = JSON.parse(e.data);
+          if (ticker === selectedSymbol) {
+            setLivePrice(price);
+            setLiveChange(change_pct);
+
+            if (targetAlertPrice && Math.abs(price - Number(targetAlertPrice)) < 1) {
+              toast.success(`🔔 ALERT TRIGGERED: ${selectedSymbol} hit target ₹${price}`);
+              setTargetAlertPrice('');
+            }
+          }
+        } catch {}
+      };
     };
 
-    const ping = setInterval(() => {
-      if (ws.readyState === WebSocket.OPEN) ws.send('ping');
+    connectWs();
+
+    pingInterval = setInterval(() => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        try { wsRef.current.send('ping'); } catch {}
+      }
     }, 20_000);
 
-    return () => { clearInterval(ping); ws.close(); };
+    return () => {
+      unmounted = true;
+      clearInterval(pingInterval);
+      clearTimeout(reconnectTimeout);
+      if (wsRef.current) {
+        try { wsRef.current.close(); } catch {}
+      }
+      setWsConnected(false);
+      useStore.getState().setWsConnected?.(false);
+    };
   }, [selectedSymbol, targetAlertPrice, compareSymbol, isSplitView]);
 
   /* ── Primary Chart Data Binding & Pattern Markers ─────────── */
