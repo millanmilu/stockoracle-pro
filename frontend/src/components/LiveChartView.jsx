@@ -2127,11 +2127,6 @@ export default function LiveChartView() {
 
           <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }} />
 
-            )}
-          </div>
-
-          <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }} />
-
           {/* Timeframe Interval Buttons */}
           <div style={{ display:'flex', gap:2, background:'rgba(255,255,255,0.03)', padding:'2px', borderRadius:5, border:'1px solid rgba(255,255,255,0.06)' }}>
             {INTERVALS.map(iv => (
@@ -2529,85 +2524,7 @@ export default function LiveChartView() {
                   <button onClick={() => setShowEMARibbon(false)} title="Remove EMA Ribbon" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
                 </div>
               )}
-              {showSMA && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(0, 229, 255, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#00E5FF', fontWeight: 700 }}>SMA 20</span>
-                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>{indicatorValues.sma ? `₹${indicatorValues.sma.toFixed(2)}` : '—'}</span>
-                  <button onClick={() => setShowSMA(false)} title="Remove SMA" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
-              {showEMA && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(255, 145, 0, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#FF9100', fontWeight: 700 }}>EMA 20</span>
-                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>{indicatorValues.ema ? `₹${indicatorValues.ema.toFixed(2)}` : '—'}</span>
-                  <button onClick={() => setShowEMA(false)} title="Remove EMA" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
-              {showALMA && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(250, 204, 21, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#FACC15', fontWeight: 700 }}>ALMA 9</span>
-                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>{indicatorValues.alma ? `₹${indicatorValues.alma.toFixed(2)}` : '—'}</span>
-                  <button onClick={() => setShowALMA(false)} title="Remove ALMA" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
-              {showBB && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(224, 64, 251, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#E040FB', fontWeight: 700 }}>BB (20, 2)</span>
-                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>
-                    {indicatorValues.bb ? `U: ₹${indicatorValues.bb.upper.toFixed(1)} L: ₹${indicatorValues.bb.lower.toFixed(1)}` : '—'}
-                  </span>
-                  <button onClick={() => setShowBB(false)} title="Remove Bollinger Bands" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
-              {showRSI && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(244, 63, 94, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#F43F5E', fontWeight: 700 }}>RSI 14</span>
-                  <span style={{ 
-                    fontFamily: 'JetBrains Mono, monospace',
-                    fontWeight: 700,
-                    color: indicatorValues.rsi > 70 ? '#EF5350' : indicatorValues.rsi < 30 ? '#10B981' : '#E2E8F0' 
-                  }}>
-                    {indicatorValues.rsi ? indicatorValues.rsi.toFixed(1) : '—'}
-                  </span>
-                  <button onClick={() => setShowRSI(false)} title="Remove RSI" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
-              {showMACD && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(56, 189, 248, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#38BDF8', fontWeight: 700 }}>MACD (12, 26, 9)</span>
-                  <span style={{ 
-                    fontFamily: 'JetBrains Mono, monospace',
-                    fontWeight: 700,
-                    color: indicatorValues.macd?.hist >= 0 ? '#10B981' : '#EF5350' 
-                  }}>
-                    {indicatorValues.macd ? `${indicatorValues.macd.hist >= 0 ? '+' : ''}${indicatorValues.macd.hist.toFixed(2)}` : '—'}
-                  </span>
-                  <button onClick={() => setShowMACD(false)} title="Remove MACD" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
-              {showKeyLevels && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(234, 179, 8, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#EAB308', fontWeight: 700 }}>Auto Key Levels</span>
-                  <span style={{ color: '#10B981', fontWeight: 600 }}>S/R Active</span>
-                  <button onClick={() => setShowKeyLevels(false)} title="Remove Key Levels" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
-              {showVolume && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(38, 166, 154, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#26A69A', fontWeight: 700 }}>Volume</span>
-                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>
-                    {indicatorValues.volume ? Number(indicatorValues.volume).toLocaleString() : '—'}
-                  </span>
-                  <button onClick={() => setShowVolume(false)} title="Remove Volume" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
-              {showPatterns && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(16, 185, 129, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#10B981', fontWeight: 700 }}>AI Patterns</span>
-                  <span style={{ color: '#E2E8F0' }}>Auto Detect</span>
-                  <button onClick={() => setShowPatterns(false)} title="Remove AI Patterns" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
+
             </div>
 
             {loading && (
