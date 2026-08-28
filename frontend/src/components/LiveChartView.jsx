@@ -605,10 +605,6 @@ export default function LiveChartView() {
   const [showKeyLevels, setShowKeyLevels] = useState(false);
   const [showPatterns,  setShowPatterns]  = useState(false);
   const [showAICone,    setShowAICone]    = useState(true);
-  const [showVWAP,      setShowVWAP]      = useState(false);
-  const [showSuperTrend, setShowSuperTrend] = useState(false);
-  const [showPivotPoints, setShowPivotPoints] = useState(false);
-  const [showEMARibbon, setShowEMARibbon] = useState(false);
   
   // Real-time indicator readout values for on-chart TradingView legend
   const [indicatorValues, setIndicatorValues] = useState({
@@ -618,23 +614,12 @@ export default function LiveChartView() {
     rsi: null,
     macd: null,
     alma: null,
-    vwap: null,
-    supertrend: null,
     volume: null,
   });
 
   // Chart Scale & Hover HUD
   const [isLogScale, setIsLogScale] = useState(false);
   const [hoverBarInfo, setHoverBarInfo] = useState(null);
-
-  // Quick Paper Trading Bar State
-  const [quickOrderQty, setQuickOrderQty] = useState(10);
-  const [showQuickTradeBar, setShowQuickTradeBar] = useState(true);
-  const portfolio = useStore(state => state.portfolio) || [];
-  const addPosition = useStore(state => state.addPosition);
-  const currentStockPosition = useMemo(() => {
-    return portfolio.find(p => p.ticker === selectedSymbol) || null;
-  }, [portfolio, selectedSymbol]);
 
   // Chart Navigation State
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -664,17 +649,13 @@ export default function LiveChartView() {
     rsi_14: showRSI,
     macd: showMACD,
     alma: showALMA,
-    vwap: showVWAP,
-    supertrend: showSuperTrend,
-    pivot_points: showPivotPoints,
-    ema_ribbon: showEMARibbon,
     auto_key_levels: showKeyLevels,
     ai_patterns: showPatterns || (showAdvancedPanel && advancedPanelTab === 'patterns'),
     vpvr: showAdvancedPanel && advancedPanelTab === 'volume',
     orderflow: showAdvancedPanel && advancedPanelTab === 'order',
     mtf_matrix: showAdvancedPanel && advancedPanelTab === 'mtf',
     backtester: showAdvancedPanel && advancedPanelTab === 'backtest',
-  }), [showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showVWAP, showSuperTrend, showPivotPoints, showEMARibbon, showKeyLevels, showPatterns, showAdvancedPanel, advancedPanelTab]);
+  }), [showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, showAdvancedPanel, advancedPanelTab]);
 
   const handleToggleIndicator = useCallback((id) => {
     switch (id) {
@@ -699,18 +680,6 @@ export default function LiveChartView() {
         break;
       case 'alma':
         setShowALMA(prev => !prev);
-        break;
-      case 'vwap':
-        setShowVWAP(prev => !prev);
-        break;
-      case 'supertrend':
-        setShowSuperTrend(prev => !prev);
-        break;
-      case 'pivot_points':
-        setShowPivotPoints(prev => !prev);
-        break;
-      case 'ema_ribbon':
-        setShowEMARibbon(prev => !prev);
         break;
       case 'auto_key_levels':
         setShowKeyLevels(prev => !prev);
@@ -785,15 +754,6 @@ export default function LiveChartView() {
   const macdSignalRef  = useRef(null);
   const macdHistRef    = useRef(null);
   const almaRef        = useRef(null);
-  const vwapRef        = useRef(null);
-  const vwapUpperRef   = useRef(null);
-  const vwapLowerRef   = useRef(null);
-  const supertrendRef  = useRef(null);
-  const pivotLinesRef  = useRef([]);
-  const ema9Ref        = useRef(null);
-  const ema21Ref       = useRef(null);
-  const ema50Ref       = useRef(null);
-  const ema200Ref      = useRef(null);
   const keyLevelLinesRef = useRef([]);
 
   const predLineRef    = useRef(null);
@@ -959,28 +919,6 @@ export default function LiveChartView() {
     const lowerLine = chart.addLineSeries({ color: 'rgba(239,83,80,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     lowerLineRef.current = lowerLine;
 
-    // VWAP & Volatility Bands
-    const vwap = chart.addLineSeries({ color: '#38BDF8', lineWidth: 1.8, priceLineVisible: false, lastValueVisible: true });
-    vwapRef.current = vwap;
-    const vwapUpper = chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.4)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
-    vwapUpperRef.current = vwapUpper;
-    const vwapLower = chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.4)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
-    vwapLowerRef.current = vwapLower;
-
-    // SuperTrend Indicator
-    const supertrend = chart.addLineSeries({ color: '#10B981', lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
-    supertrendRef.current = supertrend;
-
-    // EMA Ribbon (9, 21, 50, 200)
-    const ema9 = chart.addLineSeries({ color: '#38BDF8', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    ema9Ref.current = ema9;
-    const ema21 = chart.addLineSeries({ color: '#10B981', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    ema21Ref.current = ema21;
-    const ema50 = chart.addLineSeries({ color: '#F59E0B', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
-    ema50Ref.current = ema50;
-    const ema200 = chart.addLineSeries({ color: '#EF5350', lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
-    ema200Ref.current = ema200;
-
     // Crosshair HUD subscription
     chart.subscribeCrosshairMove((param) => {
       if (!param || !param.time) {
@@ -1031,15 +969,6 @@ export default function LiveChartView() {
       smaRef.current = null;
       emaRef.current = null;
       almaRef.current = null;
-      vwapRef.current = null;
-      vwapUpperRef.current = null;
-      vwapLowerRef.current = null;
-      supertrendRef.current = null;
-      pivotLinesRef.current = [];
-      ema9Ref.current = null;
-      ema21Ref.current = null;
-      ema50Ref.current = null;
-      ema200Ref.current = null;
       bbUpperRef.current = null;
       bbLowerRef.current = null;
       rsiRef.current = null;
@@ -1427,92 +1356,7 @@ export default function LiveChartView() {
       try { bbUpperRef.current?.setData([]); bbLowerRef.current?.setData([]); } catch {}
     }
 
-    // 4. VWAP & Bands
-    let currentVWAP = null;
-    if (showVWAP && vwapRef.current && dedupedCandles.length > 5) {
-      const vwapData = calculateVWAP(dedupedCandles);
-      try {
-        vwapRef.current.setData(vwapData.vwap);
-        vwapUpperRef.current?.setData(vwapData.upper);
-        vwapLowerRef.current?.setData(vwapData.lower);
-        if (vwapData.vwap.length > 0) currentVWAP = vwapData.vwap[vwapData.vwap.length - 1].value;
-      } catch {}
-    } else {
-      try {
-        vwapRef.current?.setData([]);
-        vwapUpperRef.current?.setData([]);
-        vwapLowerRef.current?.setData([]);
-      } catch {}
-    }
 
-    // 5. SuperTrend Indicator
-    let currentST = null;
-    if (showSuperTrend && supertrendRef.current && dedupedCandles.length > 10) {
-      const stData = calculateSuperTrend(dedupedCandles, 10, 3.0);
-      try {
-        supertrendRef.current.setData(stData);
-        if (stData.length > 0) currentST = stData[stData.length - 1];
-      } catch {}
-    } else {
-      try { supertrendRef.current?.setData([]); } catch {}
-    }
-
-    // 6. Pivot Points (Classic P, R1-R3, S1-S3)
-    if (showPivotPoints && candleRef.current && dedupedCandles.length > 2) {
-      if (pivotLinesRef.current && pivotLinesRef.current.length > 0) {
-        pivotLinesRef.current.forEach(line => {
-          try { candleRef.current?.removePriceLine(line); } catch {}
-        });
-        pivotLinesRef.current = [];
-      }
-      const piv = calculatePivotPoints(dedupedCandles);
-      if (piv) {
-        const pConfigs = [
-          { price: piv.P,  color: '#FACC15', title: `P ₹${piv.P.toFixed(0)}` },
-          { price: piv.R1, color: '#EF5350', title: `R1 ₹${piv.R1.toFixed(0)}` },
-          { price: piv.R2, color: '#DC2626', title: `R2 ₹${piv.R2.toFixed(0)}` },
-          { price: piv.R3, color: '#991B1B', title: `R3 ₹${piv.R3.toFixed(0)}` },
-          { price: piv.S1, color: '#10B981', title: `S1 ₹${piv.S1.toFixed(0)}` },
-          { price: piv.S2, color: '#059669', title: `S2 ₹${piv.S2.toFixed(0)}` },
-          { price: piv.S3, color: '#047857', title: `S3 ₹${piv.S3.toFixed(0)}` },
-        ];
-        pConfigs.forEach(pc => {
-          try {
-            const pl = candleRef.current.createPriceLine({
-              price: pc.price,
-              color: pc.color,
-              lineWidth: 1,
-              lineStyle: LineStyle.Dotted,
-              axisLabelVisible: true,
-              title: pc.title,
-            });
-            pivotLinesRef.current.push(pl);
-          } catch {}
-        });
-      }
-    } else if (!showPivotPoints && candleRef.current && pivotLinesRef.current.length > 0) {
-      pivotLinesRef.current.forEach(line => {
-        try { candleRef.current?.removePriceLine(line); } catch {}
-      });
-      pivotLinesRef.current = [];
-    }
-
-    // 7. EMA Ribbon (9, 21, 50, 200)
-    if (showEMARibbon && ema9Ref.current && dedupedCandles.length > 20) {
-      try {
-        ema9Ref.current.setData(calculateEMA(dedupedCandles, 9));
-        ema21Ref.current?.setData(calculateEMA(dedupedCandles, 21));
-        ema50Ref.current?.setData(calculateEMA(dedupedCandles, 50));
-        ema200Ref.current?.setData(calculateEMA(dedupedCandles, 200));
-      } catch {}
-    } else {
-      try {
-        ema9Ref.current?.setData([]);
-        ema21Ref.current?.setData([]);
-        ema50Ref.current?.setData([]);
-        ema200Ref.current?.setData([]);
-      } catch {}
-    }
 
     // 8. RSI Sub-chart
     let currentRSI = null;
@@ -1616,8 +1460,6 @@ export default function LiveChartView() {
       rsi: currentRSI,
       macd: currentMACD,
       alma: currentALMA,
-      vwap: currentVWAP,
-      supertrend: currentST,
       volume: lastCandle ? Number(rawHistory[rawHistory.length - 1]?.volume || 0) : null,
     });
 
@@ -1834,36 +1676,6 @@ export default function LiveChartView() {
     link.href = image;
     link.click();
     toast.success('Chart Snapshot Downloaded 📸');
-  };
-
-  const handleQuickBuy = () => {
-    const price = curPrice || lastCandleClose || 1000;
-    const qty = Number(quickOrderQty) || 1;
-    addPosition({
-      ticker: selectedSymbol,
-      quantity: qty,
-      buyPrice: price,
-      addedAt: new Date().toISOString(),
-    });
-    toast.success(`🟢 Paper BUY: ${qty} shares of ${selectedSymbol} @ ₹${Number(price).toFixed(2)}`);
-  };
-
-  const handleQuickSell = () => {
-    const price = curPrice || lastCandleClose || 1000;
-    const qty = Number(quickOrderQty) || 1;
-    if (currentStockPosition) {
-      if (currentStockPosition.quantity <= qty) {
-        useStore.getState().removePosition(currentStockPosition.id);
-        toast.success(`🔴 Paper SELL: Closed full position in ${selectedSymbol} @ ₹${Number(price).toFixed(2)}`);
-      } else {
-        useStore.getState().updatePosition(currentStockPosition.id, {
-          quantity: currentStockPosition.quantity - qty,
-        });
-        toast.success(`🔴 Paper SELL: Sold ${qty} shares of ${selectedSymbol} @ ₹${Number(price).toFixed(2)}`);
-      }
-    } else {
-      toast.error(`No active position in ${selectedSymbol} to sell.`);
-    }
   };
 
   const toggleLogScale = () => {
@@ -2217,60 +2029,6 @@ export default function LiveChartView() {
             <span style={{ color: '#10B981' }} title="1H Bullish">1H●</span>
             <span style={{ color: '#10B981' }} title="1D Bullish">1D●</span>
           </div>
-
-          {/* 1-Click Quick Paper Trading Action Bar */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            background: 'rgba(255,255,255,0.03)',
-            padding: '2px 6px', borderRadius: 5,
-            border: '1px solid rgba(255,255,255,0.08)'
-          }}>
-            <button
-              onClick={handleQuickBuy}
-              title={`1-Click Paper BUY ${quickOrderQty} shares`}
-              style={{
-                padding: '3px 8px', borderRadius: 4,
-                background: '#10B981', color: '#FFF', border: 'none',
-                fontSize: '0.7rem', fontWeight: 800, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 3
-              }}
-            >
-              BUY
-            </button>
-            <input
-              type="number"
-              min="1"
-              max="10000"
-              value={quickOrderQty}
-              onChange={(e) => setQuickOrderQty(Math.max(1, Number(e.target.value)))}
-              style={{
-                width: 34, padding: '2px 4px', borderRadius: 3,
-                background: '#060913', border: '1px solid rgba(255,255,255,0.15)',
-                color: '#FFF', fontSize: '0.68rem', fontWeight: 700, textAlign: 'center',
-                outline: 'none'
-              }}
-            />
-            <button
-              onClick={handleQuickSell}
-              title={`1-Click Paper SELL ${quickOrderQty} shares`}
-              style={{
-                padding: '3px 8px', borderRadius: 4,
-                background: '#EF5350', color: '#FFF', border: 'none',
-                fontSize: '0.7rem', fontWeight: 800, cursor: 'pointer',
-                display: 'flex', alignItems: 'center', gap: 3
-              }}
-            >
-              SELL
-            </button>
-            {currentStockPosition && (
-              <div style={{
-                fontSize: '0.64rem', color: '#10B981', background: 'rgba(16,185,129,0.12)',
-                padding: '2px 5px', borderRadius: 4, fontWeight: 700, border: '1px solid rgba(16,185,129,0.3)'
-              }}>
-                {currentStockPosition.quantity} Qty @ ₹{Number(currentStockPosition.buyPrice).toFixed(0)}
-              </div>
-            )}
-          </div>
         </div>
 
         {/* Right: Indicators, AI Overlays, Grid Switcher, Snapshot, Fullscreen */}
@@ -2496,34 +2254,7 @@ export default function LiveChartView() {
                 </div>
               )}
 
-              {showVWAP && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(56, 189, 248, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#38BDF8', fontWeight: 700 }}>VWAP</span>
-                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>{indicatorValues.vwap ? `₹${indicatorValues.vwap.toFixed(2)}` : '—'}</span>
-                  <button onClick={() => setShowVWAP(false)} title="Remove VWAP" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
-              {showSuperTrend && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(16, 185, 129, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: indicatorValues.supertrend?.color || '#10B981', fontWeight: 700 }}>SuperTrend (10, 3)</span>
-                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>{indicatorValues.supertrend ? `₹${indicatorValues.supertrend.value.toFixed(2)}` : '—'}</span>
-                  <button onClick={() => setShowSuperTrend(false)} title="Remove SuperTrend" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
-              {showPivotPoints && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(250, 204, 21, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#FACC15', fontWeight: 700 }}>Pivot Points</span>
-                  <span style={{ color: '#10B981', fontWeight: 600 }}>Classic S/R</span>
-                  <button onClick={() => setShowPivotPoints(false)} title="Remove Pivot Points" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
-              {showEMARibbon && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(168, 85, 247, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
-                  <span style={{ color: '#A855F7', fontWeight: 700 }}>EMA Ribbon</span>
-                  <span style={{ color: '#94A3B8', fontSize: 10 }}>9/21/50/200</span>
-                  <button onClick={() => setShowEMARibbon(false)} title="Remove EMA Ribbon" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
-                </div>
-              )}
+
 
             </div>
 
