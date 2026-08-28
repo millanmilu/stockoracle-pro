@@ -233,11 +233,11 @@ export default function AdvancedScreener() {
 
   // Pre-configured Quick Strategy Pills
   const quickPills = [
-    { id: 'all-nse', name: '🌐 All NSE Stocks (1,500+)', query: 'MarketCap > 0' },
+    { id: 'all-nse', name: '🌐 All NSE Equities (1,500+)', query: 'MarketCap > 0' },
     { id: 'high-roce', name: '💎 High ROCE (>20%)', query: 'ROCE > 20 AND DebtToEquity < 0.5' },
     { id: 'value-growth', name: '🔥 Growth at Fair Value', query: 'ROCE > 18 AND PE < 28 AND DebtToEquity < 1.0' },
-    { id: 'oversold', name: '⚡ Oversold Momentum', query: 'RSI14 < 40 AND VolumeRatio20D > 1.2' },
-    { id: 'ai-bulls', name: '🤖 AI Top Ranked', query: 'MarketCap > 0' },
+    { id: 'oversold', name: '⚡ Oversold Momentum', query: 'RSI14 < 40 AND VolumeRatio20D > 1.1' },
+    { id: 'ai-bulls', name: '🤖 AI High Consensus', query: 'AIConsensus > 75 AND VolumeRatio20D > 1.0' },
     { id: 'low-debt', name: '🛡️ Zero / Low Debt', query: 'DebtToEquity < 0.2 AND ROCE > 15' },
   ];
 
@@ -397,7 +397,28 @@ export default function AdvancedScreener() {
               </button>
             </div>
 
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <button
+                onClick={() => {
+                  setMinRoce(0);
+                  setMaxPe(100);
+                  setMaxDebt(3.0);
+                  setMinRsi(0);
+                  setMaxRsi(100);
+                  setMinVolRatio(0.5);
+                  setSelectedSector('ALL');
+                  setFormulaQuery('MarketCap > 0');
+                  setActivePresetId('all-nse');
+                  runScreen('MarketCap > 0');
+                  toast.success('Filters reset to default.');
+                }}
+                style={{
+                  padding: '4px 8px', borderRadius: 5, background: 'rgba(255,255,255,0.06)', color: '#94A3B8',
+                  border: '1px solid rgba(255,255,255,0.1)', fontSize: '0.68rem', cursor: 'pointer'
+                }}
+              >
+                Reset
+              </button>
               <button
                 onClick={() => runScreen()}
                 disabled={loading}
@@ -467,12 +488,16 @@ export default function AdvancedScreener() {
                   style={{ width: '100%', background: '#060913', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, padding: '4px', color: '#F1F5F9', fontSize: '0.68rem' }}
                 >
                   <option value="ALL">All Sectors</option>
-                  <option value="IT">IT & Tech</option>
-                  <option value="Banking">Banking & Finance</option>
+                  <option value="IT">IT & Software</option>
+                  <option value="Banking">Banking & Financials</option>
                   <option value="Pharma">Pharma & Healthcare</option>
                   <option value="Auto">Automobiles</option>
-                  <option value="Energy">Energy & Oil</option>
-                  <option value="FMCG">FMCG & Retail</option>
+                  <option value="Energy">Energy & Utilities</option>
+                  <option value="FMCG">FMCG & Consumer</option>
+                  <option value="Metals">Metals & Mining</option>
+                  <option value="Realty">Infrastructure & Realty</option>
+                  <option value="Chemicals">Chemicals & Materials</option>
+                  <option value="Telecom">Telecom & Media</option>
                 </select>
               </div>
             </div>

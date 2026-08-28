@@ -109,17 +109,58 @@ def generate_stock_metrics(ticker: str, name: str):
         "ai_confidence_score": round(72.0 + ((h >> 96) % 260) / 10.0, 1),
     }
 
-def main():
-    print("🚀 Seeding master curated stocks...")
-    for s in MASTER_NSE_UNIVERSE:
-        upsert_screener_daily_metric(s)
+def is_genuine_equity(ticker: str) -> bool:
+    """Filters out bonds, G-Secs, SDLs, SGBs, mutual funds, and non-equity debt instruments."""
+    t = ticker.upper().strip()
+    if not t or len(t) < 2 or len(t) > 16:
+        return False
     
+    # Allowed tickers that start with a number
+    if t.startswith(('3MINDIA', '5PAISA', '63MOONS')):
+        return True
+    
+    # Reject if starts with a digit (G-Sec, SDL, T-Bill, bond)
+    if t[0].isdigit():
+        return False
+    
+    # Reject known bond/debt/derivative patterns
+    debt_patterns = (
+        'GS20', 'GS21', 'GS22', 'GS23', 'GS24', 'GS25', 'GS26', 'GS27', 'GS28', 'GS29', 'GS30',
+        'SG20', 'SG21', 'SG22', 'SG23', 'SG24', 'SG25', 'SG26', 'SG27', 'SG28', 'SG29', 'SG30',
+        '-SG', '-GS', '-N0', '-N1', '-N2', '-N3', '-N4', '-N5', '-N6', '-N7', '-N8', '-N9',
+        'TBILL', 'SGB', 'BOND', 'DEB', 'TPL', 'SDL', 'INVI', 'REIT', 'NHAI', 'IRFC'
+    )
+    for pat in debt_patterns:
+        if pat in t:
+            # Allow IRFC stock itself
+            if t == 'IRFC' and pat == 'IRFC':
+                continue
+            return False
+            
+    return True
+
+
+def clean_and_reseed_screener():
+    """Cleans screener_daily_metrics and reseeds with authentic master universe + real equities."""
+    print("🧹 Cleaning screener_daily_metrics table...")
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM screener_daily_metrics")
+        conn.commit()
+
+    print("🚀 Seeding master curated stocks (NIFTY 50 & liquid leaders)...")
+    seen_tickers = set()
+    for s in MASTER_NSE_UNIVERSE:
+        t = s["ticker"].upper().strip()
+        upsert_screener_daily_metric(s)
+        seen_tickers.add(t)
+    
+    print(f"✅ Seeded {len(seen_tickers)} curated master stocks.")
+
     with get_db_connection() as conn:
         rows = conn.execute("SELECT ticker, name FROM stock_universe WHERE exchange = 'NSE'").fetchall()
     
     print(f"📦 Found {len(rows)} raw tickers in stock_universe table.")
 
-    seen_tickers = set()
     added = 0
     for r in rows:
         ticker = str(r["ticker"]).strip().upper()
@@ -127,14 +168,12 @@ def main():
 
         # Clean symbol
         t_clean = ticker.replace("-EQ", "").replace("-BE", "").replace("-SM", "").strip()
-        if not t_clean or len(t_clean) > 20:
+        
+        # Skip if already processed, in master universe, or is not genuine equity
+        if t_clean in seen_tickers or not is_genuine_equity(t_clean):
             continue
         
-        # Skip if already processed or is derivative
-        if t_clean in seen_tickers:
-            continue
         seen_tickers.add(t_clean)
-
         metrics = generate_stock_metrics(t_clean, name)
         upsert_screener_daily_metric(metrics)
         added += 1
@@ -142,7 +181,12 @@ def main():
     with get_db_connection() as conn:
         total = conn.execute("SELECT COUNT(*) as c FROM screener_daily_metrics").fetchone()["c"]
     
-    print(f"🎉 Successfully seeded {total} total stocks into screener_daily_metrics! (Added {added} new symbols)")
+    print(f"🎉 Successfully seeded {total} total clean equity stocks into screener_daily_metrics! (Added {added} secondary symbols)")
+
+
+def main():
+    clean_and_reseed_screener()
+
 
 if __name__ == "__main__":
     main()

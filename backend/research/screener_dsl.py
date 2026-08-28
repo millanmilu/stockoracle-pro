@@ -189,10 +189,15 @@ class ScreenerQueryParser:
         val = self.consume()[1]
         param_name = f"p_{self.param_counter}"
         self.param_counter += 1
-        self.params[param_name] = val
 
         sql_op = "=" if op == "==" else op
-        sql_clause = f"{sql_col} {sql_op} :{param_name}"
+        if sql_col in ("sector", "industry", "name", "ticker", "market_cap_cat", "ai_signal") and isinstance(val, str) and op in ("==", "="):
+            sql_clause = f"LOWER({sql_col}) LIKE LOWER(:{param_name})"
+            self.params[param_name] = f"%{val.strip()}%"
+        else:
+            self.params[param_name] = val
+            sql_clause = f"{sql_col} {sql_op} :{param_name}"
+
         ast_node = {
             "type": "COMPARISON",
             "field": raw_field,
