@@ -31,15 +31,12 @@ def generate_stock_metrics(ticker: str, name: str):
     industry_name = sector_info[1][(h >> 4) % len(sector_info[1])]
 
     cat_rand = (h >> 8) % 100
-    if cat_rand < 15:
-        market_cap_cat = "LARGE"
-        market_cap_cr = round(45000.0 + ((h >> 12) % 1200000), 1)
-    elif cat_rand < 55:
+    if cat_rand < 20:
         market_cap_cat = "MID"
-        market_cap_cr = round(8000.0 + ((h >> 12) % 37000), 1)
+        market_cap_cr = round(7500.0 + ((h >> 12) % 28000), 1)
     else:
         market_cap_cat = "SMALL"
-        market_cap_cr = round(300.0 + ((h >> 12) % 7700), 1)
+        market_cap_cr = round(250.0 + ((h >> 12) % 7200), 1)
 
     price_base = [18.5, 42.0, 95.0, 240.0, 560.0, 1150.0, 2450.0, 3800.0, 6200.0][(h >> 16) % 9]
     close_price = round(price_base * (0.85 + ((h >> 20) % 35) / 100.0), 2)
@@ -110,7 +107,7 @@ def generate_stock_metrics(ticker: str, name: str):
     }
 
 def is_genuine_equity(ticker: str) -> bool:
-    """Filters out bonds, G-Secs, SDLs, SGBs, mutual funds, and non-equity debt instruments."""
+    """Filters out bonds, G-Secs, SDLs, SGBs, mutual funds, indices, and non-equity debt instruments."""
     t = ticker.upper().strip()
     if not t or len(t) < 2 or len(t) > 16:
         return False
@@ -123,18 +120,16 @@ def is_genuine_equity(ticker: str) -> bool:
     if t[0].isdigit():
         return False
     
-    # Reject known bond/debt/derivative patterns
+    # Reject indices, ETFs, bonds, debt patterns
     debt_patterns = (
         'GS20', 'GS21', 'GS22', 'GS23', 'GS24', 'GS25', 'GS26', 'GS27', 'GS28', 'GS29', 'GS30',
         'SG20', 'SG21', 'SG22', 'SG23', 'SG24', 'SG25', 'SG26', 'SG27', 'SG28', 'SG29', 'SG30',
         '-SG', '-GS', '-N0', '-N1', '-N2', '-N3', '-N4', '-N5', '-N6', '-N7', '-N8', '-N9',
-        'TBILL', 'SGB', 'BOND', 'DEB', 'TPL', 'SDL', 'INVI', 'REIT', 'NHAI', 'IRFC'
+        'TBILL', 'SGB', 'BOND', 'DEB', 'TPL', 'SDL', 'INVI', 'REIT', 'NHAI', 'NIFTY', 'SENSEX',
+        'BANKNIFTY', 'FINNIFTY', 'MIDCAP', 'INDEX', 'BEES', 'GOLD'
     )
     for pat in debt_patterns:
         if pat in t:
-            # Allow IRFC stock itself
-            if t == 'IRFC' and pat == 'IRFC':
-                continue
             return False
             
     return True
