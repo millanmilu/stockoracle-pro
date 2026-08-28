@@ -3,11 +3,11 @@ import {
   Crosshair, TrendingUp, AlignJustify, Brush, Type, Smile,
   Ruler, ZoomIn, Magnet, Pencil, Lock, Unlock, Eye, EyeOff,
   Trash2, GripVertical, Square as SquareIcon, Sliders, Settings,
-  X, Circle, Minus, Palette, Move, Download, Check
+  X, Circle, Minus, Palette, Move, Copy
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const STORAGE_KEY = 'stockoracle_drawings_tv_v4';
+const STORAGE_KEY = 'stockoracle_drawings_tv_v5';
 
 const FIBONACCI_LEVELS = [
   { level: 0.0,   label: '0.0 (0%)',     color: '#787B86', fill: 'rgba(120, 123, 134, 0.08)' },
@@ -54,7 +54,6 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
   // Floating toolbar positioning
   const [floatingPos, setFloatingPos] = useState({ top: 12, right: 18 });
   const [isDraggingFloating, setIsDraggingFloating] = useState(false);
-  const floatDragRef = useRef(null);
 
   useEffect(() => {
     const handleMouseMove = (e) => {
@@ -77,7 +76,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     };
   }, [isDraggingFloating]);
 
-  // Synchronize on chart pan & zoom (Visible Logical Range Change + Time Range Change)
+  // Synchronize on chart pan & zoom
   useEffect(() => {
     let cleanupTimeScale = null;
     let pollInterval = null;
@@ -144,7 +143,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     };
 
     const onPointerMove = () => {
-      if (isMouseDownOnChart && activeTool === 'crosshair') {
+      if (isMouseDownOnChart) {
         if (!animFrame) {
           animFrame = requestAnimationFrame(() => {
             setRenderTick((t) => (t + 1) % 1000000);
@@ -301,9 +300,6 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
 
   // SVG Mouse & Touch Handlers
   const handleSvgMouseDown = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
     if (lockAllDrawings && activeTool !== 'crosshair') {
       toast.error('Drawings are locked');
       return;
@@ -320,6 +316,9 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
       return;
     }
 
+    e.preventDefault();
+    e.stopPropagation();
+
     // Freeze chart panning
     setChartLocked(true);
 
@@ -332,6 +331,44 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     if (activeTool === 'smile') {
       setStickerPos({ x, y, logical: chartPt.logical, price: chartPt.price });
       setShowStickerMenu(true);
+      return;
+    }
+
+    if (activeTool === 'horizontal_line') {
+      const hLine = {
+        id: Date.now(),
+        type: 'horizontal_line',
+        startLogical: chartPt.logical,
+        startPrice: chartPt.price,
+        startX: x,
+        startY: y,
+        color: activeColor,
+        strokeWidth: activeStrokeWidth,
+      };
+      saveDrawings([...drawings, hLine]);
+      setSelectedDrawingId(hLine.id);
+      setChartLocked(false);
+      if (!stayInDrawMode) setActiveTool('crosshair');
+      toast.success('Horizontal Support/Resistance Line added');
+      return;
+    }
+
+    if (activeTool === 'vertical_line') {
+      const vLine = {
+        id: Date.now(),
+        type: 'vertical_line',
+        startLogical: chartPt.logical,
+        startPrice: chartPt.price,
+        startX: x,
+        startY: y,
+        color: activeColor,
+        strokeWidth: activeStrokeWidth,
+      };
+      saveDrawings([...drawings, vLine]);
+      setSelectedDrawingId(vLine.id);
+      setChartLocked(false);
+      if (!stayInDrawMode) setActiveTool('crosshair');
+      toast.success('Vertical Time Line added');
       return;
     }
 
@@ -363,16 +400,13 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
   };
 
   const handleSvgMouseMove = (e) => {
-    if (activeTool !== 'crosshair' || draggingHandle) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-
     const { x, y } = getEventPos(e);
     const chartPt = coordToChart(x, y);
 
     // Moving an existing selected drawing or handle
     if (draggingHandle && selectedDrawingId && dragStartPos && !lockAllDrawings) {
+      e.preventDefault();
+      e.stopPropagation();
       const dx = x - dragStartPos.x;
       const dy = y - dragStartPos.y;
 
@@ -440,6 +474,8 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
 
     // Actively drawing new item
     if (!isDrawing || !currentDraw) return;
+    e.preventDefault();
+    e.stopPropagation();
 
     if (currentDraw.type === 'brush') {
       setCurrentDraw((prev) => ({
@@ -458,11 +494,10 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
   };
 
   const handleSvgMouseUp = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
     // Release drag handle
     if (draggingHandle) {
+      e.preventDefault();
+      e.stopPropagation();
       setDraggingHandle(null);
       setDragStartPos(null);
       saveDrawings(drawings);
@@ -474,6 +509,9 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
       setChartLocked(false);
       return;
     }
+
+    e.preventDefault();
+    e.stopPropagation();
 
     let isValid = false;
     if (currentDraw.type === 'brush' && currentDraw.points?.length > 2) {
@@ -496,14 +534,13 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     setCurrentDraw(null);
     setChartLocked(false);
 
-    // If not staying in draw mode, revert back to crosshair
     if (!stayInDrawMode && activeTool !== 'brush') {
       setActiveTool('crosshair');
     }
   };
 
   const handleAddText = () => {
-    if (textInputPos && textInputVal.trim()) {
+    if (textInputVal.trim() && textInputPos) {
       const textDrawing = {
         id: Date.now(),
         type: 'text',
@@ -512,7 +549,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
         startLogical: textInputPos.logical,
         startPrice: textInputPos.price,
         text: textInputVal.trim(),
-        color: activeColor || '#F0F0FF',
+        color: activeColor,
       };
       saveDrawings([...drawings, textDrawing]);
       setSelectedDrawingId(textDrawing.id);
@@ -543,9 +580,31 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     if (!stayInDrawMode) setActiveTool('crosshair');
   };
 
+  const handleDuplicateSelected = () => {
+    if (!selectedDrawingId) return;
+    const target = drawings.find((d) => d.id === selectedDrawingId);
+    if (!target) return;
+
+    const dup = {
+      ...target,
+      id: Date.now(),
+      startX: (target.startX || 0) + 15,
+      startY: (target.startY || 0) + 15,
+      endX: (target.endX || 0) + 15,
+      endY: (target.endY || 0) + 15,
+      startLogical: (target.startLogical != null) ? target.startLogical + 2 : null,
+      endLogical: (target.endLogical != null) ? target.endLogical + 2 : null,
+    };
+    saveDrawings([...drawings, dup]);
+    setSelectedDrawingId(dup.id);
+    toast.success('Drawing duplicated');
+  };
+
+  const selectedDrawing = drawings.find((d) => d.id === selectedDrawingId);
+
   return (
     <>
-      {/* ── Left Vertical Sidebar (13 TradingView Dark Grey Icons) ── */}
+      {/* ── Left Vertical Sidebar (TradingView Dark Icons) ── */}
       <div style={{
         width: 44,
         backgroundColor: '#131722',
@@ -574,11 +633,11 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           <Crosshair size={17} />
         </button>
 
-        {/* 2. Trend Line Tools */}
+        {/* 2. Trend Line */}
         <button
           onClick={() => {
             setActiveTool('trendline');
-            toast.success('Trend Line: Click and drag on chart to draw');
+            toast.success('Trend Line: Click and drag on chart');
           }}
           title="Trend Line"
           style={{
@@ -592,11 +651,29 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           <TrendingUp size={17} />
         </button>
 
-        {/* 3. Fibonacci Tools */}
+        {/* 3. Horizontal Line (Support/Resistance) */}
+        <button
+          onClick={() => {
+            setActiveTool('horizontal_line');
+            toast.success('Horizontal Line: Click on price level');
+          }}
+          title="Horizontal Support/Resistance Line"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'horizontal_line' ? '#2A2E39' : 'transparent',
+            color: activeTool === 'horizontal_line' ? '#2962FF' : '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          <Minus size={17} />
+        </button>
+
+        {/* 4. Fibonacci Retracement */}
         <button
           onClick={() => {
             setActiveTool('fibonacci');
-            toast.success('Fibonacci: Click and drag on chart to draw');
+            toast.success('Fibonacci: Click and drag High to Low');
           }}
           title="Fibonacci Retracement"
           style={{
@@ -610,11 +687,29 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           <AlignJustify size={17} />
         </button>
 
-        {/* 4. Brush / Shapes */}
+        {/* 5. Rectangle Zone */}
+        <button
+          onClick={() => {
+            setActiveTool('rectangle');
+            toast.success('Rectangle: Click and drag to create Supply/Demand Zone');
+          }}
+          title="Rectangle Zone"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'rectangle' ? '#2A2E39' : 'transparent',
+            color: activeTool === 'rectangle' ? '#2962FF' : '#787B86',
+            cursor: 'pointer',
+          }}
+        >
+          <SquareIcon size={16} />
+        </button>
+
+        {/* 6. Freehand Brush */}
         <button
           onClick={() => {
             setActiveTool('brush');
-            toast.success('Brush: Click and drag freehand to draw');
+            toast.success('Brush: Click and drag freehand');
           }}
           title="Brush (Freehand Drawing)"
           style={{
@@ -628,13 +723,13 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           <Brush size={17} />
         </button>
 
-        {/* 5. Text Tool ('T') */}
+        {/* 7. Text Tool ('T') */}
         <button
           onClick={() => {
             setActiveTool('text');
-            toast.success('Text Tool: Click anywhere on chart to type');
+            toast.success('Text Tool: Click anywhere to type');
           }}
-          title="Text Tool ('T')"
+          title="Text Note ('T')"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -646,7 +741,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           <Type size={17} />
         </button>
 
-        {/* 6. Smiley Face (Stickers) */}
+        {/* 8. Stickers / Emojis */}
         <button
           onClick={() => {
             setActiveTool('smile');
@@ -664,7 +759,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           <Smile size={17} />
         </button>
 
-        {/* 7. Ruler (Measure) */}
+        {/* 9. Ruler */}
         <button
           onClick={() => {
             setActiveTool('ruler');
@@ -682,27 +777,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           <Ruler size={17} />
         </button>
 
-        {/* 8. Zoom in (Magnifying glass) */}
-        <button
-          onClick={() => {
-            if (chartRef?.current) {
-              chartRef.current.timeScale().zoom(1.3);
-              toast.success('Zoom In');
-            }
-          }}
-          title="Zoom In"
-          style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: 'transparent',
-            color: '#787B86',
-            cursor: 'pointer',
-          }}
-        >
-          <ZoomIn size={17} />
-        </button>
-
-        {/* 9. Magnet Mode */}
+        {/* 10. Magnet Mode */}
         <button
           onClick={() => {
             setMagnetMode(!magnetMode);
@@ -720,25 +795,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           <Magnet size={17} />
         </button>
 
-        {/* 10. Pencil with Lock (Stay in Drawing Mode) */}
-        <button
-          onClick={() => {
-            setStayInDrawMode(!stayInDrawMode);
-            toast.success(stayInDrawMode ? 'Stay in Drawing Mode OFF' : 'Stay in Drawing Mode ON');
-          }}
-          title="Stay in Drawing Mode"
-          style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: stayInDrawMode ? '#2A2E39' : 'transparent',
-            color: stayInDrawMode ? '#2962FF' : '#787B86',
-            cursor: 'pointer',
-          }}
-        >
-          <Pencil size={16} />
-        </button>
-
-        {/* 11. Padlock (Lock All Drawings) */}
+        {/* 11. Lock All Drawings */}
         <button
           onClick={() => {
             setLockAllDrawings(!lockAllDrawings);
@@ -756,7 +813,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           {lockAllDrawings ? <Lock size={16} /> : <Unlock size={16} />}
         </button>
 
-        {/* 12. Eye Icon (Hide Drawings) */}
+        {/* 12. Hide / Show Drawings */}
         <button
           onClick={() => {
             setHideAllDrawings(!hideAllDrawings);
@@ -775,7 +832,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
 
         <div style={{ width: 20, height: 1, backgroundColor: 'rgba(255,255,255,0.08)', margin: '2px 0' }} />
 
-        {/* 13. Trash Can (Remove All) */}
+        {/* 13. Remove All */}
         <button
           onClick={handleClearAll}
           title="Remove All Drawings"
@@ -793,159 +850,97 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
         </button>
       </div>
 
-      {/* ── Floating Toolbar (Top Right: 5 Small White Icons) ── */}
-      <div
-        style={{
+      {/* ── Selected Drawing Floating Context Action Toolbar ── */}
+      {selectedDrawing && (
+        <div style={{
           position: 'absolute',
-          top: floatingPos.top,
-          right: floatingPos.right,
+          top: 14,
+          left: '50%',
+          transform: 'translateX(-50%)',
           backgroundColor: '#1E222D',
-          border: '1px solid rgba(255, 255, 255, 0.12)',
-          borderRadius: 6,
-          padding: '3px 6px',
+          border: '1px solid #2962FF',
+          borderRadius: 8,
+          padding: '4px 10px',
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
-          zIndex: 50,
-          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.6)',
+          gap: 10,
+          zIndex: 60,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
           userSelect: 'none',
-        }}
-      >
-        {/* 1. Drag Dots Handle */}
-        <span
-          title="Drag to reposition toolbar"
-          onMouseDown={() => setIsDraggingFloating(true)}
-          style={{ color: '#787B86', cursor: isDraggingFloating ? 'grabbing' : 'grab', display: 'flex', alignItems: 'center' }}
-        >
-          <GripVertical size={14} />
-        </span>
+        }}>
+          <span style={{ fontSize: '0.72rem', color: '#93C5FD', fontWeight: 700, textTransform: 'uppercase' }}>
+            {selectedDrawing.type} Selected
+          </span>
 
-        {/* 2. Trendline Quick Tool */}
-        <button
-          onClick={() => setActiveTool('trendline')}
-          title="Quick Trendline"
-          style={{
-            background: activeTool === 'trendline' ? '#2A2E39' : 'transparent',
-            border: 'none',
-            borderRadius: 4,
-            padding: 4,
-            color: '#FFFFFF',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          <TrendingUp size={14} />
-        </button>
+          {/* Colors */}
+          <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
+            {['#38BDF8', '#10B981', '#F59E0B', '#EF5350', '#A855F7', '#FFFFFF'].map((c) => (
+              <div
+                key={c}
+                onClick={() => {
+                  setDrawings((prev) => prev.map((d) => (d.id === selectedDrawingId ? { ...d, color: c } : d)));
+                  saveDrawings(drawings.map((d) => (d.id === selectedDrawingId ? { ...d, color: c } : d)));
+                }}
+                style={{
+                  width: 16, height: 16, borderRadius: '50%', backgroundColor: c, cursor: 'pointer',
+                  border: selectedDrawing.color === c ? '2px solid #FFF' : '1px solid transparent',
+                }}
+              />
+            ))}
+          </div>
 
-        {/* 3. Rectangle Tool */}
-        <button
-          onClick={() => setActiveTool('rectangle')}
-          title="Quick Rectangle Zone"
-          style={{
-            background: activeTool === 'rectangle' ? '#2A2E39' : 'transparent',
-            border: 'none',
-            borderRadius: 4,
-            padding: 4,
-            color: '#FFFFFF',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          <SquareIcon size={14} />
-        </button>
+          {/* Width */}
+          <div style={{ display: 'flex', gap: 3 }}>
+            {[1, 2, 3, 4].map((w) => (
+              <button
+                key={w}
+                onClick={() => {
+                  setDrawings((prev) => prev.map((d) => (d.id === selectedDrawingId ? { ...d, strokeWidth: w } : d)));
+                  saveDrawings(drawings.map((d) => (d.id === selectedDrawingId ? { ...d, strokeWidth: w } : d)));
+                }}
+                style={{
+                  padding: '2px 6px', borderRadius: 4, border: 'none',
+                  backgroundColor: selectedDrawing.strokeWidth === w ? '#2962FF' : '#2A2E39',
+                  color: '#FFF', fontSize: '0.65rem', cursor: 'pointer',
+                }}
+              >
+                {w}px
+              </button>
+            ))}
+          </div>
 
-        {/* 4. Line Style Icon (Color & Stroke Picker) */}
-        <div style={{ position: 'relative' }}>
           <button
-            onClick={() => setShowStyleMenu(!showStyleMenu)}
-            title="Line Style & Color"
-            style={{
-              background: showStyleMenu ? '#2A2E39' : 'transparent',
-              border: 'none',
-              borderRadius: 4,
-              padding: 4,
-              color: activeColor,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-            }}
+            onClick={handleDuplicateSelected}
+            title="Duplicate Drawing"
+            style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 2 }}
           >
-            <Sliders size={14} />
+            <Copy size={15} />
           </button>
 
-          {/* Color / Style Palette Popup */}
-          {showStyleMenu && (
-            <div style={{
-              position: 'absolute',
-              top: 'calc(100% + 6px)',
-              right: 0,
-              backgroundColor: '#1E222D',
-              border: '1px solid rgba(255, 255, 255, 0.15)',
-              borderRadius: 8,
-              padding: 8,
-              zIndex: 100,
-              width: 140,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
-            }}>
-              <div style={{ fontSize: '0.65rem', color: '#787B86', marginBottom: 6, fontWeight: 700 }}>COLOR</div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-                {['#38BDF8', '#10B981', '#F59E0B', '#EF5350', '#A855F7', '#FFFFFF'].map((c) => (
-                  <div
-                    key={c}
-                    onClick={() => { setActiveColor(c); setShowStyleMenu(false); }}
-                    style={{
-                      width: 18, height: 18, borderRadius: '50%', backgroundColor: c,
-                      border: activeColor === c ? '2px solid #FFF' : '1px solid transparent',
-                      cursor: 'pointer',
-                    }}
-                  />
-                ))}
-              </div>
+          <button
+            onClick={() => {
+              setDrawings((prev) => prev.filter((d) => d.id !== selectedDrawingId));
+              saveDrawings(drawings.filter((d) => d.id !== selectedDrawingId));
+              setSelectedDrawingId(null);
+              toast.success('Deleted drawing');
+            }}
+            title="Delete Drawing"
+            style={{ background: 'transparent', border: 'none', color: '#EF5350', cursor: 'pointer', padding: 2 }}
+          >
+            <Trash2 size={15} />
+          </button>
 
-              <div style={{ fontSize: '0.65rem', color: '#787B86', marginBottom: 4, fontWeight: 700 }}>WIDTH</div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {[1, 2, 3, 4].map((w) => (
-                  <button
-                    key={w}
-                    onClick={() => { setActiveStrokeWidth(w); setShowStyleMenu(false); }}
-                    style={{
-                      flex: 1, padding: '2px 0', borderRadius: 4, border: 'none',
-                      backgroundColor: activeStrokeWidth === w ? '#2962FF' : '#2A2E39',
-                      color: '#FFF', fontSize: '0.68rem', cursor: 'pointer',
-                    }}
-                  >
-                    {w}px
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+          <button
+            onClick={() => setSelectedDrawingId(null)}
+            title="Close selection"
+            style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', padding: 2 }}
+          >
+            <X size={15} />
+          </button>
         </div>
+      )}
 
-        {/* 5. Settings Menu Icon */}
-        <button
-          onClick={() => {
-            if (onOpenSettings) onOpenSettings();
-          }}
-          title="Chart & Drawing Settings"
-          style={{
-            background: 'transparent',
-            border: 'none',
-            borderRadius: 4,
-            padding: 4,
-            color: '#FFFFFF',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-          }}
-        >
-          <Settings size={14} />
-        </button>
-      </div>
-
-      {/* ── Direct Interactive SVG Overlay Layer ── */}
+      {/* ── Interactive SVG Overlay Layer ── */}
       {!hideAllDrawings && (
         <svg
           onMouseDown={handleSvgMouseDown}
@@ -974,15 +969,14 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
             const pt1 = chartToCoord(d.startLogical, d.startPrice, d.startX, d.startY);
             const pt2 = chartToCoord(d.endLogical,   d.endPrice,   d.endX,   d.endY);
 
-            // Trendline
-            if (d.type === 'trendline') {
+            // Horizontal Line
+            if (d.type === 'horizontal_line') {
               return (
-                <g key={d.id} style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}>
+                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
                   <line
-                    x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y}
-                    stroke={d.color || '#38BDF8'}
-                    strokeWidth={d.strokeWidth || 2}
-                    strokeDasharray={isSelected ? '4,4' : 'none'}
+                    x1={0} y1={pt1.y} x2="100%" y2={pt1.y}
+                    stroke="transparent" strokeWidth={14}
+                    style={{ pointerEvents: 'stroke' }}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair') {
                         e.preventDefault();
@@ -996,11 +990,82 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                       }
                     }}
                   />
+                  <line
+                    x1={0} y1={pt1.y} x2="100%" y2={pt1.y}
+                    stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 2}
+                    strokeDasharray={isSelected ? '6,6' : 'none'}
+                  />
+                  <text x={10} y={pt1.y - 4} fill={d.color || '#38BDF8'} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono">
+                    ₹{d.startPrice?.toFixed(2)}
+                  </text>
+                </g>
+              );
+            }
+
+            // Vertical Line
+            if (d.type === 'vertical_line') {
+              return (
+                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                  <line
+                    x1={pt1.x} y1={0} x2={pt1.x} y2="100%"
+                    stroke="transparent" strokeWidth={14}
+                    style={{ pointerEvents: 'stroke' }}
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        if (!lockAllDrawings) {
+                          setDraggingHandle('body');
+                          setDragStartPos({ x: e.clientX, y: e.clientY });
+                          setChartLocked(true);
+                        }
+                      }
+                    }}
+                  />
+                  <line
+                    x1={pt1.x} y1={0} x2={pt1.x} y2="100%"
+                    stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 2}
+                    strokeDasharray={isSelected ? '6,6' : 'none'}
+                  />
+                </g>
+              );
+            }
+
+            // Trendline
+            if (d.type === 'trendline') {
+              return (
+                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                  {/* Invisible wide hit area */}
+                  <line
+                    x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y}
+                    stroke="transparent" strokeWidth={14}
+                    style={{ pointerEvents: 'stroke' }}
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        if (!lockAllDrawings) {
+                          setDraggingHandle('body');
+                          setDragStartPos({ x: e.clientX, y: e.clientY });
+                          setChartLocked(true);
+                        }
+                      }
+                    }}
+                  />
+                  <line
+                    x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y}
+                    stroke={d.color || '#38BDF8'}
+                    strokeWidth={d.strokeWidth || 2}
+                    strokeDasharray={isSelected ? '4,4' : 'none'}
+                  />
                   {/* Start Handle */}
                   <circle
-                    cx={pt1.x} cy={pt1.y} r={isSelected ? 5 : 3}
+                    cx={pt1.x} cy={pt1.y} r={isSelected ? 6 : 4}
                     fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
-                    stroke="#1E222D" strokeWidth={1}
+                    stroke="#1E222D" strokeWidth={1.5}
+                    style={{ pointerEvents: 'all', cursor: 'grab' }}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair' && !lockAllDrawings) {
                         e.preventDefault();
@@ -1014,9 +1079,10 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                   />
                   {/* End Handle */}
                   <circle
-                    cx={pt2.x} cy={pt2.y} r={isSelected ? 5 : 3}
+                    cx={pt2.x} cy={pt2.y} r={isSelected ? 6 : 4}
                     fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
-                    stroke="#1E222D" strokeWidth={1}
+                    stroke="#1E222D" strokeWidth={1.5}
+                    style={{ pointerEvents: 'all', cursor: 'grab' }}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair' && !lockAllDrawings) {
                         e.preventDefault();
@@ -1038,12 +1104,11 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
               const maxY = Math.max(pt1.y, pt2.y);
               const height = maxY - minY;
               const startX = Math.min(pt1.x, pt2.x);
-              const rightX = Math.max(pt1.x, pt2.x) + Math.max(300, Math.abs(pt2.x - pt1.x));
 
               return (
                 <g
                   key={d.id}
-                  style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
                   onMouseDown={(e) => {
                     if (activeTool === 'crosshair') {
                       e.preventDefault();
@@ -1057,7 +1122,6 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                     }
                   }}
                 >
-                  {/* Fibonacci colored bands */}
                   {FIBONACCI_LEVELS.slice(0, -1).map((fib, idx) => {
                     const nextFib = FIBONACCI_LEVELS[idx + 1];
                     const y1 = pt1.y < pt2.y ? minY + height * fib.level : maxY - height * fib.level;
@@ -1076,7 +1140,6 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                     );
                   })}
 
-                  {/* Horizontal grid lines & labels */}
                   {FIBONACCI_LEVELS.map((fib) => {
                     const y = pt1.y < pt2.y ? minY + height * fib.level : maxY - height * fib.level;
                     return (
@@ -1104,7 +1167,6 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                     );
                   })}
 
-                  {/* Anchor handles */}
                   {isSelected && (
                     <>
                       <circle cx={pt1.x} cy={pt1.y} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={2} />
@@ -1140,19 +1202,19 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                       }
                     }
                   }}
-                  style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
                 />
               );
             }
 
-            // Rectangle
+            // Rectangle Zone
             if (d.type === 'rectangle') {
               const x = Math.min(pt1.x, pt2.x);
               const y = Math.min(pt1.y, pt2.y);
               const w = Math.abs(pt2.x - pt1.x);
               const h = Math.abs(pt2.y - pt1.y);
               return (
-                <g key={d.id} style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}>
+                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
                   <rect
                     x={x} y={y} width={w} height={h}
                     fill="rgba(56, 189, 248, 0.12)"
@@ -1198,7 +1260,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
               return (
                 <g
                   key={d.id}
-                  style={{ pointerEvents: 'auto', cursor: 'pointer' }}
+                  style={{ pointerEvents: 'visiblePainted', cursor: 'pointer' }}
                   onMouseDown={(e) => {
                     if (activeTool === 'crosshair') {
                       e.preventDefault();
@@ -1221,7 +1283,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
               );
             }
 
-            // Text
+            // Text Note
             if (d.type === 'text') {
               return (
                 <text
@@ -1241,7 +1303,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                       }
                     }
                   }}
-                  style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer' }}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
                 >
                   {d.text}
                 </text>
@@ -1267,7 +1329,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                       }
                     }
                   }}
-                  style={{ pointerEvents: 'auto', cursor: isSelected ? 'move' : 'pointer', userSelect: 'none' }}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer', userSelect: 'none' }}
                 >
                   {d.emoji}
                 </text>
@@ -1284,6 +1346,20 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                 <line
                   x1={currentDraw.startX} y1={currentDraw.startY}
                   x2={currentDraw.endX} y2={currentDraw.endY}
+                  stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4"
+                />
+              )}
+              {currentDraw.type === 'horizontal_line' && (
+                <line
+                  x1={0} y1={currentDraw.startY}
+                  x2="100%" y2={currentDraw.startY}
+                  stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4"
+                />
+              )}
+              {currentDraw.type === 'vertical_line' && (
+                <line
+                  x1={currentDraw.startX} y1={0}
+                  x2={currentDraw.startX} y2="100%"
                   stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4"
                 />
               )}
