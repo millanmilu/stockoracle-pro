@@ -83,6 +83,9 @@ manager = ConnectionManager()
 # ── WebSocket Real-Time Price Broadcaster Loop ────────────────────────────────
 async def websocket_price_broadcast_loop():
     prices_cache: Dict[str, float] = {}
+    # Tracks last time a fallback (stale) price was sent per ticker — throttle to 1/30s
+    _fallback_last_sent: Dict[str, float] = {}
+    import time as _time
 
     while True:
         try:
@@ -111,6 +114,7 @@ async def websocket_price_broadcast_loop():
                                             "ticker": t,
                                             "price": round(ltp, 2),
                                             "change_pct": round(change_pct * 100, 3),
+                                            "is_live": True,
                                         }
                                         save_live_tick(t, round(ltp, 2), round(change_pct * 100, 3))
                                         await manager.broadcast(payload)
@@ -119,6 +123,14 @@ async def websocket_price_broadcast_loop():
                         logger.debug("Live tick fetch failed for %s: %s", t, exc)
 
                     if not fetched:
+                        # Throttle fallback broadcasts — send at most once every 30 seconds per ticker
+                        # to avoid flooding frontend with stale/frozen prices on every loop cycle
+                        now_ts = _time.monotonic()
+                        last_sent = _fallback_last_sent.get(t, 0.0)
+                        if now_ts - last_sent < 30.0:
+                            await asyncio.sleep(0.5)
+                            continue
+
                         base_price = prices_cache.get(t)
                         if not base_price:
                             info = get_company_info(t) or get_stale_company_info(t)
@@ -131,8 +143,11 @@ async def websocket_price_broadcast_loop():
                                 "ticker": t,
                                 "price": round(base_price, 2),
                                 "change_pct": 0.0,
+                                "is_live": False,
                             }
                             await manager.broadcast(payload)
+                            _fallback_last_sent[t] = now_ts
+                            logger.debug("Sent stale fallback price for %s: %.2f", t, base_price)
 
                     await asyncio.sleep(0.5)
 
@@ -244,6 +259,7 @@ from backend.api.routers.alerts import router as alerts_router
 from backend.api.routers.ml import router as ml_router
 from backend.api.routers.ai_chat import router as aichat_router
 from backend.api.routers.sentiment_ta import router as sentiment_ta_router
+from backend.api.routers.broker import router as broker_router
 
 app.include_router(system_router)
 app.include_router(market_router)
@@ -254,6 +270,7 @@ app.include_router(alerts_router)
 app.include_router(ml_router)
 app.include_router(aichat_router)
 app.include_router(sentiment_ta_router)
+app.include_router(broker_router)
 
 
 

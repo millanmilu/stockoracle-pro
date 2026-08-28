@@ -41,6 +41,7 @@ const MacroTerminalView = lazy(() => import('./components/terminal/MacroTerminal
 const QuantRiskCockpit = lazy(() => import('./components/terminal/QuantRiskCockpit'));
 const MultiTileWorkspace = lazy(() => import('./components/terminal/MultiTileWorkspace'));
 const SentimentTAView = lazy(() => import('./components/SentimentTAView'));
+const BrokerSettingsView = lazy(() => import('./components/BrokerSettingsView'));
 
 
 function LoadingFallback() {
@@ -115,6 +116,7 @@ export default function App() {
       case 'Fundamentals':      return <Suspense fallback={<LoadingFallback />}><FundamentalsPanel ticker={selectedSymbol} /></Suspense>;
       case 'Earnings':          return <Suspense fallback={<LoadingFallback />}><EarningsPanel ticker={selectedSymbol} /></Suspense>;
       case 'Options Chain':     return <Suspense fallback={<LoadingFallback />}><OptionsChainView ticker={selectedSymbol} /></Suspense>;
+      case 'Broker Settings':   return <Suspense fallback={<LoadingFallback />}><BrokerSettingsView /></Suspense>;
       default:                  return <LiveChartView />;
     }
   };
@@ -173,6 +175,7 @@ function TrainingBar({ trainingStatus, selectedSymbol }) {
 
 function BottomStatusBar() {
   const wsConnected = useStore((s) => s.wsConnected);
+  const wsLiveData  = useStore((s) => s.wsLiveData);
   const [time, setTime] = useState(new Date());
   useEffect(() => { const t = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(t); }, []);
   const ist = time.toLocaleString('en-IN', { timeZone:'Asia/Kolkata', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false });
@@ -183,12 +186,20 @@ function BottomStatusBar() {
   const isMarketHours = !isWeekend && ((hour===9 && min>=15) || (hour>9 && hour<15) || (hour===15 && min<=30));
   const phase = isWeekend ? 'CLOSED (Weekend)' : isMarketHours ? 'MARKET OPEN' : 'MARKET CLOSED';
   const phaseColor = isMarketHours ? '#10B981' : '#F43F5E';
+
+  const wsLabel = !wsConnected ? 'WS Reconnecting…'
+    : wsLiveData ? 'WS Live'
+    : 'Delayed (no live feed)';
+  const wsColor = !wsConnected ? '#F59E0B'
+    : wsLiveData ? '#10B981'
+    : '#F59E0B';
+
   return (
     <div className="pro-status-bar">
       <span><span style={{color:phaseColor,fontWeight:700}}>●</span> {phase}</span>
       <span>NSE IST {ist}</span>
-      <span style={{color: wsConnected ? '#10B981' : '#F59E0B'}}>
-        ● {wsConnected ? 'WS Live' : 'WS Reconnecting…'}
+      <span style={{color: wsColor}}>
+        ● {wsLabel}
       </span>
     </div>
   );

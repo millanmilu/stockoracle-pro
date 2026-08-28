@@ -1048,10 +1048,21 @@ export default function LiveChartView() {
 
       ws.onmessage = e => {
         try {
-          const { ticker, price, change_pct } = JSON.parse(e.data);
+          const { ticker, price, change_pct, is_live } = JSON.parse(e.data);
+          const isLiveTick = is_live !== false; // treat missing flag as live (legacy compat)
+          useStore.getState().setWsLiveData?.(isLiveTick);
+
           if (ticker === selectedSymbol) {
+            // Always update the displayed price number
             setLivePrice(price);
             setLiveChange(change_pct);
+
+            // Block chart candle updates for stale fallback prices —
+            // the candle stays at last historical close, which is more accurate
+            if (!isLiveTick) {
+              console.debug(`[WS] Stale fallback price for ${ticker}: ${price} (is_live=false) — skipping candle update`);
+              return;
+            }
 
             if (targetAlertPrice && Math.abs(price - Number(targetAlertPrice)) < 1) {
               toast.success(`🔔 ALERT TRIGGERED: ${selectedSymbol} hit target ₹${price}`);

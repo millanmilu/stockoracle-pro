@@ -3,7 +3,7 @@ import {
   LayoutDashboard, CandlestickChart, Grid3X3, SlidersHorizontal, Wallet, 
   Activity, TrendingUp, BarChart3, History, Dices, BookOpen, BarChart2, 
   Layers, MessageSquare, BrainCircuit, Brain, Newspaper, Shield, Globe, 
-  Bell, GitFork, ChevronLeft, ChevronRight 
+  Bell, GitFork, ChevronLeft, ChevronRight, KeyRound
 } from 'lucide-react';
 import useStore from '../store/useStore';
 
@@ -64,6 +64,7 @@ export default function ProSidebar({ collapsed, onToggleCollapse }) {
     {
       title: 'ACCOUNT',
       items: [
+        { label: 'Broker Settings', icon: <KeyRound size={16} />, view: 'Broker Settings', badge: { text: 'API', color: '#10B981' } },
         { label: 'Price Alerts', icon: <Bell size={16} />, view: 'Price Alerts' },
         { label: 'Supply Chain', icon: <GitFork size={16} />, view: 'Supply Chain' },
       ]

@@ -3,7 +3,10 @@ import time
 import requests
 import pyotp
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+_IST = ZoneInfo("Asia/Kolkata")
 from typing import Optional, Dict, Tuple
 from dotenv import load_dotenv
 from backend.core.logging import get_logger
@@ -314,7 +317,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
     is_intraday = interval.lower() in ["1m", "5m", "15m", "1h"]
 
     def _expected_latest_trading_day() -> str:
-        now = datetime.now()
+        now = datetime.now(_IST)
         if now.weekday() == 5:
             target = now - timedelta(days=1)
         elif now.weekday() == 6:
@@ -591,8 +594,8 @@ def get_combined_stock_data(ticker: str, period: str = "2Y") -> Optional[pd.Data
     # The live-candle merge below is request-specific.
     df = df.copy(deep=True)
 
-    # Step 2: Check live ticks only on trading days
-    now = datetime.now()
+    # Step 2: Check live ticks only on trading days (IST)
+    now = datetime.now(_IST)
     if now.weekday() >= 5:  # Saturday = 5, Sunday = 6
         return df
 
@@ -602,7 +605,7 @@ def get_combined_stock_data(ticker: str, period: str = "2Y") -> Optional[pd.Data
 
     today_str = today_candle["date"]
 
-    # Step 3: Replace today's candle if it exists, otherwise append if during/after market hours
+    # Step 3: Replace today's candle if it exists, otherwise append if during/after market hours (IST >= 09:00)
     if today_str in df["date"].values:
         idx = df.index[df["date"] == today_str][0]
         # Update close with latest live price; keep historical open; extend high/low
