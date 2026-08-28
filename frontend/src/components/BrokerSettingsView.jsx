@@ -1,16 +1,20 @@
-﻿import { useState, useEffect } from 'react';
-import { Settings, Wifi, WifiOff, CheckCircle, XCircle, Eye, EyeOff, RefreshCw, Zap, Shield, AlertTriangle, Clock, Info } from 'lucide-react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  Settings, Wifi, WifiOff, CheckCircle, XCircle, Eye, EyeOff, 
+  RefreshCw, Zap, Shield, AlertTriangle, Clock, Info, Check, 
+  Server, Lock, Activity, ArrowRight, Radio
+} from 'lucide-react';
 import toast from 'react-hot-toast';
 
-/* â”€â”€â”€ Inject spin keyframe once â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Inject spin keyframe once ─────────────────────────────────────────────── */
 if (typeof document !== 'undefined' && !document.getElementById('broker-spin-style')) {
   const s = document.createElement('style');
   s.id = 'broker-spin-style';
-  s.textContent = '.broker-spin{animation:brokerSpin 0.8s linear infinite}@keyframes brokerSpin{to{transform:rotate(360deg)}}';
+  s.textContent = '@keyframes brokerSpin { to { transform: rotate(360deg); } } .broker-spin { animation: brokerSpin 0.8s linear infinite; } @keyframes pulseLive { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.92); } } .pulse-live { animation: pulseLive 2s ease-in-out infinite; }';
   document.head.appendChild(s);
 }
 
-/* â”€â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Constants ──────────────────────────────────────────────────────────────── */
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 const LS_KEY = 'stockoracle_broker_configs';
@@ -19,22 +23,22 @@ const BROKERS = [
   {
     id: 'angel_one',
     name: 'Angel One',
-    subtitle: 'SmartAPI',
-    logo: 'ðŸª¬',
+    subtitle: 'SmartAPI Connect',
+    logo: '🪬',
     color: '#F97316',
     supported: true,
     fields: [
-      { key: 'api_key',     label: 'API Key',      placeholder: 'e.g. AbcdEFgh',        type: 'password', help: 'From My Profile â†’ API Key in Angel One app' },
-      { key: 'client_id',   label: 'Client ID',    placeholder: 'e.g. M123456',          type: 'text',     help: 'Your Angel One login ID (starts with letter)' },
-      { key: 'password',    label: 'Password',     placeholder: 'Angel One login password', type: 'password', help: 'Same password you use to login' },
-      { key: 'totp_secret', label: 'TOTP Secret',  placeholder: 'e.g. RP2CFZHVER26CNJLâ€¦',  type: 'password', help: 'Base32 secret from the TOTP setup QR code' },
+      { key: 'api_key',     label: 'API Key',      placeholder: 'e.g. UgegfQMq',          type: 'password', help: 'SmartAPI Key from Angel One developer portal' },
+      { key: 'client_id',   label: 'Client ID',    placeholder: 'e.g. M62446252',        type: 'text',     help: 'Your Angel One login client code' },
+      { key: 'password',    label: 'PIN / Password', placeholder: '4-digit MPIN or Login Password', type: 'password', help: 'Your Angel One login MPIN or trading password' },
+      { key: 'totp_secret', label: 'TOTP Secret (Base32)', placeholder: 'e.g. RP2CFZHVER26CNJLUMTOFFBZZE', type: 'password', help: 'Base32 TOTP QR secret key from 2FA setup' },
     ],
   },
   {
     id: 'zerodha',
     name: 'Zerodha',
-    subtitle: 'Kite Connect',
-    logo: 'ðŸ”µ',
+    subtitle: 'Kite Connect API',
+    logo: '🪁',
     color: '#387ED1',
     supported: false,
     fields: [],
@@ -42,8 +46,8 @@ const BROKERS = [
   {
     id: 'upstox',
     name: 'Upstox',
-    subtitle: 'API v2',
-    logo: 'ðŸŸ£',
+    subtitle: 'Upstox Pro v2',
+    logo: '⚡',
     color: '#7C3AED',
     supported: false,
     fields: [],
@@ -51,15 +55,15 @@ const BROKERS = [
   {
     id: 'fyers',
     name: 'Fyers',
-    subtitle: 'API v3',
-    logo: 'ðŸŸ¡',
+    subtitle: 'Fyers API v3',
+    logo: '🔥',
     color: '#EAB308',
     supported: false,
     fields: [],
   },
 ];
 
-/* â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Storage Helpers ────────────────────────────────────────────────────────── */
 
 function loadConfigs() {
   try {
@@ -72,16 +76,16 @@ function saveConfigs(configs) {
   try { localStorage.setItem(LS_KEY, JSON.stringify(configs)); } catch {}
 }
 
-/* â”€â”€â”€ Status Badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Status Badge ───────────────────────────────────────────────────────────── */
 function StatusBadge({ status }) {
   const map = {
-    connected:  { icon: <CheckCircle size={13} />, label: 'Connected',  color: '#10B981', bg: 'rgba(16,185,129,0.12)' },
-    failed:     { icon: <XCircle size={13} />,     label: 'Failed',     color: '#EF4444', bg: 'rgba(239,68,68,0.12)'  },
-    testing:    { icon: <RefreshCw size={13} className="broker-spin" />, label: 'Testingâ€¦', color: '#F59E0B', bg: 'rgba(245,158,11,0.12)' },
-    applying:   { icon: <RefreshCw size={13} className="broker-spin" />, label: 'Applyingâ€¦',color: '#3B82F6', bg: 'rgba(59,130,246,0.12)' },
-    untested:   { icon: <AlertTriangle size={13} />, label: 'Untested', color: '#9CA3AF', bg: 'rgba(156,163,175,0.1)' },
-    saved:      { icon: <Shield size={13} />,        label: 'Saved',    color: '#6366F1', bg: 'rgba(99,102,241,0.12)' },
-    'coming-soon': { icon: <Clock size={13} />,      label: 'Coming Soon', color: '#6B7280', bg: 'rgba(107,114,128,0.1)' },
+    connected:     { icon: <CheckCircle size={13} />, label: 'Session Active', color: '#10B981', bg: 'rgba(16,185,129,0.12)' },
+    failed:        { icon: <XCircle size={13} />,     label: 'Disconnected',   color: '#EF4444', bg: 'rgba(239,68,68,0.12)'  },
+    testing:       { icon: <RefreshCw size={13} className="broker-spin" />, label: 'Testing…', color: '#F59E0B', bg: 'rgba(245,158,11,0.12)' },
+    applying:      { icon: <RefreshCw size={13} className="broker-spin" />, label: 'Applying…',color: '#3B82F6', bg: 'rgba(59,130,246,0.12)' },
+    untested:      { icon: <AlertTriangle size={13} />, label: 'Not Tested', color: '#9CA3AF', bg: 'rgba(156,163,175,0.1)' },
+    saved:         { icon: <Shield size={13} />,        label: 'Saved',      color: '#6366F1', bg: 'rgba(99,102,241,0.12)' },
+    'coming-soon': { icon: <Clock size={13} />,         label: 'Upcoming',   color: '#6B7280', bg: 'rgba(107,114,128,0.1)' },
   };
   const s = map[status] || map.untested;
   return (
@@ -95,7 +99,7 @@ function StatusBadge({ status }) {
   );
 }
 
-/* â”€â”€â”€ Field Row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Field Row Component ─────────────────────────────────────────────────────── */
 function FieldRow({ field, value, onChange }) {
   const [show, setShow] = useState(false);
   const isPass = field.type === 'password';
@@ -139,54 +143,73 @@ function FieldRow({ field, value, onChange }) {
           </button>
         )}
       </div>
-      <div style={{ fontSize: '0.65rem', color: '#4B5563', marginTop: 3 }}>{field.help}</div>
+      <div style={{ fontSize: '0.65rem', color: '#64748B', marginTop: 3 }}>{field.help}</div>
     </div>
   );
 }
 
-/* â”€â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* ─── Main Component ─────────────────────────────────────────────────────────── */
 export default function BrokerSettingsView() {
   const [selectedBroker, setSelectedBroker] = useState('angel_one');
   const [configs, setConfigs] = useState(loadConfigs);
-  const [statuses, setStatuses] = useState({});   // { angel_one: 'connected'|'failed'|'untested'... }
-  const [messages, setMessages] = useState({});   // { angel_one: 'some message' }
+  const [statuses, setStatuses] = useState({});
+  const [messages, setMessages] = useState({});
   const [liveStatus, setLiveStatus] = useState(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [persistToDisk, setPersistToDisk] = useState(true);
 
   const broker = BROKERS.find(b => b.id === selectedBroker);
   const creds = configs[selectedBroker] || {};
 
-  /* fetch backend live status on mount */
-  useEffect(() => {
-    fetch(`${API_BASE}/api/broker/status`)
-      .then(r => r.json())
-      .then(data => {
+  /* Function to fetch live status from backend */
+  const fetchStatus = useCallback(async (showToast = false) => {
+    setIsRefreshing(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/broker/status`);
+      if (res.ok) {
+        const data = await res.json();
         setLiveStatus(data);
         if (data.session_active) {
           setStatuses(s => ({ ...s, angel_one: 'connected' }));
+        } else if (data.api_key_set) {
+          setStatuses(s => ({ ...s, angel_one: 'failed' }));
         }
-      })
-      .catch(() => {});
+        if (showToast) toast.success('Broker status updated.');
+      }
+    } catch {
+      if (showToast) toast.error('Could not reach backend API.');
+    } finally {
+      setIsRefreshing(false);
+    }
   }, []);
+
+  /* Auto-poll status on mount and every 10 seconds */
+  useEffect(() => {
+    fetchStatus();
+    const timer = setInterval(() => {
+      fetchStatus();
+    }, 10000);
+    return () => clearInterval(timer);
+  }, [fetchStatus]);
 
   const handleFieldChange = (key, val) => {
     setConfigs(prev => {
       const updated = { ...prev, [selectedBroker]: { ...(prev[selectedBroker] || {}), [key]: val } };
       return updated;
     });
-    // Mark as unsaved
     setStatuses(s => ({ ...s, [selectedBroker]: s[selectedBroker] === 'connected' ? 'connected' : 'untested' }));
   };
 
   const handleSave = () => {
     saveConfigs(configs);
     setStatuses(s => ({ ...s, [selectedBroker]: s[selectedBroker] || 'saved' }));
-    toast.success('Credentials saved locally!');
+    toast.success('Credentials saved in browser localStorage!');
   };
 
   const handleTest = async () => {
     const c = configs[selectedBroker] || {};
     if (!c.api_key || !c.client_id || !c.password || !c.totp_secret) {
-      toast.error('Pehle sab fields bharo!');
+      toast.error('Please fill in all 4 Angel One fields first.');
       return;
     }
     setStatuses(s => ({ ...s, [selectedBroker]: 'testing' }));
@@ -202,9 +225,9 @@ export default function BrokerSettingsView() {
       setMessages(m => ({ ...m, [selectedBroker]: data.message }));
       if (data.success) toast.success(data.message);
       else toast.error(data.message);
-    } catch (e) {
+    } catch {
       setStatuses(s => ({ ...s, [selectedBroker]: 'failed' }));
-      setMessages(m => ({ ...m, [selectedBroker]: 'Network error â€” backend reachable hai?' }));
+      setMessages(m => ({ ...m, [selectedBroker]: 'Network error — could not contact backend server.' }));
       toast.error('Network error');
     }
   };
@@ -212,7 +235,7 @@ export default function BrokerSettingsView() {
   const handleApply = async () => {
     const c = configs[selectedBroker] || {};
     if (!c.api_key || !c.client_id || !c.password || !c.totp_secret) {
-      toast.error('Pehle Test karke confirm karo!');
+      toast.error('Please fill all fields and Test first.');
       return;
     }
     setStatuses(s => ({ ...s, [selectedBroker]: 'applying' }));
@@ -220,27 +243,30 @@ export default function BrokerSettingsView() {
       const res = await fetch(`${API_BASE}/api/broker/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ broker: selectedBroker, angel_one: c }),
+        body: JSON.stringify({
+          broker: selectedBroker,
+          angel_one: c,
+          persist_to_disk: persistToDisk,
+        }),
       });
       const data = await res.json();
       setStatuses(s => ({ ...s, [selectedBroker]: data.success ? 'connected' : 'failed' }));
       setMessages(m => ({ ...m, [selectedBroker]: data.message }));
       if (data.success) {
-        toast.success('Live feed active! WS status bar mein "WS Live" dikhega.');
-        // Refresh backend status
-        fetch(`${API_BASE}/api/broker/status`).then(r => r.json()).then(setLiveStatus).catch(() => {});
+        toast.success(data.message || 'Live feed active!');
+        fetchStatus();
       } else {
         toast.error(data.message);
       }
-    } catch (e) {
+    } catch {
       setStatuses(s => ({ ...s, [selectedBroker]: 'failed' }));
-      setMessages(m => ({ ...m, [selectedBroker]: 'Network error' }));
+      setMessages(m => ({ ...m, [selectedBroker]: 'Network error while applying credentials.' }));
       toast.error('Network error');
     }
   };
 
   const handleClear = () => {
-    if (!window.confirm('Is broker ki credentials clear karein?')) return;
+    if (!window.confirm('Are you sure you want to clear credentials for this broker?')) return;
     setConfigs(prev => {
       const updated = { ...prev };
       delete updated[selectedBroker];
@@ -249,80 +275,143 @@ export default function BrokerSettingsView() {
     });
     setStatuses(s => ({ ...s, [selectedBroker]: 'untested' }));
     setMessages(m => ({ ...m, [selectedBroker]: '' }));
-    toast('Cleared!');
+    toast('Cleared credentials.');
   };
 
-  const currentStatus = statuses[selectedBroker] || (broker?.supported ? 'untested' : 'coming-soon');
+  const currentStatus = statuses[selectedBroker] || (broker?.supported ? (liveStatus?.session_active ? 'connected' : 'untested') : 'coming-soon');
   const currentMsg = messages[selectedBroker] || '';
 
+  // Format remaining time
+  const formatRemaining = (mins) => {
+    if (mins == null) return null;
+    if (mins <= 0) return 'Expiring / Refreshing now';
+    const hrs = Math.floor(mins / 60);
+    const rem = mins % 60;
+    if (hrs > 0) return `${hrs}h ${rem}m remaining`;
+    return `${rem}m remaining`;
+  };
+
   return (
-    <div style={{ padding: 'clamp(14px,2.5vw,28px)', maxWidth: 1100, margin: '0 auto', color: '#F1F5F9' }}>
+    <div style={{ padding: 'clamp(14px, 2.5vw, 28px)', maxWidth: 1150, margin: '0 auto', color: '#F1F5F9' }}>
 
       {/* Header */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-          <Settings size={22} color="#6366F1" />
-          <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#F1F5F9' }}>Broker Settings</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <Settings size={22} color="#6366F1" />
+            <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 700, color: '#F1F5F9' }}>Broker Settings & Live Feed Control</h2>
+          </div>
+          <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748B' }}>
+            Manage broker API credentials, proactive session keepalive, and live tick streaming connection.
+          </p>
         </div>
-        <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748B' }}>
-          API credentials <b>sirf aapke browser</b> mein store hoti hain (localStorage). Backend sirf apply/test ke waqt use karta hai.
-        </p>
+
+        <button
+          onClick={() => fetchStatus(true)}
+          disabled={isRefreshing}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            background: 'rgba(30,41,59,0.7)', border: '1px solid rgba(99,102,241,0.2)',
+            borderRadius: 8, padding: '7px 14px', color: '#94A3B8', fontSize: '0.75rem',
+            fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s',
+          }}
+        >
+          <RefreshCw size={13} className={isRefreshing ? 'broker-spin' : ''} />
+          {isRefreshing ? 'Checking…' : 'Refresh Status'}
+        </button>
       </div>
 
-      {/* Backend Live Status Bar */}
+      {/* Live Server Session Card */}
       {liveStatus && (
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-          background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(99,102,241,0.15)',
-          borderRadius: 10, padding: '10px 16px', marginBottom: 24,
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12,
+          background: 'rgba(15,23,42,0.85)', border: '1px solid rgba(99,102,241,0.2)',
+          borderRadius: 12, padding: '14px 18px', marginBottom: 24, boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
         }}>
-          <span style={{ fontSize: '0.72rem', color: '#94A3B8', fontWeight: 600 }}>BACKEND SESSION</span>
-          <StatusBadge status={liveStatus.session_active ? 'connected' : 'failed'} />
-          <span style={{ fontSize: '0.72rem', color: '#4B5563' }}>
-            Active broker: <b style={{ color: '#CBD5E1' }}>{liveStatus.active_broker === 'angel_one' ? 'Angel One' : 'None'}</b>
-          </span>
-          {liveStatus.client_id_masked && (
-            <span style={{ fontSize: '0.72rem', color: '#4B5563' }}>
-              Client: <b style={{ color: '#CBD5E1', fontFamily: 'monospace' }}>{liveStatus.client_id_masked}</b>
-            </span>
-          )}
-          <span style={{ fontSize: '0.72rem', color: '#374151', marginLeft: 'auto' }}>{liveStatus.checked_at_ist}</span>
+          {/* Card 1: Session Status */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 10, height: 10, borderRadius: '50%',
+              background: liveStatus.session_active ? '#10B981' : '#EF4444',
+              boxShadow: liveStatus.session_active ? '0 0 10px #10B981' : '0 0 8px #EF4444',
+            }} className={liveStatus.session_active ? 'pulse-live' : ''} />
+            <div>
+              <div style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 700, letterSpacing: '0.05em' }}>SESSION STATUS</div>
+              <div style={{ fontSize: '0.85rem', fontWeight: 700, color: liveStatus.session_active ? '#10B981' : '#EF4444' }}>
+                {liveStatus.session_active ? 'Active & Streaming' : 'Inactive / Reconnecting'}
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Expiry & Keepalive */}
+          <div>
+            <div style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 700, letterSpacing: '0.05em' }}>KEEPALIVE & EXPIRY</div>
+            <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#E2E8F0' }}>
+              {liveStatus.remaining_minutes != null
+                ? `⏳ ${formatRemaining(liveStatus.remaining_minutes)}`
+                : (liveStatus.session_active ? '⚡ Auto-Renew Active' : '—')}
+            </div>
+            <div style={{ fontSize: '0.65rem', color: '#64748B' }}>Auto-refreshes before expiry</div>
+          </div>
+
+          {/* Card 3: Active Client Code */}
+          <div>
+            <div style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 700, letterSpacing: '0.05em' }}>ACTIVE CLIENT</div>
+            <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#93C5FD', fontFamily: 'JetBrains Mono, monospace' }}>
+              {liveStatus.client_id_masked || 'None Configured'}
+            </div>
+            <div style={{ fontSize: '0.65rem', color: '#64748B' }}>
+              {liveStatus.persisted_on_disk ? '💾 Saved in backend/.env' : 'In-Memory Only'}
+            </div>
+          </div>
+
+          {/* Card 4: Last Checked Timestamp */}
+          <div>
+            <div style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 700, letterSpacing: '0.05em' }}>LAST CHECKED</div>
+            <div style={{ fontSize: '0.78rem', color: '#CBD5E1', fontFamily: 'JetBrains Mono, monospace' }}>
+              {liveStatus.checked_at_ist || '—'}
+            </div>
+            <div style={{ fontSize: '0.65rem', color: '#10B981' }}>● Real-time Polling (10s)</div>
+          </div>
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 20, alignItems: 'start' }}>
+      {/* Main Grid: Selector + Form */}
+      <div style={{ display: 'grid', gridTemplateColumns: '250px 1fr', gap: 20, alignItems: 'start' }}>
 
         {/* Left: Broker Selector */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#4B5563', letterSpacing: '0.08em', marginBottom: 4 }}>SELECT BROKER</div>
+          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: '#64748B', letterSpacing: '0.08em', marginBottom: 2 }}>SELECT BROKER</div>
           {BROKERS.map(b => {
-            const st = statuses[b.id] || (b.supported ? 'untested' : 'coming-soon');
+            const st = statuses[b.id] || (b.supported ? (liveStatus?.session_active ? 'connected' : 'untested') : 'coming-soon');
             const hasData = !!(configs[b.id]?.api_key);
+            const isSelected = selectedBroker === b.id;
+
             return (
               <button
                 key={b.id}
                 onClick={() => b.supported && setSelectedBroker(b.id)}
                 disabled={!b.supported}
                 style={{
-                  display: 'flex', flexDirection: 'column', gap: 4,
+                  display: 'flex', flexDirection: 'column', gap: 6,
                   padding: '12px 14px', borderRadius: 10, border: 'none', cursor: b.supported ? 'pointer' : 'not-allowed',
-                  background: selectedBroker === b.id
-                    ? `linear-gradient(135deg, ${b.color}18, ${b.color}08)`
-                    : 'rgba(15,23,42,0.5)',
-                  borderLeft: `3px solid ${selectedBroker === b.id ? b.color : 'transparent'}`,
-                  outline: selectedBroker === b.id ? `1px solid ${b.color}40` : '1px solid rgba(99,102,241,0.1)',
+                  background: isSelected
+                    ? `linear-gradient(135deg, ${b.color}20, ${b.color}08)`
+                    : 'rgba(15,23,42,0.6)',
+                  borderLeft: `3px solid ${isSelected ? b.color : 'transparent'}`,
+                  outline: isSelected ? `1px solid ${b.color}50` : '1px solid rgba(99,102,241,0.12)',
                   textAlign: 'left', transition: 'all 0.15s', opacity: b.supported ? 1 : 0.45,
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span style={{ fontSize: '1.2rem' }}>{b.logo}</span>
+                    <span style={{ fontSize: '1.25rem' }}>{b.logo}</span>
                     <div>
-                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: selectedBroker === b.id ? b.color : '#CBD5E1' }}>{b.name}</div>
-                      <div style={{ fontSize: '0.65rem', color: '#4B5563' }}>{b.subtitle}</div>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 700, color: isSelected ? b.color : '#CBD5E1' }}>{b.name}</div>
+                      <div style={{ fontSize: '0.65rem', color: '#64748B' }}>{b.subtitle}</div>
                     </div>
                   </div>
-                  {hasData && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#6366F1' }} title="Saved" />}
+                  {hasData && <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#6366F1' }} title="Saved locally" />}
                 </div>
                 <StatusBadge status={st} />
               </button>
@@ -332,35 +421,64 @@ export default function BrokerSettingsView() {
 
         {/* Right: Config Panel */}
         <div style={{
-          background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(99,102,241,0.15)',
-          borderRadius: 14, padding: '22px 24px',
+          background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(99,102,241,0.18)',
+          borderRadius: 14, padding: '22px 24px', boxShadow: '0 4px 25px rgba(0,0,0,0.25)',
         }}>
           {!broker?.supported ? (
-            <div style={{ textAlign: 'center', padding: '48px 0', color: '#4B5563' }}>
+            <div style={{ textAlign: 'center', padding: '48px 0', color: '#64748B' }}>
               <Clock size={36} style={{ marginBottom: 12, opacity: 0.4 }} />
-              <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>Coming Soon</div>
-              <div style={{ fontSize: '0.75rem', marginTop: 6 }}>Ye broker jald available hoga</div>
+              <div style={{ fontSize: '0.95rem', fontWeight: 600, color: '#CBD5E1' }}>Coming Soon</div>
+              <div style={{ fontSize: '0.78rem', marginTop: 6 }}>This broker connector is in development and will be available in an upcoming update.</div>
             </div>
           ) : (
             <>
               {/* Broker Header */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 22, paddingBottom: 16, borderBottom: '1px solid rgba(99,102,241,0.1)' }}>
-                <span style={{ fontSize: '2rem' }}>{broker.logo}</span>
-                <div>
-                  <div style={{ fontSize: '1rem', fontWeight: 700, color: broker.color }}>{broker.name} <span style={{ color: '#4B5563', fontWeight: 400 }}>({broker.subtitle})</span></div>
-                  <div style={{ marginTop: 4 }}><StatusBadge status={currentStatus} /></div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, paddingBottom: 14, borderBottom: '1px solid rgba(99,102,241,0.12)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: '2rem' }}>{broker.logo}</span>
+                  <div>
+                    <div style={{ fontSize: '1.05rem', fontWeight: 700, color: broker.color }}>
+                      {broker.name} <span style={{ color: '#64748B', fontWeight: 400, fontSize: '0.85rem' }}>({broker.subtitle})</span>
+                    </div>
+                    <div style={{ marginTop: 4 }}><StatusBadge status={currentStatus} /></div>
+                  </div>
                 </div>
+
+                {liveStatus?.created_at_ist && (
+                  <div style={{ fontSize: '0.7rem', color: '#64748B', textAlign: 'right' }}>
+                    Authenticated: <span style={{ color: '#94A3B8' }}>{liveStatus.created_at_ist}</span>
+                  </div>
+                )}
               </div>
 
-              {/* Status Message */}
+              {/* Status Message Banner */}
               {currentMsg && (
                 <div style={{
                   padding: '10px 14px', borderRadius: 8, marginBottom: 18,
                   background: currentStatus === 'connected' ? 'rgba(16,185,129,0.08)' : 'rgba(239,68,68,0.08)',
-                  border: `1px solid ${currentStatus === 'connected' ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`,
+                  border: `1px solid ${currentStatus === 'connected' ? 'rgba(16,185,129,0.25)' : 'rgba(239,68,68,0.25)'}`,
                   fontSize: '0.78rem', color: currentStatus === 'connected' ? '#10B981' : '#EF4444',
+                  display: 'flex', alignItems: 'center', gap: 8,
                 }}>
-                  {currentMsg}
+                  {currentStatus === 'connected' ? <Check size={15} /> : <AlertTriangle size={15} />}
+                  <span>{currentMsg}</span>
+                </div>
+              )}
+
+              {/* Last Auth Error if any */}
+              {liveStatus?.last_auth_error && !currentMsg && (
+                <div style={{
+                  padding: '10px 14px', borderRadius: 8, marginBottom: 18,
+                  background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)',
+                  fontSize: '0.75rem', color: '#F87171', display: 'flex', alignItems: 'flex-start', gap: 8,
+                }}>
+                  <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0 }} />
+                  <div>
+                    <b>Last Server Session Error:</b> {liveStatus.last_auth_error}
+                    <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginTop: 2 }}>
+                      Ensure your TOTP Secret is the Base32 string from your 2FA authenticator setup QR.
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -369,32 +487,39 @@ export default function BrokerSettingsView() {
                 <FieldRow key={f.key} field={f} value={creds[f.key] || ''} onChange={handleFieldChange} />
               ))}
 
-              {/* Security Note */}
+              {/* Options: Persist to Server Checkbox */}
               <div style={{
-                display: 'flex', alignItems: 'flex-start', gap: 8,
-                background: 'rgba(99,102,241,0.06)', borderRadius: 8, padding: '10px 12px', marginTop: 4, marginBottom: 20,
+                display: 'flex', alignItems: 'center', gap: 8,
+                margin: '16px 0 18px 0', padding: '10px 12px',
+                background: 'rgba(15,23,42,0.5)', borderRadius: 8, border: '1px solid rgba(99,102,241,0.12)',
               }}>
-                <Shield size={13} style={{ marginTop: 1, flexShrink: 0, color: '#6366F1' }} />
-                <p style={{ margin: 0, fontSize: '0.68rem', color: '#475569', lineHeight: 1.5 }}>
-                  Credentials <b style={{ color: '#6366F1' }}>sirf browser ke localStorage</b> mein save hoti hain â€” koi bhi external server pe nahi jaati jab tak tum "Apply" na karo.
-                  Apply karne ke baad credentials sirf current server process mein in-memory rehti hain; .env file change nahi hoti.
-                </p>
+                <input
+                  type="checkbox"
+                  id="persist-checkbox"
+                  checked={persistToDisk}
+                  onChange={e => setPersistToDisk(e.target.checked)}
+                  style={{ cursor: 'pointer', accentColor: '#6366F1' }}
+                />
+                <label htmlFor="persist-checkbox" style={{ fontSize: '0.75rem', color: '#CBD5E1', cursor: 'pointer', userSelect: 'none' }}>
+                  <b>Persist to Server (.env):</b> Keep active credentials saved on EC2 disk so server restarts don't lose session.
+                </label>
               </div>
 
               {/* Action Buttons */}
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                 <button
                   onClick={handleSave}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '9px 18px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                    padding: '9px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
                     background: 'rgba(99,102,241,0.15)', color: '#818CF8',
                     fontSize: '0.8rem', fontWeight: 600,
                     outline: '1px solid rgba(99,102,241,0.3)', transition: 'all 0.15s',
                   }}
                 >
-                  <Shield size={14} /> Save Locally
+                  <Shield size={14} /> Save in Browser
                 </button>
+
                 <button
                   onClick={handleTest}
                   disabled={['testing','applying'].includes(currentStatus)}
@@ -408,10 +533,11 @@ export default function BrokerSettingsView() {
                   }}
                 >
                   {currentStatus === 'testing'
-                    ? <><RefreshCw size={14} className="broker-spin" /> Testingâ€¦</>
+                    ? <><RefreshCw size={14} className="broker-spin" /> Verifying…</>
                     : <><Wifi size={14} /> Test Connection</>
                   }
                 </button>
+
                 <button
                   onClick={handleApply}
                   disabled={['testing','applying'].includes(currentStatus)}
@@ -421,14 +547,15 @@ export default function BrokerSettingsView() {
                     cursor: ['testing','applying'].includes(currentStatus) ? 'not-allowed' : 'pointer',
                     background: 'linear-gradient(135deg, #6366F1, #4F46E5)',
                     color: '#fff', fontSize: '0.8rem', fontWeight: 700,
-                    boxShadow: '0 2px 8px rgba(99,102,241,0.3)', transition: 'all 0.15s',
+                    boxShadow: '0 2px 10px rgba(99,102,241,0.35)', transition: 'all 0.15s',
                   }}
                 >
                   {currentStatus === 'applying'
-                    ? <><RefreshCw size={14} className="broker-spin" /> Applyingâ€¦</>
+                    ? <><RefreshCw size={14} className="broker-spin" /> Applying Session…</>
                     : <><Zap size={14} /> Apply as Active</>
                   }
                 </button>
+
                 <button
                   onClick={handleClear}
                   style={{
@@ -439,7 +566,7 @@ export default function BrokerSettingsView() {
                     outline: '1px solid rgba(239,68,68,0.2)', marginLeft: 'auto',
                   }}
                 >
-                  <WifiOff size={14} /> Clear
+                  <WifiOff size={14} /> Clear Form
                 </button>
               </div>
             </>
@@ -448,21 +575,21 @@ export default function BrokerSettingsView() {
       </div>
 
       {/* Info Cards Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginTop: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12, marginTop: 24 }}>
         {[
-          { icon: 'ðŸ”’', title: 'Local Only', desc: 'Credentials sirf browser mein rahti hain' },
-          { icon: 'âš¡', title: 'Hot Reload', desc: 'Apply karo â€” server restart ki zaroorat nahi' },
-          { icon: 'ðŸ”„', title: 'Test First', desc: 'Pehle Test karo, phir Apply â€” safe workflow' },
-          { icon: 'ðŸ“¡', title: 'Auto Live', desc: 'Apply ke baad WS feed automatically live ho jaata hai' },
+          { icon: '🔄', title: 'Session Keepalive', desc: 'Auto-refreshes tokens before the 8-hour expiry and at 8:45 AM pre-market' },
+          { icon: '💾', title: 'Disk Persistence', desc: 'Saves safely to backend/.env so EC2 reboots keep the active session intact' },
+          { icon: '📡', title: 'Real-Time Sync', desc: '10-second background polling updates connection badges dynamically' },
+          { icon: '🛡️', title: 'Zero Candle Drop', desc: 'Protected WS pipeline guarantees candles stay synchronized and reliable' },
         ].map((card, i) => (
           <div key={i} style={{
-            background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(99,102,241,0.1)',
+            background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(99,102,241,0.12)',
             borderRadius: 10, padding: '14px 16px', display: 'flex', gap: 10, alignItems: 'flex-start',
           }}>
             <span style={{ fontSize: '1.3rem', flexShrink: 0 }}>{card.icon}</span>
             <div>
               <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#CBD5E1', marginBottom: 2 }}>{card.title}</div>
-              <div style={{ fontSize: '0.7rem', color: '#4B5563' }}>{card.desc}</div>
+              <div style={{ fontSize: '0.7rem', color: '#64748B', lineHeight: 1.4 }}>{card.desc}</div>
             </div>
           </div>
         ))}
@@ -471,4 +598,3 @@ export default function BrokerSettingsView() {
     </div>
   );
 }
-

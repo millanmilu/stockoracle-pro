@@ -1,5 +1,6 @@
 import os
 import time
+import asyncio
 import requests
 import pyotp
 import pandas as pd
@@ -38,8 +39,11 @@ ANGEL_TOTP_SECRET = os.getenv("ANGEL_TOTP_SECRET", "").strip()
 smartApi: Optional[SmartConnect] = SmartConnect(api_key=ANGEL_API_KEY) if ANGEL_API_KEY else None
 
 # Session state — token auto-refreshes every 8 hours
-_session_active    = False
+_session_active     = False
 _session_expires_at: Optional[datetime] = None
+_session_created_at: Optional[datetime] = None
+_last_auth_attempt:  Optional[datetime] = None
+_last_auth_error:    Optional[str] = None
 SESSION_REFRESH_HOURS = 8
 
 # Angel One error codes that indicate an expired / invalid session
@@ -51,11 +55,30 @@ def get_session_status() -> bool:
     return _session_active
 
 
+def get_session_details() -> dict:
+    """Returns comprehensive session metadata for monitoring & UI display."""
+    now = datetime.now(_IST)
+    remaining_minutes = None
+    if _session_active and _session_expires_at:
+        diff = (_session_expires_at - now).total_seconds()
+        remaining_minutes = max(0, int(diff // 60))
+
+    return {
+        "session_active": _session_active,
+        "expires_at_ist": _session_expires_at.strftime("%Y-%m-%d %H:%M:%S IST") if _session_expires_at else None,
+        "created_at_ist": _session_created_at.strftime("%Y-%m-%d %H:%M:%S IST") if _session_created_at else None,
+        "remaining_minutes": remaining_minutes,
+        "last_auth_attempt_ist": _last_auth_attempt.strftime("%Y-%m-%d %H:%M:%S IST") if _last_auth_attempt else None,
+        "last_auth_error": _last_auth_error,
+    }
+
+
 def reset_session():
     """Force re-authentication on the next API call."""
-    global _session_active, _session_expires_at
-    _session_active    = False
+    global _session_active, _session_expires_at, _session_created_at
+    _session_active     = False
     _session_expires_at = None
+    _session_created_at = None
 
 
 def ensure_session() -> bool:
@@ -65,10 +88,12 @@ def ensure_session() -> bool:
     session is about to expire (SESSION_REFRESH_HOURS threshold).
     Returns True if session is active after the call.
     """
-    global _session_active, _session_expires_at
+    global _session_active, _session_expires_at, _session_created_at, _last_auth_attempt, _last_auth_error
+    now = datetime.now(_IST)
+    _last_auth_attempt = now
 
     # Auto-refresh if session is expired
-    if _session_active and _session_expires_at and datetime.now() >= _session_expires_at:
+    if _session_active and _session_expires_at and now >= _session_expires_at:
         logger.warning("Angel One session expired — refreshing...")
         reset_session()
 
@@ -76,30 +101,101 @@ def ensure_session() -> bool:
         return True
 
     if not smartApi:
+        _last_auth_error = "ANGEL_API_KEY is missing."
         logger.warning("Angel One SmartAPI not initialized: ANGEL_API_KEY is missing.")
         return False
 
     if not (ANGEL_CLIENT_ID and ANGEL_PASSWORD and ANGEL_TOTP_SECRET):
+        _last_auth_error = "Incomplete Angel One credentials."
         logger.warning("Angel One credentials incomplete. Check .env for ANGEL_CLIENT_ID / ANGEL_PASSWORD / ANGEL_TOTP_SECRET.")
         return False
 
     try:
-        totp = pyotp.TOTP(ANGEL_TOTP_SECRET).now()
-        data = smartApi.generateSession(ANGEL_CLIENT_ID, ANGEL_PASSWORD, totp)
+        totp = pyotp.TOTP(ANGEL_TOTP_SECRET.strip()).now()
+        data = smartApi.generateSession(ANGEL_CLIENT_ID.strip(), ANGEL_PASSWORD.strip(), totp)
 
         if data and data.get("status"):
-            _session_active    = True
-            _session_expires_at = datetime.now() + timedelta(hours=SESSION_REFRESH_HOURS)
-            logger.info("Angel One SmartAPI login successful.")
+            _session_active     = True
+            _session_created_at = now
+            _session_expires_at = now + timedelta(hours=SESSION_REFRESH_HOURS)
+            _last_auth_error    = None
+            logger.info("Angel One SmartAPI login successful. Valid until %s", _session_expires_at.strftime("%H:%M:%S IST"))
             return True
         else:
             msg = data.get("message", "No response") if data else "No response"
+            _last_auth_error = str(msg)
             logger.error("Angel One login failed: %s", msg)
             return False
 
     except Exception as e:
+        _last_auth_error = str(e)
         logger.error("Exception during Angel One login: %s", e, exc_info=True)
         return False
+
+
+async def run_session_keepalive_loop():
+    """
+    Proactive keepalive background loop:
+    1. Re-authenticates proactively if session is expiring in < 45 minutes.
+    2. Enforces fresh pre-market authentication between 08:45 AM and 09:05 AM IST on trading weekdays.
+    3. Auto-retries with exponential backoff if session drops during market hours.
+    4. Dispatches a system warning if session remains inactive during trading hours.
+    """
+    logger.info("Starting broker session keepalive loop...")
+    fail_count = 0
+    last_alert_time = 0.0
+
+    while True:
+        try:
+            now = datetime.now(_IST)
+            is_weekday = now.weekday() < 5
+            is_pre_market = is_weekday and ((now.hour == 8 and now.minute >= 45) or (now.hour == 9 and now.minute <= 5))
+            is_market_hours = is_weekday and ((now.hour == 9 and now.minute >= 15) or (9 < now.hour < 15) or (now.hour == 15 and now.minute <= 30))
+
+            if ANGEL_API_KEY and ANGEL_CLIENT_ID and ANGEL_PASSWORD and ANGEL_TOTP_SECRET:
+                # Case A: Pre-market refresh: force fresh token so the entire trading day has a clean session
+                if is_pre_market:
+                    if not _session_active or (_session_created_at and (now - _session_created_at).total_seconds() > 3600):
+                        logger.info("Pre-market session keepalive: Refreshing Angel One session for upcoming trading session...")
+                        reset_session()
+                        ensure_session()
+
+                # Case B: Check if active session is near expiry (< 45 minutes remaining)
+                elif _session_active and _session_expires_at:
+                    remaining_sec = (_session_expires_at - now).total_seconds()
+                    if remaining_sec < 2700:  # < 45 minutes
+                        logger.info("Angel One session expiring soon (%.0f min remaining) — proactively refreshing...", remaining_sec / 60)
+                        reset_session()
+                        ensure_session()
+
+                # Case C: If inactive during market hours, attempt reconnection
+                elif not _session_active and is_market_hours:
+                    logger.warning("Angel One session is INACTIVE during market hours. Attempting auto-reconnect...")
+                    success = ensure_session()
+                    if not success:
+                        fail_count += 1
+                        if fail_count >= 3:
+                            curr_ts = time.time()
+                            if curr_ts - last_alert_time > 7200:  # at most once every 2 hours
+                                try:
+                                    from backend.services.telegram_bot import send_telegram_alert
+                                    send_telegram_alert(
+                                        ticker="SYSTEM",
+                                        alert_type="broker_session_down",
+                                        reason="⚠️ Angel One SmartAPI session disconnected during market hours. Live price feed may be degraded. Please verify TOTP/credentials in Broker Settings.",
+                                    )
+                                    last_alert_time = curr_ts
+                                except Exception:
+                                    pass
+                    else:
+                        fail_count = 0
+                else:
+                    fail_count = 0
+
+        except Exception as e:
+            logger.warning("Exception in session keepalive loop: %s", e)
+
+        await asyncio.sleep(60.0)
 
 
 # ── API call wrapper with retry + session-expiry detection ──

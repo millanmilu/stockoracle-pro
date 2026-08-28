@@ -25,7 +25,7 @@ from backend.shared.database import init_database
 from backend.data.database import init_db, cleanup_old_tasks, save_live_tick, get_company_info, get_stale_company_info
 from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, ensure_session,
-    get_session_status, get_token_info, smartApi
+    get_session_status, get_token_info, smartApi, run_session_keepalive_loop
 )
 from backend.services.alert_scheduler import run_alert_scheduler_loop
 
@@ -185,13 +185,14 @@ async def lifespan(app: FastAPI):
     price_task = asyncio.create_task(websocket_price_broadcast_loop())
     alert_task = asyncio.create_task(run_alert_scheduler_loop())
     prefetch_task = asyncio.create_task(prefetch_all_tickers())
+    keepalive_task = asyncio.create_task(run_session_keepalive_loop())
 
     try:
         yield
     finally:
-        for task in (price_task, alert_task, prefetch_task):
+        for task in (price_task, alert_task, prefetch_task, keepalive_task):
             task.cancel()
-        for task in (price_task, alert_task, prefetch_task):
+        for task in (price_task, alert_task, prefetch_task, keepalive_task):
             with suppress(asyncio.CancelledError):
                 await task
 
