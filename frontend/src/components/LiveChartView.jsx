@@ -6,7 +6,8 @@ import {
   Maximize2, Minimize2, Camera, Bell, Search, 
   Columns, Rows, Grid2X2, Square, Eye, EyeOff, Sparkles, TrendingUp,
   ZoomIn, ZoomOut, Move, RotateCcw, Zap, Activity, Check,
-  BarChart3, Layers, Target, ChevronRight, ChevronLeft, X, FlaskConical
+  BarChart3, Layers, Target, ChevronRight, ChevronLeft, X, FlaskConical,
+  Play, Pause, SkipForward, FastForward, Flame, ShieldAlert, Sliders
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import MultiChartGrid from './MultiChartGrid';
@@ -18,6 +19,8 @@ import OrderFlow from './chart-tools/OrderFlow';
 import AIPatternRecognition from './chart-tools/AIPatternRecognition';
 import MultiTimeframeCorrelation from './chart-tools/MultiTimeframeCorrelation';
 import TrustBadge from './TrustBadge';
+import { playAlertChime } from '../utils/soundChime';
+import { detectFVGs, detectOrderBlocks, detectMarketStructure } from './chart-tools/smcEngine';
 
 /* ─── Constants ─────────────────────────────────────────────────────────────── */
 
@@ -606,6 +609,40 @@ export default function LiveChartView() {
   const [showPatterns,  setShowPatterns]  = useState(false);
   const [showAICone,    setShowAICone]    = useState(true);
   
+  // ── 5 Institutional Advance Features State ──
+  // 1. Smart Money Concepts (SMC) & Liquidity Imbalances
+  const [showSMC, setShowSMC] = useState(false);
+
+  // 2. Options Open Interest (OI) & Max Pain Overlays
+  const [showOptionsOI, setShowOptionsOI] = useState(false);
+  const [optionsData, setOptionsData] = useState(null);
+  const [optionsLoading, setOptionsLoading] = useState(false);
+
+  // 3. Integrated Volume Profile (VPVR) & Point of Control (POC)
+  const [showVPVR, setShowVPVR] = useState(false);
+
+  // 4. Historical Bar Replay Simulator (Practice Mode)
+  const [isReplayMode, setIsReplayMode] = useState(false);
+  const [replayIndex, setReplayIndex] = useState(0);
+  const [isReplayPlaying, setIsReplayPlaying] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState(1); // 1x, 2x, 5x
+
+  // 5. Interactive Canvas Price Alerts & Audio Chime
+  const [priceAlerts, setPriceAlerts] = useState(() => {
+    try {
+      const saved = localStorage.getItem('stockoracle_price_alerts');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('stockoracle_price_alerts', JSON.stringify(priceAlerts));
+    } catch {}
+  }, [priceAlerts]);
+  
   // Real-time indicator readout values for on-chart TradingView legend
   const [indicatorValues, setIndicatorValues] = useState({
     sma: null,
@@ -755,6 +792,11 @@ export default function LiveChartView() {
   const macdHistRef    = useRef(null);
   const almaRef        = useRef(null);
   const keyLevelLinesRef = useRef([]);
+  const smcLinesRef    = useRef([]);
+  const optionsLinesRef = useRef([]);
+  const vpvrLinesRef   = useRef([]);
+  const alertLinesRef  = useRef([]);
+  const lastTriggeredMap = useRef(new Set());
 
   const predLineRef    = useRef(null);
   const upperLineRef   = useRef(null);
@@ -978,6 +1020,10 @@ export default function LiveChartView() {
       macdSignalRef.current = null;
       macdHistRef.current = null;
       keyLevelLinesRef.current = [];
+      smcLinesRef.current = [];
+      optionsLinesRef.current = [];
+      vpvrLinesRef.current = [];
+      alertLinesRef.current = [];
       predLineRef.current = null;
       upperLineRef.current = null;
       lowerLineRef.current = null;
@@ -1221,10 +1267,30 @@ export default function LiveChartView() {
               return;
             }
 
-            if (targetAlertPrice && Math.abs(price - Number(targetAlertPrice)) < 1) {
-              toast.success(`🔔 ALERT TRIGGERED: ${selectedSymbol} hit target ₹${price}`);
-              setTargetAlertPrice('');
-            }
+            // Real-time Canvas Price Alert Trigger & Chime
+            setPriceAlerts(prevAlerts => {
+              let changed = false;
+              const updated = prevAlerts.map(alert => {
+                if (alert.ticker === selectedSymbol && !alert.triggered) {
+                  const target = Number(alert.price);
+                  const isHit = Math.abs(price - target) <= Math.max(0.5, target * 0.002) || 
+                                (alert.direction === 'above' && price >= target) ||
+                                (alert.direction === 'below' && price <= target);
+                  if (isHit && !lastTriggeredMap.current.has(alert.id)) {
+                    lastTriggeredMap.current.add(alert.id);
+                    changed = true;
+                    playAlertChime();
+                    toast.success(`🔔 PRICE ALERT TRIGGERED: ${selectedSymbol} reached ₹${price.toFixed(2)} (Target ₹${target})`, {
+                      duration: 6000,
+                      icon: '🚨',
+                    });
+                    return { ...alert, triggered: true, triggeredAt: new Date().toISOString() };
+                  }
+                }
+                return alert;
+              });
+              return changed ? updated : prevAlerts;
+            });
           }
         } catch {}
       };
@@ -1301,19 +1367,26 @@ export default function LiveChartView() {
     const seen = new Map();
     candles.forEach(c => seen.set(c.time, c));
     const dedupedCandles = Array.from(seen.values());
+    
+    // Bar Replay Active Candle Slicing
+    const activeCandles = isReplayMode
+      ? dedupedCandles.slice(0, Math.min(Math.max(5, replayIndex || dedupedCandles.length - 30), dedupedCandles.length))
+      : dedupedCandles;
 
     try { 
       const displayCandles = chartType === 'heikin_ashi' 
-        ? calculateHeikinAshi(dedupedCandles) 
-        : dedupedCandles;
+        ? calculateHeikinAshi(activeCandles) 
+        : activeCandles;
       candleRef.current.setData(displayCandles); 
-      chartRef.current?.timeScale().fitContent();
+      if (!isReplayMode) {
+        chartRef.current?.timeScale().fitContent();
+      }
     } catch (e) {}
 
     // Pattern Badges Overlay
     if (showPatterns) {
       try {
-        const patternMarkers = detectPatterns(dedupedCandles);
+        const patternMarkers = detectPatterns(activeCandles);
         candleRef.current.setMarkers(patternMarkers);
       } catch {}
     } else {
@@ -1322,7 +1395,7 @@ export default function LiveChartView() {
 
     // 2. Volume Bars
     if (showVolume && volumeRef.current) {
-      const volumeData = rawHistory
+      const volumeData = (isReplayMode ? rawHistory.slice(0, activeCandles.length) : rawHistory)
         .map(d => ({
           time: toChartTime(d.date, intraday),
           value: Number(d.volume || 0),
@@ -1338,16 +1411,16 @@ export default function LiveChartView() {
     }
 
     // 3. Technical Indicators (SMA, EMA, BB)
-    if (showSMA && smaRef.current && dedupedCandles.length > 20) {
-      try { smaRef.current.setData(calculateSMA(dedupedCandles, 20)); } catch {}
+    if (showSMA && smaRef.current && activeCandles.length > 20) {
+      try { smaRef.current.setData(calculateSMA(activeCandles, 20)); } catch {}
     } else { try { smaRef.current?.setData([]); } catch {} }
 
-    if (showEMA && emaRef.current && dedupedCandles.length > 20) {
-      try { emaRef.current.setData(calculateEMA(dedupedCandles, 20)); } catch {}
+    if (showEMA && emaRef.current && activeCandles.length > 20) {
+      try { emaRef.current.setData(calculateEMA(activeCandles, 20)); } catch {}
     } else { try { emaRef.current?.setData([]); } catch {} }
 
-    if (showBB && bbUpperRef.current && bbLowerRef.current && dedupedCandles.length > 20) {
-      const { upper, lower } = calculateBollingerBands(dedupedCandles, 20, 2);
+    if (showBB && bbUpperRef.current && bbLowerRef.current && activeCandles.length > 20) {
+      const { upper, lower } = calculateBollingerBands(activeCandles, 20, 2);
       try {
         bbUpperRef.current.setData(upper);
         bbLowerRef.current.setData(lower);
@@ -1356,12 +1429,146 @@ export default function LiveChartView() {
       try { bbUpperRef.current?.setData([]); bbLowerRef.current?.setData([]); } catch {}
     }
 
+    // 4. Smart Money Concepts (SMC) & Liquidity Overlay
+    if (showSMC && candleRef.current && activeCandles.length > 10) {
+      smcLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
+      smcLinesRef.current = [];
 
+      // A. Fair Value Gaps (FVG)
+      const fvgs = detectFVGs(activeCandles, 4);
+      fvgs.forEach(fvg => {
+        try {
+          const pLine = candleRef.current.createPriceLine({
+            price: fvg.mid,
+            color: fvg.borderColor,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dotted,
+            axisLabelVisible: true,
+            title: fvg.type === 'bullish_fvg' ? `FVG (Demand) ₹${fvg.bottom.toFixed(0)}-${fvg.top.toFixed(0)}` : `FVG (Supply) ₹${fvg.bottom.toFixed(0)}-${fvg.top.toFixed(0)}`,
+          });
+          smcLinesRef.current.push(pLine);
+        } catch {}
+      });
+
+      // B. Order Blocks (OB)
+      const obs = detectOrderBlocks(activeCandles, 60);
+      obs.forEach(ob => {
+        try {
+          const pLine = candleRef.current.createPriceLine({
+            price: ob.price,
+            color: ob.color,
+            lineWidth: 1.5,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: ob.label,
+          });
+          smcLinesRef.current.push(pLine);
+        } catch {}
+      });
+
+      // C. Market Structure Breaks (BOS)
+      const ms = detectMarketStructure(activeCandles, 4);
+      ms.breaks.forEach(brk => {
+        try {
+          const pLine = candleRef.current.createPriceLine({
+            price: brk.price,
+            color: brk.color,
+            lineWidth: 1,
+            lineStyle: LineStyle.Solid,
+            axisLabelVisible: true,
+            title: brk.label,
+          });
+          smcLinesRef.current.push(pLine);
+        } catch {}
+      });
+    } else if (!showSMC && candleRef.current && smcLinesRef.current.length > 0) {
+      smcLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
+      smcLinesRef.current = [];
+    }
+
+    // 5. Chart-Integrated Volume Profile (VPVR) & Point of Control (POC)
+    if (showVPVR && candleRef.current && activeCandles.length > 10) {
+      vpvrLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
+      vpvrLinesRef.current = [];
+
+      let minP = Infinity;
+      let maxP = -Infinity;
+      activeCandles.forEach(c => {
+        if (c.high > maxP) maxP = c.high;
+        if (c.low < minP) minP = c.low;
+      });
+      const pRange = maxP - minP;
+      if (pRange > 0) {
+        const nBins = 35;
+        const bSize = pRange / nBins;
+        const vBins = new Array(nBins).fill(0);
+        activeCandles.forEach(c => {
+          const mid = (c.high + c.low + c.close) / 3;
+          const idx = Math.min(nBins - 1, Math.max(0, Math.floor((mid - minP) / bSize)));
+          vBins[idx] += Number(c.volume || 1);
+        });
+
+        const maxV = Math.max(...vBins);
+        const pocI = vBins.indexOf(maxV);
+        const pocPrice = minP + (pocI + 0.5) * bSize;
+
+        const totV = vBins.reduce((a, b) => a + b, 0);
+        const target70 = totV * 0.7;
+        const sorted = vBins.map((v, i) => ({ idx: i, vol: v })).sort((a, b) => b.vol - a.vol);
+        let acc = 0;
+        const vaIndices = new Set();
+        for (const item of sorted) {
+          acc += item.vol;
+          vaIndices.add(item.idx);
+          if (acc >= target70) break;
+        }
+        const vahI = Math.max(...vaIndices);
+        const valI = Math.min(...vaIndices);
+        const vahPrice = minP + (vahI + 0.5) * bSize;
+        const valPrice = minP + (valI + 0.5) * bSize;
+
+        // POC Line (Golden)
+        const pocLine = candleRef.current.createPriceLine({
+          price: pocPrice,
+          color: '#F59E0B',
+          lineWidth: 2,
+          lineStyle: LineStyle.Solid,
+          axisLabelVisible: true,
+          title: `★ POC ₹${pocPrice.toFixed(1)}`,
+        });
+        vpvrLinesRef.current.push(pocLine);
+
+        // VAH Line
+        const vahLine = candleRef.current.createPriceLine({
+          price: vahPrice,
+          color: '#818CF8',
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: `VAH (70%) ₹${vahPrice.toFixed(1)}`,
+        });
+        vpvrLinesRef.current.push(vahLine);
+
+        // VAL Line
+        const valLine = candleRef.current.createPriceLine({
+          price: valPrice,
+          color: '#818CF8',
+          lineWidth: 1,
+          lineStyle: LineStyle.Dotted,
+          axisLabelVisible: true,
+          title: `VAL (70%) ₹${valPrice.toFixed(1)}`,
+        });
+        vpvrLinesRef.current.push(valLine);
+      }
+    } else if (!showVPVR && candleRef.current && vpvrLinesRef.current.length > 0) {
+      vpvrLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
+      vpvrLinesRef.current = [];
+    }
 
     // 8. RSI Sub-chart
     let currentRSI = null;
-    if (showRSI && rsiRef.current && dedupedCandles.length > 14) {
-      const rsiVals = calculateRSI(dedupedCandles, 14);
+    if (showRSI && rsiRef.current && activeCandles.length > 14) {
+      const rsiVals = calculateRSI(activeCandles, 14);
       try {
         rsiRef.current.setData(rsiVals);
         if (rsiVals.length > 0) {
@@ -1382,8 +1589,8 @@ export default function LiveChartView() {
 
     // 9. MACD Sub-chart
     let currentMACD = null;
-    if (showMACD && macdRef.current && macdSignalRef.current && macdHistRef.current && dedupedCandles.length > 35) {
-      const macdData = calculateMACD(dedupedCandles, 12, 26, 9);
+    if (showMACD && macdRef.current && macdSignalRef.current && macdHistRef.current && activeCandles.length > 35) {
+      const macdData = calculateMACD(activeCandles, 12, 26, 9);
       try {
         macdRef.current.setData(macdData.macd);
         macdSignalRef.current.setData(macdData.signal);
@@ -1405,8 +1612,8 @@ export default function LiveChartView() {
 
     // 10. ALMA Overlay
     let currentALMA = null;
-    if (showALMA && almaRef.current && dedupedCandles.length > 10) {
-      const almaVals = calculateALMA(dedupedCandles, 9, 0.85, 6);
+    if (showALMA && almaRef.current && activeCandles.length > 10) {
+      const almaVals = calculateALMA(activeCandles, 9, 0.85, 6);
       try {
         almaRef.current.setData(almaVals);
         if (almaVals.length > 0) currentALMA = almaVals[almaVals.length - 1].value;
@@ -1416,14 +1623,14 @@ export default function LiveChartView() {
     }
 
     // 11. Auto Support & Resistance Key Levels
-    if (showKeyLevels && candleRef.current && dedupedCandles.length > 25) {
+    if (showKeyLevels && candleRef.current && activeCandles.length > 25) {
       if (keyLevelLinesRef.current && keyLevelLinesRef.current.length > 0) {
         keyLevelLinesRef.current.forEach(line => {
           try { candleRef.current?.removePriceLine(line); } catch {}
         });
         keyLevelLinesRef.current = [];
       }
-      const keyLevels = calculateKeyLevels(dedupedCandles);
+      const keyLevels = calculateKeyLevels(activeCandles);
       keyLevels.forEach(lvl => {
         try {
           const pLine = candleRef.current.createPriceLine({
@@ -1445,10 +1652,10 @@ export default function LiveChartView() {
     }
 
     // Update real-time indicator legend values
-    const lastCandle = dedupedCandles[dedupedCandles.length - 1];
-    const smaCalculated = showSMA && dedupedCandles.length > 20 ? calculateSMA(dedupedCandles, 20) : [];
-    const emaCalculated = showEMA && dedupedCandles.length > 20 ? calculateEMA(dedupedCandles, 20) : [];
-    const bbCalculated  = showBB && dedupedCandles.length > 20 ? calculateBollingerBands(dedupedCandles, 20, 2) : null;
+    const lastCandle = activeCandles[activeCandles.length - 1];
+    const smaCalculated = showSMA && activeCandles.length > 20 ? calculateSMA(activeCandles, 20) : [];
+    const emaCalculated = showEMA && activeCandles.length > 20 ? calculateEMA(activeCandles, 20) : [];
+    const bbCalculated  = showBB && activeCandles.length > 20 ? calculateBollingerBands(activeCandles, 20, 2) : null;
 
     setIndicatorValues({
       sma: smaCalculated.length > 0 ? smaCalculated[smaCalculated.length - 1].value : null,
@@ -1510,9 +1717,8 @@ export default function LiveChartView() {
 
     const timer = setTimeout(() => {
       try {
-        if (chartRef.current && dedupedCandles.length > 0) {
-          const total = dedupedCandles.length;
-          // Focus view on recent ~120 candles (full size), panning left reveals full 5-year history
+        if (chartRef.current && activeCandles.length > 0) {
+          const total = activeCandles.length;
           const visibleCount = Math.min(total, 120);
           chartRef.current.timeScale().setVisibleLogicalRange({
             from: total - visibleCount,
@@ -1522,7 +1728,7 @@ export default function LiveChartView() {
       } catch {}
     }, 50);
     return () => clearTimeout(timer);
-  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns]);
+  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, showSMC, showVPVR, isReplayMode, replayIndex, chartType]);
 
   /* ── Secondary Comparison Chart Data Binding ───────────────── */
 
@@ -1648,6 +1854,124 @@ export default function LiveChartView() {
       title               : 'LIVE',
     });
   }, [livePrice, interval, isDaily, selectedSymbol]);
+
+  /* ── 2. Options Open Interest (OI) & Max Pain Overlay ──────── */
+  useEffect(() => {
+    if (!showOptionsOI || !selectedSymbol) {
+      if (optionsLinesRef.current.length > 0 && candleRef.current) {
+        optionsLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
+        optionsLinesRef.current = [];
+      }
+      return;
+    }
+
+    let active = true;
+    setOptionsLoading(true);
+    fetch(`/api/stock/${selectedSymbol}/options-chain`)
+      .then(res => res.json())
+      .then(data => {
+        if (!active) return;
+        setOptionsLoading(false);
+        if (!data || data.error || !data.chain || !data.chain.length) {
+          toast.error(`Options chain data not available for ${selectedSymbol}`);
+          return;
+        }
+        setOptionsData(data);
+
+        if (candleRef.current) {
+          optionsLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
+          optionsLinesRef.current = [];
+
+          // 1. Highest Call OI (Resistance Wall)
+          const highestCall = [...data.chain].sort((a, b) => (b.call_oi || 0) - (a.call_oi || 0))[0];
+          if (highestCall && highestCall.call_oi > 0) {
+            const callWallLine = candleRef.current.createPriceLine({
+              price: highestCall.strike_price,
+              color: '#EF5350',
+              lineWidth: 2,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: `🔴 Call OI Wall ₹${highestCall.strike_price} [${(highestCall.call_oi / 100000).toFixed(1)}L]`,
+            });
+            optionsLinesRef.current.push(callWallLine);
+          }
+
+          // 2. Highest Put OI (Support Floor)
+          const highestPut = [...data.chain].sort((a, b) => (b.put_oi || 0) - (a.put_oi || 0))[0];
+          if (highestPut && highestPut.put_oi > 0) {
+            const putWallLine = candleRef.current.createPriceLine({
+              price: highestPut.strike_price,
+              color: '#10B981',
+              lineWidth: 2,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: true,
+              title: `🟢 Put OI Wall ₹${highestPut.strike_price} [${(highestPut.put_oi / 100000).toFixed(1)}L]`,
+            });
+            optionsLinesRef.current.push(putWallLine);
+          }
+
+          // 3. Max Pain Strike
+          if (data.max_pain) {
+            const maxPainLine = candleRef.current.createPriceLine({
+              price: data.max_pain,
+              color: '#A855F7',
+              lineWidth: 1.5,
+              lineStyle: LineStyle.Solid,
+              axisLabelVisible: true,
+              title: `🟣 Max Pain Strike ₹${data.max_pain}`,
+            });
+            optionsLinesRef.current.push(maxPainLine);
+          }
+        }
+      })
+      .catch(() => {
+        if (active) setOptionsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [showOptionsOI, selectedSymbol, chartReady]);
+
+  /* ── 4. Bar Replay Timer Playback Loop ────────────────────── */
+  useEffect(() => {
+    if (!isReplayMode || !isReplayPlaying || !rawHistory?.length) return;
+    const delay = Math.max(150, 1000 / replaySpeed);
+    const intervalId = setInterval(() => {
+      setReplayIndex(prev => {
+        const next = (prev || 10) + 1;
+        if (next >= rawHistory.length) {
+          setIsReplayPlaying(false);
+          toast.success('Replay completed to latest candle');
+          return rawHistory.length;
+        }
+        return next;
+      });
+    }, delay);
+    return () => clearInterval(intervalId);
+  }, [isReplayMode, isReplayPlaying, replaySpeed, rawHistory]);
+
+  /* ── 5. Canvas Price Alert Visual Lines ───────────────────── */
+  useEffect(() => {
+    if (!candleRef.current) return;
+    alertLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
+    alertLinesRef.current = [];
+
+    const stockAlerts = priceAlerts.filter(a => a.ticker === selectedSymbol && !a.triggered);
+    stockAlerts.forEach(alert => {
+      try {
+        const pLine = candleRef.current.createPriceLine({
+          price: Number(alert.price),
+          color: '#A855F7',
+          lineWidth: 1.5,
+          lineStyle: LineStyle.Dashed,
+          axisLabelVisible: true,
+          title: `🔔 Alert ₹${Number(alert.price).toFixed(1)}`,
+        });
+        alertLinesRef.current.push(pLine);
+      } catch {}
+    });
+  }, [priceAlerts, selectedSymbol, chartReady]);
 
   /* ── Header Handlers ──────────────────────────────────────── */
 
@@ -2033,6 +2357,118 @@ export default function LiveChartView() {
 
         {/* Right: Indicators, AI Overlays, Grid Switcher, Snapshot, Fullscreen */}
         <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink: 0 }}>
+          {/* 1. Smart Money Concepts (SMC) Toggle */}
+          <button
+            onClick={() => {
+              setShowSMC(prev => !prev);
+              toast.success(!showSMC ? '🏛️ Smart Money Concepts (FVG, OB, BOS) Enabled' : 'SMC Disabled');
+            }}
+            title="Smart Money Concepts: Fair Value Gaps, Order Blocks, BOS/CHoCH"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '3px 8px', borderRadius: 4,
+              border: showSMC ? '1px solid #10B981' : '1px solid rgba(255,255,255,0.08)',
+              background: showSMC ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.03)',
+              color: showSMC ? '#10B981' : '#CBD5E1',
+              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
+            }}
+          >
+            <span>🏛️ SMC</span>
+          </button>
+
+          {/* 2. Options OI & Max Pain Toggle */}
+          <button
+            onClick={() => {
+              setShowOptionsOI(prev => !prev);
+              toast.success(!showOptionsOI ? '⚡ Options Open Interest & Max Pain Overlays Enabled' : 'Options OI Disabled');
+            }}
+            title="Options Chain Open Interest Walls & Max Pain Strike"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '3px 8px', borderRadius: 4,
+              border: showOptionsOI ? '1px solid #EF5350' : '1px solid rgba(255,255,255,0.08)',
+              background: showOptionsOI ? 'rgba(239,83,80,0.2)' : 'rgba(255,255,255,0.03)',
+              color: showOptionsOI ? '#EF5350' : '#CBD5E1',
+              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
+            }}
+          >
+            <Flame size={12} style={{ color: '#EF5350' }} />
+            <span>Options OI</span>
+            {optionsData?.pcr && showOptionsOI && (
+              <span style={{ fontSize: '0.62rem', background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: 3 }}>
+                PCR {optionsData.pcr}
+              </span>
+            )}
+          </button>
+
+          {/* 3. Integrated Volume Profile (VPVR & POC) Toggle */}
+          <button
+            onClick={() => {
+              setShowVPVR(prev => !prev);
+              toast.success(!showVPVR ? '📊 Volume Profile (POC & Value Area) Enabled' : 'VPVR Disabled');
+            }}
+            title="Volume-at-Price Histogram with Point of Control (POC)"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '3px 8px', borderRadius: 4,
+              border: showVPVR ? '1px solid #F59E0B' : '1px solid rgba(255,255,255,0.08)',
+              background: showVPVR ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.03)',
+              color: showVPVR ? '#F59E0B' : '#CBD5E1',
+              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
+            }}
+          >
+            <span>📊 VPVR</span>
+          </button>
+
+          {/* 4. Historical Bar Replay Simulator Toggle */}
+          <button
+            onClick={() => {
+              const nextState = !isReplayMode;
+              setIsReplayMode(nextState);
+              setIsReplayPlaying(false);
+              if (nextState) {
+                setReplayIndex(Math.max(5, (rawHistory?.length || 100) - 50));
+                toast.success('⏪ Bar Replay Mode Started — Scrub or Play candles');
+              } else {
+                toast.success('Exited Bar Replay Mode');
+              }
+            }}
+            title="Historical Bar Replay Simulator for Practice Trading"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '3px 8px', borderRadius: 4,
+              border: isReplayMode ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
+              background: isReplayMode ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.03)',
+              color: isReplayMode ? '#818CF8' : '#CBD5E1',
+              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
+            }}
+          >
+            <RotateCcw size={12} style={{ color: '#818CF8' }} />
+            <span>Replay</span>
+          </button>
+
+          {/* 5. Interactive Canvas Price Alert Button */}
+          <button
+            onClick={() => setShowAlertModal(true)}
+            title="Set Price Alert with Sound Chime"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '3px 8px', borderRadius: 4,
+              border: '1px solid rgba(168,85,247,0.3)',
+              background: 'rgba(168,85,247,0.12)',
+              color: '#A855F7',
+              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
+            }}
+          >
+            <Bell size={12} style={{ color: '#A855F7' }} />
+            <span>Alert</span>
+            {priceAlerts.filter(a => a.ticker === selectedSymbol && !a.triggered).length > 0 && (
+              <span style={{ backgroundColor: '#A855F7', color: '#fff', fontSize: '0.6rem', padding: '1px 5px', borderRadius: 8, fontWeight: 800 }}>
+                {priceAlerts.filter(a => a.ticker === selectedSymbol && !a.triggered).length}
+              </span>
+            )}
+          </button>
+
           {/* Logarithmic Scale Toggle */}
           <button
             onClick={toggleLogScale}
@@ -2188,6 +2624,104 @@ export default function LiveChartView() {
         </div>
       </div>
 
+      {/* ── Floating Bar Replay Practice Control Bar ── */}
+      {isReplayMode && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '5px 12px', background: 'rgba(15, 23, 42, 0.96)',
+          border: '1px solid #818CF8', borderRadius: 6,
+          boxShadow: '0 6px 20px rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
+          flexShrink: 0, gap: 10, zIndex: 40, flexWrap: 'wrap'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <RotateCcw size={13} /> BAR REPLAY
+            </span>
+            <span style={{ fontSize: '0.68rem', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>
+              Bar {replayIndex || (rawHistory?.length || 0)} / {rawHistory?.length || 0}
+            </span>
+          </div>
+
+          {/* Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <button
+              onClick={() => {
+                setIsReplayPlaying(false);
+                setReplayIndex(Math.max(5, (rawHistory?.length || 100) - 80));
+              }}
+              title="Rewind 80 Bars"
+              style={{ padding: '3px 8px', borderRadius: 4, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.7rem', cursor: 'pointer' }}
+            >
+              ⏮ Rewind
+            </button>
+
+            <button
+              onClick={() => setIsReplayPlaying(!isReplayPlaying)}
+              style={{
+                padding: '3px 12px', borderRadius: 4,
+                background: isReplayPlaying ? '#EF5350' : '#10B981',
+                color: '#FFF', border: 'none', fontWeight: 700, fontSize: '0.72rem',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4
+              }}
+            >
+              {isReplayPlaying ? <Pause size={12} /> : <Play size={12} />}
+              {isReplayPlaying ? 'Pause' : 'Play'}
+            </button>
+
+            <button
+              onClick={() => {
+                setIsReplayPlaying(false);
+                setReplayIndex(prev => Math.min((rawHistory?.length || 100), (prev || 10) + 1));
+              }}
+              title="Step forward 1 bar"
+              style={{ padding: '3px 8px', borderRadius: 4, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.7rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}
+            >
+              <SkipForward size={12} /> Step
+            </button>
+
+            {/* Speed Selector */}
+            <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,0.05)', padding: 2, borderRadius: 4 }}>
+              {[1, 2, 5].map(spd => (
+                <button
+                  key={spd}
+                  onClick={() => setReplaySpeed(spd)}
+                  style={{
+                    padding: '2px 6px', borderRadius: 3, border: 'none',
+                    background: replaySpeed === spd ? '#6366F1' : 'transparent',
+                    color: replaySpeed === spd ? '#FFF' : '#94A3B8',
+                    fontSize: '0.66rem', fontWeight: 700, cursor: 'pointer'
+                  }}
+                >
+                  {spd}x
+                </button>
+              ))}
+            </div>
+
+            {/* Scrubber Slider */}
+            <input
+              type="range"
+              min="5"
+              max={rawHistory?.length || 100}
+              value={replayIndex || (rawHistory?.length || 100)}
+              onChange={(e) => {
+                setIsReplayPlaying(false);
+                setReplayIndex(Number(e.target.value));
+              }}
+              style={{ width: 130, cursor: 'pointer', accentColor: '#818CF8' }}
+            />
+          </div>
+
+          <button
+            onClick={() => {
+              setIsReplayMode(false);
+              setIsReplayPlaying(false);
+            }}
+            style={{ padding: '3px 8px', borderRadius: 4, background: 'rgba(239,83,80,0.15)', border: '1px solid rgba(239,83,80,0.3)', color: '#EF5350', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer' }}
+          >
+            ✕ Exit Replay
+          </button>
+        </div>
+      )}
 
       {/* ── Main Chart Body: Multi-Chart Grid OR Single Chart Workstation (Fills Available Height) ── */}
       {chartLayout !== '1x1' ? (
@@ -2414,35 +2948,122 @@ export default function LiveChartView() {
       </div>
       )}
 
-      {/* ── Price Alert Modal ── */}
+      {/* ── Interactive Canvas Price Alert & Sound Chime Manager Modal ── */}
       {showAlertModal && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:100 }}>
-          <div style={{ background:'#121629', border:'1px solid #A855F7', borderRadius:16, padding:24, width:320, display:'flex', flexDirection:'column', gap:14 }}>
-            <h3 style={{ margin:0, color:'#F0F0FF', fontSize:'1.1rem', display:'flex', alignItems:'center', gap:8 }}>
-              <Bell size={18} color="#A855F7" /> Set Price Alert for {selectedSymbol}
-            </h3>
-            <p style={{ margin:0, color:'#9CA3AF', fontSize:'0.78rem' }}>
-              Notify me when live price reaches or crosses this target price:
-            </p>
-            <input
-              type="number"
-              placeholder={`Current: ₹${curPrice || '0'}`}
-              value={targetAlertPrice}
-              onChange={e => setTargetAlertPrice(e.target.value)}
-              style={{ padding:'8px 12px', borderRadius:8, border:'1px solid rgba(168,85,247,0.3)', background:'#090C18', color:'#fff', fontSize:'0.9rem', outline:'none' }}
-            />
-            <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
-              <button onClick={() => setShowAlertModal(false)} style={{ padding:'6px 12px', borderRadius:8, border:'none', background:'#374151', color:'#fff', cursor:'pointer' }}>Cancel</button>
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:150 }}>
+          <div style={{ background:'#0D1322', border:'1px solid rgba(168,85,247,0.4)', borderRadius:14, padding:20, width:380, maxWidth:'92vw', display:'flex', flexDirection:'column', gap:12, boxShadow:'0 20px 40px rgba(0,0,0,0.8)' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+              <h3 style={{ margin:0, color:'#F0F0FF', fontSize:'1rem', display:'flex', alignItems:'center', gap:8 }}>
+                <Bell size={16} color="#A855F7" /> Price Alerts: {selectedSymbol}
+              </h3>
               <button
                 onClick={() => {
-                  if (targetAlertPrice) {
-                    toast.success(`Alert set for ${selectedSymbol} at ₹${targetAlertPrice}`);
-                    setShowAlertModal(false);
+                  playAlertChime();
+                  toast.success('🔔 Alert Chime Tested');
+                }}
+                title="Test Crystal Audio Chime"
+                style={{ padding:'2px 8px', borderRadius:4, background:'rgba(168,85,247,0.15)', border:'1px solid rgba(168,85,247,0.3)', color:'#A855F7', fontSize:'0.68rem', cursor:'pointer', fontWeight:700 }}
+              >
+                🔊 Test Chime
+              </button>
+            </div>
+
+            <p style={{ margin:0, color:'#94A3B8', fontSize:'0.74rem' }}>
+              Set an alert line on the chart canvas. Rings audio chime & sends toast notification on price hit:
+            </p>
+
+            {/* Quick Price Percentage Presets */}
+            {curPrice && (
+              <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
+                {[-5, -2, -1, 1, 2, 5].map(pct => {
+                  const targetP = (curPrice * (1 + pct / 100)).toFixed(2);
+                  return (
+                    <button
+                      key={pct}
+                      onClick={() => setTargetAlertPrice(targetP)}
+                      style={{
+                        padding:'3px 6px', borderRadius:4, border:'1px solid rgba(255,255,255,0.1)',
+                        background:'rgba(255,255,255,0.04)', color: pct > 0 ? '#10B981' : '#EF5350',
+                        fontSize:'0.68rem', fontWeight:700, cursor:'pointer'
+                      }}
+                    >
+                      {pct > 0 ? `+${pct}%` : `${pct}%`} (₹{Number(targetP).toFixed(0)})
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <div style={{ display:'flex', gap:6 }}>
+              <input
+                type="number"
+                step="0.05"
+                placeholder={`Target Price (LTP ₹${curPrice?.toFixed(2) || '0.00'})`}
+                value={targetAlertPrice}
+                onChange={e => setTargetAlertPrice(e.target.value)}
+                style={{ flex:1, padding:'8px 12px', borderRadius:6, border:'1px solid rgba(168,85,247,0.3)', background:'#060913', color:'#fff', fontSize:'0.86rem', outline:'none', fontFamily:'JetBrains Mono, monospace' }}
+              />
+              <button
+                onClick={() => {
+                  const p = Number(targetAlertPrice);
+                  if (p > 0) {
+                    const newAlert = {
+                      id: `alert_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                      ticker: selectedSymbol,
+                      price: p,
+                      direction: curPrice && p > curPrice ? 'above' : 'below',
+                      triggered: false,
+                      createdAt: new Date().toISOString(),
+                    };
+                    setPriceAlerts(prev => [...prev, newAlert]);
+                    toast.success(`🔔 Alert line created for ${selectedSymbol} at ₹${p.toFixed(2)}`);
+                    setTargetAlertPrice('');
                   }
                 }}
-                style={{ padding:'6px 14px', borderRadius:8, border:'none', background:'#A855F7', color:'#fff', fontWeight:700, cursor:'pointer' }}
+                style={{ padding:'8px 16px', borderRadius:6, border:'none', background:'#A855F7', color:'#fff', fontWeight:700, fontSize:'0.82rem', cursor:'pointer' }}
               >
-                Save Alert
+                + Add Alert
+              </button>
+            </div>
+
+            {/* Active Alerts List for this Symbol */}
+            <div style={{ maxHeight:160, overflowY:'auto', display:'flex', flexDirection:'column', gap:4, marginTop:4 }}>
+              <div style={{ fontSize:'0.66rem', color:'#64748B', fontWeight:700, letterSpacing:'0.05em' }}>
+                ACTIVE ALERTS ({priceAlerts.filter(a => a.ticker === selectedSymbol).length})
+              </div>
+              {priceAlerts.filter(a => a.ticker === selectedSymbol).length === 0 ? (
+                <div style={{ fontSize:'0.72rem', color:'#475569', padding:'6px 0', fontStyle:'italic' }}>
+                  No alerts set for {selectedSymbol}.
+                </div>
+              ) : (
+                priceAlerts.filter(a => a.ticker === selectedSymbol).map(alert => (
+                  <div key={alert.id} style={{
+                    display:'flex', alignItems:'center', justifyContent:'space-between',
+                    padding:'5px 8px', borderRadius:4, background:'rgba(255,255,255,0.03)',
+                    border: alert.triggered ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(168,85,247,0.2)',
+                    fontSize:'0.74rem'
+                  }}>
+                    <span style={{ color: alert.triggered ? '#10B981' : '#F0F0FF', fontFamily:'JetBrains Mono, monospace', fontWeight:700 }}>
+                      ₹{Number(alert.price).toFixed(2)} {alert.triggered ? '✓ (Triggered)' : '⏳ Active'}
+                    </span>
+                    <button
+                      onClick={() => setPriceAlerts(prev => prev.filter(a => a.id !== alert.id))}
+                      style={{ background:'none', border:'none', color:'#EF5350', cursor:'pointer', fontSize:'0.72rem', padding:'0 4px' }}
+                      title="Delete Alert"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={{ display:'flex', justifyContent:'flex-end', marginTop:6 }}>
+              <button
+                onClick={() => setShowAlertModal(false)}
+                style={{ padding:'6px 14px', borderRadius:6, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.05)', color:'#CBD5E1', cursor:'pointer', fontSize:'0.76rem' }}
+              >
+                Close
               </button>
             </div>
           </div>
