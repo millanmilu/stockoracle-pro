@@ -10,7 +10,7 @@ import ProSidebar from './components/ProSidebar';
 import ProRightPanel from './components/ProRightPanel';
 
 import BloombergTickerTape from './components/terminal/BloombergTickerTape';
-
+import KeymapModal from './components/KeymapModal';
 import CommandPalette from './components/terminal/CommandPalette';
 
 const MultiChartGrid = lazy(() => import('./components/MultiChartGrid'));
@@ -69,16 +69,24 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showKeymapModal, setShowKeymapModal] = useState(false);
 
-  // Global Keyboard Listener for / or Ctrl+K Command Palette
+  // Global Keyboard Listener for / or Ctrl+K (Command Palette) and ? (Keymap)
   React.useEffect(() => {
     const handleKeyDown = (e) => {
+      const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         setShowCommandPalette(prev => !prev);
-      } else if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) {
+      } else if (e.key === '/' && !isInput) {
         e.preventDefault();
         setShowCommandPalette(true);
+      } else if ((e.key === '?' || (e.shiftKey && e.key === '/')) && !isInput) {
+        e.preventDefault();
+        setShowKeymapModal(prev => !prev);
+      } else if (e.key === 'Escape') {
+        setShowCommandPalette(false);
+        setShowKeymapModal(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -127,6 +135,7 @@ export default function App() {
       <div className="scanline-overlay" />
       <Toaster position="top-right" toastOptions={{ style: { background: '#0F172A', color: '#F0F0FF', border: '1px solid rgba(99,102,241,0.3)' } }} />
       <CommandPalette isOpen={showCommandPalette} onClose={() => setShowCommandPalette(false)} />
+      <KeymapModal isOpen={showKeymapModal} onClose={() => setShowKeymapModal(false)} />
       
       <ErrorBoundary>
         <ProTopBar 

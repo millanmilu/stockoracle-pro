@@ -825,6 +825,37 @@ export default function LiveChartView() {
     }, 100);
   }, []);
 
+  /* ── Interactive Keymap & Hotkeys Listener ──────────────────── */
+  useEffect(() => {
+    const handleChartKeys = (e) => {
+      const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName);
+      if (isInput) return;
+
+      // Timeframe Hotkeys: 1 (1m), 2 (5m), 3 (15m), 4 (1H), D (1D)
+      if (!e.ctrlKey && !e.altKey && !e.metaKey) {
+        if (e.key === '1') { handleIntervalChange('1m'); toast('1m Interval', { icon: '⏱️' }); }
+        else if (e.key === '2') { handleIntervalChange('5m'); toast('5m Interval', { icon: '⏱️' }); }
+        else if (e.key === '3') { handleIntervalChange('15m'); toast('15m Interval', { icon: '⏱️' }); }
+        else if (e.key === '4') { handleIntervalChange('1h'); toast('1H Interval', { icon: '⏱️' }); }
+        else if (e.key.toLowerCase() === 'd') { handleIntervalChange('1d'); toast('1D Daily Candles', { icon: '📅' }); }
+        else if (e.key.toLowerCase() === 'f') { toggleFullscreen(); }
+      }
+
+      // Pro Feature Alt Hotkeys
+      if (e.altKey) {
+        if (e.key.toLowerCase() === 's') { e.preventDefault(); setShowSMC(p => !p); }
+        else if (e.key.toLowerCase() === 'o') { e.preventDefault(); setShowOptionsOI(p => !p); }
+        else if (e.key.toLowerCase() === 'v') { e.preventDefault(); setShowVPVR(p => !p); }
+        else if (e.key.toLowerCase() === 'r') { e.preventDefault(); setIsReplayMode(p => !p); setIsReplayPlaying(false); }
+        else if (e.key.toLowerCase() === 'a') { e.preventDefault(); setShowAlertModal(true); }
+        else if (e.key.toLowerCase() === 'l') { e.preventDefault(); toggleLogScale(); }
+        else if (e.key.toLowerCase() === 'k') { e.preventDefault(); setChartType(p => p === 'candle' ? 'heikin_ashi' : 'candle'); }
+      }
+    };
+    window.addEventListener('keydown', handleChartKeys);
+    return () => window.removeEventListener('keydown', handleChartKeys);
+  }, [handleIntervalChange, isLogScale]);
+
   /* ── Chart Navigation Handlers ─────────────────────────────── */
 
   const handleZoomIn = useCallback(() => {
