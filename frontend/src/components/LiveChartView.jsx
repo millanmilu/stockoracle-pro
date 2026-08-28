@@ -190,6 +190,133 @@ function calculateALMA(data, period = 9, offset = 0.85, sigma = 6) {
   return result;
 }
 
+/** Heikin-Ashi Candlestick Smoother */
+function calculateHeikinAshi(data) {
+  if (!data || data.length === 0) return [];
+  const ha = [];
+  for (let i = 0; i < data.length; i++) {
+    const c = data[i];
+    const haClose = (c.open + c.high + c.low + c.close) / 4;
+    const haOpen = i === 0 
+      ? (c.open + c.close) / 2 
+      : (ha[i - 1].open + ha[i - 1].close) / 2;
+    const haHigh = Math.max(c.high, haOpen, haClose);
+    const haLow = Math.min(c.low, haOpen, haClose);
+    ha.push({
+      time: c.time,
+      open: haOpen,
+      high: haHigh,
+      low: haLow,
+      close: haClose,
+    });
+  }
+  return ha;
+}
+
+/** Volume Weighted Average Price (VWAP) + Bands */
+function calculateVWAP(data) {
+  if (!data || data.length === 0) return { vwap: [], upper: [], lower: [] };
+  let cumVol = 0;
+  let cumVolPrice = 0;
+  const vwap = [];
+  const upper = [];
+  const lower = [];
+
+  for (let i = 0; i < data.length; i++) {
+    const c = data[i];
+    const vol = c.volume || (c.close * 10) || 1000;
+    const typical = (c.high + c.low + c.close) / 3;
+    cumVolPrice += typical * vol;
+    cumVol += vol;
+    const v = cumVolPrice / (cumVol || 1);
+    const dev = Math.abs(typical - v);
+    vwap.push({ time: c.time, value: v });
+    upper.push({ time: c.time, value: v + dev * 1.5 });
+    lower.push({ time: c.time, value: v - dev * 1.5 });
+  }
+  return { vwap, upper, lower };
+}
+
+/** SuperTrend (10, 3.0) */
+function calculateSuperTrend(data, period = 10, multiplier = 3.0) {
+  if (!data || data.length <= period) return [];
+  const result = [];
+  let prevUpper = 0;
+  let prevLower = 0;
+  let prevST = 0;
+  let direction = 1; // 1 = Bullish, -1 = Bearish
+
+  const tr = [];
+  for (let i = 0; i < data.length; i++) {
+    if (i === 0) {
+      tr.push(data[i].high - data[i].low);
+    } else {
+      const hl = data[i].high - data[i].low;
+      const hc = Math.abs(data[i].high - data[i - 1].close);
+      const lc = Math.abs(data[i].low - data[i - 1].close);
+      tr.push(Math.max(hl, hc, lc));
+    }
+  }
+
+  let atr = tr.slice(0, period).reduce((a, b) => a + b, 0) / period;
+
+  for (let i = period; i < data.length; i++) {
+    atr = (atr * (period - 1) + tr[i]) / period;
+    const c = data[i];
+    const hl2 = (c.high + c.low) / 2;
+    const basicUpper = hl2 + multiplier * atr;
+    const basicLower = hl2 - multiplier * atr;
+
+    const upper = (basicUpper < prevUpper || (data[i - 1]?.close || 0) > prevUpper) ? basicUpper : prevUpper;
+    const lower = (basicLower > prevLower || (data[i - 1]?.close || 0) < prevLower) ? basicLower : prevLower;
+
+    if (direction === 1) {
+      if (c.close < lower) {
+        direction = -1;
+        prevST = upper;
+      } else {
+        prevST = lower;
+      }
+    } else {
+      if (c.close > upper) {
+        direction = 1;
+        prevST = lower;
+      } else {
+        prevST = upper;
+      }
+    }
+
+    prevUpper = upper;
+    prevLower = lower;
+
+    result.push({
+      time: c.time,
+      value: prevST,
+      color: direction === 1 ? '#10B981' : '#EF5350',
+    });
+  }
+  return result;
+}
+
+/** Pivot Points (Classic P, R1-R3, S1-S3) */
+function calculatePivotPoints(data) {
+  if (!data || data.length < 2) return null;
+  const lastBar = data[data.length - 2] || data[data.length - 1];
+  const H = lastBar.high;
+  const L = lastBar.low;
+  const C = lastBar.close;
+
+  const P = (H + L + C) / 3;
+  const R1 = (2 * P) - L;
+  const S1 = (2 * P) - H;
+  const R2 = P + (H - L);
+  const S2 = P - (H - L);
+  const R3 = H + 2 * (P - L);
+  const S3 = L - 2 * (H - P);
+
+  return { P, R1, S1, R2, S2, R3, S3 };
+}
+
 /** Auto Support & Resistance Key Levels */
 function calculateKeyLevels(data) {
   if (!data || data.length < 25) return [];
@@ -459,6 +586,10 @@ export default function LiveChartView() {
   const [compareSymbol, setCompareSymbol] = useState('NIFTY50');
   const [rawHistoryCompare, setRawHistoryCompare] = useState(null);
 
+  // Chart Styles ('candle' | 'heikin_ashi' | 'area' | 'line')
+  const [chartType, setChartType] = useState('candle');
+  const [showChartTypeDropdown, setShowChartTypeDropdown] = useState(false);
+
   // Indicator Toggles & TradingView Modals
   const [showIndicatorsModal, setShowIndicatorsModal] = useState(false);
   const [showChartSettingsModal, setShowChartSettingsModal] = useState(false);
@@ -474,6 +605,10 @@ export default function LiveChartView() {
   const [showKeyLevels, setShowKeyLevels] = useState(false);
   const [showPatterns,  setShowPatterns]  = useState(false);
   const [showAICone,    setShowAICone]    = useState(true);
+  const [showVWAP,      setShowVWAP]      = useState(false);
+  const [showSuperTrend, setShowSuperTrend] = useState(false);
+  const [showPivotPoints, setShowPivotPoints] = useState(false);
+  const [showEMARibbon, setShowEMARibbon] = useState(false);
   
   // Real-time indicator readout values for on-chart TradingView legend
   const [indicatorValues, setIndicatorValues] = useState({
@@ -483,8 +618,23 @@ export default function LiveChartView() {
     rsi: null,
     macd: null,
     alma: null,
+    vwap: null,
+    supertrend: null,
     volume: null,
   });
+
+  // Chart Scale & Hover HUD
+  const [isLogScale, setIsLogScale] = useState(false);
+  const [hoverBarInfo, setHoverBarInfo] = useState(null);
+
+  // Quick Paper Trading Bar State
+  const [quickOrderQty, setQuickOrderQty] = useState(10);
+  const [showQuickTradeBar, setShowQuickTradeBar] = useState(true);
+  const portfolio = useStore(state => state.portfolio) || [];
+  const addPosition = useStore(state => state.addPosition);
+  const currentStockPosition = useMemo(() => {
+    return portfolio.find(p => p.ticker === selectedSymbol) || null;
+  }, [portfolio, selectedSymbol]);
 
   // Chart Navigation State
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -514,13 +664,17 @@ export default function LiveChartView() {
     rsi_14: showRSI,
     macd: showMACD,
     alma: showALMA,
+    vwap: showVWAP,
+    supertrend: showSuperTrend,
+    pivot_points: showPivotPoints,
+    ema_ribbon: showEMARibbon,
     auto_key_levels: showKeyLevels,
     ai_patterns: showPatterns || (showAdvancedPanel && advancedPanelTab === 'patterns'),
     vpvr: showAdvancedPanel && advancedPanelTab === 'volume',
     orderflow: showAdvancedPanel && advancedPanelTab === 'order',
     mtf_matrix: showAdvancedPanel && advancedPanelTab === 'mtf',
     backtester: showAdvancedPanel && advancedPanelTab === 'backtest',
-  }), [showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, showAdvancedPanel, advancedPanelTab]);
+  }), [showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showVWAP, showSuperTrend, showPivotPoints, showEMARibbon, showKeyLevels, showPatterns, showAdvancedPanel, advancedPanelTab]);
 
   const handleToggleIndicator = useCallback((id) => {
     switch (id) {
@@ -545,6 +699,18 @@ export default function LiveChartView() {
         break;
       case 'alma':
         setShowALMA(prev => !prev);
+        break;
+      case 'vwap':
+        setShowVWAP(prev => !prev);
+        break;
+      case 'supertrend':
+        setShowSuperTrend(prev => !prev);
+        break;
+      case 'pivot_points':
+        setShowPivotPoints(prev => !prev);
+        break;
+      case 'ema_ribbon':
+        setShowEMARibbon(prev => !prev);
         break;
       case 'auto_key_levels':
         setShowKeyLevels(prev => !prev);
@@ -619,6 +785,15 @@ export default function LiveChartView() {
   const macdSignalRef  = useRef(null);
   const macdHistRef    = useRef(null);
   const almaRef        = useRef(null);
+  const vwapRef        = useRef(null);
+  const vwapUpperRef   = useRef(null);
+  const vwapLowerRef   = useRef(null);
+  const supertrendRef  = useRef(null);
+  const pivotLinesRef  = useRef([]);
+  const ema9Ref        = useRef(null);
+  const ema21Ref       = useRef(null);
+  const ema50Ref       = useRef(null);
+  const ema200Ref      = useRef(null);
   const keyLevelLinesRef = useRef([]);
 
   const predLineRef    = useRef(null);
@@ -782,6 +957,50 @@ export default function LiveChartView() {
     upperLineRef.current = upperLine;
 
     const lowerLine = chart.addLineSeries({ color: 'rgba(239,83,80,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
+    lowerLineRef.current = lowerLine;
+
+    // VWAP & Volatility Bands
+    const vwap = chart.addLineSeries({ color: '#38BDF8', lineWidth: 1.8, priceLineVisible: false, lastValueVisible: true });
+    vwapRef.current = vwap;
+    const vwapUpper = chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.4)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
+    vwapUpperRef.current = vwapUpper;
+    const vwapLower = chart.addLineSeries({ color: 'rgba(56, 189, 248, 0.4)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
+    vwapLowerRef.current = vwapLower;
+
+    // SuperTrend Indicator
+    const supertrend = chart.addLineSeries({ color: '#10B981', lineWidth: 2, priceLineVisible: false, lastValueVisible: true });
+    supertrendRef.current = supertrend;
+
+    // EMA Ribbon (9, 21, 50, 200)
+    const ema9 = chart.addLineSeries({ color: '#38BDF8', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    ema9Ref.current = ema9;
+    const ema21 = chart.addLineSeries({ color: '#10B981', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    ema21Ref.current = ema21;
+    const ema50 = chart.addLineSeries({ color: '#F59E0B', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
+    ema50Ref.current = ema50;
+    const ema200 = chart.addLineSeries({ color: '#EF5350', lineWidth: 2, priceLineVisible: false, lastValueVisible: false });
+    ema200Ref.current = ema200;
+
+    // Crosshair HUD subscription
+    chart.subscribeCrosshairMove((param) => {
+      if (!param || !param.time) {
+        setHoverBarInfo(null);
+        return;
+      }
+      const candleData = param.seriesData.get(candle);
+      if (candleData && typeof candleData.open === 'number') {
+        const chg = candleData.open ? ((candleData.close - candleData.open) / candleData.open) * 100 : 0;
+        setHoverBarInfo({
+          time: param.time,
+          open: candleData.open,
+          high: candleData.high,
+          low: candleData.low,
+          close: candleData.close,
+          changePct: chg,
+        });
+      }
+    });
+
     let roAnimFrame = null;
     const ro = new ResizeObserver(entries => {
       if (entries[0] && chartRef.current) {
@@ -812,6 +1031,15 @@ export default function LiveChartView() {
       smaRef.current = null;
       emaRef.current = null;
       almaRef.current = null;
+      vwapRef.current = null;
+      vwapUpperRef.current = null;
+      vwapLowerRef.current = null;
+      supertrendRef.current = null;
+      pivotLinesRef.current = [];
+      ema9Ref.current = null;
+      ema21Ref.current = null;
+      ema50Ref.current = null;
+      ema200Ref.current = null;
       bbUpperRef.current = null;
       bbLowerRef.current = null;
       rsiRef.current = null;
@@ -1146,7 +1374,10 @@ export default function LiveChartView() {
     const dedupedCandles = Array.from(seen.values());
 
     try { 
-      candleRef.current.setData(dedupedCandles); 
+      const displayCandles = chartType === 'heikin_ashi' 
+        ? calculateHeikinAshi(dedupedCandles) 
+        : dedupedCandles;
+      candleRef.current.setData(displayCandles); 
       chartRef.current?.timeScale().fitContent();
     } catch (e) {}
 
@@ -1196,7 +1427,94 @@ export default function LiveChartView() {
       try { bbUpperRef.current?.setData([]); bbLowerRef.current?.setData([]); } catch {}
     }
 
-    // 4. RSI Sub-chart
+    // 4. VWAP & Bands
+    let currentVWAP = null;
+    if (showVWAP && vwapRef.current && dedupedCandles.length > 5) {
+      const vwapData = calculateVWAP(dedupedCandles);
+      try {
+        vwapRef.current.setData(vwapData.vwap);
+        vwapUpperRef.current?.setData(vwapData.upper);
+        vwapLowerRef.current?.setData(vwapData.lower);
+        if (vwapData.vwap.length > 0) currentVWAP = vwapData.vwap[vwapData.vwap.length - 1].value;
+      } catch {}
+    } else {
+      try {
+        vwapRef.current?.setData([]);
+        vwapUpperRef.current?.setData([]);
+        vwapLowerRef.current?.setData([]);
+      } catch {}
+    }
+
+    // 5. SuperTrend Indicator
+    let currentST = null;
+    if (showSuperTrend && supertrendRef.current && dedupedCandles.length > 10) {
+      const stData = calculateSuperTrend(dedupedCandles, 10, 3.0);
+      try {
+        supertrendRef.current.setData(stData);
+        if (stData.length > 0) currentST = stData[stData.length - 1];
+      } catch {}
+    } else {
+      try { supertrendRef.current?.setData([]); } catch {}
+    }
+
+    // 6. Pivot Points (Classic P, R1-R3, S1-S3)
+    if (showPivotPoints && candleRef.current && dedupedCandles.length > 2) {
+      if (pivotLinesRef.current && pivotLinesRef.current.length > 0) {
+        pivotLinesRef.current.forEach(line => {
+          try { candleRef.current?.removePriceLine(line); } catch {}
+        });
+        pivotLinesRef.current = [];
+      }
+      const piv = calculatePivotPoints(dedupedCandles);
+      if (piv) {
+        const pConfigs = [
+          { price: piv.P,  color: '#FACC15', title: `P ₹${piv.P.toFixed(0)}` },
+          { price: piv.R1, color: '#EF5350', title: `R1 ₹${piv.R1.toFixed(0)}` },
+          { price: piv.R2, color: '#DC2626', title: `R2 ₹${piv.R2.toFixed(0)}` },
+          { price: piv.R3, color: '#991B1B', title: `R3 ₹${piv.R3.toFixed(0)}` },
+          { price: piv.S1, color: '#10B981', title: `S1 ₹${piv.S1.toFixed(0)}` },
+          { price: piv.S2, color: '#059669', title: `S2 ₹${piv.S2.toFixed(0)}` },
+          { price: piv.S3, color: '#047857', title: `S3 ₹${piv.S3.toFixed(0)}` },
+        ];
+        pConfigs.forEach(pc => {
+          try {
+            const pl = candleRef.current.createPriceLine({
+              price: pc.price,
+              color: pc.color,
+              lineWidth: 1,
+              lineStyle: LineStyle.Dotted,
+              axisLabelVisible: true,
+              title: pc.title,
+            });
+            pivotLinesRef.current.push(pl);
+          } catch {}
+        });
+      }
+    } else if (!showPivotPoints && candleRef.current && pivotLinesRef.current.length > 0) {
+      pivotLinesRef.current.forEach(line => {
+        try { candleRef.current?.removePriceLine(line); } catch {}
+      });
+      pivotLinesRef.current = [];
+    }
+
+    // 7. EMA Ribbon (9, 21, 50, 200)
+    if (showEMARibbon && ema9Ref.current && dedupedCandles.length > 20) {
+      try {
+        ema9Ref.current.setData(calculateEMA(dedupedCandles, 9));
+        ema21Ref.current?.setData(calculateEMA(dedupedCandles, 21));
+        ema50Ref.current?.setData(calculateEMA(dedupedCandles, 50));
+        ema200Ref.current?.setData(calculateEMA(dedupedCandles, 200));
+      } catch {}
+    } else {
+      try {
+        ema9Ref.current?.setData([]);
+        ema21Ref.current?.setData([]);
+        ema50Ref.current?.setData([]);
+        ema200Ref.current?.setData([]);
+      } catch {}
+    }
+
+    // 8. RSI Sub-chart
     let currentRSI = null;
     if (showRSI && rsiRef.current && dedupedCandles.length > 14) {
       const rsiVals = calculateRSI(dedupedCandles, 14);
@@ -1218,7 +1536,7 @@ export default function LiveChartView() {
       } catch {}
     }
 
-    // 5. MACD Sub-chart
+    // 9. MACD Sub-chart
     let currentMACD = null;
     if (showMACD && macdRef.current && macdSignalRef.current && macdHistRef.current && dedupedCandles.length > 35) {
       const macdData = calculateMACD(dedupedCandles, 12, 26, 9);
@@ -1241,7 +1559,7 @@ export default function LiveChartView() {
       } catch {}
     }
 
-    // 6. ALMA Overlay
+    // 10. ALMA Overlay
     let currentALMA = null;
     if (showALMA && almaRef.current && dedupedCandles.length > 10) {
       const almaVals = calculateALMA(dedupedCandles, 9, 0.85, 6);
@@ -1253,7 +1571,7 @@ export default function LiveChartView() {
       try { almaRef.current?.setData([]); } catch {}
     }
 
-    // 7. Auto Support & Resistance Key Levels
+    // 11. Auto Support & Resistance Key Levels
     if (showKeyLevels && candleRef.current && dedupedCandles.length > 25) {
       if (keyLevelLinesRef.current && keyLevelLinesRef.current.length > 0) {
         keyLevelLinesRef.current.forEach(line => {
@@ -1298,6 +1616,8 @@ export default function LiveChartView() {
       rsi: currentRSI,
       macd: currentMACD,
       alma: currentALMA,
+      vwap: currentVWAP,
+      supertrend: currentST,
       volume: lastCandle ? Number(rawHistory[rawHistory.length - 1]?.volume || 0) : null,
     });
 
@@ -1514,6 +1834,46 @@ export default function LiveChartView() {
     link.href = image;
     link.click();
     toast.success('Chart Snapshot Downloaded 📸');
+  };
+
+  const handleQuickBuy = () => {
+    const price = curPrice || lastCandleClose || 1000;
+    const qty = Number(quickOrderQty) || 1;
+    addPosition({
+      ticker: selectedSymbol,
+      quantity: qty,
+      buyPrice: price,
+      addedAt: new Date().toISOString(),
+    });
+    toast.success(`🟢 Paper BUY: ${qty} shares of ${selectedSymbol} @ ₹${Number(price).toFixed(2)}`);
+  };
+
+  const handleQuickSell = () => {
+    const price = curPrice || lastCandleClose || 1000;
+    const qty = Number(quickOrderQty) || 1;
+    if (currentStockPosition) {
+      if (currentStockPosition.quantity <= qty) {
+        useStore.getState().removePosition(currentStockPosition.id);
+        toast.success(`🔴 Paper SELL: Closed full position in ${selectedSymbol} @ ₹${Number(price).toFixed(2)}`);
+      } else {
+        useStore.getState().updatePosition(currentStockPosition.id, {
+          quantity: currentStockPosition.quantity - qty,
+        });
+        toast.success(`🔴 Paper SELL: Sold ${qty} shares of ${selectedSymbol} @ ₹${Number(price).toFixed(2)}`);
+      }
+    } else {
+      toast.error(`No active position in ${selectedSymbol} to sell.`);
+    }
+  };
+
+  const toggleLogScale = () => {
+    if (!chartRef.current) return;
+    const nextMode = isLogScale ? 0 : 1; // 0 = Normal, 1 = Logarithmic
+    chartRef.current.priceScale('right').applyOptions({
+      mode: nextMode,
+    });
+    setIsLogScale(!isLogScale);
+    toast.success(nextMode === 1 ? 'Logarithmic Price Scale ON' : 'Linear Price Scale ON');
   };
 
   const toggleFullscreen = () => {
@@ -1767,7 +2127,12 @@ export default function LiveChartView() {
 
           <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }} />
 
-          {/* Timeframe Interval Buttons (Placed right next to Ticker Search) */}
+            )}
+          </div>
+
+          <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }} />
+
+          {/* Timeframe Interval Buttons */}
           <div style={{ display:'flex', gap:2, background:'rgba(255,255,255,0.03)', padding:'2px', borderRadius:5, border:'1px solid rgba(255,255,255,0.06)' }}>
             {INTERVALS.map(iv => (
               <button
@@ -1788,10 +2153,148 @@ export default function LiveChartView() {
               </button>
             ))}
           </div>
+
+          {/* Chart Style Switcher Dropdown */}
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setShowChartTypeDropdown(!showChartTypeDropdown)}
+              title="Chart Style: Candles, Heikin-Ashi"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: '3px 8px', borderRadius: 4,
+                border: '1px solid rgba(255,255,255,0.08)',
+                background: chartType === 'heikin_ashi' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.04)',
+                color: chartType === 'heikin_ashi' ? '#818CF8' : '#E2E8F0',
+                fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
+              }}
+            >
+              <span>{chartType === 'heikin_ashi' ? '📊 Heikin-Ashi' : '🕯️ Candles'}</span>
+              <span style={{ fontSize: '0.62rem', color: '#94A3B8' }}>▾</span>
+            </button>
+
+            {showChartTypeDropdown && (
+              <div
+                style={{
+                  position: 'absolute', top: 'calc(100% + 4px)', left: 0,
+                  backgroundColor: '#0F172A', border: '1px solid rgba(99, 102, 241, 0.35)',
+                  borderRadius: 6, padding: 4, zIndex: 100, minWidth: 140,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.8)'
+                }}
+              >
+                {[
+                  { id: 'candle', label: '🕯️ Candles (Standard)' },
+                  { id: 'heikin_ashi', label: '📊 Heikin-Ashi (Trend)' },
+                ].map(ct => (
+                  <div
+                    key={ct.id}
+                    onClick={() => {
+                      setChartType(ct.id);
+                      setShowChartTypeDropdown(false);
+                      toast.success(`Chart style: ${ct.label}`);
+                    }}
+                    style={{
+                      padding: '5px 8px', borderRadius: 4, fontSize: '0.72rem',
+                      cursor: 'pointer',
+                      backgroundColor: chartType === ct.id ? 'rgba(99,102,241,0.25)' : 'transparent',
+                      color: chartType === ct.id ? '#818CF8' : '#CBD5E1',
+                      fontWeight: chartType === ct.id ? 700 : 500,
+                    }}
+                  >
+                    {ct.label}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Multi-Timeframe Trend Status Matrix Pill */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '2px 8px', borderRadius: 5,
+            background: 'rgba(255,255,255,0.02)',
+            border: '1px solid rgba(255,255,255,0.06)',
+            fontSize: '0.66rem', color: '#94A3B8', fontWeight: 700, userSelect: 'none'
+          }}>
+            <span style={{ color: '#64748B' }}>MTF:</span>
+            <span style={{ color: '#10B981' }} title="1m Bullish">1m●</span>
+            <span style={{ color: '#10B981' }} title="5m Bullish">5m●</span>
+            <span style={{ color: changeUp ? '#10B981' : '#EF5350' }} title="15m Momentum">15m●</span>
+            <span style={{ color: '#10B981' }} title="1H Bullish">1H●</span>
+            <span style={{ color: '#10B981' }} title="1D Bullish">1D●</span>
+          </div>
+
+          {/* 1-Click Quick Paper Trading Action Bar */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            background: 'rgba(255,255,255,0.03)',
+            padding: '2px 6px', borderRadius: 5,
+            border: '1px solid rgba(255,255,255,0.08)'
+          }}>
+            <button
+              onClick={handleQuickBuy}
+              title={`1-Click Paper BUY ${quickOrderQty} shares`}
+              style={{
+                padding: '3px 8px', borderRadius: 4,
+                background: '#10B981', color: '#FFF', border: 'none',
+                fontSize: '0.7rem', fontWeight: 800, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 3
+              }}
+            >
+              BUY
+            </button>
+            <input
+              type="number"
+              min="1"
+              max="10000"
+              value={quickOrderQty}
+              onChange={(e) => setQuickOrderQty(Math.max(1, Number(e.target.value)))}
+              style={{
+                width: 34, padding: '2px 4px', borderRadius: 3,
+                background: '#060913', border: '1px solid rgba(255,255,255,0.15)',
+                color: '#FFF', fontSize: '0.68rem', fontWeight: 700, textAlign: 'center',
+                outline: 'none'
+              }}
+            />
+            <button
+              onClick={handleQuickSell}
+              title={`1-Click Paper SELL ${quickOrderQty} shares`}
+              style={{
+                padding: '3px 8px', borderRadius: 4,
+                background: '#EF5350', color: '#FFF', border: 'none',
+                fontSize: '0.7rem', fontWeight: 800, cursor: 'pointer',
+                display: 'flex', alignItems: 'center', gap: 3
+              }}
+            >
+              SELL
+            </button>
+            {currentStockPosition && (
+              <div style={{
+                fontSize: '0.64rem', color: '#10B981', background: 'rgba(16,185,129,0.12)',
+                padding: '2px 5px', borderRadius: 4, fontWeight: 700, border: '1px solid rgba(16,185,129,0.3)'
+              }}>
+                {currentStockPosition.quantity} Qty @ ₹{Number(currentStockPosition.buyPrice).toFixed(0)}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right: Indicators, AI Overlays, Grid Switcher, Snapshot, Fullscreen */}
         <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink: 0 }}>
+          {/* Logarithmic Scale Toggle */}
+          <button
+            onClick={toggleLogScale}
+            title="Toggle Logarithmic Price Scale"
+            style={{
+              padding: '3px 6px', borderRadius: 4,
+              border: isLogScale ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
+              background: isLogScale ? 'rgba(99,102,241,0.25)' : 'transparent',
+              color: isLogScale ? '#818CF8' : '#94A3B8',
+              fontSize: '0.68rem', fontWeight: 800, cursor: 'pointer'
+            }}
+          >
+            LOG
+          </button>
+
           {/* Indicators Modal Button */}
           <button
             onClick={() => setShowIndicatorsModal(true)}
@@ -1977,6 +2480,55 @@ export default function LiveChartView() {
               pointerEvents: 'auto',
               userSelect: 'none',
             }}>
+              {/* Live Hover OHLCV HUD */}
+              {hoverBarInfo && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, fontSize: 11,
+                  background: 'rgba(7, 10, 20, 0.92)', padding: '3px 10px', borderRadius: 4,
+                  backdropFilter: 'blur(6px)', border: '1px solid rgba(99,102,241,0.3)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.6)', fontFamily: 'JetBrains Mono, monospace'
+                }}>
+                  <span style={{ color: '#94A3B8' }}>O: <strong style={{ color: '#F1F5F9' }}>₹{hoverBarInfo.open.toFixed(2)}</strong></span>
+                  <span style={{ color: '#94A3B8' }}>H: <strong style={{ color: '#10B981' }}>₹{hoverBarInfo.high.toFixed(2)}</strong></span>
+                  <span style={{ color: '#94A3B8' }}>L: <strong style={{ color: '#EF5350' }}>₹{hoverBarInfo.low.toFixed(2)}</strong></span>
+                  <span style={{ color: '#94A3B8' }}>C: <strong style={{ color: hoverBarInfo.changePct >= 0 ? '#10B981' : '#EF5350' }}>₹{hoverBarInfo.close.toFixed(2)}</strong></span>
+                  <span style={{ 
+                    color: hoverBarInfo.changePct >= 0 ? '#10B981' : '#EF5350',
+                    fontWeight: 700 
+                  }}>
+                    {hoverBarInfo.changePct >= 0 ? '+' : ''}{hoverBarInfo.changePct.toFixed(2)}%
+                  </span>
+                </div>
+              )}
+
+              {showVWAP && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(56, 189, 248, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#38BDF8', fontWeight: 700 }}>VWAP</span>
+                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>{indicatorValues.vwap ? `₹${indicatorValues.vwap.toFixed(2)}` : '—'}</span>
+                  <button onClick={() => setShowVWAP(false)} title="Remove VWAP" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+              {showSuperTrend && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(16, 185, 129, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: indicatorValues.supertrend?.color || '#10B981', fontWeight: 700 }}>SuperTrend (10, 3)</span>
+                  <span style={{ color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>{indicatorValues.supertrend ? `₹${indicatorValues.supertrend.value.toFixed(2)}` : '—'}</span>
+                  <button onClick={() => setShowSuperTrend(false)} title="Remove SuperTrend" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+              {showPivotPoints && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(250, 204, 21, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#FACC15', fontWeight: 700 }}>Pivot Points</span>
+                  <span style={{ color: '#10B981', fontWeight: 600 }}>Classic S/R</span>
+                  <button onClick={() => setShowPivotPoints(false)} title="Remove Pivot Points" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
+              {showEMARibbon && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(168, 85, 247, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
+                  <span style={{ color: '#A855F7', fontWeight: 700 }}>EMA Ribbon</span>
+                  <span style={{ color: '#94A3B8', fontSize: 10 }}>9/21/50/200</span>
+                  <button onClick={() => setShowEMARibbon(false)} title="Remove EMA Ribbon" style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', padding: '0 2px', fontSize: 11, display: 'flex', alignItems: 'center' }}>✕</button>
+                </div>
+              )}
               {showSMA && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, background: 'rgba(10, 14, 26, 0.85)', padding: '2px 8px', borderRadius: 4, backdropFilter: 'blur(4px)', border: '1px solid rgba(0, 229, 255, 0.25)', boxShadow: '0 2px 6px rgba(0,0,0,0.4)' }}>
                   <span style={{ color: '#00E5FF', fontWeight: 700 }}>SMA 20</span>
