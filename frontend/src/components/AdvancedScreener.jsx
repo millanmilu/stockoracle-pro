@@ -1,17 +1,33 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import useStore from '../store/useStore';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
 import { 
   SlidersHorizontal, Sparkles, Terminal, Play, 
-  Dices, Save, BookOpen, RefreshCw, Layers,
-  ChevronDown, ChevronUp, ArrowUpDown, Filter,
-  Search, Check, TrendingUp, BarChart2, Zap, Shield, HelpCircle, ExternalLink
+  Dices, Save, RefreshCw, Filter, Search, Download,
+  BookmarkPlus, ArrowUpDown, ChevronDown, ChevronUp, Layers, CheckSquare
 } from 'lucide-react';
-import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid
-} from 'recharts';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+
+import ScreenerKpiCards from './screener/ScreenerKpiCards';
+import ScreenerSectorChart from './screener/ScreenerSectorChart';
+import ScreenerFilters from './screener/ScreenerFilters';
+import ScreenerTable from './screener/ScreenerTable';
+import ScreenerPagination from './screener/ScreenerPagination';
+import ScreenerFlyoutDrawer from './screener/ScreenerFlyoutDrawer';
+import ScreenerBulkBar from './screener/ScreenerBulkBar';
+
+const getWsUrl = () => {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    if (window.location.hostname.includes('amplifyapp.com')) {
+      return 'wss://stockoracle.duckdns.org/ws/prices';
+    }
+    return `${protocol}//${window.location.host}/ws/prices`;
+  }
+  return 'ws://localhost:8000/ws/prices';
+};
 
 export default function AdvancedScreener() {
   const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
@@ -31,17 +47,23 @@ export default function AdvancedScreener() {
   const [sortColumn, setSortColumn] = useState('market_cap_cr');
   const [sortDirection, setSortDirection] = useState('desc'); // 'asc' | 'desc'
 
+  // Pagination State
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+
   // Formula State
-  const [formulaQuery, setFormulaQuery] = useState('MarketCap > 0 AND ROCE > 15 AND PE < 35');
+  const [formulaQuery, setFormulaQuery] = useState('MarketCap > 0 AND ROCE > 15 AND PE < 40');
 
   // Visual Filter Sliders
+  const [universe, setUniverse] = useState('ALL NSE');
+  const [selectedSector, setSelectedSector] = useState('ALL');
+  const [marketCapCat, setMarketCapCat] = useState('ALL');
   const [minRoce, setMinRoce] = useState(15);
   const [maxPe, setMaxPe] = useState(40);
   const [maxDebt, setMaxDebt] = useState(1.5);
   const [minRsi, setMinRsi] = useState(0);
   const [maxRsi, setMaxRsi] = useState(100);
   const [minVolRatio, setMinVolRatio] = useState(0.8);
-  const [selectedSector, setSelectedSector] = useState('ALL');
 
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
@@ -50,6 +72,16 @@ export default function AdvancedScreener() {
   const [savedScreens, setSavedScreens] = useState([]);
   const [activePresetId, setActivePresetId] = useState('all-nse');
 
+  // Multi-Selection State
+  const [selectedTickers, setSelectedTickers] = useState(new Set());
+
+  // Flyout Drawer State
+  const [inspectedStock, setInspectedStock] = useState(null);
+
+  // WebSocket Live Ticks State
+  const [liveTicks, setLiveTicks] = useState({});
+  const wsRef = useRef(null);
+
   // Modal States
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [screenName, setScreenName] = useState('');
@@ -57,8 +89,7 @@ export default function AdvancedScreener() {
   const [backtestLoading, setBacktestLoading] = useState(false);
   const [backtestResults, setBacktestResults] = useState(null);
   const [holdingDays, setHoldingDays] = useState(20);
-
-  const parentRef = useRef(null);
+  const [sttRate, setSttRate] = useState(0.001); // 0.10%
 
   // 1. Fetch Presets & Initial Data on Mount
   useEffect(() => {
@@ -76,16 +107,26 @@ export default function AdvancedScreener() {
   }, []);
 
   // 2. Build Visual Formula
-  const buildVisualFormula = () => {
+  const buildVisualFormula = useCallback(() => {
     let formula = `ROCE > ${minRoce} AND PE < ${maxPe} AND DebtToEquity < ${maxDebt} AND RSI14 > ${minRsi} AND RSI14 < ${maxRsi} AND VolumeRatio20D > ${minVolRatio}`;
     if (selectedSector !== 'ALL') {
       formula += ` AND Sector == '${selectedSector}'`;
     }
+    if (marketCapCat !== 'ALL') {
+      formula += ` AND MarketCapCat == '${marketCapCat}'`;
+    }
     return formula;
-  };
+  }, [minRoce, maxPe, maxDebt, minRsi, maxRsi, minVolRatio, selectedSector, marketCapCat]);
+
+  // Sync formula when sliders change (if in visual mode)
+  useEffect(() => {
+    if (queryMode === 'visual') {
+      setFormulaQuery(buildVisualFormula());
+    }
+  }, [queryMode, buildVisualFormula]);
 
   // 3. Run Screen API (/api/screener/query)
-  const runScreen = async (query = null) => {
+  const runScreen = async (query = null, targetPage = 1, targetSize = pageSize) => {
     setLoading(true);
     const activeQuery = query || (queryMode === 'formula' ? formulaQuery : buildVisualFormula());
     try {
@@ -93,11 +134,11 @@ export default function AdvancedScreener() {
         formula_query: activeQuery || "MarketCap > 0",
         sort_by: sortColumn || "market_cap_cr",
         sort_dir: sortDirection === 'asc' ? "ASC" : "DESC",
-        limit: 2000,
+        limit: 1000,
         offset: 0
       });
       setResults(data.results || []);
-      setTotalCount(data.total || data.count || (data.results ? data.results.length : 0));
+      setTotalCount(data.total || (data.results ? data.results.length : 0));
     } catch (err) {
       console.error('Screener query error:', err);
       toast.error(err.response?.data?.detail || 'Screener query failed');
@@ -106,7 +147,42 @@ export default function AdvancedScreener() {
     }
   };
 
-  // 4. AI Translate Natural Language (/api/screener/ai-parse)
+  // 4. WebSocket Feed for Live Price Ticks
+  useEffect(() => {
+    const wsUrl = getWsUrl();
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      if (results.length > 0) {
+        const topTickers = results.slice(0, 50).map(r => r.ticker);
+        ws.send(JSON.stringify({ subscribe: topTickers }));
+      }
+    };
+
+    ws.onmessage = (evt) => {
+      try {
+        const tick = JSON.parse(evt.data);
+        if (tick.ticker && tick.price) {
+          setLiveTicks(prev => ({
+            ...prev,
+            [tick.ticker]: {
+              price: tick.price,
+              change_pct: tick.change_pct,
+              is_live: tick.is_live,
+              updated_at: Date.now()
+            }
+          }));
+        }
+      } catch (_) {}
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [results]);
+
+  // 5. AI Translate Natural Language (/api/screener/ai-parse)
   const handleAiTranslate = async () => {
     if (!aiPrompt.trim()) return;
     setAiLoading(true);
@@ -116,7 +192,8 @@ export default function AdvancedScreener() {
         setFormulaQuery(data.formula_query);
         setQueryMode('formula');
         setActivePresetId(null);
-        runScreen(data.formula_query);
+        setPage(1);
+        runScreen(data.formula_query, 1);
         toast.success(`AI Query: ${data.formula_query}`);
       } else {
         toast.error('Could not generate formula.');
@@ -128,7 +205,7 @@ export default function AdvancedScreener() {
     }
   };
 
-  // 5. Backtest Runner (/api/screener/backtest)
+  // 6. Backtest Runner (/api/screener/backtest)
   const handleRunBacktest = async () => {
     setShowBacktestModal(true);
     setBacktestLoading(true);
@@ -137,10 +214,11 @@ export default function AdvancedScreener() {
       const { data } = await api.post('/api/screener/backtest', {
         formula_query: activeQuery,
         holding_period_days: holdingDays,
-        benchmark: 'NIFTY50'
+        benchmark: 'NIFTY50',
+        stt_rate: sttRate
       });
       setBacktestResults(data);
-      toast.success('Screen backtest simulated!');
+      toast.success('Historical screen backtest completed!');
     } catch (err) {
       toast.error('Screen backtest failed.');
     } finally {
@@ -148,7 +226,7 @@ export default function AdvancedScreener() {
     }
   };
 
-  // 6. Save Screen Handler
+  // 7. Save Screen Handler
   const handleSaveScreen = async () => {
     if (!screenName.trim()) {
       toast.error('Please enter a screen name.');
@@ -156,12 +234,12 @@ export default function AdvancedScreener() {
     }
     try {
       const activeQuery = queryMode === 'formula' ? formulaQuery : buildVisualFormula();
-      const { data } = await api.post('/api/screener/screens', {
+      await api.post('/api/screener/screens', {
         name: screenName,
         formula_query: activeQuery,
         is_public: true,
       });
-      toast.success(`Screen saved!`);
+      toast.success(`Screen saved successfully!`);
       setShowSaveModal(false);
       setScreenName('');
       const res = await api.get('/api/screener/screens');
@@ -176,8 +254,26 @@ export default function AdvancedScreener() {
     setActivePresetId(id);
     setFormulaQuery(query);
     setQueryMode('formula');
-    runScreen(query);
+    setPage(1);
+    runScreen(query, 1);
     toast.success(`Applied: ${name}`);
+  };
+
+  // Reset Filters Handler
+  const handleResetFilters = () => {
+    setMinRoce(0);
+    setMaxPe(100);
+    setMaxDebt(3.0);
+    setMinRsi(0);
+    setMaxRsi(100);
+    setMinVolRatio(0.5);
+    setSelectedSector('ALL');
+    setMarketCapCat('ALL');
+    setFormulaQuery('MarketCap > 0');
+    setActivePresetId('all-nse');
+    setPage(1);
+    runScreen('MarketCap > 0', 1);
+    toast.success('Filters reset to default.');
   };
 
   // Client-side instant filter & sorting
@@ -209,14 +305,36 @@ export default function AdvancedScreener() {
     return list;
   }, [results, searchFilter, sortColumn, sortDirection]);
 
-  // Virtualizer for smooth rendering
-  const rowVirtualizer = useVirtualizer({
-    count: processedResults.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 42,
-    overscan: 12,
-  });
+  // Paginated Rows Slice
+  const paginatedRows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return processedResults.slice(start, start + pageSize);
+  }, [processedResults, page, pageSize]);
 
+  // Derived KPI Stats
+  const kpiStats = useMemo(() => {
+    let bullish = 0;
+    let volumeSurges = 0;
+    let oversold = 0;
+    let totalScore = 0;
+
+    processedResults.forEach(r => {
+      if (r.ai_signal === 'BUY' || r.ai_signal === 'STRONG BUY') bullish++;
+      if ((r.volume_ratio_20d || 1) > 1.3) volumeSurges++;
+      if ((r.rsi_14 || 50) < 38) oversold++;
+      totalScore += (r.ai_consensus_score || 50);
+    });
+
+    return {
+      total: processedResults.length,
+      bullish,
+      volumeSurges,
+      oversold,
+      avgScore: processedResults.length > 0 ? (totalScore / processedResults.length).toFixed(0) : 50
+    };
+  }, [processedResults]);
+
+  // Sort Toggle
   const handleSort = (col) => {
     if (sortColumn === col) {
       setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
@@ -226,9 +344,70 @@ export default function AdvancedScreener() {
     }
   };
 
-  const getSortIcon = (col) => {
-    if (sortColumn !== col) return <ArrowUpDown size={10} style={{ opacity: 0.35 }} />;
-    return sortDirection === 'asc' ? <ChevronUp size={12} color="#10B981" /> : <ChevronDown size={12} color="#10B981" />;
+  // Selection Handlers
+  const handleToggleSelect = (ticker) => {
+    setSelectedTickers(prev => {
+      const next = new Set(prev);
+      if (next.has(ticker)) next.delete(ticker);
+      else next.add(ticker);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (paginatedRows.every(r => selectedTickers.has(r.ticker))) {
+      setSelectedTickers(prev => {
+        const next = new Set(prev);
+        paginatedRows.forEach(r => next.delete(r.ticker));
+        return next;
+      });
+    } else {
+      setSelectedTickers(prev => {
+        const next = new Set(prev);
+        paginatedRows.forEach(r => next.add(r.ticker));
+        return next;
+      });
+    }
+  };
+
+  // CSV Export Handler
+  const handleExportCsv = (dataToExport = processedResults) => {
+    if (dataToExport.length === 0) {
+      toast.error('No data to export.');
+      return;
+    }
+    const headers = ['Ticker', 'Name', 'Sector', 'Industry', 'Price', '1D Change %', 'P/E', 'ROCE %', 'Debt/Equity', 'RSI (14)', 'Vol Ratio', 'Market Cap (Cr)', 'AI Score', 'AI Signal'];
+    const csvRows = [headers.join(',')];
+
+    dataToExport.forEach(r => {
+      const values = [
+        `"${r.ticker || ''}"`,
+        `"${(r.name || '').replace(/"/g, '""')}"`,
+        `"${r.sector || ''}"`,
+        `"${r.industry || ''}"`,
+        r.close_price || '',
+        r.change_1d_pct || '',
+        r.pe_ratio || '',
+        r.roce_pct || '',
+        r.debt_to_equity || '',
+        r.rsi_14 || '',
+        r.volume_ratio_20d || '',
+        r.market_cap_cr || '',
+        r.ai_consensus_score || '',
+        `"${r.ai_signal || ''}"`
+      ];
+      csvRows.push(values.join(','));
+    });
+
+    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `StockOracle_Screener_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(`Exported ${dataToExport.length} stocks to CSV!`);
   };
 
   // Pre-configured Quick Strategy Pills
@@ -242,21 +421,21 @@ export default function AdvancedScreener() {
   ];
 
   return (
-    <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10, height: '100%', boxSizing: 'border-box', background: '#050711', color: '#F1F5F9' }}>
+    <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 12, height: '100%', boxSizing: 'border-box', background: '#050711', color: '#F1F5F9' }}>
       
       {/* ── TOP HEADER & ACTION BAR ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg, #4F46E5, #06B6D4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <SlidersHorizontal size={16} color="#FFF" />
+          <div style={{ width: 34, height: 34, borderRadius: 8, background: 'linear-gradient(135deg, #4F46E5, #06B6D4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <SlidersHorizontal size={18} color="#FFF" />
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '0.95rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#FFF' }}>Institutional Screener</span>
+              <span style={{ fontSize: '1.05rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#FFF' }}>Institutional Screener</span>
               <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.15)', color: '#818CF8', fontSize: '0.65rem', fontWeight: 700 }}>v2.0 PRO</span>
             </div>
             <div style={{ fontSize: '0.65rem', color: '#64748B' }}>
-              Real-time multi-factor scanning with AI consensus & technical timing
+              Real-time multi-factor scanning with AI consensus & live WebSocket market timing
             </div>
           </div>
         </div>
@@ -265,33 +444,44 @@ export default function AdvancedScreener() {
           <button
             onClick={() => setFiltersOpen(!filtersOpen)}
             style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', borderRadius: 6,
+              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 6,
               background: filtersOpen ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.05)',
               color: filtersOpen ? '#818CF8' : '#94A3B8', border: filtersOpen ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.1)',
               cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600, transition: 'all 0.15s'
             }}
           >
             <Filter size={13} /> Filters
-            <span style={{ background: '#6366F1', color: '#FFF', borderRadius: '50%', width: 15, height: 15, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.58rem' }}>
-              {queryMode === 'visual' ? '6' : '1'}
+            <span style={{ background: '#6366F1', color: '#FFF', borderRadius: '50%', width: 16, height: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.58rem' }}>
+              {queryMode === 'visual' ? '7' : '1'}
             </span>
+          </button>
+
+          <button
+            onClick={() => handleExportCsv(processedResults)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: 6,
+              background: 'rgba(255,255,255,0.05)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.1)',
+              cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600
+            }}
+          >
+            <Download size={13} /> Export CSV
           </button>
 
           <button
             onClick={() => setShowSaveModal(true)}
             style={{
-              display: 'flex', alignItems: 'center', gap: 5, padding: '5px 10px', borderRadius: 6,
+              display: 'flex', alignItems: 'center', gap: 5, padding: '6px 11px', borderRadius: 6,
               background: 'rgba(255,255,255,0.05)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.1)',
               cursor: 'pointer', fontSize: '0.72rem', fontWeight: 600
             }}
           >
-            <Save size={13} /> Save
+            <Save size={13} /> Save Screen
           </button>
 
           <button
             onClick={handleRunBacktest}
             style={{
-              display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6,
+              display: 'flex', alignItems: 'center', gap: 5, padding: '6px 13px', borderRadius: 6,
               background: 'linear-gradient(135deg, #10B981, #059669)', color: '#FFF', border: 'none',
               cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700, boxShadow: '0 2px 8px rgba(16,185,129,0.25)'
             }}
@@ -300,6 +490,9 @@ export default function AdvancedScreener() {
           </button>
         </div>
       </div>
+
+      {/* ── KPI SUMMARY CARDS ── */}
+      <ScreenerKpiCards stats={kpiStats} />
 
       {/* ── AI PROMPT & SEARCH BAR ── */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#0B0F1E', padding: '6px 10px', borderRadius: 8, border: '1px solid rgba(99,102,241,0.2)' }}>
@@ -321,7 +514,7 @@ export default function AdvancedScreener() {
           onClick={handleAiTranslate}
           disabled={aiLoading}
           style={{
-            padding: '4px 10px', borderRadius: 5, background: '#6366F1', color: '#FFF', border: 'none',
+            padding: '4px 11px', borderRadius: 5, background: '#6366F1', color: '#FFF', border: 'none',
             fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4
           }}
         >
@@ -369,156 +562,48 @@ export default function AdvancedScreener() {
         ))}
       </div>
 
+      {/* ── SECTOR DISTRIBUTION CHART ── */}
+      <ScreenerSectorChart
+        rows={processedResults}
+        selectedSector={selectedSector}
+        onSelectSector={(sec) => {
+          setSelectedSector(sec);
+          if (queryMode === 'visual') {
+            runScreen();
+          }
+        }}
+      />
+
       {/* ── EXPANDABLE FILTER DRAWER ── */}
       {filtersOpen && (
-        <div style={{ background: '#090D1C', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.06)', paddingBottom: 8 }}>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button
-                onClick={() => setQueryMode('visual')}
-                style={{
-                  padding: '4px 10px', borderRadius: 5, border: 'none',
-                  background: queryMode === 'visual' ? 'rgba(99,102,241,0.25)' : 'transparent',
-                  color: queryMode === 'visual' ? '#818CF8' : '#64748B', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer'
-                }}
-              >
-                Sliders Filter Builder
-              </button>
-              <button
-                onClick={() => setQueryMode('formula')}
-                style={{
-                  padding: '4px 10px', borderRadius: 5, border: 'none',
-                  background: queryMode === 'formula' ? 'rgba(99,102,241,0.25)' : 'transparent',
-                  color: queryMode === 'formula' ? '#818CF8' : '#64748B', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer'
-                }}
-              >
-                Screener.in SQL Formula
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <button
-                onClick={() => {
-                  setMinRoce(0);
-                  setMaxPe(100);
-                  setMaxDebt(3.0);
-                  setMinRsi(0);
-                  setMaxRsi(100);
-                  setMinVolRatio(0.5);
-                  setSelectedSector('ALL');
-                  setFormulaQuery('MarketCap > 0');
-                  setActivePresetId('all-nse');
-                  runScreen('MarketCap > 0');
-                  toast.success('Filters reset to default.');
-                }}
-                style={{
-                  padding: '4px 8px', borderRadius: 5, background: 'rgba(255,255,255,0.06)', color: '#94A3B8',
-                  border: '1px solid rgba(255,255,255,0.1)', fontSize: '0.68rem', cursor: 'pointer'
-                }}
-              >
-                Reset
-              </button>
-              <button
-                onClick={() => runScreen()}
-                disabled={loading}
-                style={{
-                  padding: '4px 12px', borderRadius: 5, background: '#10B981', color: '#FFF', border: 'none',
-                  fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4
-                }}
-              >
-                {loading ? <RefreshCw size={11} className="spin" /> : <Play size={11} />} Apply & Run
-              </button>
-              <button
-                onClick={() => setFiltersOpen(false)}
-                style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', fontSize: '0.75rem' }}
-              >
-                ✕
-              </button>
-            </div>
-          </div>
-
-          {queryMode === 'visual' ? (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#94A3B8', marginBottom: 2 }}>
-                  <span>Min ROCE %</span><strong style={{ color: '#10B981' }}>{minRoce}%</strong>
-                </div>
-                <input type="range" min="0" max="60" value={minRoce} onChange={(e) => setMinRoce(Number(e.target.value))} style={{ width: '100%' }} />
-              </div>
-
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#94A3B8', marginBottom: 2 }}>
-                  <span>Max P/E Ratio</span><strong style={{ color: '#38BDF8' }}>{maxPe}x</strong>
-                </div>
-                <input type="range" min="5" max="80" value={maxPe} onChange={(e) => setMaxPe(Number(e.target.value))} style={{ width: '100%' }} />
-              </div>
-
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#94A3B8', marginBottom: 2 }}>
-                  <span>Max Debt/Equity</span><strong style={{ color: '#F59E0B' }}>{maxDebt}x</strong>
-                </div>
-                <input type="range" min="0" max="3" step="0.1" value={maxDebt} onChange={(e) => setMaxDebt(Number(e.target.value))} style={{ width: '100%' }} />
-              </div>
-
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#94A3B8', marginBottom: 2 }}>
-                  <span>RSI (14) Range</span><strong>{minRsi} - {maxRsi}</strong>
-                </div>
-                <div style={{ display: 'flex', gap: 4 }}>
-                  <input type="range" min="0" max="50" value={minRsi} onChange={(e) => setMinRsi(Number(e.target.value))} style={{ width: '50%' }} />
-                  <input type="range" min="50" max="100" value={maxRsi} onChange={(e) => setMaxRsi(Number(e.target.value))} style={{ width: '50%' }} />
-                </div>
-              </div>
-
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#94A3B8', marginBottom: 2 }}>
-                  <span>Min Vol Surge</span><strong style={{ color: '#A855F7' }}>{minVolRatio}x</strong>
-                </div>
-                <input type="range" min="0.5" max="3.0" step="0.1" value={minVolRatio} onChange={(e) => setMinVolRatio(Number(e.target.value))} style={{ width: '100%' }} />
-              </div>
-
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#94A3B8', marginBottom: 2 }}>
-                  <span>Sector Filter</span>
-                </div>
-                <select
-                  value={selectedSector}
-                  onChange={(e) => setSelectedSector(e.target.value)}
-                  style={{ width: '100%', background: '#060913', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, padding: '4px', color: '#F1F5F9', fontSize: '0.68rem' }}
-                >
-                  <option value="ALL">All Sectors</option>
-                  <option value="IT">IT & Software</option>
-                  <option value="Banking">Banking & Financials</option>
-                  <option value="Pharma">Pharma & Healthcare</option>
-                  <option value="Auto">Automobiles</option>
-                  <option value="Energy">Energy & Utilities</option>
-                  <option value="FMCG">FMCG & Consumer</option>
-                  <option value="Metals">Metals & Mining</option>
-                  <option value="Realty">Infrastructure & Realty</option>
-                  <option value="Chemicals">Chemicals & Materials</option>
-                  <option value="Telecom">Telecom & Media</option>
-                </select>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <textarea
-                value={formulaQuery}
-                onChange={(e) => setFormulaQuery(e.target.value)}
-                rows={2}
-                style={{
-                  width: '100%', background: '#060913', border: '1px solid rgba(99,102,241,0.3)',
-                  borderRadius: 6, padding: '6px 10px', color: '#38BDF8', fontFamily: 'JetBrains Mono, monospace',
-                  fontSize: '0.72rem', outline: 'none'
-                }}
-              />
-              <div style={{ fontSize: '0.62rem', color: '#64748B', marginTop: 4 }}>
-                Variables: <code>ROCE</code>, <code>ROE</code>, <code>PE</code>, <code>DebtToEquity</code>, <code>RSI14</code>, <code>VolumeRatio20D</code>, <code>MarketCap</code>, <code>Sector</code>
-              </div>
-            </div>
-          )}
-        </div>
+        <ScreenerFilters
+          universe={universe}
+          setUniverse={setUniverse}
+          selectedSector={selectedSector}
+          setSelectedSector={setSelectedSector}
+          minRoce={minRoce}
+          setMinRoce={setMinRoce}
+          maxPe={maxPe}
+          setMaxPe={setMaxPe}
+          maxDebt={maxDebt}
+          setMaxDebt={setMaxDebt}
+          minRsi={minRsi}
+          setMinRsi={setMinRsi}
+          maxRsi={maxRsi}
+          setMaxRsi={setMaxRsi}
+          minVolRatio={minVolRatio}
+          setMinVolRatio={setMinVolRatio}
+          marketCapCat={marketCapCat}
+          setMarketCapCat={setMarketCapCat}
+          queryMode={queryMode}
+          setQueryMode={setQueryMode}
+          formulaQuery={formulaQuery}
+          setFormulaQuery={setFormulaQuery}
+          onResetFilters={handleResetFilters}
+          onRunScreen={() => { setPage(1); runScreen(); }}
+          loading={loading}
+          onClose={() => setFiltersOpen(false)}
+        />
       )}
 
       {/* ── TABLE CONTROLS & CATEGORY TABS ── */}
@@ -556,7 +641,7 @@ export default function AdvancedScreener() {
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
               placeholder="Quick search results..."
-              style={{ background: 'transparent', border: 'none', color: '#F1F5F9', fontSize: '0.68rem', outline: 'none', width: 130 }}
+              style={{ background: 'transparent', border: 'none', color: '#F1F5F9', fontSize: '0.68rem', outline: 'none', width: 140 }}
             />
           </div>
           <div style={{ fontSize: '0.68rem', color: '#94A3B8', fontWeight: 600 }}>
@@ -565,233 +650,68 @@ export default function AdvancedScreener() {
         </div>
       </div>
 
-      {/* ── VIRTUALIZED DATA TABLE ── */}
-      <div 
-        ref={parentRef}
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          overflowX: 'auto',
-          background: '#080C1A',
-          border: '1px solid rgba(255,255,255,0.08)',
-          borderRadius: 8,
-          position: 'relative',
-          minHeight: '400px'
-        }}
-      >
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.7rem', fontFamily: 'JetBrains Mono, monospace' }}>
-          <thead style={{ position: 'sticky', top: 0, background: '#0C1124', zIndex: 10, boxShadow: '0 2px 4px rgba(0,0,0,0.4)' }}>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right' }}>
-              <th style={{ textAlign: 'left', padding: '6px 8px', width: 35 }}>#</th>
-              <th onClick={() => handleSort('ticker')} style={{ textAlign: 'left', padding: '6px 8px', cursor: 'pointer' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>Ticker {getSortIcon('ticker')}</div>
-              </th>
-              <th onClick={() => handleSort('sector')} style={{ textAlign: 'left', padding: '6px 8px', cursor: 'pointer' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>Sector {getSortIcon('sector')}</div>
-              </th>
-              <th onClick={() => handleSort('close_price')} style={{ padding: '6px 8px', cursor: 'pointer' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>Price ₹ {getSortIcon('close_price')}</div>
-              </th>
-              <th onClick={() => handleSort('change_1d_pct')} style={{ padding: '6px 8px', cursor: 'pointer' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>1D % {getSortIcon('change_1d_pct')}</div>
-              </th>
-
-              {(activeTab === 'all' || activeTab === 'valuation') && (
-                <>
-                  <th onClick={() => handleSort('pe_ratio')} style={{ padding: '6px 8px', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>P/E {getSortIcon('pe_ratio')}</div>
-                  </th>
-                  <th onClick={() => handleSort('roce_pct')} style={{ padding: '6px 8px', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>ROCE % {getSortIcon('roce_pct')}</div>
-                  </th>
-                  <th onClick={() => handleSort('debt_to_equity')} style={{ padding: '6px 8px', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>D/E {getSortIcon('debt_to_equity')}</div>
-                  </th>
-                </>
-              )}
-
-              {(activeTab === 'all' || activeTab === 'technical') && (
-                <>
-                  <th onClick={() => handleSort('rsi_14')} style={{ padding: '6px 8px', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>RSI (14) {getSortIcon('rsi_14')}</div>
-                  </th>
-                  <th onClick={() => handleSort('volume_ratio_20d')} style={{ padding: '6px 8px', cursor: 'pointer' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>Vol Surge {getSortIcon('volume_ratio_20d')}</div>
-                  </th>
-                </>
-              )}
-
-              {(activeTab === 'all' || activeTab === 'ai') && (
-                <th onClick={() => handleSort('ai_consensus_score')} style={{ padding: '6px 8px', cursor: 'pointer' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>AI Score {getSortIcon('ai_consensus_score')}</div>
-                </th>
-              )}
-
-              <th style={{ padding: '6px 8px', textAlign: 'center', width: 90 }}>Actions</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {rowVirtualizer.getVirtualItems()[0]?.start > 0 && (
-              <tr style={{ height: rowVirtualizer.getVirtualItems()[0].start }}>
-                <td colSpan="12" style={{ padding: 0, border: 0 }}></td>
-              </tr>
-            )}
-
-            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const r = processedResults[virtualRow.index];
-              if (!r) return null;
-              const isPositive = (r.change_1d_pct || 0) >= 0;
-              const isHighRoce = (r.roce_pct || 0) >= 20;
-              const isOverbought = (r.rsi_14 || 50) >= 70;
-              const isOversold = (r.rsi_14 || 50) <= 35;
-              const isStrongAi = (r.ai_consensus_score || 50) >= 80;
-
-              return (
-                <tr
-                  key={r.ticker || virtualRow.index}
-                  ref={rowVirtualizer.measureElement}
-                  data-index={virtualRow.index}
-                  style={{
-                    borderBottom: '1px solid rgba(255,255,255,0.03)',
-                    textAlign: 'right',
-                    color: '#CBD5E1',
-                    background: virtualRow.index % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)',
-                    transition: 'background 0.1s'
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(99,102,241,0.08)'}
-                  onMouseLeave={(e) => e.currentTarget.style.background = virtualRow.index % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)'}
-                >
-                  <td style={{ textAlign: 'left', padding: '5px 8px', color: '#475569', fontSize: '0.62rem' }}>
-                    {virtualRow.index + 1}
-                  </td>
-
-                  {/* Ticker & Name */}
-                  <td style={{ textAlign: 'left', padding: '5px 8px', fontWeight: 700, color: '#F8FAFC' }}>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span style={{ color: '#38BDF8', cursor: 'pointer' }} onClick={() => { setSelectedSymbol(r.ticker); setActiveView('Live Chart'); }}>
-                        {r.ticker}
-                      </span>
-                      <span style={{ fontSize: '0.6rem', color: '#64748B', fontWeight: 400, maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {r.name}
-                      </span>
-                    </div>
-                  </td>
-
-                  {/* Sector */}
-                  <td style={{ textAlign: 'left', padding: '5px 8px' }}>
-                    <span style={{ padding: '2px 5px', borderRadius: 3, background: 'rgba(255,255,255,0.04)', color: '#94A3B8', fontSize: '0.62rem' }}>
-                      {r.sector || 'General'}
-                    </span>
-                  </td>
-
-                  {/* Price */}
-                  <td style={{ padding: '5px 8px', fontWeight: 700, color: '#F1F5F9' }}>
-                    ₹{Number(r.close_price).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                  </td>
-
-                  {/* 1D Change */}
-                  <td style={{ padding: '5px 8px', color: isPositive ? '#10B981' : '#EF4444', fontWeight: 600 }}>
-                    {isPositive ? '+' : ''}{r.change_1d_pct != null ? `${r.change_1d_pct}%` : '—'}
-                  </td>
-
-                  {/* Valuation metrics */}
-                  {(activeTab === 'all' || activeTab === 'valuation') && (
-                    <>
-                      <td style={{ padding: '5px 8px', color: (r.pe_ratio || 0) < 25 ? '#38BDF8' : '#CBD5E1' }}>
-                        {r.pe_ratio != null ? `${r.pe_ratio}x` : '—'}
-                      </td>
-                      <td style={{ padding: '5px 8px', color: isHighRoce ? '#10B981' : '#CBD5E1', fontWeight: isHighRoce ? 700 : 500 }}>
-                        {r.roce_pct != null ? `${r.roce_pct}%` : '—'}
-                      </td>
-                      <td style={{ padding: '5px 8px', color: (r.debt_to_equity || 0) < 0.5 ? '#10B981' : '#F59E0B' }}>
-                        {r.debt_to_equity != null ? r.debt_to_equity : '—'}
-                      </td>
-                    </>
-                  )}
-
-                  {/* Technical metrics */}
-                  {(activeTab === 'all' || activeTab === 'technical') && (
-                    <>
-                      <td style={{ padding: '5px 8px' }}>
-                        <span style={{
-                          padding: '2px 5px', borderRadius: 3, fontSize: '0.62rem', fontWeight: 600,
-                          background: isOverbought ? 'rgba(239,68,68,0.15)' : isOversold ? 'rgba(16,185,129,0.15)' : 'transparent',
-                          color: isOverbought ? '#EF4444' : isOversold ? '#10B981' : '#94A3B8'
-                        }}>
-                          {r.rsi_14 != null ? r.rsi_14 : '—'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '5px 8px', color: (r.volume_ratio_20d || 1) > 1.5 ? '#A855F7' : '#94A3B8', fontWeight: (r.volume_ratio_20d || 1) > 1.5 ? 700 : 400 }}>
-                        {r.volume_ratio_20d != null ? `${r.volume_ratio_20d}x` : '—'}
-                      </td>
-                    </>
-                  )}
-
-                  {/* AI Consensus Score */}
-                  {(activeTab === 'all' || activeTab === 'ai') && (
-                    <td style={{ padding: '5px 8px' }}>
-                      <span style={{
-                        padding: '2px 6px', borderRadius: 4, fontSize: '0.62rem', fontWeight: 800,
-                        background: isStrongAi ? 'rgba(16,185,129,0.2)' : 'rgba(99,102,241,0.15)',
-                        color: isStrongAi ? '#10B981' : '#818CF8',
-                        border: isStrongAi ? '1px solid rgba(16,185,129,0.4)' : '1px solid rgba(99,102,241,0.3)'
-                      }}>
-                        {r.ai_consensus_score || 50} • {r.ai_signal || 'BUY'}
-                      </span>
-                    </td>
-                  )}
-
-                  {/* Quick Actions */}
-                  <td style={{ padding: '5px 8px', textAlign: 'center' }}>
-                    <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                      <button
-                        onClick={() => { setSelectedSymbol(r.ticker); setActiveView('Live Chart'); }}
-                        title="Open Live Chart"
-                        style={{
-                          padding: '3px 6px', borderRadius: 4, background: 'rgba(56,189,248,0.12)',
-                          color: '#38BDF8', border: '1px solid rgba(56,189,248,0.25)', cursor: 'pointer',
-                          fontSize: '0.6rem', fontWeight: 600
-                        }}
-                      >
-                        Chart
-                      </button>
-                      <button
-                        onClick={() => { setSelectedSymbol(r.ticker); setActiveView('Fundamentals'); }}
-                        title="View Research & Ratios"
-                        style={{
-                          padding: '3px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.12)',
-                          color: '#818CF8', border: '1px solid rgba(99,102,241,0.25)', cursor: 'pointer',
-                          fontSize: '0.6rem', fontWeight: 600
-                        }}
-                      >
-                        Info
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-
-            {rowVirtualizer.getVirtualItems().length > 0 && (
-              <tr style={{ height: rowVirtualizer.getTotalSize() - rowVirtualizer.getVirtualItems()[rowVirtualizer.getVirtualItems().length - 1].end }}>
-                <td colSpan="12" style={{ padding: 0, border: 0 }}></td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-
-        {processedResults.length === 0 && !loading && (
-          <div style={{ textAlign: 'center', padding: '40px 0', color: '#64748B', fontSize: '0.78rem' }}>
-            No stocks matched current criteria. Try resetting or relaxing your filters.
-          </div>
-        )}
+      {/* ── MODULAR DATA TABLE ── */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        background: '#080C1A',
+        border: '1px solid rgba(255,255,255,0.08)',
+        borderRadius: 8,
+        minHeight: '380px',
+        position: 'relative'
+      }}>
+        <ScreenerTable
+          rows={paginatedRows}
+          loading={loading}
+          sortBy={sortColumn}
+          sortDir={sortDirection}
+          onSort={handleSort}
+          activeTab={activeTab}
+          selectedTickers={selectedTickers}
+          onToggleSelect={handleToggleSelect}
+          onToggleSelectAll={handleToggleSelectAll}
+          onInspect={(stock) => setInspectedStock(stock)}
+          onNavigateChart={(sym) => { setSelectedSymbol(sym); setActiveView('Live Chart'); }}
+          onNavigateFundamentals={(sym) => { setSelectedSymbol(sym); setActiveView('Fundamentals'); }}
+          liveTicks={liveTicks}
+        />
       </div>
 
-      {/* ── MODALS ── */}
+      {/* ── SERVER-SIDE PAGINATION BAR ── */}
+      <ScreenerPagination
+        totalItems={processedResults.length}
+        page={page}
+        setPage={setPage}
+        pageSize={pageSize}
+        setPageSize={setPageSize}
+      />
+
+      {/* ── BULK ACTION FLOATING BAR ── */}
+      <ScreenerBulkBar
+        selectedCount={selectedTickers.size}
+        selectedTickers={Array.from(selectedTickers)}
+        onClearSelection={() => setSelectedTickers(new Set())}
+        onExportSelected={() => {
+          const selectedRows = processedResults.filter(r => selectedTickers.has(r.ticker));
+          handleExportCsv(selectedRows);
+        }}
+        allResults={processedResults}
+      />
+
+      {/* ── STOCK INSPECTION FLYOUT DRAWER ── */}
+      {inspectedStock && (
+        <ScreenerFlyoutDrawer
+          stock={inspectedStock}
+          onClose={() => setInspectedStock(null)}
+          onNavigateChart={(sym) => { setSelectedSymbol(sym); setActiveView('Live Chart'); }}
+          onNavigateFundamentals={(sym) => { setSelectedSymbol(sym); setActiveView('Fundamentals'); }}
+        />
+      )}
+
+      {/* ── HISTORICAL STRATEGY BACKTEST MODAL ── */}
       {showBacktestModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(4, 5, 14, 0.85)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 }}>
-          <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 12, width: '100%', maxWidth: 720, maxHeight: '90vh', overflowY: 'auto', padding: 20 }}>
+          <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 12, width: '100%', maxWidth: 760, maxHeight: '90vh', overflowY: 'auto', padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 10, marginBottom: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Dices size={18} color="#10B981" />
@@ -799,27 +719,77 @@ export default function AdvancedScreener() {
               </div>
               <button onClick={() => setShowBacktestModal(false)} style={{ background: 'transparent', border: 'none', color: '#94A3B8', fontSize: '1rem', cursor: 'pointer' }}>✕</button>
             </div>
+
+            {/* Backtest Config Controls */}
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', background: 'rgba(255,255,255,0.02)', padding: '8px 12px', borderRadius: 8, marginBottom: 14 }}>
+              <div style={{ fontSize: '0.7rem', color: '#94A3B8' }}>Rebalance:</div>
+              <select
+                value={holdingDays}
+                onChange={(e) => setHoldingDays(Number(e.target.value))}
+                style={{ background: '#060913', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, padding: '3px 8px', color: '#F1F5F9', fontSize: '0.72rem' }}
+              >
+                <option value="5">Weekly (5 Days)</option>
+                <option value="20">Monthly (20 Days)</option>
+                <option value="60">Quarterly (60 Days)</option>
+              </select>
+
+              <div style={{ fontSize: '0.7rem', color: '#94A3B8', marginLeft: 8 }}>STT / Slippage:</div>
+              <select
+                value={sttRate}
+                onChange={(e) => setSttRate(Number(e.target.value))}
+                style={{ background: '#060913', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, padding: '3px 8px', color: '#F1F5F9', fontSize: '0.72rem' }}
+              >
+                <option value="0.0005">0.05% Low Friction</option>
+                <option value="0.001">0.10% Standard NSE</option>
+                <option value="0.002">0.20% Conservative</option>
+              </select>
+
+              <button
+                onClick={handleRunBacktest}
+                disabled={backtestLoading}
+                style={{
+                  marginLeft: 'auto', padding: '4px 12px', borderRadius: 5, background: '#6366F1',
+                  color: '#FFF', border: 'none', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
+                }}
+              >
+                Re-simulate
+              </button>
+            </div>
+
             {backtestLoading ? (
-              <div style={{ textAlign: 'center', padding: '40px 0', color: '#818CF8' }}>
+              <div style={{ textAlign: 'center', padding: '50px 0', color: '#818CF8' }}>
                 <RefreshCw size={24} className="spin" style={{ margin: '0 auto 12px' }} />
-                <div style={{ fontSize: '0.8rem' }}>Simulating historical screen rebalance against NIFTY 50...</div>
+                <div style={{ fontSize: '0.82rem' }}>Fetching historical price bars & rebalancing against NIFTY 50...</div>
               </div>
             ) : backtestResults ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-                  <div style={{ background: 'rgba(16,185,129,0.1)', padding: 8, borderRadius: 6 }}><div style={{ fontSize: '0.62rem', color: '#6B7280' }}>STRATEGY CAGR</div><div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#10B981' }}>{backtestResults.strategy_cagr_pct}%</div></div>
-                  <div style={{ background: 'rgba(255,255,255,0.03)', padding: 8, borderRadius: 6 }}><div style={{ fontSize: '0.62rem', color: '#6B7280' }}>NIFTY 50 CAGR</div><div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#94A3B8' }}>{backtestResults.benchmark_cagr_pct}%</div></div>
-                  <div style={{ background: 'rgba(99,102,241,0.1)', padding: 8, borderRadius: 6 }}><div style={{ fontSize: '0.62rem', color: '#6B7280' }}>ALPHA GENERATION</div><div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#818CF8' }}>+{backtestResults.alpha_pct}%</div></div>
-                  <div style={{ background: 'rgba(244,63,94,0.1)', padding: 8, borderRadius: 6 }}><div style={{ fontSize: '0.62rem', color: '#6B7280' }}>MAX DRAWDOWN</div><div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#F43F5E' }}>{backtestResults.max_drawdown_pct}%</div></div>
+                  <div style={{ background: 'rgba(16,185,129,0.1)', padding: 8, borderRadius: 6 }}>
+                    <div style={{ fontSize: '0.62rem', color: '#6B7280' }}>STRATEGY CAGR</div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#10B981' }}>{backtestResults.strategy_cagr_pct}%</div>
+                  </div>
+                  <div style={{ background: 'rgba(255,255,255,0.03)', padding: 8, borderRadius: 6 }}>
+                    <div style={{ fontSize: '0.62rem', color: '#6B7280' }}>NIFTY 50 CAGR</div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#94A3B8' }}>{backtestResults.benchmark_cagr_pct}%</div>
+                  </div>
+                  <div style={{ background: 'rgba(99,102,241,0.1)', padding: 8, borderRadius: 6 }}>
+                    <div style={{ fontSize: '0.62rem', color: '#6B7280' }}>ALPHA GENERATION</div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#818CF8' }}>+{backtestResults.alpha_pct}%</div>
+                  </div>
+                  <div style={{ background: 'rgba(244,63,94,0.1)', padding: 8, borderRadius: 6 }}>
+                    <div style={{ fontSize: '0.62rem', color: '#6B7280' }}>MAX DRAWDOWN</div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#F43F5E' }}>{backtestResults.max_drawdown_pct}%</div>
+                  </div>
                 </div>
-                <div style={{ height: 220, width: '100%', background: '#060913', borderRadius: 8, padding: 8 }}>
+
+                <div style={{ height: 230, width: '100%', background: '#060913', borderRadius: 8, padding: 8 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={backtestResults.equity_curve || []}>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
                       <XAxis dataKey="date" stroke="#4B5563" fontSize={9} />
                       <YAxis stroke="#4B5563" fontSize={9} domain={['auto', 'auto']} />
                       <Tooltip contentStyle={{ background: '#0F172A', borderColor: 'rgba(99,102,241,0.3)', color: '#F0F0FF', fontSize: '0.72rem' }} />
-                      <Line type="monotone" dataKey="strategy_value" stroke="#10B981" strokeWidth={2} dot={false} name="Strategy" />
+                      <Line type="monotone" dataKey="strategy_value" stroke="#10B981" strokeWidth={2} dot={false} name="Strategy Basket" />
                       <Line type="monotone" dataKey="benchmark_value" stroke="#6B7280" strokeWidth={1.5} dot={false} name="NIFTY 50" />
                     </LineChart>
                   </ResponsiveContainer>
@@ -830,6 +800,7 @@ export default function AdvancedScreener() {
         </div>
       )}
 
+      {/* ── SAVE CUSTOM SCREEN MODAL ── */}
       {showSaveModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(4, 5, 14, 0.85)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 }}>
           <div style={{ background: '#0C1022', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 12, width: '100%', maxWidth: 380, padding: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>

@@ -187,13 +187,15 @@ async def lifespan(app: FastAPI):
     alert_task = asyncio.create_task(run_alert_scheduler_loop())
     prefetch_task = asyncio.create_task(prefetch_all_tickers())
     keepalive_task = asyncio.create_task(run_session_keepalive_loop())
+    from backend.research.screener_pipeline import run_screener_refresh_loop
+    screener_refresh_task = asyncio.create_task(run_screener_refresh_loop())
 
     try:
         yield
     finally:
-        for task in (price_task, alert_task, prefetch_task, keepalive_task):
+        for task in (price_task, alert_task, prefetch_task, keepalive_task, screener_refresh_task):
             task.cancel()
-        for task in (price_task, alert_task, prefetch_task, keepalive_task):
+        for task in (price_task, alert_task, prefetch_task, keepalive_task, screener_refresh_task):
             with suppress(asyncio.CancelledError):
                 await task
 

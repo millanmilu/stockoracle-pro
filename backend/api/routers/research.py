@@ -3,7 +3,7 @@ StockOracle Pro — Research, Fundamentals, Options, Screener 2.0 & Corporate Ac
 """
 import logging
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, HTTPException, Query, Request, Security
+from fastapi import APIRouter, HTTPException, Query, Request, Security, BackgroundTasks
 from pydantic import BaseModel, Field
 
 from backend.shared.security import verify_api_key, get_current_user_id
@@ -353,6 +353,14 @@ def execute_screener_query_endpoint(req: ScreenerQueryRequest):
         "count": sql_res["count"],
         "results": sql_res["results"]
     }
+
+
+@router.post("/screener/refresh")
+def trigger_screener_metrics_refresh(background_tasks: BackgroundTasks):
+    """Triggers background recalculation of screener technical indicators from fresh OHLCV."""
+    from backend.research.screener_pipeline import refresh_screener_metrics_from_market
+    background_tasks.add_task(refresh_screener_metrics_from_market)
+    return {"status": "accepted", "message": "Screener metrics refresh scheduled in background."}
 
 
 @router.post("/screener/ai-parse")
