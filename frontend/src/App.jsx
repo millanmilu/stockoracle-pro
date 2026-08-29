@@ -67,7 +67,7 @@ export default function App() {
   const selectedSymbol = useStore(s => s.selectedSymbol);
   const theme = useStore(s => s.theme);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showKeymapModal, setShowKeymapModal] = useState(false);
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Menu, Zap, Sun, Moon, Maximize2, Minimize2, Search } from 'lucide-react';
+import { Menu, Zap, Sun, Moon, Maximize2, Minimize2, Search, Bookmark } from 'lucide-react';
 import useStore from '../store/useStore';
 import api from '../utils/api';
 
@@ -152,8 +152,8 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
         <button onClick={onOpenCommandPalette} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', padding: '4px 8px', borderRadius: 4, color: '#9CA3AF', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.7rem' }}>
           <Search size={12} /> ⌘K
         </button>
-        <button onClick={onToggleRight} style={{ background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer', display: 'flex' }}>
-          <Menu size={20} />
+        <button onClick={onToggleRight} title="Toggle Watchlist & AI Copilot" style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, padding: '4px 8px', color: '#818CF8', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.72rem', fontWeight: 700 }}>
+          <Bookmark size={13} /> Watchlist
         </button>
       </div>
     </div>
