@@ -370,8 +370,7 @@ def get_token_info(ticker: str) -> Optional[dict]:
 
 
 def search_nse_stocks(query: str, limit: int = 12) -> list[dict]:
-    """Search every locally stored NSE listing by ticker or company name."""
-    _load_scrip_master()
+    """Search every locally stored NSE listing by ticker or company name from SQLite."""
     return search_stock_universe(query, limit)
 
 

@@ -620,7 +620,7 @@ def save_stock_universe(records: list[dict]):
 
 
 def search_stock_universe(query: str, limit: int = 12) -> list[dict]:
-    """Returns ticker/name matches from the locally stored NSE symbol master."""
+    """Returns ticker/name matches from the locally stored NSE symbol master and screener universe."""
     text = query.strip().upper()
     if not text:
         return []
@@ -628,13 +628,23 @@ def search_stock_universe(query: str, limit: int = 12) -> list[dict]:
     with get_db_connection() as conn:
         rows = conn.execute(
             """
-            SELECT ticker, name, exchange
-            FROM stock_universe
-            WHERE ticker LIKE ? OR name LIKE ?
-            ORDER BY CASE WHEN ticker = ? THEN 0 WHEN ticker LIKE ? THEN 1 ELSE 2 END, ticker
+            SELECT DISTINCT ticker, name, exchange
+            FROM (
+                SELECT ticker, name, exchange FROM stock_universe WHERE ticker LIKE ? OR name LIKE ?
+                UNION
+                SELECT ticker, name, 'NSE' as exchange FROM screener_daily_metrics WHERE ticker LIKE ? OR name LIKE ?
+            )
+            ORDER BY 
+                CASE 
+                    WHEN ticker = ? THEN 0 
+                    WHEN ticker LIKE ? THEN 1 
+                    WHEN name LIKE ? THEN 2
+                    ELSE 3 
+                END, 
+                ticker ASC
             LIMIT ?
             """,
-            (like, like, text, f"{text}%", max(1, min(limit, 30))),
+            (like, like, like, like, text, f"{text}%", f"{text}%", max(1, min(limit, 30))),
         ).fetchall()
     return [dict(row) for row in rows]
 
