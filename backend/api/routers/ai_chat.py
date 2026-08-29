@@ -158,7 +158,7 @@ async def get_ai_trade_explain_endpoint(symbol: str):
 
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-1.5-flash")
         resp = model.generate_content(
             f"Explain this stock trade signal in 3 clear sentences for a trader:\n{prompt_context}\nInclude key technical drivers and one risk caveat."
         )

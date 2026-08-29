@@ -58,7 +58,7 @@ def convert_natural_language_to_screener_query(prompt_text: str) -> Dict[str, An
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
         system_instruction = """
 You are a financial quantitative query generator for StockOracle Pro.

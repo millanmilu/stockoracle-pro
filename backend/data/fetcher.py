@@ -549,7 +549,8 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
             YF_ALIAS_MAP = {
                 "HUL": "HINDUNILVR.NS",
                 "M&M": "M&M.NS",
-                "TATAMTRDVR": "TATAMOTORS.NS",
+                "TATAMTRDVR": "TATAMOTORS-DVR.NS",
+                "TATAMOTORS": "TATAMOTORS.NS",
                 "NIFTY50": "^NSEI",
                 "NIFTY": "^NSEI",
                 "NIFTY 50": "^NSEI",

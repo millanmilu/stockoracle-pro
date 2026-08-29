@@ -15,7 +15,7 @@ const INTERVALS = [
   { label: '1D',  value: '1d'  },
 ];
 
-const POPULAR_PANE_SYMBOLS = ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'TATAMOTORS', 'NIFTY50', 'BANKNIFTY'];
+const POPULAR_PANE_SYMBOLS = ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'HCLTECH', 'NIFTY50', 'BANKNIFTY'];
 
 // Helper to convert date string to lightweight-charts time format
 function toChartTime(dateStr, isIntraday) {

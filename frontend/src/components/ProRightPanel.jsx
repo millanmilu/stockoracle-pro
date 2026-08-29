@@ -3,7 +3,7 @@ import { X, Send, BrainCircuit, TrendingUp, TrendingDown } from 'lucide-react';
 import useStore from '../store/useStore';
 import api from '../utils/api';
 
-const DEFAULT_TICKERS = ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'AXISBANK', 'WIPRO', 'LT', 'TATAMOTORS'];
+const DEFAULT_TICKERS = ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'AXISBANK', 'WIPRO', 'LT', 'HCLTECH'];
 
 export default function ProRightPanel({ onClose }) {
   const selectedSymbol = useStore(s => s.selectedSymbol);

@@ -29,7 +29,7 @@ export function addBusinessDays(dateStr, days) {
   return d.toISOString().split('T')[0];
 }
 
-export const POPULAR_STOCKS = ['RELIANCE', 'TATAMOTORS', 'INFY', 'TCS', 'HDFCBANK', 'NIFTY50', 'BANKNIFTY'];
+export const POPULAR_STOCKS = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'WIPRO', 'NIFTY50', 'BANKNIFTY'];
 
 export const INTERVALS = [
   { label: '1m', value: '1m' },
