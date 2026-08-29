@@ -20,7 +20,7 @@ logger = logging.getLogger("StockOracle.Research.Pipeline")
 
 def compute_metrics_from_ohlcv(ticker: str, df: pd.DataFrame, meta: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
     """
-    Computes all standard screener indicators from 1-year daily OHLCV DataFrame.
+    Computes all standard screener indicators from 1-year daily OHLCV DataFrame and real-time LTP.
     """
     if df is None or df.empty or len(df) < 5:
         return None
@@ -33,12 +33,17 @@ def compute_metrics_from_ohlcv(ticker: str, df: pd.DataFrame, meta: Optional[Dic
     close_series = df["close"].astype(float)
     vol_series = df["volume"].astype(float) if "volume" in df.columns else pd.Series([100000] * len(df))
 
-    # Current close & previous close
-    curr_close = float(close_series.iloc[-1])
-    prev_close = float(close_series.iloc[-2]) if len(close_series) >= 2 else curr_close
-    change_1d = round(((curr_close - prev_close) / (prev_close + 1e-9)) * 100.0, 2)
+    # Real-time company info / LTP integration
+    company_info = fetch_company_info(ticker) or {}
+    live_price = float(company_info.get("price") or company_info.get("current_price") or close_series.iloc[-1])
+    live_change_pct = float(company_info.get("change_pct") or company_info.get("changePercent") or 0.0)
 
-    # 1-week, 1-month, 1-year changes
+    # Current close & previous close
+    curr_close = live_price if live_price > 0 else float(close_series.iloc[-1])
+    prev_close = float(close_series.iloc[-2]) if len(close_series) >= 2 else curr_close
+    change_1d = live_change_pct if live_change_pct != 0.0 else round(((curr_close - prev_close) / (prev_close + 1e-9)) * 100.0, 2)
+
+    # 1-week, 1-month, 1-year returns
     idx_1w = max(0, len(close_series) - 5)
     close_1w = float(close_series.iloc[idx_1w])
     change_1w = round(((curr_close - close_1w) / (close_1w + 1e-9)) * 100.0, 2)
@@ -51,8 +56,8 @@ def compute_metrics_from_ohlcv(ticker: str, df: pd.DataFrame, meta: Optional[Dic
     change_1y = round(((curr_close - close_1y) / (close_1y + 1e-9)) * 100.0, 2)
 
     # 52-week High / Low
-    high_52w = float(df["high"].max()) if "high" in df.columns else curr_close * 1.15
-    low_52w = float(df["low"].min()) if "low" in df.columns else curr_close * 0.85
+    high_52w = float(company_info.get("fifty_two_week_high") or (df["high"].max() if "high" in df.columns else curr_close * 1.15))
+    low_52w = float(company_info.get("fifty_two_week_low") or (df["low"].min() if "low" in df.columns else curr_close * 0.85))
     dist_high = round(((curr_close - high_52w) / (high_52w + 1e-9)) * 100.0, 2)
     dist_low = round(((curr_close - low_52w) / (low_52w + 1e-9)) * 100.0, 2)
 
@@ -109,7 +114,7 @@ def compute_metrics_from_ohlcv(ticker: str, df: pd.DataFrame, meta: Optional[Dic
 
     return {
         "ticker": ticker,
-        "name": meta.get("name", ticker),
+        "name": company_info.get("name") or company_info.get("companyName") or meta.get("name", ticker),
         "sector": meta.get("sector", "Diversified"),
         "industry": meta.get("industry", "General"),
         "market_cap_cr": market_cap_cr,
@@ -161,13 +166,19 @@ def refresh_screener_metrics_from_market() -> Dict[str, Any]:
                     upsert_screener_daily_metric(metrics)
                     updated_count += 1
             else:
-                # Fallback to seeder data
-                upsert_screener_daily_metric(item)
+                # Update with company info LTP if available
+                c_info = fetch_company_info(ticker)
+                if c_info and (c_info.get("price") or c_info.get("current_price")):
+                    item_copy = dict(item)
+                    item_copy["close_price"] = float(c_info.get("price") or c_info.get("current_price"))
+                    item_copy["change_1d_pct"] = float(c_info.get("change_pct") or c_info.get("changePercent") or item["change_1d_pct"])
+                    upsert_screener_daily_metric(item_copy)
+                else:
+                    upsert_screener_daily_metric(item)
                 updated_count += 1
         except Exception as exc:
             logger.warning("Metrics refresh failed for %s: %s", ticker, exc)
             errors.append(f"{ticker}: {str(exc)}")
-            # Keep existing or fallback
             upsert_screener_daily_metric(item)
 
     logger.info("Screener metrics refresh complete. %d/%d stocks updated.", updated_count, len(MASTER_NSE_UNIVERSE))
