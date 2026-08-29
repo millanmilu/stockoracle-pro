@@ -366,3 +366,42 @@ class UserScreen(Base):
     updated_at = Column(String(50), nullable=False)
 
 
+# ── Cache Entities ────────────────────────────────────────────────────────────
+
+class CompanyInfoCache(Base):
+    """Cached company profile and live metrics snapshot."""
+    __tablename__ = "company_info"
+
+    ticker = Column(String(20), primary_key=True, nullable=False)
+    data_json = Column(Text, nullable=False)
+    fetched_at = Column(String(50), nullable=False)
+
+
+class PredictionCache(Base):
+    """Cached 7-day AI forecast and prediction metrics."""
+    __tablename__ = "predictions"
+
+    ticker = Column(String(20), primary_key=True, nullable=False)
+    data_json = Column(Text, nullable=False)
+    fetched_at = Column(String(50), nullable=False)
+
+
+class ScreenerResultCache(Base):
+    """Cached screener scans output."""
+    __tablename__ = "screener_results"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    data_json = Column(Text, nullable=False)
+    fetched_at = Column(String(50), nullable=False)
+
+
+class MonteCarloCache(Base):
+    """Cached Monte Carlo simulations output."""
+    __tablename__ = "monte_carlo"
+
+    ticker = Column(String(20), primary_key=True, nullable=False)
+    data_json = Column(Text, nullable=False)
+    fetched_at = Column(String(50), nullable=False)
+
+
+

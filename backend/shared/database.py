@@ -71,6 +71,7 @@ def init_database() -> None:
     """
     Initializes database tables from SQLAlchemy Base metadata.
     If PostgreSQL/TimescaleDB is active, initializes Timescale hypertables.
+    Auto-cleans legacy non-daily candle rows (AGENTS.md invariant).
     """
     logger.info("Initializing database with engine: %s (Postgres=%s)", engine.url.drivername, IS_POSTGRES)
     Base.metadata.create_all(bind=engine)
@@ -84,6 +85,13 @@ def init_database() -> None:
                 logger.info("✅ TimescaleDB extension verified/enabled.")
         except Exception as e:
             logger.warning("TimescaleDB extension setup notice: %s (Standard PostgreSQL active)", e)
+
+    # Invariant: Auto-cleansing on init to purge legacy non-daily candle strings
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("DELETE FROM historical_prices WHERE length(date) > 10;"))
+    except Exception as e:
+        logger.debug("Historical prices auto-cleansing check notice: %s", e)
 
     logger.info("✅ Database schema initialization complete.")
 

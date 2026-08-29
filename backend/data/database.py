@@ -15,18 +15,21 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stockoracle.
 DATE_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
-def get_db_connection() -> sqlite3.Connection:
-    """Returns a connection to the SQLite database with row factory and WAL mode enabled."""
-    conn = sqlite3.connect(DB_PATH, timeout=15.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    conn.execute("PRAGMA synchronous=NORMAL;")
+from backend.shared.database import engine, init_database, get_db_session
+
+
+def get_db_connection():
+    """Returns a connection from the unified SQLAlchemy engine pool with sqlite3.Row factory."""
+    conn = engine.raw_connection()
+    if hasattr(conn, "row_factory"):
+        conn.row_factory = sqlite3.Row
     return conn
 
 
 def init_db():
     """Initializes the database schema and creates all tables if they do not exist."""
-    logger.info("Initializing SQLite database at: %s", DB_PATH)
+    logger.info("Initializing database with unified SQLAlchemy engine: %s", DB_PATH)
+    init_database()
     with get_db_connection() as conn:
         cursor = conn.cursor()
 
