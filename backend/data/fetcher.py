@@ -563,6 +563,16 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
                 "USD / INR": "USDINR=X",
                 "BRENT CRUDE": "BZ=F",
             }
+            # Tickers permanently unavailable on Yahoo Finance (404 / delisted from YF global API).
+            # Skip them silently — return SQLite data or None.
+            YF_SKIP_LIST = {"TATAMOTORS"}
+            if ticker in YF_SKIP_LIST:
+                if db_df is not None and not db_df.empty:
+                    logger.warning("Returning existing SQLite data for %s (YF skip-list).", ticker)
+                    return db_df
+                logger.error("Failed to fetch history for %s (YF skip-list, no SQLite data).", ticker)
+                return None
+
             yf_ticker = YF_ALIAS_MAP.get(ticker, f"{ticker}.NS" if not ticker.endswith(".NS") else ticker)
             yf_period = "1y" if period.upper() in ["1Y", "370D", "200D", "6M"] else ("5y" if period.upper() == "5Y" else "6mo")
             yf_data = yf.download(yf_ticker, period=yf_period, interval="1d", progress=False, auto_adjust=True)
