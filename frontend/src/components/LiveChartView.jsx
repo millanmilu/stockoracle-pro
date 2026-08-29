@@ -18,7 +18,7 @@ import ChartSettingsModal from './ChartSettingsModal';
 import AIPatternRecognition from './chart-tools/AIPatternRecognition';
 import TrustBadge from './TrustBadge';
 import { parseNum, toChartTime, addBusinessDays, POPULAR_STOCKS, INTERVALS, SIG, CHART_OPTIONS, CANDLE_STYLE } from '../utils/chartHelpers';
-import { calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateMACD, calculateALMA, calculateHeikinAshi, calculateKeyLevels, detectPatterns } from '../utils/chartIndicators';
+import { calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateMACD, calculateALMA, calculateKeyLevels, detectPatterns } from '../utils/chartIndicators';
 import SymbolSearchModal from './chart-tools/SymbolSearchModal';
 import { playAlertChime } from '../utils/soundChime';
 
@@ -147,10 +147,6 @@ export default function LiveChartView() {
   const [isSplitView, setIsSplitView] = useState(false);
   const [compareSymbol, setCompareSymbol] = useState('NIFTY50');
   const [rawHistoryCompare, setRawHistoryCompare] = useState(null);
-
-  // Chart Styles ('candle' | 'heikin_ashi' | 'area' | 'line')
-  const [chartType, setChartType] = useState('candle');
-  const [showChartTypeDropdown, setShowChartTypeDropdown] = useState(false);
 
   // Indicator Toggles & TradingView Modals
   const [showIndicatorsModal, setShowIndicatorsModal] = useState(false);
@@ -376,13 +372,9 @@ export default function LiveChartView() {
 
       // Pro Feature Alt Hotkeys
       if (e.altKey) {
-        if (e.key.toLowerCase() === 's') { e.preventDefault(); setShowSMC(p => !p); }
-        else if (e.key.toLowerCase() === 'o') { e.preventDefault(); setShowOptionsOI(p => !p); }
-        else if (e.key.toLowerCase() === 'v') { e.preventDefault(); setShowVPVR(p => !p); }
-        else if (e.key.toLowerCase() === 'r') { e.preventDefault(); setIsReplayMode(p => !p); setIsReplayPlaying(false); }
+        if (e.key.toLowerCase() === 'r') { e.preventDefault(); setIsReplayMode(p => !p); setIsReplayPlaying(false); }
         else if (e.key.toLowerCase() === 'a') { e.preventDefault(); setShowAlertModal(true); }
         else if (e.key.toLowerCase() === 'l') { e.preventDefault(); toggleLogScale(); }
-        else if (e.key.toLowerCase() === 'k') { e.preventDefault(); setChartType(p => p === 'candle' ? 'heikin_ashi' : 'candle'); }
       }
     };
     window.addEventListener('keydown', handleChartKeys);
@@ -602,6 +594,21 @@ export default function LiveChartView() {
       backtestEquityRef.current = null;
     };
   }, []);
+
+  /* ── Auto Resize & Re-fit on Engine Switch ────────────────── */
+  useEffect(() => {
+    if (chartEngine === 'stockoracle' && chartRef.current && containerRef.current) {
+      const timer = setTimeout(() => {
+        try {
+          const w = containerRef.current.clientWidth || 800;
+          const h = containerRef.current.clientHeight || 600;
+          chartRef.current.applyOptions({ width: w, height: h });
+          chartRef.current.timeScale().fitContent();
+        } catch (_) {}
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [chartEngine]);
 
   /* ── Backtest Fetch + Chart Markers ──────────────────────────── */
 
@@ -944,10 +951,7 @@ export default function LiveChartView() {
       : dedupedCandles;
 
     try { 
-      const displayCandles = chartType === 'heikin_ashi' 
-        ? calculateHeikinAshi(activeCandles) 
-        : activeCandles;
-      candleRef.current.setData(displayCandles); 
+      candleRef.current.setData(activeCandles); 
       if (!isReplayMode) {
         chartRef.current?.timeScale().fitContent();
       }
@@ -1705,57 +1709,19 @@ export default function LiveChartView() {
             ))}
           </div>
 
-          {/* Chart Style Switcher Dropdown */}
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={() => setShowChartTypeDropdown(!showChartTypeDropdown)}
-              title="Chart Style: Candles, Heikin-Ashi"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 4,
-                padding: '3px 8px', borderRadius: 4,
-                border: '1px solid rgba(255,255,255,0.08)',
-                background: chartType === 'heikin_ashi' ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.04)',
-                color: chartType === 'heikin_ashi' ? '#818CF8' : '#E2E8F0',
-                fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
-              }}
-            >
-              <span>{chartType === 'heikin_ashi' ? '📊 Heikin-Ashi' : '🕯️ Candles'}</span>
-              <span style={{ fontSize: '0.62rem', color: '#94A3B8' }}>▾</span>
-            </button>
-
-            {showChartTypeDropdown && (
-              <div
-                style={{
-                  position: 'absolute', top: 'calc(100% + 4px)', left: 0,
-                  backgroundColor: '#0F172A', border: '1px solid rgba(99, 102, 241, 0.35)',
-                  borderRadius: 6, padding: 4, zIndex: 100, minWidth: 140,
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.8)'
-                }}
-              >
-                {[
-                  { id: 'candle', label: '🕯️ Candles (Standard)' },
-                  { id: 'heikin_ashi', label: '📊 Heikin-Ashi (Trend)' },
-                ].map(ct => (
-                  <div
-                    key={ct.id}
-                    onClick={() => {
-                      setChartType(ct.id);
-                      setShowChartTypeDropdown(false);
-                      toast.success(`Chart style: ${ct.label}`);
-                    }}
-                    style={{
-                      padding: '5px 8px', borderRadius: 4, fontSize: '0.72rem',
-                      cursor: 'pointer',
-                      backgroundColor: chartType === ct.id ? 'rgba(99,102,241,0.25)' : 'transparent',
-                      color: chartType === ct.id ? '#818CF8' : '#CBD5E1',
-                      fontWeight: chartType === ct.id ? 700 : 500,
-                    }}
-                  >
-                    {ct.label}
-                  </div>
-                ))}
-              </div>
-            )}
+          {/* Chart Style: Pure Candlestick */}
+          <div
+            title="Chart Style: Standard Japanese Candlesticks"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '3px 8px', borderRadius: 4,
+              border: '1px solid rgba(255,255,255,0.08)',
+              background: 'rgba(255,255,255,0.04)',
+              color: '#818CF8',
+              fontSize: '0.72rem', fontWeight: 700, userSelect: 'none'
+            }}
+          >
+            <span>🕯️ Candlestick</span>
           </div>
         </div>
 
@@ -2069,233 +2035,201 @@ export default function LiveChartView() {
         <div style={{ flex: 1, minHeight: 0, height: '100%', width: '100%', overflow: 'hidden' }}>
           <MultiChartGrid layout={chartLayout} onLayoutChange={setChartLayout} />
         </div>
-      ) : chartEngine === 'tradingview' && !isSplitView ? (
-        <div style={{
-          flex: 1, minHeight: 0, height: '100%', width: '100%',
-          position: 'relative', overflow: 'hidden',
-          borderRadius: 8, border: '1px solid rgba(99,102,241,0.2)',
-          background: '#070A14'
-        }}>
-          <TradingViewAdvancedChart
-            symbol={selectedSymbol}
-            interval={interval}
-            onOpenSettings={() => setShowChartSettingsModal(true)}
-          />
-        </div>
       ) : (
-      <div style={{ flex: 1, minHeight: 0, height: '100%', display:'grid', gridTemplateColumns: isSplitView ? '1fr 1fr' : '1fr', gap: 6, overflow: 'hidden' }}>
-        
-        {/* Chart 1 Container with TradingView Left Drawing Sidebar */}
-        <div style={{
-          background:'rgba(255,255,255,0.015)',
-          border:'1px solid rgba(99,102,241,0.12)',
-          borderRadius: 8, overflow:'hidden',
-          position:'relative',
-          display: 'flex',
-          height: '100%',
-          flex: 1,
-          minHeight: 0,
-        }}>
-
-          {/* ── TradingView Style Vertical Left Drawing Sidebar ── */}
-          <DrawingTools
-            chartRef={chartRef}
-            candleRef={candleRef}
-            candles={rawHistory || []}
-            symbol={selectedSymbol}
-            interval={interval}
-            chartReady={chartReady}
-            onOpenSettings={() => setShowChartSettingsModal(true)}
-          />
-
-          {/* ── Center Chart Canvas ── */}
-          <div style={{ flex: 1, position: 'relative', overflow: 'hidden', height: '100%' }}>
-            {/* ── TradingView Style On-Chart Active Indicators Legend & HUD ── */}
-            <div style={{
-              position: 'absolute',
-              top: 10,
-              left: 12,
-              zIndex: 20,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              pointerEvents: 'none',
-              userSelect: 'none',
-            }}>
-              {/* Ultra-Fast Live Hover OHLCV HUD (Direct 0ms DOM Ref) */}
-              <div
-                ref={hudRef}
-                style={{
-                  display: 'none',
-                  alignItems: 'center',
-                  gap: 8,
-                  fontSize: 11,
-                  background: 'rgba(7, 10, 20, 0.92)',
-                  padding: '3px 10px',
-                  borderRadius: 4,
-                  backdropFilter: 'blur(6px)',
-                  border: '1px solid rgba(99,102,241,0.3)',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
-                  fontFamily: 'JetBrains Mono, monospace',
-                  pointerEvents: 'none',
-                }}
-              />
-            </div>
-
-            {loading && (
-              <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(9,12,24,0.75)', zIndex:10 }}>
-                <div style={{ width:38, height:38, borderRadius:'50%', border:'3px solid rgba(168,85,247,0.15)', borderTopColor:'#A855F7', animation:'spin 0.75s linear infinite' }} />
-                <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-              </div>
-            )}
-
-            <div ref={containerRef} style={{ width:'100%', height:'100%' }} />
-          </div>
+        <div style={{ flex: 1, minHeight: 0, height: '100%', width: '100%', position: 'relative', overflow: 'hidden' }}>
           
-          {/* ── Right Docked Pro Indicator Panel (Volume Profile, Order Flow, AI Patterns, MTF, Backtest) ── */}
-          {showAdvancedPanel && (
+          {/* 1. TradingView Full Heavy Engine Container */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: chartEngine === 'tradingview' && !isSplitView ? 'block' : 'none',
+            borderRadius: 8, border: '1px solid rgba(99,102,241,0.2)',
+            background: '#070A14',
+            overflow: 'hidden',
+            zIndex: chartEngine === 'tradingview' && !isSplitView ? 2 : 0,
+          }}>
+            <TradingViewAdvancedChart
+              symbol={selectedSymbol}
+              interval={interval}
+              onOpenSettings={() => setShowChartSettingsModal(true)}
+            />
+          </div>
+
+          {/* 2. StockOracle AI Engine (Lightweight Chart + Drawing Tools) */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            display: chartEngine === 'stockoracle' || isSplitView ? 'grid' : 'none',
+            gridTemplateColumns: isSplitView ? '1fr 1fr' : '1fr',
+            gap: 6, overflow: 'hidden',
+            zIndex: chartEngine === 'stockoracle' || isSplitView ? 2 : 0,
+          }}>
+            {/* Chart 1 Container with TradingView Left Drawing Sidebar */}
             <div style={{
-              width: 320,
-              height: '100%',
-              background: 'rgba(9,12,24,0.98)',
-              borderLeft: '1px solid rgba(168,85,247,0.2)',
-              zIndex: 35,
-              overflow: 'hidden',
+              background:'rgba(255,255,255,0.015)',
+              border:'1px solid rgba(99,102,241,0.12)',
+              borderRadius: 8, overflow:'hidden',
+              position:'relative',
               display: 'flex',
-              flexDirection: 'column',
-              boxShadow: '-8px 0 24px rgba(0,0,0,0.5)',
-              flexShrink: 0,
+              height: '100%',
+              flex: 1,
+              minHeight: 0,
             }}>
-              {/* Panel Header */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '10px 12px',
-                borderBottom: '1px solid rgba(168,85,247,0.2)',
-                background: 'rgba(168,85,247,0.05)',
-              }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#A855F7', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Activity size={13} />
-                  {advancedPanelTab === 'volume' ? 'VOLUME PROFILE (VPVR)' :
-                   advancedPanelTab === 'order' ? 'ORDER FLOW DELTA' :
-                   advancedPanelTab === 'patterns' ? 'AI PATTERN SCANNER' :
-                   advancedPanelTab === 'mtf' ? 'MTF CORRELATION' :
-                   advancedPanelTab === 'backtest' ? 'STRATEGY BACKTEST' : 'INDICATOR PANEL'}
+              {/* ── TradingView Style Vertical Left Drawing Sidebar ── */}
+              <DrawingTools
+                chartRef={chartRef}
+                candleRef={candleRef}
+                candles={rawHistory || []}
+                symbol={selectedSymbol}
+                interval={interval}
+                chartReady={chartReady}
+                onOpenSettings={() => setShowChartSettingsModal(true)}
+              />
+
+              {/* ── Center Chart Canvas ── */}
+              <div style={{ flex: 1, position: 'relative', overflow: 'hidden', height: '100%' }}>
+                {/* ── TradingView Style On-Chart Active Indicators Legend & HUD ── */}
+                <div style={{
+                  position: 'absolute',
+                  top: 10,
+                  left: 12,
+                  zIndex: 20,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 4,
+                  pointerEvents: 'none',
+                  userSelect: 'none',
+                }}>
+                  {/* Ultra-Fast Live Hover OHLCV HUD (Direct 0ms DOM Ref) */}
+                  <div
+                    ref={hudRef}
+                    style={{
+                      display: 'none',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: 11,
+                      background: 'rgba(7, 10, 20, 0.92)',
+                      padding: '3px 10px',
+                      borderRadius: 4,
+                      backdropFilter: 'blur(6px)',
+                      border: '1px solid rgba(99,102,241,0.3)',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
+                      fontFamily: 'JetBrains Mono, monospace',
+                      pointerEvents: 'none',
+                    }}
+                  />
                 </div>
-                <button
-                  onClick={() => setShowAdvancedPanel(false)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: '#6B7280',
-                    cursor: 'pointer',
-                    padding: 4,
-                    display: 'flex',
-                    alignItems: 'center',
-                  }}
-                >
-                  <X size={14} />
-                </button>
+
+                {loading && (
+                  <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(9,12,24,0.75)', zIndex:10 }}>
+                    <div style={{ width:38, height:38, borderRadius:'50%', border:'3px solid rgba(168,85,247,0.15)', borderTopColor:'#A855F7', animation:'spin 0.75s linear infinite' }} />
+                    <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+                  </div>
+                )}
+
+                <div ref={containerRef} style={{ width:'100%', height:'100%' }} />
               </div>
               
-              {/* Panel Content */}
+              {/* ── Right Docked Pro Indicator Panel (AI Patterns, Backtest) ── */}
+              {showAdvancedPanel && (
+                <div style={{
+                  width: 320,
+                  height: '100%',
+                  background: 'rgba(9,12,24,0.98)',
+                  borderLeft: '1px solid rgba(168,85,247,0.2)',
+                  zIndex: 35,
+                  overflow: 'hidden',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  boxShadow: '-8px 0 24px rgba(0,0,0,0.5)',
+                  flexShrink: 0,
+                }}>
+                  {/* Panel Header */}
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '10px 12px',
+                    borderBottom: '1px solid rgba(168,85,247,0.2)',
+                    background: 'rgba(168,85,247,0.05)',
+                  }}>
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#A855F7', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Activity size={13} />
+                      {advancedPanelTab === 'patterns' ? 'AI PATTERN SCANNER' :
+                       advancedPanelTab === 'backtest' ? 'STRATEGY BACKTEST' : 'INDICATOR PANEL'}
+                    </div>
+                    <button
+                      onClick={() => setShowAdvancedPanel(false)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#6B7280',
+                        cursor: 'pointer',
+                        padding: 4,
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                  
+                  {/* Panel Content */}
+                  <div style={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    padding: 10,
+                  }}>
+                    {advancedPanelTab === 'patterns' && rawHistory && (
+                      <AIPatternRecognition 
+                        candles={rawHistory.map(d => ({
+                          time: d.date,
+                          open: Number(d.open),
+                          high: Number(d.high),
+                          low: Number(d.low),
+                          close: Number(d.close),
+                        }))}
+                        symbol={selectedSymbol}
+                      />
+                    )}
+
+                    {advancedPanelTab === 'backtest' && (
+                      <BacktestOverlayPanel
+                        symbol={selectedSymbol}
+                        showBacktest={showBacktest}
+                        setShowBacktest={setShowBacktest}
+                        backtestData={backtestData}
+                        backtestLoading={backtestLoading}
+                      />
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Comparison Chart 2 Container (Split View Only) */}
+            {isSplitView && (
               <div style={{
-                flex: 1,
-                overflowY: 'auto',
-                padding: 10,
+                background:'rgba(255,255,255,0.015)',
+                border:'1px solid rgba(59,130,246,0.2)',
+                borderRadius:18, overflow:'hidden',
+                position:'relative',
               }}>
-                {advancedPanelTab === 'volume' && rawHistory && (
-                  <VolumeProfile 
-                    candles={rawHistory.map(d => ({
-                      time: d.date,
-                      open: Number(d.open),
-                      high: Number(d.high),
-                      low: Number(d.low),
-                      close: Number(d.close),
-                      volume: Number(d.volume) || 0,
-                    }))}
-                    height={280}
-                  />
-                )}
-                
-                {advancedPanelTab === 'order' && rawHistory && (
-                  <OrderFlow 
-                    candles={rawHistory.map(d => ({
-                      time: d.date,
-                      open: Number(d.open),
-                      high: Number(d.high),
-                      low: Number(d.low),
-                      close: Number(d.close),
-                      volume: Number(d.volume) || 0,
-                    }))}
-                  />
-                )}
-                
-                {advancedPanelTab === 'patterns' && rawHistory && (
-                  <AIPatternRecognition 
-                    candles={rawHistory.map(d => ({
-                      time: d.date,
-                      open: Number(d.open),
-                      high: Number(d.high),
-                      low: Number(d.low),
-                      close: Number(d.close),
-                    }))}
-                    symbol={selectedSymbol}
-                  />
-                )}
-                
-                {advancedPanelTab === 'mtf' && rawHistory && (
-                  <MultiTimeframeCorrelation 
-                    candles={rawHistory.map(d => ({
-                      time: d.date,
-                      open: Number(d.open),
-                      high: Number(d.high),
-                      low: Number(d.low),
-                      close: Number(d.close),
-                    }))}
-                    symbol={selectedSymbol}
-                  />
-                )}
-
-                {advancedPanelTab === 'backtest' && (
-                  <BacktestOverlayPanel
-                    symbol={selectedSymbol}
-                    showBacktest={showBacktest}
-                    setShowBacktest={setShowBacktest}
-                    backtestData={backtestData}
-                    backtestLoading={backtestLoading}
-                  />
-                )}
+                <div style={{ display:'flex', gap:8, padding:'10px 16px', fontSize:'0.75rem', color:'#60A5FA', fontWeight:700, alignItems:'center', borderBottom:'1px solid rgba(255,255,255,0.03)' }}>
+                  <span>COMPARISON CHART:</span>
+                  <select
+                    value={compareSymbol}
+                    onChange={e => setCompareSymbol(e.target.value)}
+                    style={{ background:'#090C18', color:'#60A5FA', border:'1px solid rgba(59,130,246,0.3)', borderRadius:6, padding:'2px 8px', fontSize:'0.75rem', outline:'none', fontWeight:700 }}
+                  >
+                    {POPULAR_STOCKS.map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+                <div ref={containerRef2} style={{ width:'100%', height:520 }} />
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* Chart 2 Container (Shown only when Split View is Active) */}
-        {isSplitView && (
-          <div style={{
-            background:'rgba(255,255,255,0.015)',
-            border:'1px solid rgba(59,130,246,0.2)',
-            borderRadius:18, overflow:'hidden',
-            position:'relative',
-          }}>
-            <div style={{ display:'flex', gap:8, padding:'10px 16px', fontSize:'0.75rem', color:'#60A5FA', fontWeight:700, alignItems:'center', borderBottom:'1px solid rgba(255,255,255,0.03)' }}>
-              <span>COMPARISON CHART:</span>
-              <select
-                value={compareSymbol}
-                onChange={e => setCompareSymbol(e.target.value)}
-                style={{ background:'#090C18', color:'#60A5FA', border:'1px solid rgba(59,130,246,0.3)', borderRadius:6, padding:'2px 8px', fontSize:'0.75rem', outline:'none', fontWeight:700 }}
-              >
-                {POPULAR_STOCKS.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
-            <div ref={containerRef2} style={{ width:'100%', height:520 }} />
+            )}
           </div>
-        )}
-      </div>
+        </div>
       )}
 
       {/* ── Interactive Canvas Price Alert & Sound Chime Manager Modal ── */}
