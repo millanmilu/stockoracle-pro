@@ -4,7 +4,7 @@ Compatible with PostgreSQL / TimescaleDB and SQLite.
 """
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, String, Integer, Float, BigInteger, Text, DateTime,
+    Column, String, Integer, Float, BigInteger, Text, DateTime, Boolean,
     Index, UniqueConstraint, PrimaryKeyConstraint, func
 )
 from sqlalchemy.orm import declarative_base
