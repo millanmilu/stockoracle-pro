@@ -565,7 +565,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
             }
             # Tickers permanently unavailable on Yahoo Finance (404 / delisted from YF global API).
             # Skip them silently — return SQLite data or None.
-            YF_SKIP_LIST = {"TATAMOTORS"}
+            YF_SKIP_LIST = {"TATAMOTORS", "ZOMATO"}
             if ticker in YF_SKIP_LIST:
                 if db_df is not None and not db_df.empty:
                     logger.warning("Returning existing SQLite data for %s (YF skip-list).", ticker)
