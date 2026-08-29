@@ -9,7 +9,6 @@ import ProTopBar from './components/ProTopBar';
 import ProSidebar from './components/ProSidebar';
 import ProRightPanel from './components/ProRightPanel';
 
-import BloombergTickerTape from './components/terminal/BloombergTickerTape';
 import KeymapModal from './components/KeymapModal';
 import CommandPalette from './components/terminal/CommandPalette';
 
@@ -143,10 +142,6 @@ export default function App() {
           onToggleRight={() => setRightPanelOpen(r => !r)}
           onOpenCommandPalette={() => setShowCommandPalette(true)}
         />
-      </ErrorBoundary>
-      
-      <ErrorBoundary>
-        <BloombergTickerTape />
       </ErrorBoundary>
       
       {trainingStatus && <TrainingBar trainingStatus={trainingStatus} selectedSymbol={selectedSymbol} />}
