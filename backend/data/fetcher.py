@@ -335,13 +335,23 @@ def _load_scrip_master(force: bool = False):
         _scrip_map_failed = True
 
 
+ALIAS_TOKEN_MAP = {
+    "TATAMOTORS": {"symbol": "TMPV-EQ", "token": "3456", "exch_seg": "NSE", "name": "Tata Motors Ltd"},
+    "TATAMTRDVR": {"symbol": "TMPV-EQ", "token": "3456", "exch_seg": "NSE", "name": "Tata Motors Ltd"},
+    "TMPV": {"symbol": "TMPV-EQ", "token": "3456", "exch_seg": "NSE", "name": "Tata Motors Ltd"},
+}
+
+
 def get_token_info(ticker: str) -> Optional[dict]:
     """
     Returns the ScripMaster record for a ticker (e.g. 'RELIANCE' or 'RELIANCE-EQ').
     Triggers a one-time ScripMaster download if needed.
     """
-    _load_scrip_master()
     t = ticker.upper().strip()
+    if t in ALIAS_TOKEN_MAP:
+        return ALIAS_TOKEN_MAP[t]
+
+    _load_scrip_master()
     key = t if t.endswith("-EQ") else f"{t}-EQ"
     info = _scrip_map.get(key) or _scrip_map.get(t) or _scrip_map.get(t.removesuffix("-EQ"))
     if not info:

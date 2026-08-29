@@ -1,19 +1,15 @@
-from backend.data.fetcher import ensure_session, smartApi, _call_api
+from backend.data.fetcher import fetch_stock_data, get_token_info
+from backend.data.database import clear_ticker_history
 
-ensure_session()
-param = {
-    "exchange": "NSE",
-    "symboltoken": "3456",
-    "interval": "ONE_DAY",
-    "fromdate": "2024-01-01 09:15",
-    "todate": "2026-08-29 15:30"
-}
-res = _call_api(smartApi.getCandleData, param)
-print("Angel API response status:", res.get("status") if res else None)
-if res and res.get("data"):
-    print(f"Total REAL Angel One candles for Tata Motors (Token 3456): {len(res['data'])}")
-    print("Latest 3 real candles:")
-    for c in res["data"][-3:]:
-        print(c)
-else:
-    print("Angel API error:", res)
+# Clear any old fake/synthetic history for TATAMOTORS
+clear_ticker_history("TATAMOTORS")
+
+info = get_token_info("TATAMOTORS")
+print("Resolved Token Info:", info)
+
+# Fetch fresh from Angel One
+df = fetch_stock_data("TATAMOTORS", period="1Y", interval="1d")
+print("Data Source:", df.attrs.get("data_source"))
+print("Candles Count:", len(df) if df is not None else 0)
+print("Latest 3 candles:")
+print(df.tail(3))
