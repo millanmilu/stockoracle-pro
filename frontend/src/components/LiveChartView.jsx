@@ -1285,16 +1285,17 @@ export default function LiveChartView() {
     });
   }, [livePrice, interval, isDaily, selectedSymbol]);
 
-  /* ── 4. Bar Replay Timer Playback Loop ────────────────────── */
+  /* ── 4. Bar Replay Auto-Play Loop ────────────────────────── */
   useEffect(() => {
     if (!isReplayMode || !isReplayPlaying || !rawHistory?.length) return;
-    const delay = Math.max(150, 1000 / replaySpeed);
+    const baseDelay = 700; // 700ms at 1x
+    const delay = Math.max(70, Math.round(baseDelay / replaySpeed));
     const intervalId = setInterval(() => {
       setReplayIndex(prev => {
         const next = (prev || 10) + 1;
         if (next >= rawHistory.length) {
           setIsReplayPlaying(false);
-          toast.success('Replay completed to latest candle');
+          toast.success('🎉 Replay completed to the latest candle!');
           return rawHistory.length;
         }
         return next;
@@ -1724,25 +1725,30 @@ export default function LiveChartView() {
             onClick={() => {
               const nextState = !isReplayMode;
               setIsReplayMode(nextState);
-              setIsReplayPlaying(false);
               if (nextState) {
-                setReplayIndex(Math.max(5, (rawHistory?.length || 100) - 50));
-                toast.success('⏪ Bar Replay Mode Started — Scrub or Play candles');
+                // Ensure AI / SMC Engine is active for canvas interactive playback
+                setChartEngine('stockoracle');
+                localStorage.setItem('stockoracle_chart_engine', 'stockoracle');
+                const startIdx = Math.max(5, (rawHistory?.length || 100) - 60);
+                setReplayIndex(startIdx);
+                setIsReplayPlaying(true);
+                toast.success('▶️ Auto-Play Bar Replay Mode Started!');
               } else {
+                setIsReplayPlaying(false);
                 toast.success('Exited Bar Replay Mode');
               }
             }}
-            title="Historical Bar Replay Simulator for Practice Trading"
+            title="Historical Bar Replay Simulator — Watch Candles Form Live"
             style={{
               display: 'flex', alignItems: 'center', gap: 4,
-              padding: '3px 8px', borderRadius: 4,
+              padding: '3px 9px', borderRadius: 4,
               border: isReplayMode ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
               background: isReplayMode ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.03)',
               color: isReplayMode ? '#818CF8' : '#CBD5E1',
               fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
             }}
           >
-            <RotateCcw size={12} style={{ color: '#818CF8' }} />
+            <RotateCcw size={12} style={{ color: '#818CF8' }} className={isReplayMode && isReplayPlaying ? 'broker-spin' : ''} />
             <span>Replay</span>
           </button>
 
@@ -1923,72 +1929,109 @@ export default function LiveChartView() {
         </div>
       </div>
 
-      {/* ── Floating Bar Replay Practice Control Bar ── */}
+      {/* ── Floating Bar Replay Auto-Play Control Bar ── */}
       {isReplayMode && (
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '5px 12px', background: 'rgba(15, 23, 42, 0.96)',
-          border: '1px solid #818CF8', borderRadius: 6,
-          boxShadow: '0 6px 20px rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)',
-          flexShrink: 0, gap: 10, zIndex: 40, flexWrap: 'wrap'
+          padding: '6px 14px', background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.95))',
+          border: '1px solid rgba(99, 102, 241, 0.4)', borderRadius: 8,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)',
+          flexShrink: 0, gap: 10, zIndex: 40, flexWrap: 'wrap',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <RotateCcw size={13} /> BAR REPLAY
+          {/* Left Title & Current Date/Bar Info */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 5 }}>
+              <RotateCcw size={14} className={isReplayPlaying ? 'broker-spin' : ''} />
+              <span>BAR REPLAY</span>
             </span>
-            <span style={{ fontSize: '0.68rem', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>
-              Bar {replayIndex || (rawHistory?.length || 0)} / {rawHistory?.length || 0}
-            </span>
+            <div style={{
+              fontSize: '0.7rem', color: '#CBD5E1', fontFamily: 'JetBrains Mono, monospace',
+              background: 'rgba(0,0,0,0.4)', padding: '2px 8px', borderRadius: 4,
+              border: '1px solid rgba(255,255,255,0.06)'
+            }}>
+              📅 {rawHistory && rawHistory[replayIndex - 1] ? (rawHistory[replayIndex - 1].date || rawHistory[replayIndex - 1].time) : 'Live'}
+              <span style={{ color: '#64748B', marginLeft: 6 }}>({replayIndex || 0}/{rawHistory?.length || 0} bars)</span>
+            </div>
           </div>
 
-          {/* Controls */}
+          {/* Center Playback Controls */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {/* Rewind to Start */}
             <button
               onClick={() => {
                 setIsReplayPlaying(false);
-                setReplayIndex(Math.max(5, (rawHistory?.length || 100) - 80));
+                setReplayIndex(5);
+                toast('Rewound to oldest candle');
               }}
-              title="Rewind 80 Bars"
-              style={{ padding: '3px 8px', borderRadius: 4, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.7rem', cursor: 'pointer' }}
+              title="Jump to oldest candle"
+              style={{ padding: '4px 8px', borderRadius: 5, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.72rem', cursor: 'pointer', fontWeight: 700 }}
             >
-              ⏮ Rewind
+              ⏮ Start
             </button>
 
+            {/* Step Back -10 */}
+            <button
+              onClick={() => {
+                setIsReplayPlaying(false);
+                setReplayIndex(prev => Math.max(5, (prev || 10) - 10));
+              }}
+              title="Jump back 10 bars"
+              style={{ padding: '4px 8px', borderRadius: 5, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.72rem', cursor: 'pointer', fontWeight: 700 }}
+            >
+              ⏪ -10
+            </button>
+
+            {/* Play / Pause Auto Play Button */}
             <button
               onClick={() => setIsReplayPlaying(!isReplayPlaying)}
               style={{
-                padding: '3px 12px', borderRadius: 4,
-                background: isReplayPlaying ? '#EF5350' : '#10B981',
-                color: '#FFF', border: 'none', fontWeight: 700, fontSize: '0.72rem',
-                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4
+                padding: '5px 16px', borderRadius: 6,
+                background: isReplayPlaying ? 'linear-gradient(135deg, #EF4444, #DC2626)' : 'linear-gradient(135deg, #10B981, #059669)',
+                color: '#FFF', border: 'none', fontWeight: 800, fontSize: '0.76rem',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+                boxShadow: isReplayPlaying ? '0 2px 10px rgba(239,68,68,0.4)' : '0 2px 10px rgba(168,85,247,0.4)',
+                transition: 'all 0.15s ease'
               }}
             >
-              {isReplayPlaying ? <Pause size={12} /> : <Play size={12} />}
-              {isReplayPlaying ? 'Pause' : 'Play'}
+              {isReplayPlaying ? <Pause size={14} /> : <Play size={14} />}
+              {isReplayPlaying ? 'PAUSE' : 'AUTO PLAY'}
             </button>
 
+            {/* Step Forward +1 */}
             <button
               onClick={() => {
                 setIsReplayPlaying(false);
                 setReplayIndex(prev => Math.min((rawHistory?.length || 100), (prev || 10) + 1));
               }}
               title="Step forward 1 bar"
-              style={{ padding: '3px 8px', borderRadius: 4, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.7rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3 }}
+              style={{ padding: '4px 9px', borderRadius: 5, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.72rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 700 }}
             >
-              <SkipForward size={12} /> Step
+              <SkipForward size={13} /> +1
             </button>
 
-            {/* Speed Selector */}
-            <div style={{ display: 'flex', gap: 2, background: 'rgba(255,255,255,0.05)', padding: 2, borderRadius: 4 }}>
-              {[1, 2, 5].map(spd => (
+            {/* Step Forward +10 */}
+            <button
+              onClick={() => {
+                setIsReplayPlaying(false);
+                setReplayIndex(prev => Math.min((rawHistory?.length || 100), (prev || 10) + 10));
+              }}
+              title="Jump forward 10 bars"
+              style={{ padding: '4px 8px', borderRadius: 5, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.72rem', cursor: 'pointer', fontWeight: 700 }}
+            >
+              ⏩ +10
+            </button>
+
+            {/* Speed Selector Pills */}
+            <div style={{ display: 'flex', gap: 2, background: 'rgba(0,0,0,0.4)', padding: '2px 4px', borderRadius: 5, border: '1px solid rgba(255,255,255,0.08)' }}>
+              {[0.5, 1, 2, 3, 5, 10].map(spd => (
                 <button
                   key={spd}
                   onClick={() => setReplaySpeed(spd)}
                   style={{
-                    padding: '2px 6px', borderRadius: 3, border: 'none',
+                    padding: '3px 6px', borderRadius: 3, border: 'none',
                     background: replaySpeed === spd ? '#6366F1' : 'transparent',
                     color: replaySpeed === spd ? '#FFF' : '#94A3B8',
-                    fontSize: '0.66rem', fontWeight: 700, cursor: 'pointer'
+                    fontSize: '0.68rem', fontWeight: 800, cursor: 'pointer'
                   }}
                 >
                   {spd}x
@@ -1996,26 +2039,33 @@ export default function LiveChartView() {
               ))}
             </div>
 
-            {/* Scrubber Slider */}
-            <input
-              type="range"
-              min="5"
-              max={rawHistory?.length || 100}
-              value={replayIndex || (rawHistory?.length || 100)}
-              onChange={(e) => {
-                setIsReplayPlaying(false);
-                setReplayIndex(Number(e.target.value));
-              }}
-              style={{ width: 130, cursor: 'pointer', accentColor: '#818CF8' }}
-            />
+            {/* Scrubber Timeline Slider */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4 }}>
+              <input
+                type="range"
+                min="5"
+                max={rawHistory?.length || 100}
+                value={replayIndex || (rawHistory?.length || 100)}
+                onChange={(e) => {
+                  setIsReplayPlaying(false);
+                  setReplayIndex(Number(e.target.value));
+                }}
+                style={{ width: 140, cursor: 'pointer', accentColor: '#818CF8' }}
+              />
+            </div>
           </div>
 
+          {/* Exit Button */}
           <button
             onClick={() => {
               setIsReplayMode(false);
               setIsReplayPlaying(false);
             }}
-            style={{ padding: '3px 8px', borderRadius: 4, background: 'rgba(239,83,80,0.15)', border: '1px solid rgba(239,83,80,0.3)', color: '#EF5350', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer' }}
+            style={{
+              padding: '4px 10px', borderRadius: 5,
+              background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
+              color: '#EF4444', fontSize: '0.72rem', fontWeight: 800, cursor: 'pointer'
+            }}
           >
             ✕ Exit Replay
           </button>
