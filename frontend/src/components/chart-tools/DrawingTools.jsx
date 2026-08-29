@@ -51,7 +51,7 @@ export default function DrawingTools({
   const [snapIndicator, setSnapIndicator] = useState(null); // { x, y, price, label }
 
   // Modifiers
-  const [stayInDrawMode, setStayInDrawMode] = useState(false);
+  const [stayInDrawMode, setStayInDrawMode] = useState(true);
   const [lockAllDrawings, setLockAllDrawings] = useState(false);
   const [hideAllDrawings, setHideAllDrawings] = useState(false);
 
@@ -743,6 +743,8 @@ export default function DrawingTools({
       {/* ── TradingView-Style Left Vertical Drawing Toolbar ── */}
       <div style={{
         width: 44,
+        height: '100%',
+        maxHeight: '100%',
         backgroundColor: '#0F131D',
         borderRight: '1px solid rgba(255, 255, 255, 0.08)',
         display: 'flex',
@@ -753,6 +755,10 @@ export default function DrawingTools({
         zIndex: 45,
         userSelect: 'none',
         flexShrink: 0,
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        scrollbarWidth: 'none',
+        overscrollBehavior: 'contain',
       }}>
         {/* 1. Crosshair (Select & Pan) */}
         <button
@@ -1089,7 +1095,7 @@ export default function DrawingTools({
       </div>
 
       {/* ── Selected Drawing Floating Context Action Toolbar ── */}
-      {selectedDrawing && (
+      {selectedDrawing && activeTool === 'crosshair' && (
         <div style={{
           position: 'absolute',
           top: 12,
