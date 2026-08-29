@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Settings, Wifi, WifiOff, CheckCircle, XCircle, Eye, EyeOff, 
   RefreshCw, Zap, Shield, AlertTriangle, Clock, Info, Check, 
@@ -40,8 +40,12 @@ const BROKERS = [
     subtitle: 'Kite Connect API',
     logo: '🪁',
     color: '#387ED1',
-    supported: false,
-    fields: [],
+    supported: true,
+    fields: [
+      { key: 'api_key',      label: 'API Key',       placeholder: 'e.g. abcd1234efgh5678', type: 'password', help: 'Kite Connect API Key from developer portal' },
+      { key: 'api_secret',   label: 'API Secret',    placeholder: 'e.g. 32-character secret', type: 'password', help: 'Kite Connect API Secret' },
+      { key: 'access_token', label: 'Access Token / Enctoken', placeholder: 'Daily Access Token or Enctoken', type: 'password', help: 'Session access token generated upon daily login' },
+    ],
   },
   {
     id: 'upstox',
@@ -49,8 +53,13 @@ const BROKERS = [
     subtitle: 'Upstox Pro v2',
     logo: '⚡',
     color: '#7C3AED',
-    supported: false,
-    fields: [],
+    supported: true,
+    fields: [
+      { key: 'api_key',      label: 'API Key (Client ID)', placeholder: 'Upstox App Client ID', type: 'password', help: 'Client ID from Upstox Developer Portal' },
+      { key: 'api_secret',   label: 'API Secret',    placeholder: 'Upstox App Secret Key', type: 'password', help: 'Secret Key from Upstox Developer Portal' },
+      { key: 'redirect_uri', label: 'Redirect URI',  placeholder: 'https://127.0.0.1:8000/api/broker/callback', type: 'text', help: 'OAuth Redirect URI' },
+      { key: 'access_token', label: 'Access Token',  placeholder: 'Daily Access Token', type: 'password', help: 'OAuth2 access token for data and orders' },
+    ],
   },
   {
     id: 'fyers',
@@ -58,8 +67,12 @@ const BROKERS = [
     subtitle: 'Fyers API v3',
     logo: '🔥',
     color: '#EAB308',
-    supported: false,
-    fields: [],
+    supported: true,
+    fields: [
+      { key: 'app_id',       label: 'App ID',        placeholder: 'e.g. XXXXXX-100', type: 'text', help: 'Fyers App ID from API Dashboard' },
+      { key: 'secret_key',   label: 'Secret Key',    placeholder: 'Fyers App Secret Key', type: 'password', help: 'Secret Key from Fyers API dashboard' },
+      { key: 'access_token', label: 'Access Token',  placeholder: 'Daily 2FA Auth Token', type: 'password', help: 'Access token generated after daily login' },
+    ],
   },
 ];
 
@@ -161,21 +174,41 @@ export default function BrokerSettingsView() {
   const broker = BROKERS.find(b => b.id === selectedBroker);
   const creds = configs[selectedBroker] || {};
 
-  /* Function to fetch live status from backend */
+  /* Function to fetch live status and saved accounts from backend DB */
   const fetchStatus = useCallback(async (showToast = false) => {
     setIsRefreshing(true);
     try {
-      const res = await fetch(`${API_BASE}/api/broker/status`);
-      if (res.ok) {
-        const data = await res.json();
+      const [resStatus, resAccounts] = await Promise.all([
+        fetch(`${API_BASE}/api/broker/status`),
+        fetch(`${API_BASE}/api/broker/accounts`),
+      ]);
+
+      if (resStatus.ok) {
+        const data = await resStatus.json();
         setLiveStatus(data);
         if (data.session_active) {
-          setStatuses(s => ({ ...s, angel_one: 'connected' }));
-        } else if (data.api_key_set) {
-          setStatuses(s => ({ ...s, angel_one: 'failed' }));
+          setStatuses(s => ({ ...s, [data.active_broker || 'angel_one']: 'connected' }));
         }
-        if (showToast) toast.success('Broker status updated.');
       }
+
+      if (resAccounts.ok) {
+        const accData = await resAccounts.json();
+        if (accData && accData.accounts) {
+          setConfigs(prev => {
+            const next = { ...prev };
+            Object.entries(accData.accounts).forEach(([bId, bVal]) => {
+              if (bVal.credentials && Object.keys(bVal.credentials).length > 0) {
+                next[bId] = { ...(next[bId] || {}), ...bVal.credentials };
+                if (bVal.is_active) {
+                  setStatuses(s => ({ ...s, [bId]: 'connected' }));
+                }
+              }
+            });
+            return next;
+          });
+        }
+      }
+      if (showToast) toast.success('Broker credentials synced with database.');
     } catch {
       if (showToast) toast.error('Could not reach backend API.');
     } finally {
@@ -203,12 +236,12 @@ export default function BrokerSettingsView() {
   const handleSave = () => {
     saveConfigs(configs);
     setStatuses(s => ({ ...s, [selectedBroker]: s[selectedBroker] || 'saved' }));
-    toast.success('Credentials saved in browser localStorage!');
+    toast.success('Credentials saved locally!');
   };
 
   const handleTest = async () => {
     const c = configs[selectedBroker] || {};
-    if (!c.api_key || !c.client_id || !c.password || !c.totp_secret) {
+    if (selectedBroker === 'angel_one' && (!c.api_key || !c.client_id || !c.password || !c.totp_secret)) {
       toast.error('Please fill in all 4 Angel One fields first.');
       return;
     }
@@ -218,7 +251,10 @@ export default function BrokerSettingsView() {
       const res = await fetch(`${API_BASE}/api/broker/test`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ broker: selectedBroker, angel_one: c }),
+        body: JSON.stringify({
+          broker: selectedBroker,
+          [selectedBroker]: c,
+        }),
       });
       const data = await res.json();
       setStatuses(s => ({ ...s, [selectedBroker]: data.success ? 'connected' : 'failed' }));
@@ -234,8 +270,8 @@ export default function BrokerSettingsView() {
 
   const handleApply = async () => {
     const c = configs[selectedBroker] || {};
-    if (!c.api_key || !c.client_id || !c.password || !c.totp_secret) {
-      toast.error('Please fill all fields and Test first.');
+    if (selectedBroker === 'angel_one' && (!c.api_key || !c.client_id || !c.password || !c.totp_secret)) {
+      toast.error('Please fill all Angel One fields first.');
       return;
     }
     setStatuses(s => ({ ...s, [selectedBroker]: 'applying' }));
@@ -245,7 +281,7 @@ export default function BrokerSettingsView() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           broker: selectedBroker,
-          angel_one: c,
+          [selectedBroker]: c,
           persist_to_disk: persistToDisk,
         }),
       });
@@ -253,7 +289,8 @@ export default function BrokerSettingsView() {
       setStatuses(s => ({ ...s, [selectedBroker]: data.success ? 'connected' : 'failed' }));
       setMessages(m => ({ ...m, [selectedBroker]: data.message }));
       if (data.success) {
-        toast.success(data.message || 'Live feed active!');
+        saveConfigs(configs);
+        toast.success(data.message || 'Saved permanently in database & live feed active!');
         fetchStatus();
       } else {
         toast.error(data.message);

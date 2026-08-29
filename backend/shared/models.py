@@ -404,4 +404,19 @@ class MonteCarloCache(Base):
     fetched_at = Column(String(50), nullable=False)
 
 
+class BrokerAccount(Base):
+    """Multi-broker credentials and persistent active session tokens."""
+    __tablename__ = "broker_accounts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    broker = Column(String(32), nullable=False, unique=True, index=True)  # "angel_one", "zerodha", "upstox", "fyers"
+    is_active = Column(Boolean, default=False, nullable=False)
+    credentials_json = Column(Text, nullable=False)  # Encrypted/JSON API keys and credentials
+    session_data_json = Column(Text, nullable=True)  # Access tokens & expiry info
+    last_verified_at = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+
 

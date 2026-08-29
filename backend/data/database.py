@@ -19,10 +19,11 @@ from backend.shared.database import engine, init_database, get_db_session
 
 
 def get_db_connection():
-    """Returns a connection from the unified SQLAlchemy engine pool with sqlite3.Row factory."""
-    conn = engine.raw_connection()
-    if hasattr(conn, "row_factory"):
-        conn.row_factory = sqlite3.Row
+    """Returns a high-concurrency SQLite connection with sqlite3.Row factory and WAL mode."""
+    conn = sqlite3.connect(DB_PATH, timeout=20.0, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
     return conn
 
 

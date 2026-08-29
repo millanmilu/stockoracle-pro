@@ -81,6 +81,39 @@ def reset_session():
     _session_created_at = None
 
 
+def _load_broker_from_database() -> bool:
+    """Loads active broker credentials permanently stored in the broker_accounts table."""
+    global ANGEL_API_KEY, ANGEL_CLIENT_ID, ANGEL_PASSWORD, ANGEL_TOTP_SECRET, smartApi
+    try:
+        from backend.data.database import get_db_connection
+        with get_db_connection() as conn:
+            row = conn.execute("""
+                SELECT credentials_json FROM broker_accounts
+                WHERE broker = 'angel_one' AND is_active = 1
+                LIMIT 1
+            """).fetchone()
+            if row and row["credentials_json"]:
+                creds = json.loads(row["credentials_json"])
+                ANGEL_API_KEY = creds.get("api_key", "").strip()
+                ANGEL_CLIENT_ID = creds.get("client_id", "").strip()
+                ANGEL_PASSWORD = creds.get("password", "").strip()
+                ANGEL_TOTP_SECRET = creds.get("totp_secret", "").strip()
+
+                os.environ["ANGEL_API_KEY"] = ANGEL_API_KEY
+                os.environ["ANGEL_CLIENT_ID"] = ANGEL_CLIENT_ID
+                os.environ["ANGEL_PASSWORD"] = ANGEL_PASSWORD
+                os.environ["ANGEL_TOTP_SECRET"] = ANGEL_TOTP_SECRET
+
+                if not smartApi and ANGEL_API_KEY:
+                    from SmartApi import SmartConnect
+                    smartApi = SmartConnect(api_key=ANGEL_API_KEY)
+                logger.info("Loaded active Angel One credentials from database broker_accounts.")
+                return True
+    except Exception as exc:
+        logger.debug("Could not load broker credentials from DB: %s", exc)
+    return False
+
+
 def ensure_session() -> bool:
     """
     Authenticates with Angel One SmartAPI using TOTP.
@@ -88,7 +121,7 @@ def ensure_session() -> bool:
     session is about to expire (SESSION_REFRESH_HOURS threshold).
     Returns True if session is active after the call.
     """
-    global _session_active, _session_expires_at, _session_created_at, _last_auth_attempt, _last_auth_error
+    global _session_active, _session_expires_at, _session_created_at, _last_auth_attempt, _last_auth_error, smartApi
     now = datetime.now(_IST)
     _last_auth_attempt = now
 
@@ -100,6 +133,10 @@ def ensure_session() -> bool:
     if _session_active:
         return True
 
+    # If in-memory credentials missing, load from database
+    if not (ANGEL_API_KEY and ANGEL_CLIENT_ID and ANGEL_PASSWORD and ANGEL_TOTP_SECRET):
+        _load_broker_from_database()
+
     if not smartApi:
         _last_auth_error = "ANGEL_API_KEY is missing."
         logger.warning("Angel One SmartAPI not initialized: ANGEL_API_KEY is missing.")
@@ -107,7 +144,7 @@ def ensure_session() -> bool:
 
     if not (ANGEL_CLIENT_ID and ANGEL_PASSWORD and ANGEL_TOTP_SECRET):
         _last_auth_error = "Incomplete Angel One credentials."
-        logger.warning("Angel One credentials incomplete. Check .env for ANGEL_CLIENT_ID / ANGEL_PASSWORD / ANGEL_TOTP_SECRET.")
+        logger.warning("Angel One credentials incomplete. Check database or .env for ANGEL_CLIENT_ID / ANGEL_PASSWORD / ANGEL_TOTP_SECRET.")
         return False
 
     try:

@@ -55,9 +55,12 @@ else:
         echo=settings.DEBUG,
     )
 
-    # Enable WAL mode for SQLite
+    # Enable WAL mode and Row factory for SQLite
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
+        import sqlite3
+        if hasattr(dbapi_connection, "row_factory"):
+            dbapi_connection.row_factory = sqlite3.Row
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL;")
         cursor.execute("PRAGMA synchronous=NORMAL;")
