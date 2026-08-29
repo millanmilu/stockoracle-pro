@@ -3,9 +3,11 @@ import requests
 url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 data = requests.get(url, timeout=30).json()
 
-print("Searching by token 500570 or 3456 or TATA in symbol...")
+print("Exact match search for TATA MOTORS in Angel One:")
 for item in data:
+    name = (item.get("name") or "").strip()
+    sym = (item.get("symbol") or "").strip()
     token = str(item.get("token", ""))
-    sym = (item.get("symbol") or "").upper()
-    if token in ["500570", "3456", "3499"] or sym.startswith("TATA"):
-        print(f"Exch: {item.get('exch_seg'):5} | Sym: {item.get('symbol'):20} | Token: {item.get('token'):8} | Name: {item.get('name')}")
+    if token in ["3456", "3499", "3405", "500570"] or "TATA MOTORS" in name or sym.startswith("TATAMOTORS"):
+        if item.get("exch_seg") in ["NSE", "BSE"]:
+            print(f"Exch: {item.get('exch_seg')} | Symbol: {item.get('symbol')} | Token: {item.get('token')} | Name: {item.get('name')}")
