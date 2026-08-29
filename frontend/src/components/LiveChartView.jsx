@@ -205,13 +205,8 @@ export default function LiveChartView() {
   const [autoScroll, setAutoScroll] = useState(true);
 
   // Advanced Features State
-  const [showVolumeProfile, setShowVolumeProfile] = useState(false);
-  const [showOrderFlow, setShowOrderFlow] = useState(false);
-  const [showAIPatterns, setShowAIPatterns] = useState(false);
-  const [showMTFCorrelation, setShowMTFCorrelation] = useState(false);
-  const [showDrawings, setShowDrawings] = useState(false);
   const [showAdvancedPanel, setShowAdvancedPanel] = useState(false);
-  const [advancedPanelTab, setAdvancedPanelTab] = useState('volume');
+  const [advancedPanelTab, setAdvancedPanelTab] = useState('patterns');
 
   // Backtest Overlay State
   const [backtestData, setBacktestData] = useState(null);
@@ -230,9 +225,6 @@ export default function LiveChartView() {
     alma: showALMA,
     auto_key_levels: showKeyLevels,
     ai_patterns: showPatterns || (showAdvancedPanel && advancedPanelTab === 'patterns'),
-    vpvr: showAdvancedPanel && advancedPanelTab === 'volume',
-    orderflow: showAdvancedPanel && advancedPanelTab === 'order',
-    mtf_matrix: showAdvancedPanel && advancedPanelTab === 'mtf',
     backtester: showAdvancedPanel && advancedPanelTab === 'backtest',
   }), [showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, showAdvancedPanel, advancedPanelTab]);
 
@@ -1166,7 +1158,7 @@ export default function LiveChartView() {
       } catch {}
     }, 50);
     return () => clearTimeout(timer);
-  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, isReplayMode, replayIndex, chartType]);
+  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, isReplayMode, replayIndex]);
 
   /* ── Secondary Comparison Chart Data Binding ───────────────── */
 
