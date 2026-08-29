@@ -12,6 +12,7 @@ import {
 import toast from 'react-hot-toast';
 import MultiChartGrid from './MultiChartGrid';
 import DrawingTools from './chart-tools/DrawingTools';
+import TradingViewAdvancedChart from './chart-tools/TradingViewAdvancedChart';
 import IndicatorsModal from './IndicatorsModal';
 import ChartSettingsModal from './ChartSettingsModal';
 import VolumeProfile from './chart-tools/VolumeProfile';
@@ -312,6 +313,7 @@ export default function LiveChartView() {
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [targetAlertPrice, setTargetAlertPrice] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [chartEngine, setChartEngine] = useState(() => localStorage.getItem('stockoracle_chart_engine') || 'tradingview');
 
   // Real-time Autocomplete Ticker Suggestions
   useEffect(() => {
@@ -1862,6 +1864,70 @@ export default function LiveChartView() {
 
           <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }} />
 
+          {/* Dual Engine Switcher: TradingView Full Heavy Engine vs StockOracle AI Engine */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            background: 'rgba(15, 23, 42, 0.95)',
+            padding: '2px',
+            borderRadius: 6,
+            border: '1px solid rgba(99, 102, 241, 0.3)',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+          }}>
+            <button
+              type="button"
+              onClick={() => {
+                setChartEngine('tradingview');
+                localStorage.setItem('stockoracle_chart_engine', 'tradingview');
+                toast.success('🚀 Switched to TradingView Full Engine (100+ Indicators, 80+ Drawing Tools)');
+              }}
+              style={{
+                padding: '3px 9px',
+                borderRadius: 4,
+                border: 'none',
+                background: chartEngine === 'tradingview' ? 'linear-gradient(135deg, #2563EB, #4F46E5)' : 'transparent',
+                color: chartEngine === 'tradingview' ? '#FFFFFF' : '#94A3B8',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                boxShadow: chartEngine === 'tradingview' ? '0 2px 8px rgba(37,99,235,0.4)' : 'none',
+              }}
+              title="Full TradingView Engine (80+ Drawing Tools, 100+ Built-in Indicators)"
+            >
+              <span>🔥 TV Full Engine</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setChartEngine('stockoracle');
+                localStorage.setItem('stockoracle_chart_engine', 'stockoracle');
+                toast.success('⚡ Switched to StockOracle AI & SMC Terminal Engine');
+              }}
+              style={{
+                padding: '3px 9px',
+                borderRadius: 4,
+                border: 'none',
+                background: chartEngine === 'stockoracle' ? 'linear-gradient(135deg, #A855F7, #6366F1)' : 'transparent',
+                color: chartEngine === 'stockoracle' ? '#FFFFFF' : '#94A3B8',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                boxShadow: chartEngine === 'stockoracle' ? '0 2px 8px rgba(168,85,247,0.4)' : 'none',
+              }}
+              title="StockOracle AI Engine (SMC, Order Flow, Volume Profile, AI Forecasts)"
+            >
+              <span>⚡ AI / SMC Engine</span>
+            </button>
+          </div>
+
+          <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }} />
+
           {/* Timeframe Interval Buttons */}
           <div style={{ display:'flex', gap:2, background:'rgba(255,255,255,0.03)', padding:'2px', borderRadius:5, border:'1px solid rgba(255,255,255,0.06)' }}>
             {INTERVALS.map(iv => (
@@ -2326,6 +2392,19 @@ export default function LiveChartView() {
       {chartLayout !== '1x1' ? (
         <div style={{ flex: 1, minHeight: 0, height: '100%', width: '100%', overflow: 'hidden' }}>
           <MultiChartGrid layout={chartLayout} onLayoutChange={setChartLayout} />
+        </div>
+      ) : chartEngine === 'tradingview' && !isSplitView ? (
+        <div style={{
+          flex: 1, minHeight: 0, height: '100%', width: '100%',
+          position: 'relative', overflow: 'hidden',
+          borderRadius: 8, border: '1px solid rgba(99,102,241,0.2)',
+          background: '#070A14'
+        }}>
+          <TradingViewAdvancedChart
+            symbol={selectedSymbol}
+            interval={interval}
+            onOpenSettings={() => setShowChartSettingsModal(true)}
+          />
         </div>
       ) : (
       <div style={{ flex: 1, minHeight: 0, height: '100%', display:'grid', gridTemplateColumns: isSplitView ? '1fr 1fr' : '1fr', gap: 6, overflow: 'hidden' }}>
