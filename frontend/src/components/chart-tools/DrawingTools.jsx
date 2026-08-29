@@ -1,13 +1,14 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { 
   Crosshair, TrendingUp, AlignJustify, Brush, Type, Smile,
-  Ruler, ZoomIn, Magnet, Pencil, Lock, Unlock, Eye, EyeOff,
-  Trash2, GripVertical, Square as SquareIcon, Sliders, Settings,
-  X, Circle, Minus, Palette, Move, Copy
+  Ruler, Magnet, Lock, Unlock, Eye, EyeOff,
+  Trash2, Square as SquareIcon, Sliders, Settings,
+  X, Circle, Minus, Palette, Move, Copy,
+  RotateCcw, RotateCw, ArrowUpRight, ArrowDownRight, Layers
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-const STORAGE_KEY = 'stockoracle_drawings_tv_v5';
+const STORAGE_KEY = 'stockoracle_drawings_tv_v6';
 
 const FIBONACCI_LEVELS = [
   { level: 0.0,   label: '0.0 (0%)',     color: '#787B86', fill: 'rgba(120, 123, 134, 0.08)' },
@@ -19,23 +20,37 @@ const FIBONACCI_LEVELS = [
   { level: 1.0,   label: '1.0 (100%)',   color: '#A855F7', fill: 'rgba(168, 85, 247, 0.12)' },
 ];
 
-export default function DrawingTools({ chartRef, candleRef, symbol, interval, chartReady, onOpenSettings }) {
+const COLOR_PRESETS = ['#38BDF8', '#10B981', '#F59E0B', '#EF5350', '#A855F7', '#EC4899', '#FFFFFF', '#64748B'];
+
+export default function DrawingTools({ 
+  chartRef, 
+  candleRef, 
+  candles = [], 
+  symbol, 
+  interval, 
+  chartReady, 
+  onOpenSettings 
+}) {
   // Tool & State Management
   const [activeTool, setActiveTool] = useState('crosshair');
   const [drawings, setDrawings] = useState([]);
   const [isDrawing, setIsDrawing] = useState(false);
   const [currentDraw, setCurrentDraw] = useState(null);
-  
-  // Re-render tick to synchronize drawing positions on chart pan/zoom
-  const [, setRenderTick] = useState(0);
 
-  // Selected / Dragging existing drawing
+  // Undo / Redo History Stacks
+  const [undoStack, setUndoStack] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
+
+  // Selected / Dragging state
   const [selectedDrawingId, setSelectedDrawingId] = useState(null);
-  const [draggingHandle, setDraggingHandle] = useState(null); // 'start' | 'end' | 'body'
+  const [draggingHandle, setDraggingHandle] = useState(null); // 'start' | 'end' | 'body' | 'target' | 'stop' | 'channel'
   const [dragStartPos, setDragStartPos] = useState(null);
 
-  // Modifier Modes
+  // Magnet Mode & Snapping state
   const [magnetMode, setMagnetMode] = useState(false);
+  const [snapIndicator, setSnapIndicator] = useState(null); // { x, y, price, label }
+
+  // Modifiers
   const [stayInDrawMode, setStayInDrawMode] = useState(false);
   const [lockAllDrawings, setLockAllDrawings] = useState(false);
   const [hideAllDrawings, setHideAllDrawings] = useState(false);
@@ -46,143 +61,18 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
   const [showStickerMenu, setShowStickerMenu] = useState(false);
   const [stickerPos, setStickerPos] = useState(null);
 
-  // Line Style / Color Picker state
+  // Active Line Styles
   const [activeColor, setActiveColor] = useState('#38BDF8');
   const [activeStrokeWidth, setActiveStrokeWidth] = useState(2);
-  const [showStyleMenu, setShowStyleMenu] = useState(false);
+  const [activeLineStyle, setActiveLineStyle] = useState('solid'); // 'solid' | 'dashed' | 'dotted'
 
-  // Floating toolbar positioning
-  const [floatingPos, setFloatingPos] = useState({ top: 12, right: 18 });
-  const [isDraggingFloating, setIsDraggingFloating] = useState(false);
+  // Coordinate sync tick (throttled with RAF)
+  const [, setSyncTick] = useState(0);
+  const svgRef = useRef(null);
+  const isDraggingRef = useRef(false);
 
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      if (!isDraggingFloating) return;
-      setFloatingPos((prev) => ({
-        top: Math.max(0, prev.top + e.movementY),
-        right: Math.max(0, prev.right - e.movementX),
-      }));
-    };
-    const handleMouseUp = () => {
-      setIsDraggingFloating(false);
-    };
-    if (isDraggingFloating) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-    }
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDraggingFloating]);
+  // ── 1. Coordinate Transforms ───────────────────────────────────────────────
 
-  // Synchronize on chart pan & zoom
-  useEffect(() => {
-    let cleanupTimeScale = null;
-    let pollInterval = null;
-
-    const attachListeners = () => {
-      if (!chartRef?.current) return false;
-      try {
-        const timeScale = chartRef.current.timeScale();
-        const handleRangeChange = () => {
-          setRenderTick((t) => (t + 1) % 1000000);
-        };
-        timeScale.subscribeVisibleLogicalRangeChange(handleRangeChange);
-        timeScale.subscribeVisibleTimeRangeChange(handleRangeChange);
-
-        try {
-          chartRef.current.subscribeCrosshairMove(handleRangeChange);
-        } catch (_) {}
-
-        cleanupTimeScale = () => {
-          try {
-            timeScale.unsubscribeVisibleLogicalRangeChange(handleRangeChange);
-            timeScale.unsubscribeVisibleTimeRangeChange(handleRangeChange);
-            chartRef.current?.unsubscribeCrosshairMove?.(handleRangeChange);
-          } catch (_) {}
-        };
-        return true;
-      } catch (_) {
-        return false;
-      }
-    };
-
-    const attached = attachListeners();
-    if (!attached) {
-      pollInterval = setInterval(() => {
-        if (attachListeners()) {
-          clearInterval(pollInterval);
-          setRenderTick((t) => (t + 1) % 1000000);
-        }
-      }, 100);
-    }
-
-    const handleGlobalChartInteraction = () => {
-      setRenderTick((t) => (t + 1) % 1000000);
-    };
-
-    window.addEventListener('resize', handleGlobalChartInteraction);
-
-    return () => {
-      if (pollInterval) clearInterval(pollInterval);
-      if (cleanupTimeScale) cleanupTimeScale();
-      window.removeEventListener('resize', handleGlobalChartInteraction);
-    };
-  }, [chartRef, chartReady]);
-
-  // Real-time animation frame tracking while panning/dragging chart
-  useEffect(() => {
-    let isMouseDownOnChart = false;
-    let animFrame = null;
-
-    const onPointerDown = (e) => {
-      if (e.target?.closest?.('svg') || e.target?.closest?.('canvas')) {
-        isMouseDownOnChart = true;
-      }
-    };
-
-    const onPointerMove = () => {
-      if (isMouseDownOnChart) {
-        if (!animFrame) {
-          animFrame = requestAnimationFrame(() => {
-            setRenderTick((t) => (t + 1) % 1000000);
-            animFrame = null;
-          });
-        }
-      }
-    };
-
-    const onPointerUp = () => {
-      isMouseDownOnChart = false;
-      if (animFrame) {
-        cancelAnimationFrame(animFrame);
-        animFrame = null;
-      }
-      setRenderTick((t) => (t + 1) % 1000000);
-    };
-
-    window.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('mousemove', onPointerMove);
-    window.addEventListener('mouseup', onPointerUp);
-    window.addEventListener('touchstart', onPointerDown, { passive: true });
-    window.addEventListener('touchmove', onPointerMove, { passive: true });
-    window.addEventListener('touchend', onPointerUp);
-    window.addEventListener('wheel', onPointerMove, { passive: true });
-
-    return () => {
-      window.removeEventListener('mousedown', onPointerDown);
-      window.removeEventListener('mousemove', onPointerMove);
-      window.removeEventListener('mouseup', onPointerUp);
-      window.removeEventListener('touchstart', onPointerDown);
-      window.removeEventListener('touchmove', onPointerMove);
-      window.removeEventListener('touchend', onPointerUp);
-      window.removeEventListener('wheel', onPointerMove);
-      if (animFrame) cancelAnimationFrame(animFrame);
-    };
-  }, [activeTool]);
-
-  // Convert screen coordinate (x, y) to chart logical time & price
   const coordToChart = useCallback((x, y) => {
     let logical = null;
     let price = null;
@@ -199,7 +89,6 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     return { logical, price };
   }, [chartRef, candleRef]);
 
-  // Convert chart logical time & price back to current screen (x, y) coordinate
   const chartToCoord = useCallback((logical, price, fallbackX, fallbackY) => {
     let x = fallbackX;
     let y = fallbackY;
@@ -218,7 +107,123 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     return { x, y };
   }, [chartRef, candleRef]);
 
-  // Disable / Enable chart pan & scroll to prevent chart jitter while drawing
+  // ── 2. True Magnet Snapping Engine ─────────────────────────────────────────
+
+  const findMagnetSnap = useCallback((x, y) => {
+    if (!magnetMode || !candleRef?.current || !chartRef?.current || !candles?.length) {
+      return null;
+    }
+
+    try {
+      const timeScale = chartRef.current.timeScale();
+      const logical = timeScale.coordinateToLogical(x);
+      if (logical == null) return null;
+
+      const roundedIndex = Math.round(logical);
+      const totalCandles = candles.length;
+      if (roundedIndex < 0 || roundedIndex >= totalCandles) return null;
+
+      const candle = candles[roundedIndex];
+      if (!candle) return null;
+
+      const candleX = timeScale.logicalToCoordinate(roundedIndex);
+      if (candleX == null || Math.abs(x - candleX) > 40) return null;
+
+      const o = Number(candle.open);
+      const h = Number(candle.high);
+      const l = Number(candle.low);
+      const c = Number(candle.close);
+
+      const oY = candleRef.current.priceToCoordinate(o);
+      const hY = candleRef.current.priceToCoordinate(h);
+      const lY = candleRef.current.priceToCoordinate(l);
+      const cY = candleRef.current.priceToCoordinate(c);
+
+      const candidates = [
+        { price: h, y: hY, label: `HIGH ₹${h.toFixed(2)}` },
+        { price: l, y: lY, label: `LOW ₹${l.toFixed(2)}` },
+        { price: c, y: cY, label: `CLOSE ₹${c.toFixed(2)}` },
+        { price: o, y: oY, label: `OPEN ₹${o.toFixed(2)}` },
+      ].filter(pt => pt.y != null && !isNaN(pt.y));
+
+      if (!candidates.length) return null;
+
+      let closest = candidates[0];
+      let minDist = Math.abs(y - candidates[0].y);
+      for (let i = 1; i < candidates.length; i++) {
+        const dist = Math.abs(y - candidates[i].y);
+        if (dist < minDist) {
+          minDist = dist;
+          closest = candidates[i];
+        }
+      }
+
+      if (minDist < 35) {
+        return {
+          x: candleX,
+          y: closest.y,
+          logical: roundedIndex,
+          price: closest.price,
+          label: closest.label,
+        };
+      }
+    } catch (_) {}
+
+    return null;
+  }, [magnetMode, candleRef, chartRef, candles]);
+
+  // ── 3. Smooth Pan/Zoom Synchronization ─────────────────────────────────────
+
+  useEffect(() => {
+    let cleanup = null;
+    let rafId = null;
+
+    const requestSync = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        setSyncTick(t => (t + 1) % 1000000);
+      });
+    };
+
+    const attach = () => {
+      if (!chartRef?.current) return false;
+      try {
+        const timeScale = chartRef.current.timeScale();
+        timeScale.subscribeVisibleLogicalRangeChange(requestSync);
+        timeScale.subscribeVisibleTimeRangeChange(requestSync);
+
+        cleanup = () => {
+          try {
+            timeScale.unsubscribeVisibleLogicalRangeChange(requestSync);
+            timeScale.unsubscribeVisibleTimeRangeChange(requestSync);
+          } catch (_) {}
+        };
+        return true;
+      } catch (_) {
+        return false;
+      }
+    };
+
+    if (!attach()) {
+      const intervalId = setInterval(() => {
+        if (attach()) clearInterval(intervalId);
+      }, 100);
+      return () => {
+        clearInterval(intervalId);
+        if (cleanup) cleanup();
+        if (rafId) cancelAnimationFrame(rafId);
+      };
+    }
+
+    window.addEventListener('resize', requestSync);
+    return () => {
+      if (cleanup) cleanup();
+      if (rafId) cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', requestSync);
+    };
+  }, [chartRef, chartReady]);
+
+  // Lock / Unlock chart panning during active drawing
   const setChartLocked = useCallback((locked) => {
     if (chartRef?.current) {
       try {
@@ -230,7 +235,8 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     }
   }, [chartRef]);
 
-  // Load saved drawings on mount / symbol change
+  // ── 4. History & Persistence ───────────────────────────────────────────────
+
   useEffect(() => {
     const key = `${STORAGE_KEY}_${symbol}_${interval}`;
     const saved = localStorage.getItem(key);
@@ -243,51 +249,97 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     } else {
       setDrawings([]);
     }
+    setUndoStack([]);
+    setRedoStack([]);
   }, [symbol, interval]);
 
-  // Delete key listener to remove selected drawing
+  const saveDrawingsWithHistory = useCallback((nextDrawings, pushToUndo = true) => {
+    if (pushToUndo) {
+      setUndoStack(prev => [...prev.slice(-30), drawings]);
+      setRedoStack([]);
+    }
+    const key = `${STORAGE_KEY}_${symbol}_${interval}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(nextDrawings));
+    } catch (_) {}
+    setDrawings(nextDrawings);
+  }, [drawings, symbol, interval]);
+
+  const handleUndo = useCallback(() => {
+    if (undoStack.length === 0) return;
+    const previous = undoStack[undoStack.length - 1];
+    setRedoStack(prev => [...prev, drawings]);
+    setUndoStack(prev => prev.slice(0, -1));
+    const key = `${STORAGE_KEY}_${symbol}_${interval}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(previous));
+    } catch (_) {}
+    setDrawings(previous);
+    toast.success('Undo drawing change');
+  }, [undoStack, drawings, symbol, interval]);
+
+  const handleRedo = useCallback(() => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    setUndoStack(prev => [...prev, drawings]);
+    setRedoStack(prev => prev.slice(0, -1));
+    const key = `${STORAGE_KEY}_${symbol}_${interval}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch (_) {}
+    setDrawings(next);
+    toast.success('Redo drawing change');
+  }, [redoStack, drawings, symbol, interval]);
+
+  // Global Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId && !textInputPos) {
+      const isInput = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+      if (isInput) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) handleRedo();
+        else handleUndo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selectedDrawingId) {
+        e.preventDefault();
+        handleDuplicateSelected();
+        return;
+      }
+      if (e.key === 'Escape') {
+        setActiveTool('crosshair');
+        setSelectedDrawingId(null);
+        setIsDrawing(false);
+        setCurrentDraw(null);
+        setChartLocked(false);
+        setSnapIndicator(null);
+        return;
+      }
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDrawingId) {
         if (lockAllDrawings) {
           toast.error('Drawings are locked');
           return;
         }
-        setDrawings((prev) => {
-          const next = prev.filter((d) => d.id !== selectedDrawingId);
-          saveDrawings(next);
-          return next;
-        });
+        saveDrawingsWithHistory(drawings.filter(d => d.id !== selectedDrawingId));
         setSelectedDrawingId(null);
         toast.success('Drawing deleted');
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedDrawingId, lockAllDrawings, textInputPos]);
+  }, [selectedDrawingId, drawings, lockAllDrawings, handleUndo, handleRedo, saveDrawingsWithHistory, setChartLocked]);
 
-  // Persist drawings to localStorage
-  const saveDrawings = (newDrawings) => {
-    const key = `${STORAGE_KEY}_${symbol}_${interval}`;
-    try {
-      localStorage.setItem(key, JSON.stringify(newDrawings));
-    } catch (_) {}
-    setDrawings(newDrawings);
-  };
-
-  const handleClearAll = () => {
-    if (lockAllDrawings) {
-      toast.error('Drawings are locked. Unlock first.');
-      return;
-    }
-    saveDrawings([]);
-    setSelectedDrawingId(null);
-    toast.success('All drawings removed');
-  };
-
-  // Helper to extract client coordinate from Mouse or Touch events
+  // Helper for mouse/touch position
   const getEventPos = (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
+    const rect = svgRef.current?.getBoundingClientRect() || e.currentTarget.getBoundingClientRect();
     const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
     return {
@@ -298,17 +350,22 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     };
   };
 
-  // SVG Mouse & Touch Handlers
+  // ── 5. Mouse & Touch Drawing Handlers ──────────────────────────────────────
+
   const handleSvgMouseDown = (e) => {
     if (lockAllDrawings && activeTool !== 'crosshair') {
-      toast.error('Drawings are locked');
+      toast.error('Drawings are locked. Unlock to draw.');
       return;
     }
 
     const { x, y } = getEventPos(e);
-    const chartPt = coordToChart(x, y);
+    const snap = findMagnetSnap(x, y);
+    const finalX = snap ? snap.x : x;
+    const finalY = snap ? snap.y : y;
+    const chartPt = snap 
+      ? { logical: snap.logical, price: snap.price } 
+      : coordToChart(finalX, finalY);
 
-    // In crosshair mode, clicking empty space deselects drawing
     if (activeTool === 'crosshair') {
       if (selectedDrawingId && !draggingHandle) {
         setSelectedDrawingId(null);
@@ -318,18 +375,17 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
 
     e.preventDefault();
     e.stopPropagation();
-
-    // Freeze chart panning
     setChartLocked(true);
 
+    // Instant click placement tools
     if (activeTool === 'text') {
-      setTextInputPos({ x, y, logical: chartPt.logical, price: chartPt.price });
+      setTextInputPos({ x: finalX, y: finalY, logical: chartPt.logical, price: chartPt.price });
       setTextInputVal('');
       return;
     }
 
     if (activeTool === 'smile') {
-      setStickerPos({ x, y, logical: chartPt.logical, price: chartPt.price });
+      setStickerPos({ x: finalX, y: finalY, logical: chartPt.logical, price: chartPt.price });
       setShowStickerMenu(true);
       return;
     }
@@ -340,84 +396,129 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
         type: 'horizontal_line',
         startLogical: chartPt.logical,
         startPrice: chartPt.price,
-        startX: x,
-        startY: y,
+        startX: finalX,
+        startY: finalY,
         color: activeColor,
         strokeWidth: activeStrokeWidth,
+        lineStyle: activeLineStyle,
       };
-      saveDrawings([...drawings, hLine]);
+      saveDrawingsWithHistory([...drawings, hLine]);
       setSelectedDrawingId(hLine.id);
       setChartLocked(false);
       if (!stayInDrawMode) setActiveTool('crosshair');
-      toast.success('Horizontal Support/Resistance Line added');
+      toast.success(`Support/Resistance Line at ₹${chartPt.price?.toFixed(2)}`);
       return;
     }
 
-    if (activeTool === 'vertical_line') {
-      const vLine = {
+    if (activeTool === 'horizontal_ray') {
+      const hRay = {
         id: Date.now(),
-        type: 'vertical_line',
+        type: 'horizontal_ray',
         startLogical: chartPt.logical,
         startPrice: chartPt.price,
-        startX: x,
-        startY: y,
+        startX: finalX,
+        startY: finalY,
         color: activeColor,
         strokeWidth: activeStrokeWidth,
+        lineStyle: activeLineStyle,
       };
-      saveDrawings([...drawings, vLine]);
-      setSelectedDrawingId(vLine.id);
+      saveDrawingsWithHistory([...drawings, hRay]);
+      setSelectedDrawingId(hRay.id);
       setChartLocked(false);
       if (!stayInDrawMode) setActiveTool('crosshair');
-      toast.success('Vertical Time Line added');
+      toast.success(`Horizontal Ray placed at ₹${chartPt.price?.toFixed(2)}`);
       return;
     }
 
+    // Drag-based tools initialization
     setIsDrawing(true);
+    isDraggingRef.current = true;
+
     if (activeTool === 'brush') {
       setCurrentDraw({
         id: Date.now(),
         type: 'brush',
-        points: [{ x, y, logical: chartPt.logical, price: chartPt.price }],
+        points: [{ x: finalX, y: finalY, logical: chartPt.logical, price: chartPt.price }],
         color: activeColor,
         strokeWidth: activeStrokeWidth,
       });
+    } else if (activeTool === 'long_position' || activeTool === 'short_position') {
+      const isLong = activeTool === 'long_position';
+      const entryPrice = chartPt.price || 1000;
+      const targetDelta = entryPrice * 0.03; // 3% default target
+      const stopDelta   = entryPrice * 0.015; // 1.5% default stop
+
+      const targetPrice = isLong ? entryPrice + targetDelta : entryPrice - targetDelta;
+      const stopPrice   = isLong ? entryPrice - stopDelta   : entryPrice + stopDelta;
+
+      const posDrawing = {
+        id: Date.now(),
+        type: activeTool,
+        startX: finalX,
+        startY: finalY,
+        startLogical: chartPt.logical,
+        startPrice: entryPrice,
+        endX: finalX + 180,
+        endY: finalY,
+        endLogical: chartPt.logical != null ? chartPt.logical + 15 : null,
+        targetPrice,
+        stopPrice,
+        color: isLong ? '#10B981' : '#EF5350',
+      };
+      saveDrawingsWithHistory([...drawings, posDrawing]);
+      setSelectedDrawingId(posDrawing.id);
+      setIsDrawing(false);
+      isDraggingRef.current = false;
+      setChartLocked(false);
+      if (!stayInDrawMode) setActiveTool('crosshair');
+      toast.success(`${isLong ? 'Long' : 'Short'} Position Risk:Reward Tool placed`);
     } else {
       setCurrentDraw({
         id: Date.now(),
         type: activeTool,
-        startX: x,
-        startY: y,
+        startX: finalX,
+        startY: finalY,
         startLogical: chartPt.logical,
         startPrice: chartPt.price,
-        endX: x,
-        endY: y,
+        endX: finalX,
+        endY: finalY,
         endLogical: chartPt.logical,
         endPrice: chartPt.price,
+        channelWidth: 35,
         color: activeColor,
         strokeWidth: activeStrokeWidth,
+        lineStyle: activeLineStyle,
       });
     }
   };
 
   const handleSvgMouseMove = (e) => {
     const { x, y } = getEventPos(e);
-    const chartPt = coordToChart(x, y);
+    const snap = findMagnetSnap(x, y);
+    setSnapIndicator(snap);
 
-    // Moving an existing selected drawing or handle
+    const finalX = snap ? snap.x : x;
+    const finalY = snap ? snap.y : y;
+    const chartPt = snap 
+      ? { logical: snap.logical, price: snap.price } 
+      : coordToChart(finalX, finalY);
+
+    // ── Handle dragging existing item ──
     if (draggingHandle && selectedDrawingId && dragStartPos && !lockAllDrawings) {
       e.preventDefault();
       e.stopPropagation();
-      const dx = x - dragStartPos.x;
-      const dy = y - dragStartPos.y;
+      const dx = finalX - dragStartPos.x;
+      const dy = finalY - dragStartPos.y;
 
       setDrawings((prev) =>
         prev.map((d) => {
           if (d.id !== selectedDrawingId) return d;
+
           if (draggingHandle === 'start') {
             return {
               ...d,
-              startX: x,
-              startY: y,
+              startX: finalX,
+              startY: finalY,
               startLogical: chartPt.logical,
               startPrice: chartPt.price,
             };
@@ -425,10 +526,28 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           if (draggingHandle === 'end') {
             return {
               ...d,
-              endX: x,
-              endY: y,
+              endX: finalX,
+              endY: finalY,
               endLogical: chartPt.logical,
               endPrice: chartPt.price,
+            };
+          }
+          if (draggingHandle === 'target') {
+            return {
+              ...d,
+              targetPrice: chartPt.price,
+            };
+          }
+          if (draggingHandle === 'stop') {
+            return {
+              ...d,
+              stopPrice: chartPt.price,
+            };
+          }
+          if (draggingHandle === 'channel') {
+            return {
+              ...d,
+              channelWidth: Math.max(10, Math.abs(dy)),
             };
           }
           if (draggingHandle === 'body') {
@@ -463,16 +582,22 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
               endY: newEndY,
               endLogical: newEndPt.logical,
               endPrice: newEndPt.price,
+              targetPrice: d.targetPrice != null && chartPt.price != null && d.startPrice != null 
+                ? d.targetPrice + (newStartPt.price - d.startPrice) 
+                : d.targetPrice,
+              stopPrice: d.stopPrice != null && chartPt.price != null && d.startPrice != null 
+                ? d.stopPrice + (newStartPt.price - d.startPrice) 
+                : d.stopPrice,
             };
           }
           return d;
         })
       );
-      setDragStartPos({ x, y });
+      setDragStartPos({ x: finalX, y: finalY });
       return;
     }
 
-    // Actively drawing new item
+    // ── Active drawing in progress ──
     if (!isDrawing || !currentDraw) return;
     e.preventDefault();
     e.stopPropagation();
@@ -480,13 +605,13 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     if (currentDraw.type === 'brush') {
       setCurrentDraw((prev) => ({
         ...prev,
-        points: [...(prev.points || []), { x, y, logical: chartPt.logical, price: chartPt.price }],
+        points: [...(prev.points || []), { x: finalX, y: finalY, logical: chartPt.logical, price: chartPt.price }],
       }));
     } else {
       setCurrentDraw((prev) => ({
         ...prev,
-        endX: x,
-        endY: y,
+        endX: finalX,
+        endY: finalY,
         endLogical: chartPt.logical,
         endPrice: chartPt.price,
       }));
@@ -494,13 +619,12 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
   };
 
   const handleSvgMouseUp = (e) => {
-    // Release drag handle
     if (draggingHandle) {
       e.preventDefault();
       e.stopPropagation();
       setDraggingHandle(null);
       setDragStartPos(null);
-      saveDrawings(drawings);
+      saveDrawingsWithHistory(drawings, true);
       setChartLocked(false);
       return;
     }
@@ -526,17 +650,49 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
 
     if (isValid) {
       const updated = [...drawings, currentDraw];
-      saveDrawings(updated);
+      saveDrawingsWithHistory(updated, true);
       setSelectedDrawingId(currentDraw.id);
     }
 
     setIsDrawing(false);
+    isDraggingRef.current = false;
     setCurrentDraw(null);
     setChartLocked(false);
 
     if (!stayInDrawMode && activeTool !== 'brush') {
       setActiveTool('crosshair');
     }
+  };
+
+  // Duplicate selected drawing
+  const handleDuplicateSelected = () => {
+    if (!selectedDrawingId) return;
+    const target = drawings.find((d) => d.id === selectedDrawingId);
+    if (!target) return;
+
+    const dup = {
+      ...target,
+      id: Date.now(),
+      startX: (target.startX || 0) + 18,
+      startY: (target.startY || 0) + 18,
+      endX: (target.endX || 0) + 18,
+      endY: (target.endY || 0) + 18,
+      startLogical: target.startLogical != null ? target.startLogical + 2 : null,
+      endLogical: target.endLogical != null ? target.endLogical + 2 : null,
+    };
+    saveDrawingsWithHistory([...drawings, dup]);
+    setSelectedDrawingId(dup.id);
+    toast.success('Drawing duplicated');
+  };
+
+  const handleClearAll = () => {
+    if (lockAllDrawings) {
+      toast.error('Drawings are locked. Unlock first.');
+      return;
+    }
+    saveDrawingsWithHistory([]);
+    setSelectedDrawingId(null);
+    toast.success('All drawings removed');
   };
 
   const handleAddText = () => {
@@ -551,7 +707,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
         text: textInputVal.trim(),
         color: activeColor,
       };
-      saveDrawings([...drawings, textDrawing]);
+      saveDrawingsWithHistory([...drawings, textDrawing]);
       setSelectedDrawingId(textDrawing.id);
     }
     setTextInputPos(null);
@@ -571,7 +727,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
         startPrice: stickerPos.price,
         emoji,
       };
-      saveDrawings([...drawings, stickerDrawing]);
+      saveDrawingsWithHistory([...drawings, stickerDrawing]);
       setSelectedDrawingId(stickerDrawing.id);
     }
     setShowStickerMenu(false);
@@ -580,34 +736,14 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
     if (!stayInDrawMode) setActiveTool('crosshair');
   };
 
-  const handleDuplicateSelected = () => {
-    if (!selectedDrawingId) return;
-    const target = drawings.find((d) => d.id === selectedDrawingId);
-    if (!target) return;
-
-    const dup = {
-      ...target,
-      id: Date.now(),
-      startX: (target.startX || 0) + 15,
-      startY: (target.startY || 0) + 15,
-      endX: (target.endX || 0) + 15,
-      endY: (target.endY || 0) + 15,
-      startLogical: (target.startLogical != null) ? target.startLogical + 2 : null,
-      endLogical: (target.endLogical != null) ? target.endLogical + 2 : null,
-    };
-    saveDrawings([...drawings, dup]);
-    setSelectedDrawingId(dup.id);
-    toast.success('Drawing duplicated');
-  };
-
   const selectedDrawing = drawings.find((d) => d.id === selectedDrawingId);
 
   return (
     <>
-      {/* ── Left Vertical Sidebar (TradingView Dark Icons) ── */}
+      {/* ── TradingView-Style Left Vertical Drawing Toolbar ── */}
       <div style={{
         width: 44,
-        backgroundColor: '#131722',
+        backgroundColor: '#0F131D',
         borderRight: '1px solid rgba(255, 255, 255, 0.08)',
         display: 'flex',
         flexDirection: 'column',
@@ -618,19 +754,19 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
         userSelect: 'none',
         flexShrink: 0,
       }}>
-        {/* 1. Crosshair */}
+        {/* 1. Crosshair (Select & Pan) */}
         <button
           onClick={() => setActiveTool('crosshair')}
-          title="Crosshair (Select / Pan)"
+          title="Crosshair (Select / Move / Pan)"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: activeTool === 'crosshair' ? '#2A2E39' : 'transparent',
-            color: activeTool === 'crosshair' ? '#2962FF' : '#787B86',
+            backgroundColor: activeTool === 'crosshair' ? '#2962FF' : 'transparent',
+            color: activeTool === 'crosshair' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Crosshair size={17} />
+          <Crosshair size={16} />
         </button>
 
         {/* 2. Trend Line */}
@@ -643,15 +779,33 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: activeTool === 'trendline' ? '#2A2E39' : 'transparent',
-            color: activeTool === 'trendline' ? '#2962FF' : '#787B86',
+            backgroundColor: activeTool === 'trendline' ? '#2962FF' : 'transparent',
+            color: activeTool === 'trendline' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <TrendingUp size={17} />
+          <TrendingUp size={16} />
         </button>
 
-        {/* 3. Horizontal Line (Support/Resistance) */}
+        {/* 3. Trend Ray (Ray Line) */}
+        <button
+          onClick={() => {
+            setActiveTool('ray');
+            toast.success('Trend Ray: Click and drag to extend line right');
+          }}
+          title="Trend Ray (Extends to future)"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'ray' ? '#2962FF' : 'transparent',
+            color: activeTool === 'ray' ? '#FFFFFF' : '#94A3B8',
+            cursor: 'pointer',
+          }}
+        >
+          <ArrowUpRight size={16} />
+        </button>
+
+        {/* 4. Horizontal Support/Resistance Line */}
         <button
           onClick={() => {
             setActiveTool('horizontal_line');
@@ -661,15 +815,69 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: activeTool === 'horizontal_line' ? '#2A2E39' : 'transparent',
-            color: activeTool === 'horizontal_line' ? '#2962FF' : '#787B86',
+            backgroundColor: activeTool === 'horizontal_line' ? '#2962FF' : 'transparent',
+            color: activeTool === 'horizontal_line' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Minus size={17} />
+          <Minus size={16} />
         </button>
 
-        {/* 4. Fibonacci Retracement */}
+        {/* 5. Parallel Channel */}
+        <button
+          onClick={() => {
+            setActiveTool('parallel_channel');
+            toast.success('Parallel Channel: Click and drag trend corridor');
+          }}
+          title="Parallel Channel"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'parallel_channel' ? '#2962FF' : 'transparent',
+            color: activeTool === 'parallel_channel' ? '#FFFFFF' : '#94A3B8',
+            cursor: 'pointer',
+          }}
+        >
+          <Layers size={16} />
+        </button>
+
+        {/* 6. Long Position (Risk:Reward) */}
+        <button
+          onClick={() => {
+            setActiveTool('long_position');
+            toast.success('Long Position: Click on entry price level');
+          }}
+          title="Long Position (Risk:Reward Tool)"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'long_position' ? '#10B981' : 'transparent',
+            color: activeTool === 'long_position' ? '#FFFFFF' : '#10B981',
+            cursor: 'pointer',
+          }}
+        >
+          <ArrowUpRight size={17} style={{ strokeWidth: 2.5 }} />
+        </button>
+
+        {/* 7. Short Position (Risk:Reward) */}
+        <button
+          onClick={() => {
+            setActiveTool('short_position');
+            toast.success('Short Position: Click on entry price level');
+          }}
+          title="Short Position (Risk:Reward Tool)"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: activeTool === 'short_position' ? '#EF5350' : 'transparent',
+            color: activeTool === 'short_position' ? '#FFFFFF' : '#EF5350',
+            cursor: 'pointer',
+          }}
+        >
+          <ArrowDownRight size={17} style={{ strokeWidth: 2.5 }} />
+        </button>
+
+        {/* 8. Fibonacci Retracement */}
         <button
           onClick={() => {
             setActiveTool('fibonacci');
@@ -679,160 +887,190 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: activeTool === 'fibonacci' ? '#2A2E39' : 'transparent',
-            color: activeTool === 'fibonacci' ? '#2962FF' : '#787B86',
+            backgroundColor: activeTool === 'fibonacci' ? '#2962FF' : 'transparent',
+            color: activeTool === 'fibonacci' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <AlignJustify size={17} />
+          <AlignJustify size={16} />
         </button>
 
-        {/* 5. Rectangle Zone */}
+        {/* 9. Rectangle / Supply & Demand Zone */}
         <button
           onClick={() => {
             setActiveTool('rectangle');
-            toast.success('Rectangle: Click and drag to create Supply/Demand Zone');
+            toast.success('Rectangle: Click and drag Supply/Demand Zone');
           }}
           title="Rectangle Zone"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: activeTool === 'rectangle' ? '#2A2E39' : 'transparent',
-            color: activeTool === 'rectangle' ? '#2962FF' : '#787B86',
+            backgroundColor: activeTool === 'rectangle' ? '#2962FF' : 'transparent',
+            color: activeTool === 'rectangle' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <SquareIcon size={16} />
+          <SquareIcon size={15} />
         </button>
 
-        {/* 6. Freehand Brush */}
+        {/* 10. Freehand Brush */}
         <button
           onClick={() => {
             setActiveTool('brush');
-            toast.success('Brush: Click and drag freehand');
+            toast.success('Brush: Freehand sketch');
           }}
-          title="Brush (Freehand Drawing)"
+          title="Freehand Brush"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: activeTool === 'brush' ? '#2A2E39' : 'transparent',
-            color: activeTool === 'brush' ? '#2962FF' : '#787B86',
+            backgroundColor: activeTool === 'brush' ? '#2962FF' : 'transparent',
+            color: activeTool === 'brush' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Brush size={17} />
+          <Brush size={16} />
         </button>
 
-        {/* 7. Text Tool ('T') */}
+        {/* 11. Text Note */}
         <button
           onClick={() => {
             setActiveTool('text');
-            toast.success('Text Tool: Click anywhere to type');
+            toast.success('Text Note: Click anywhere on chart to type');
           }}
           title="Text Note ('T')"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: activeTool === 'text' ? '#2A2E39' : 'transparent',
-            color: activeTool === 'text' ? '#2962FF' : '#787B86',
+            backgroundColor: activeTool === 'text' ? '#2962FF' : 'transparent',
+            color: activeTool === 'text' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Type size={17} />
+          <Type size={16} />
         </button>
 
-        {/* 8. Stickers / Emojis */}
+        {/* 12. Stickers */}
         <button
           onClick={() => {
             setActiveTool('smile');
             setShowStickerMenu(!showStickerMenu);
           }}
-          title="Icons / Emojis / Stickers"
+          title="Emojis & Stickers"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: activeTool === 'smile' ? '#2A2E39' : 'transparent',
-            color: activeTool === 'smile' ? '#2962FF' : '#787B86',
+            backgroundColor: activeTool === 'smile' ? '#2962FF' : 'transparent',
+            color: activeTool === 'smile' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Smile size={17} />
+          <Smile size={16} />
         </button>
 
-        {/* 9. Ruler */}
+        {/* 13. Ruler / Measure */}
         <button
           onClick={() => {
             setActiveTool('ruler');
-            toast.success('Ruler: Click and drag to measure price & bars');
+            toast.success('Ruler: Click and drag to measure bars & price %');
           }}
           title="Ruler (Measure Price & Bars)"
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: activeTool === 'ruler' ? '#2A2E39' : 'transparent',
-            color: activeTool === 'ruler' ? '#2962FF' : '#787B86',
+            backgroundColor: activeTool === 'ruler' ? '#2962FF' : 'transparent',
+            color: activeTool === 'ruler' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Ruler size={17} />
+          <Ruler size={16} />
         </button>
 
-        {/* 10. Magnet Mode */}
+        <div style={{ width: 22, height: 1, backgroundColor: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
+
+        {/* 14. Magnet Mode (True OHLC Snapping) */}
         <button
           onClick={() => {
-            setMagnetMode(!magnetMode);
-            toast.success(magnetMode ? 'Magnet Mode OFF' : 'Magnet Mode ON');
+            const nextMode = !magnetMode;
+            setMagnetMode(nextMode);
+            toast.success(nextMode ? '🧲 Magnet Mode ON (Snaps to OHLC)' : 'Magnet Mode OFF');
           }}
-          title="Magnet Mode (Snap to OHLC)"
+          title={magnetMode ? 'Magnet Mode ON (Snapping to Candles)' : 'Magnet Mode OFF'}
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: magnetMode ? '#2A2E39' : 'transparent',
-            color: magnetMode ? '#2962FF' : '#787B86',
+            backgroundColor: magnetMode ? '#2962FF' : 'transparent',
+            color: magnetMode ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Magnet size={17} />
+          <Magnet size={16} />
         </button>
 
-        {/* 11. Lock All Drawings */}
+        {/* 15. Undo / Redo Buttons */}
+        <button
+          onClick={handleUndo}
+          disabled={undoStack.length === 0}
+          title="Undo Drawing (Ctrl+Z)"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: 'transparent',
+            color: undoStack.length > 0 ? '#94A3B8' : '#475569',
+            cursor: undoStack.length > 0 ? 'pointer' : 'default',
+          }}
+        >
+          <RotateCcw size={15} />
+        </button>
+
+        <button
+          onClick={handleRedo}
+          disabled={redoStack.length === 0}
+          title="Redo Drawing (Ctrl+Y)"
+          style={{
+            width: 32, height: 32, borderRadius: 5, border: 'none',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            backgroundColor: 'transparent',
+            color: redoStack.length > 0 ? '#94A3B8' : '#475569',
+            cursor: redoStack.length > 0 ? 'pointer' : 'default',
+          }}
+        >
+          <RotateCw size={15} />
+        </button>
+
+        {/* 16. Lock All Drawings */}
         <button
           onClick={() => {
             setLockAllDrawings(!lockAllDrawings);
             toast.success(lockAllDrawings ? 'Drawings Unlocked' : 'All Drawings Locked');
           }}
-          title="Lock All Drawings"
+          title={lockAllDrawings ? 'Drawings Locked' : 'Lock All Drawings'}
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: lockAllDrawings ? '#2A2E39' : 'transparent',
-            color: lockAllDrawings ? '#F59E0B' : '#787B86',
+            backgroundColor: lockAllDrawings ? '#F59E0B' : 'transparent',
+            color: lockAllDrawings ? '#000000' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          {lockAllDrawings ? <Lock size={16} /> : <Unlock size={16} />}
+          {lockAllDrawings ? <Lock size={15} /> : <Unlock size={15} />}
         </button>
 
-        {/* 12. Hide / Show Drawings */}
+        {/* 17. Hide / Show Drawings */}
         <button
-          onClick={() => {
-            setHideAllDrawings(!hideAllDrawings);
-          }}
-          title="Hide / Show Drawings"
+          onClick={() => setHideAllDrawings(!hideAllDrawings)}
+          title={hideAllDrawings ? 'Show Drawings' : 'Hide Drawings'}
           style={{
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            backgroundColor: hideAllDrawings ? '#2A2E39' : 'transparent',
-            color: hideAllDrawings ? '#EF5350' : '#787B86',
+            backgroundColor: hideAllDrawings ? '#EF5350' : 'transparent',
+            color: hideAllDrawings ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          {hideAllDrawings ? <EyeOff size={16} /> : <Eye size={16} />}
+          {hideAllDrawings ? <EyeOff size={15} /> : <Eye size={15} />}
         </button>
 
-        <div style={{ width: 20, height: 1, backgroundColor: 'rgba(255,255,255,0.08)', margin: '2px 0' }} />
-
-        {/* 13. Remove All */}
+        {/* 18. Clear All */}
         <button
           onClick={handleClearAll}
           title="Remove All Drawings"
@@ -840,13 +1078,13 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
             width: 32, height: 32, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: 'transparent',
-            color: '#787B86',
+            color: '#94A3B8',
             cursor: 'pointer',
           }}
           onMouseEnter={(e) => (e.currentTarget.style.color = '#EF5350')}
-          onMouseLeave={(e) => (e.currentTarget.style.color = '#787B86')}
+          onMouseLeave={(e) => (e.currentTarget.style.color = '#94A3B8')}
         >
-          <Trash2 size={16} />
+          <Trash2 size={15} />
         </button>
       </div>
 
@@ -854,54 +1092,57 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
       {selectedDrawing && (
         <div style={{
           position: 'absolute',
-          top: 14,
+          top: 12,
           left: '50%',
           transform: 'translateX(-50%)',
-          backgroundColor: '#1E222D',
+          backgroundColor: '#131722',
           border: '1px solid #2962FF',
           borderRadius: 8,
-          padding: '4px 10px',
+          padding: '4px 12px',
           display: 'flex',
           alignItems: 'center',
           gap: 10,
           zIndex: 60,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
+          boxShadow: '0 12px 32px rgba(0,0,0,0.85)',
           userSelect: 'none',
         }}>
-          <span style={{ fontSize: '0.72rem', color: '#93C5FD', fontWeight: 700, textTransform: 'uppercase' }}>
-            {selectedDrawing.type} Selected
+          <span style={{ fontSize: '0.72rem', color: '#93C5FD', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            {selectedDrawing.type.replace('_', ' ')}
           </span>
 
-          {/* Colors */}
+          {/* Color Presets */}
           <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
-            {['#38BDF8', '#10B981', '#F59E0B', '#EF5350', '#A855F7', '#FFFFFF'].map((c) => (
+            {COLOR_PRESETS.map((c) => (
               <div
                 key={c}
                 onClick={() => {
-                  setDrawings((prev) => prev.map((d) => (d.id === selectedDrawingId ? { ...d, color: c } : d)));
-                  saveDrawings(drawings.map((d) => (d.id === selectedDrawingId ? { ...d, color: c } : d)));
+                  const updated = drawings.map((d) => (d.id === selectedDrawingId ? { ...d, color: c } : d));
+                  saveDrawingsWithHistory(updated, true);
                 }}
                 style={{
                   width: 16, height: 16, borderRadius: '50%', backgroundColor: c, cursor: 'pointer',
-                  border: selectedDrawing.color === c ? '2px solid #FFF' : '1px solid transparent',
+                  border: selectedDrawing.color === c ? '2px solid #FFF' : '1px solid rgba(255,255,255,0.2)',
+                  transition: 'transform 0.1s',
                 }}
+                onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.2)')}
+                onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1.0)')}
               />
             ))}
           </div>
 
-          {/* Width */}
+          {/* Stroke Width Selector */}
           <div style={{ display: 'flex', gap: 3 }}>
             {[1, 2, 3, 4].map((w) => (
               <button
                 key={w}
                 onClick={() => {
-                  setDrawings((prev) => prev.map((d) => (d.id === selectedDrawingId ? { ...d, strokeWidth: w } : d)));
-                  saveDrawings(drawings.map((d) => (d.id === selectedDrawingId ? { ...d, strokeWidth: w } : d)));
+                  const updated = drawings.map((d) => (d.id === selectedDrawingId ? { ...d, strokeWidth: w } : d));
+                  saveDrawingsWithHistory(updated, true);
                 }}
                 style={{
                   padding: '2px 6px', borderRadius: 4, border: 'none',
                   backgroundColor: selectedDrawing.strokeWidth === w ? '#2962FF' : '#2A2E39',
-                  color: '#FFF', fontSize: '0.65rem', cursor: 'pointer',
+                  color: '#FFF', fontSize: '0.65rem', fontWeight: 700, cursor: 'pointer',
                 }}
               >
                 {w}px
@@ -909,27 +1150,50 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
             ))}
           </div>
 
+          {/* Line Style Selector */}
+          <div style={{ display: 'flex', gap: 3 }}>
+            {['solid', 'dashed', 'dotted'].map((st) => (
+              <button
+                key={st}
+                onClick={() => {
+                  const updated = drawings.map((d) => (d.id === selectedDrawingId ? { ...d, lineStyle: st } : d));
+                  saveDrawingsWithHistory(updated, true);
+                }}
+                style={{
+                  padding: '2px 6px', borderRadius: 4, border: 'none',
+                  backgroundColor: (selectedDrawing.lineStyle || 'solid') === st ? '#2962FF' : '#2A2E39',
+                  color: '#FFF', fontSize: '0.65rem', fontWeight: 600, cursor: 'pointer',
+                  textTransform: 'capitalize'
+                }}
+              >
+                {st}
+              </button>
+            ))}
+          </div>
+
+          {/* Duplicate Button */}
           <button
             onClick={handleDuplicateSelected}
-            title="Duplicate Drawing"
+            title="Duplicate Drawing (Ctrl+D)"
             style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 2 }}
           >
             <Copy size={15} />
           </button>
 
+          {/* Delete Button */}
           <button
             onClick={() => {
-              setDrawings((prev) => prev.filter((d) => d.id !== selectedDrawingId));
-              saveDrawings(drawings.filter((d) => d.id !== selectedDrawingId));
+              saveDrawingsWithHistory(drawings.filter((d) => d.id !== selectedDrawingId), true);
               setSelectedDrawingId(null);
               toast.success('Deleted drawing');
             }}
-            title="Delete Drawing"
+            title="Delete Drawing (Del)"
             style={{ background: 'transparent', border: 'none', color: '#EF5350', cursor: 'pointer', padding: 2 }}
           >
             <Trash2 size={15} />
           </button>
 
+          {/* Close Toolbar */}
           <button
             onClick={() => setSelectedDrawingId(null)}
             title="Close selection"
@@ -940,15 +1204,17 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
         </div>
       )}
 
-      {/* ── Interactive SVG Overlay Layer ── */}
+      {/* ── High-Performance Interactive SVG Canvas ── */}
       {!hideAllDrawings && (
         <svg
+          ref={svgRef}
           onMouseDown={handleSvgMouseDown}
           onMouseMove={handleSvgMouseMove}
           onMouseUp={handleSvgMouseUp}
           onTouchStart={handleSvgMouseDown}
           onTouchMove={handleSvgMouseMove}
           onTouchEnd={handleSvgMouseUp}
+          shapeRendering="geometricPrecision"
           style={{
             position: 'absolute',
             top: 0,
@@ -963,24 +1229,25 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
             touchAction: 'none',
           }}
         >
-          {/* Render Saved Drawings */}
+          {/* Render All Saved Drawings */}
           {drawings.map((d) => {
             const isSelected = selectedDrawingId === d.id;
             const pt1 = chartToCoord(d.startLogical, d.startPrice, d.startX, d.startY);
             const pt2 = chartToCoord(d.endLogical,   d.endPrice,   d.endX,   d.endY);
 
-            // Horizontal Line
+            const strokeDash = d.lineStyle === 'dashed' ? '6,6' : (d.lineStyle === 'dotted' ? '2,4' : (isSelected ? '4,4' : 'none'));
+
+            // 1. Horizontal Line
             if (d.type === 'horizontal_line') {
               return (
                 <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
                   <line
                     x1={0} y1={pt1.y} x2="100%" y2={pt1.y}
-                    stroke="transparent" strokeWidth={14}
+                    stroke="transparent" strokeWidth={16}
                     style={{ pointerEvents: 'stroke' }}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair') {
-                        e.preventDefault();
-                        e.stopPropagation();
+                        e.preventDefault(); e.stopPropagation();
                         setSelectedDrawingId(d.id);
                         if (!lockAllDrawings) {
                           setDraggingHandle('body');
@@ -993,27 +1260,30 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                   <line
                     x1={0} y1={pt1.y} x2="100%" y2={pt1.y}
                     stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 2}
-                    strokeDasharray={isSelected ? '6,6' : 'none'}
+                    strokeDasharray={strokeDash}
                   />
-                  <text x={10} y={pt1.y - 4} fill={d.color || '#38BDF8'} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono">
+                  <rect
+                    x={8} y={pt1.y - 18} width={75} height={16} rx={3}
+                    fill="#131722" stroke={d.color || '#38BDF8'} strokeWidth={1}
+                  />
+                  <text x={12} y={pt1.y - 6} fill={d.color || '#38BDF8'} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace">
                     ₹{d.startPrice?.toFixed(2)}
                   </text>
                 </g>
               );
             }
 
-            // Vertical Line
-            if (d.type === 'vertical_line') {
+            // 2. Horizontal Ray
+            if (d.type === 'horizontal_ray') {
               return (
                 <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
                   <line
-                    x1={pt1.x} y1={0} x2={pt1.x} y2="100%"
-                    stroke="transparent" strokeWidth={14}
+                    x1={pt1.x} y1={pt1.y} x2="100%" y2={pt1.y}
+                    stroke="transparent" strokeWidth={16}
                     style={{ pointerEvents: 'stroke' }}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair') {
-                        e.preventDefault();
-                        e.stopPropagation();
+                        e.preventDefault(); e.stopPropagation();
                         setSelectedDrawingId(d.id);
                         if (!lockAllDrawings) {
                           setDraggingHandle('body');
@@ -1024,27 +1294,33 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                     }}
                   />
                   <line
-                    x1={pt1.x} y1={0} x2={pt1.x} y2="100%"
+                    x1={pt1.x} y1={pt1.y} x2="100%" y2={pt1.y}
                     stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 2}
-                    strokeDasharray={isSelected ? '6,6' : 'none'}
+                    strokeDasharray={strokeDash}
                   />
+                  <circle cx={pt1.x} cy={pt1.y} r={isSelected ? 5 : 3.5} fill="#FFF" stroke={d.color || '#38BDF8'} strokeWidth={1.5} />
+                  <rect
+                    x={pt1.x + 8} y={pt1.y - 18} width={75} height={16} rx={3}
+                    fill="#131722" stroke={d.color || '#38BDF8'} strokeWidth={1}
+                  />
+                  <text x={pt1.x + 12} y={pt1.y - 6} fill={d.color || '#38BDF8'} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace">
+                    ₹{d.startPrice?.toFixed(2)}
+                  </text>
                 </g>
               );
             }
 
-            // Trendline
+            // 3. Trend Line
             if (d.type === 'trendline') {
               return (
                 <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
-                  {/* Invisible wide hit area */}
                   <line
                     x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y}
-                    stroke="transparent" strokeWidth={14}
+                    stroke="transparent" strokeWidth={16}
                     style={{ pointerEvents: 'stroke' }}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair') {
-                        e.preventDefault();
-                        e.stopPropagation();
+                        e.preventDefault(); e.stopPropagation();
                         setSelectedDrawingId(d.id);
                         if (!lockAllDrawings) {
                           setDraggingHandle('body');
@@ -1058,18 +1334,17 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                     x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y}
                     stroke={d.color || '#38BDF8'}
                     strokeWidth={d.strokeWidth || 2}
-                    strokeDasharray={isSelected ? '4,4' : 'none'}
+                    strokeDasharray={strokeDash}
                   />
-                  {/* Start Handle */}
+                  {/* Start & End Handles */}
                   <circle
                     cx={pt1.x} cy={pt1.y} r={isSelected ? 6 : 4}
                     fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
-                    stroke="#1E222D" strokeWidth={1.5}
+                    stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair' && !lockAllDrawings) {
-                        e.preventDefault();
-                        e.stopPropagation();
+                        e.preventDefault(); e.stopPropagation();
                         setSelectedDrawingId(d.id);
                         setDraggingHandle('start');
                         setDragStartPos({ x: e.clientX, y: e.clientY });
@@ -1077,16 +1352,14 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                       }
                     }}
                   />
-                  {/* End Handle */}
                   <circle
                     cx={pt2.x} cy={pt2.y} r={isSelected ? 6 : 4}
                     fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
-                    stroke="#1E222D" strokeWidth={1.5}
+                    stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair' && !lockAllDrawings) {
-                        e.preventDefault();
-                        e.stopPropagation();
+                        e.preventDefault(); e.stopPropagation();
                         setSelectedDrawingId(d.id);
                         setDraggingHandle('end');
                         setDragStartPos({ x: e.clientX, y: e.clientY });
@@ -1098,12 +1371,257 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
               );
             }
 
-            // Fibonacci Retracement
+            // 4. Trend Ray (Ray extending to infinity)
+            if (d.type === 'ray') {
+              const dx = pt2.x - pt1.x;
+              const dy = pt2.y - pt1.y;
+              const angle = Math.atan2(dy, dx);
+              const extendedLength = 3000;
+              const extX = pt1.x + Math.cos(angle) * extendedLength;
+              const extY = pt1.y + Math.sin(angle) * extendedLength;
+
+              return (
+                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                  <line
+                    x1={pt1.x} y1={pt1.y} x2={extX} y2={extY}
+                    stroke="transparent" strokeWidth={16}
+                    style={{ pointerEvents: 'stroke' }}
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair') {
+                        e.preventDefault(); e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        if (!lockAllDrawings) {
+                          setDraggingHandle('body');
+                          setDragStartPos({ x: e.clientX, y: e.clientY });
+                          setChartLocked(true);
+                        }
+                      }
+                    }}
+                  />
+                  <line
+                    x1={pt1.x} y1={pt1.y} x2={extX} y2={extY}
+                    stroke={d.color || '#38BDF8'}
+                    strokeWidth={d.strokeWidth || 2}
+                    strokeDasharray={strokeDash}
+                  />
+                  <circle
+                    cx={pt1.x} cy={pt1.y} r={isSelected ? 6 : 4}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    stroke="#131722" strokeWidth={1.5}
+                    style={{ pointerEvents: 'all', cursor: 'grab' }}
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair' && !lockAllDrawings) {
+                        e.preventDefault(); e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        setDraggingHandle('start');
+                        setDragStartPos({ x: e.clientX, y: e.clientY });
+                        setChartLocked(true);
+                      }
+                    }}
+                  />
+                  <circle
+                    cx={pt2.x} cy={pt2.y} r={isSelected ? 6 : 4}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    stroke="#131722" strokeWidth={1.5}
+                    style={{ pointerEvents: 'all', cursor: 'grab' }}
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair' && !lockAllDrawings) {
+                        e.preventDefault(); e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        setDraggingHandle('end');
+                        setDragStartPos({ x: e.clientX, y: e.clientY });
+                        setChartLocked(true);
+                      }
+                    }}
+                  />
+                </g>
+              );
+            }
+
+            // 5. Parallel Channel
+            if (d.type === 'parallel_channel') {
+              const cWidth = d.channelWidth || 35;
+              const dx = pt2.x - pt1.x;
+              const dy = pt2.y - pt1.y;
+              const angle = Math.atan2(dy, dx);
+              const perpAngle = angle - Math.PI / 2;
+
+              const offX = Math.cos(perpAngle) * cWidth;
+              const offY = Math.sin(perpAngle) * cWidth;
+
+              const upperP1 = { x: pt1.x + offX, y: pt1.y + offY };
+              const upperP2 = { x: pt2.x + offX, y: pt2.y + offY };
+              const lowerP1 = { x: pt1.x - offX, y: pt1.y - offY };
+              const lowerP2 = { x: pt2.x - offX, y: pt2.y - offY };
+
+              const polyPoints = `${upperP1.x},${upperP1.y} ${upperP2.x},${upperP2.y} ${lowerP2.x},${lowerP2.y} ${lowerP1.x},${lowerP1.y}`;
+
+              return (
+                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                  {/* Channel Fill */}
+                  <polygon
+                    points={polyPoints}
+                    fill="rgba(56, 189, 248, 0.08)"
+                    stroke="none"
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair') {
+                        e.preventDefault(); e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        if (!lockAllDrawings) {
+                          setDraggingHandle('body');
+                          setDragStartPos({ x: e.clientX, y: e.clientY });
+                          setChartLocked(true);
+                        }
+                      }
+                    }}
+                  />
+                  {/* Upper & Lower Channel Lines */}
+                  <line x1={upperP1.x} y1={upperP1.y} x2={upperP2.x} y2={upperP2.y} stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 1.5} />
+                  <line x1={lowerP1.x} y1={lowerP1.y} x2={lowerP2.x} y2={lowerP2.y} stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 1.5} />
+                  {/* Median Line */}
+                  <line x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y} stroke={d.color || '#38BDF8'} strokeWidth={1} strokeDasharray="4,4" />
+
+                  {/* Channel Width Handle */}
+                  {isSelected && (
+                    <circle
+                      cx={upperP1.x} cy={upperP1.y} r={5}
+                      fill="#FFF" stroke="#2962FF" strokeWidth={1.5}
+                      style={{ pointerEvents: 'all', cursor: 'ns-resize' }}
+                      onMouseDown={(e) => {
+                        e.preventDefault(); e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        setDraggingHandle('channel');
+                        setDragStartPos({ x: e.clientX, y: e.clientY });
+                        setChartLocked(true);
+                      }}
+                    />
+                  )}
+                </g>
+              );
+            }
+
+            // 6. Long / Short Position (Risk:Reward Position Tool)
+            if (d.type === 'long_position' || d.type === 'short_position') {
+              const isLong = d.type === 'long_position';
+              const entryY = pt1.y;
+              const entryPrice = d.startPrice || 1000;
+              const targetPrice = d.targetPrice || (isLong ? entryPrice * 1.03 : entryPrice * 0.97);
+              const stopPrice   = d.stopPrice   || (isLong ? entryPrice * 0.985 : entryPrice * 1.015);
+
+              const targetCoord = chartToCoord(d.startLogical, targetPrice, pt1.x, pt1.y - 60);
+              const stopCoord   = chartToCoord(d.startLogical, stopPrice, pt1.x, pt1.y + 40);
+
+              const targetY = targetCoord.y;
+              const stopY   = stopCoord.y;
+
+              const boxWidth = Math.max(160, Math.abs(pt2.x - pt1.x));
+              const startX   = pt1.x;
+
+              const targetDelta = Math.abs(targetPrice - entryPrice);
+              const stopDelta   = Math.abs(stopPrice - entryPrice);
+              const rrRatio     = stopDelta > 0 ? (targetDelta / stopDelta) : 0;
+              const targetPct   = entryPrice > 0 ? ((targetDelta / entryPrice) * 100) : 0;
+              const stopPct     = entryPrice > 0 ? ((stopDelta / entryPrice) * 100) : 0;
+
+              const targetBoxTop    = Math.min(entryY, targetY);
+              const targetBoxHeight = Math.abs(targetY - entryY);
+              const stopBoxTop      = Math.min(entryY, stopY);
+              const stopBoxHeight   = Math.abs(stopY - entryY);
+
+              return (
+                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                  {/* Target Box (Green) */}
+                  <rect
+                    x={startX} y={targetBoxTop} width={boxWidth} height={targetBoxHeight}
+                    fill="rgba(16, 185, 129, 0.18)"
+                    stroke="#10B981" strokeWidth={1}
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair') {
+                        e.preventDefault(); e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        if (!lockAllDrawings) {
+                          setDraggingHandle('body');
+                          setDragStartPos({ x: e.clientX, y: e.clientY });
+                          setChartLocked(true);
+                        }
+                      }
+                    }}
+                  />
+
+                  {/* Stop Loss Box (Red) */}
+                  <rect
+                    x={startX} y={stopBoxTop} width={boxWidth} height={stopBoxHeight}
+                    fill="rgba(239, 83, 80, 0.18)"
+                    stroke="#EF5350" strokeWidth={1}
+                    onMouseDown={(e) => {
+                      if (activeTool === 'crosshair') {
+                        e.preventDefault(); e.stopPropagation();
+                        setSelectedDrawingId(d.id);
+                        if (!lockAllDrawings) {
+                          setDraggingHandle('body');
+                          setDragStartPos({ x: e.clientX, y: e.clientY });
+                          setChartLocked(true);
+                        }
+                      }
+                    }}
+                  />
+
+                  {/* Entry Line */}
+                  <line
+                    x1={startX} y1={entryY} x2={startX + boxWidth} y2={entryY}
+                    stroke="#38BDF8" strokeWidth={1.5} strokeDasharray="3,3"
+                  />
+
+                  {/* Info Badge */}
+                  <rect
+                    x={startX + 6} y={entryY - 12} width={boxWidth - 12} height={24} rx={4}
+                    fill="rgba(15, 23, 42, 0.95)" stroke="#6366F1" strokeWidth={1}
+                  />
+                  <text
+                    x={startX + 12} y={entryY + 4}
+                    fill="#FFF" fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace"
+                  >
+                    R:R {rrRatio.toFixed(2)} · TP +₹{targetDelta.toFixed(1)} (+{targetPct.toFixed(1)}%) · SL -₹{stopDelta.toFixed(1)} (-{stopPct.toFixed(1)}%)
+                  </text>
+
+                  {/* Target Handle */}
+                  <circle
+                    cx={startX + boxWidth / 2} cy={targetY} r={5}
+                    fill="#10B981" stroke="#FFF" strokeWidth={1.5}
+                    style={{ pointerEvents: 'all', cursor: 'ns-resize' }}
+                    onMouseDown={(e) => {
+                      e.preventDefault(); e.stopPropagation();
+                      setSelectedDrawingId(d.id);
+                      setDraggingHandle('target');
+                      setDragStartPos({ x: e.clientX, y: e.clientY });
+                      setChartLocked(true);
+                    }}
+                  />
+
+                  {/* Stop Handle */}
+                  <circle
+                    cx={startX + boxWidth / 2} cy={stopY} r={5}
+                    fill="#EF5350" stroke="#FFF" strokeWidth={1.5}
+                    style={{ pointerEvents: 'all', cursor: 'ns-resize' }}
+                    onMouseDown={(e) => {
+                      e.preventDefault(); e.stopPropagation();
+                      setSelectedDrawingId(d.id);
+                      setDraggingHandle('stop');
+                      setDragStartPos({ x: e.clientX, y: e.clientY });
+                      setChartLocked(true);
+                    }}
+                  />
+                </g>
+              );
+            }
+
+            // 7. Fibonacci Retracement
             if (d.type === 'fibonacci') {
               const minY = Math.min(pt1.y, pt2.y);
               const maxY = Math.max(pt1.y, pt2.y);
               const height = maxY - minY;
               const startX = Math.min(pt1.x, pt2.x);
+              const width = Math.max(300, Math.abs(pt2.x - pt1.x));
 
               return (
                 <g
@@ -1111,8 +1629,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                   style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
                   onMouseDown={(e) => {
                     if (activeTool === 'crosshair') {
-                      e.preventDefault();
-                      e.stopPropagation();
+                      e.preventDefault(); e.stopPropagation();
                       setSelectedDrawingId(d.id);
                       if (!lockAllDrawings) {
                         setDraggingHandle('body');
@@ -1131,10 +1648,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                     return (
                       <rect
                         key={`band-${fib.level}`}
-                        x={startX}
-                        y={bandTop}
-                        width={Math.max(300, Math.abs(pt2.x - pt1.x))}
-                        height={bandHeight}
+                        x={startX} y={bandTop} width={width} height={bandHeight}
                         fill={fib.fill}
                       />
                     );
@@ -1145,20 +1659,13 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                     return (
                       <g key={fib.level}>
                         <line
-                          x1={startX}
-                          y1={y}
-                          x2={startX + Math.max(300, Math.abs(pt2.x - pt1.x))}
-                          y2={y}
-                          stroke={fib.color}
-                          strokeWidth={1}
+                          x1={startX} y1={y} x2={startX + width} y2={y}
+                          stroke={fib.color} strokeWidth={1}
                           strokeDasharray={isSelected ? '2,2' : 'none'}
                         />
                         <text
-                          x={startX + 6}
-                          y={y - 4}
-                          fill={fib.color}
-                          fontSize="10"
-                          fontWeight="700"
+                          x={startX + 6} y={y - 4}
+                          fill={fib.color} fontSize="10" fontWeight="700"
                           fontFamily="JetBrains Mono, monospace"
                         >
                           {fib.label}
@@ -1177,7 +1684,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
               );
             }
 
-            // Brush Freehand
+            // 8. Freehand Brush
             if (d.type === 'brush' && d.points?.length > 1) {
               const livePoints = d.points.map(pt => chartToCoord(pt.logical, pt.price, pt.x, pt.y));
               const pathData = livePoints.reduce((acc, pt, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`, '');
@@ -1192,8 +1699,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                   strokeLinejoin="round"
                   onMouseDown={(e) => {
                     if (activeTool === 'crosshair') {
-                      e.preventDefault();
-                      e.stopPropagation();
+                      e.preventDefault(); e.stopPropagation();
                       setSelectedDrawingId(d.id);
                       if (!lockAllDrawings) {
                         setDraggingHandle('body');
@@ -1207,7 +1713,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
               );
             }
 
-            // Rectangle Zone
+            // 9. Rectangle Zone
             if (d.type === 'rectangle') {
               const x = Math.min(pt1.x, pt2.x);
               const y = Math.min(pt1.y, pt2.y);
@@ -1223,8 +1729,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                     strokeDasharray={isSelected ? '4,4' : 'none'}
                     onMouseDown={(e) => {
                       if (activeTool === 'crosshair') {
-                        e.preventDefault();
-                        e.stopPropagation();
+                        e.preventDefault(); e.stopPropagation();
                         setSelectedDrawingId(d.id);
                         if (!lockAllDrawings) {
                           setDraggingHandle('body');
@@ -1246,7 +1751,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
               );
             }
 
-            // Ruler / Measure
+            // 10. Ruler / Measurement
             if (d.type === 'ruler') {
               const dx = Math.abs(pt2.x - pt1.x);
               const dy = pt1.y - pt2.y;
@@ -1258,17 +1763,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
               const pricePercent = d.startPrice ? (priceDelta / d.startPrice) * 100 : (dy * 0.08);
 
               return (
-                <g
-                  key={d.id}
-                  style={{ pointerEvents: 'visiblePainted', cursor: 'pointer' }}
-                  onMouseDown={(e) => {
-                    if (activeTool === 'crosshair') {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setSelectedDrawingId(d.id);
-                    }
-                  }}
-                >
+                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: 'pointer' }}>
                   <rect
                     x={x} y={y} width={w} height={h}
                     fill={priceDelta >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,83,80,0.15)'}
@@ -1276,14 +1771,14 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                     strokeWidth={1}
                     strokeDasharray="3,3"
                   />
-                  <text x={x + 6} y={y + 14} fill="#FFF" fontSize="10" fontWeight="700" fontFamily="JetBrains Mono">
+                  <text x={x + 6} y={y + 14} fill="#FFF" fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace">
                     {priceDelta >= 0 ? '+' : ''}{priceDelta.toFixed(2)} ({pricePercent.toFixed(2)}%) · {Math.max(1, Math.round(dx / 8))} bars
                   </text>
                 </g>
               );
             }
 
-            // Text Note
+            // 11. Text Note
             if (d.type === 'text') {
               return (
                 <text
@@ -1293,8 +1788,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                   fontSize="12" fontWeight="600" fontFamily="Inter, sans-serif"
                   onMouseDown={(e) => {
                     if (activeTool === 'crosshair') {
-                      e.preventDefault();
-                      e.stopPropagation();
+                      e.preventDefault(); e.stopPropagation();
                       setSelectedDrawingId(d.id);
                       if (!lockAllDrawings) {
                         setDraggingHandle('body');
@@ -1310,7 +1804,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
               );
             }
 
-            // Sticker Emoji
+            // 12. Sticker Emoji
             if (d.type === 'sticker') {
               return (
                 <text
@@ -1319,8 +1813,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                   fontSize="22"
                   onMouseDown={(e) => {
                     if (activeTool === 'crosshair') {
-                      e.preventDefault();
-                      e.stopPropagation();
+                      e.preventDefault(); e.stopPropagation();
                       setSelectedDrawingId(d.id);
                       if (!lockAllDrawings) {
                         setDraggingHandle('body');
@@ -1339,10 +1832,17 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
             return null;
           })}
 
-          {/* Realtime Drawing Preview */}
+          {/* ── Active Drawing Preview ── */}
           {currentDraw && (
             <>
               {currentDraw.type === 'trendline' && (
+                <line
+                  x1={currentDraw.startX} y1={currentDraw.startY}
+                  x2={currentDraw.endX} y2={currentDraw.endY}
+                  stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4"
+                />
+              )}
+              {currentDraw.type === 'ray' && (
                 <line
                   x1={currentDraw.startX} y1={currentDraw.startY}
                   x2={currentDraw.endX} y2={currentDraw.endY}
@@ -1356,13 +1856,6 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                   stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4"
                 />
               )}
-              {currentDraw.type === 'vertical_line' && (
-                <line
-                  x1={currentDraw.startX} y1={0}
-                  x2={currentDraw.startX} y2="100%"
-                  stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4"
-                />
-              )}
               {currentDraw.type === 'fibonacci' && (
                 <g>
                   {FIBONACCI_LEVELS.map((fib) => {
@@ -1371,27 +1864,14 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
                     const height = maxY - minY;
                     const y = currentDraw.startY < currentDraw.endY ? minY + height * fib.level : maxY - height * fib.level;
                     return (
-                      <g key={fib.level}>
-                        <line
-                          x1={Math.min(currentDraw.startX, currentDraw.endX)}
-                          y1={y}
-                          x2={Math.min(currentDraw.startX, currentDraw.endX) + Math.max(300, Math.abs(currentDraw.endX - currentDraw.startX))}
-                          y2={y}
-                          stroke={fib.color}
-                          strokeWidth={1}
-                          strokeDasharray="3,3"
-                        />
-                        <text
-                          x={Math.min(currentDraw.startX, currentDraw.endX) + 6}
-                          y={y - 4}
-                          fill={fib.color}
-                          fontSize="10"
-                          fontWeight="700"
-                          fontFamily="JetBrains Mono, monospace"
-                        >
-                          {fib.label}
-                        </text>
-                      </g>
+                      <line
+                        key={fib.level}
+                        x1={Math.min(currentDraw.startX, currentDraw.endX)}
+                        y1={y}
+                        x2={Math.min(currentDraw.startX, currentDraw.endX) + Math.max(300, Math.abs(currentDraw.endX - currentDraw.startX))}
+                        y2={y}
+                        stroke={fib.color} strokeWidth={1} strokeDasharray="3,3"
+                      />
                     );
                   })}
                 </g>
@@ -1422,6 +1902,32 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
               )}
             </>
           )}
+
+          {/* ── Magnet Snapping Visual Indicator (Glowing Cyan Dot) ── */}
+          {snapIndicator && (
+            <g>
+              <circle
+                cx={snapIndicator.x} cy={snapIndicator.y} r={7}
+                fill="none" stroke="#00E5FF" strokeWidth={2}
+                opacity={0.85}
+              />
+              <circle
+                cx={snapIndicator.x} cy={snapIndicator.y} r={3.5}
+                fill="#00E5FF"
+              />
+              <rect
+                x={snapIndicator.x + 10} y={snapIndicator.y - 14}
+                width={70} height={14} rx={2}
+                fill="rgba(0, 229, 255, 0.2)" stroke="#00E5FF" strokeWidth={0.75}
+              />
+              <text
+                x={snapIndicator.x + 14} y={snapIndicator.y - 3}
+                fill="#00E5FF" fontSize="8.5" fontWeight="800" fontFamily="JetBrains Mono, monospace"
+              >
+                {snapIndicator.label}
+              </text>
+            </g>
+          )}
         </svg>
       )}
 
@@ -1432,7 +1938,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           left: textInputPos.x + 44,
           top: textInputPos.y,
           zIndex: 60,
-          background: '#1E222D',
+          background: '#131722',
           border: '1px solid #2962FF',
           borderRadius: 6,
           padding: 4,
@@ -1451,7 +1957,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
             }}
             autoFocus
             style={{
-              background: '#131722',
+              background: '#090C18',
               border: '1px solid rgba(255,255,255,0.1)',
               borderRadius: 4,
               padding: '4px 8px',
@@ -1485,7 +1991,7 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           left: stickerPos.x + 44,
           top: stickerPos.y,
           zIndex: 60,
-          background: '#1E222D',
+          background: '#131722',
           border: '1px solid rgba(255, 255, 255, 0.15)',
           borderRadius: 8,
           padding: 8,
@@ -1493,11 +1999,13 @@ export default function DrawingTools({ chartRef, candleRef, symbol, interval, ch
           gap: 8,
           boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
         }}>
-          {['🚀', '📈', '📉', '🎯', '⭐', '🔥', '👍', '❌'].map((emoji) => (
+          {['🚀', '📈', '📉', '🎯', '⭐', '🔥', '👍', '❌', '💰', '🛡️'].map((emoji) => (
             <span
               key={emoji}
               onClick={() => handleAddSticker(emoji)}
-              style={{ fontSize: 20, cursor: 'pointer' }}
+              style={{ fontSize: 20, cursor: 'pointer', transition: 'transform 0.1s' }}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = 'scale(1.3)')}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = 'scale(1.0)')}
             >
               {emoji}
             </span>

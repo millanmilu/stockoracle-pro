@@ -189,7 +189,7 @@ export default function ChartPane({
         fontFamily: 'Inter, system-ui, sans-serif',
       },
       grid: {
-        vertLines: { color: 'rgba(99, 102, 241, 0.05)' },
+        vertLines: { color: 'rgba(99, 102, 241, 0.04)', style: LineStyle.Dotted },
         horzLines: { color: 'rgba(99, 102, 241, 0.05)' },
       },
       crosshair: {
@@ -198,14 +198,24 @@ export default function ChartPane({
         horzLine: { color: 'rgba(99, 102, 241, 0.4)', width: 1, style: LineStyle.Dashed },
       },
       rightPriceScale: {
-        borderColor: 'rgba(99, 102, 241, 0.15)',
-        scaleMargins: { top: 0.1, bottom: 0.2 },
+        borderColor: 'rgba(99, 102, 241, 0.12)',
+        scaleMargins: { top: 0.08, bottom: 0.16 },
+        autoScale: true,
+        alignLabels: true,
       },
       timeScale: {
-        borderColor: 'rgba(99, 102, 241, 0.15)',
+        borderColor: 'rgba(99, 102, 241, 0.12)',
         timeVisible: !isDaily,
         secondsVisible: false,
+        shiftVisibleRangeOnNewBar: true,
+        rightOffset: 10,
+        barSpacing: 8,
+        minBarSpacing: 0.5,
+        allowBoldLabels: true,
       },
+      handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
+      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+      kineticScroll: { touch: true, mouse: true },
     });
 
     chartRef.current = chart;

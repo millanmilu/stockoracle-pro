@@ -440,26 +440,32 @@ const CHART_OPTIONS = {
     fontSize   : 11,
   },
   grid: {
-    vertLines: { color: 'rgba(168,85,247,0.04)', style: LineStyle.Dotted },
-    horzLines: { color: 'rgba(168,85,247,0.07)' },
+    vertLines: { color: 'rgba(99,102,241,0.04)', style: LineStyle.Dotted },
+    horzLines: { color: 'rgba(99,102,241,0.06)' },
   },
   crosshair: {
     mode        : CrosshairMode.Normal,
-    vertLine    : { color: 'rgba(168,85,247,0.45)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#1e1060' },
-    horzLine    : { color: 'rgba(168,85,247,0.45)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#1e1060' },
+    vertLine    : { color: 'rgba(129,140,248,0.4)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#1e1060' },
+    horzLine    : { color: 'rgba(129,140,248,0.4)', width: 1, style: LineStyle.Dashed, labelBackgroundColor: '#1e1060' },
   },
   rightPriceScale: {
-    borderColor     : 'rgba(168,85,247,0.10)',
+    borderColor     : 'rgba(99,102,241,0.12)',
     textColor       : '#6B7280',
-    scaleMargins    : { top: 0.08, bottom: 0.28 },
+    scaleMargins    : { top: 0.08, bottom: 0.16 },
     autoScale       : true,
+    alignLabels     : true,
     lockVisibleRange: false,
   },
   timeScale: {
-    borderColor     : 'rgba(168,85,247,0.10)',
+    borderColor     : 'rgba(99,102,241,0.12)',
     textColor       : '#6B7280',
     timeVisible     : true,
     secondsVisible  : false,
+    shiftVisibleRangeOnNewBar: true,
+    rightOffset     : 12,
+    barSpacing      : 8,
+    minBarSpacing   : 0.5,
+    allowBoldLabels : true,
     fixLeftEdge     : false,
     fixRightEdge    : false,
     visible         : true,
@@ -654,9 +660,8 @@ export default function LiveChartView() {
     volume: null,
   });
 
-  // Chart Scale & Hover HUD
+  // Chart Scale & Navigation
   const [isLogScale, setIsLogScale] = useState(false);
-  const [hoverBarInfo, setHoverBarInfo] = useState(null);
 
   // Chart Navigation State
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -803,6 +808,7 @@ export default function LiveChartView() {
   const lowerLineRef   = useRef(null);
   const livePriceLineRef = useRef(null);
   const activeCandleRef  = useRef(null);
+  const hudRef           = useRef(null);
 
   // Chart 2 (Comparison) Refs
   const containerRef2  = useRef(null);
@@ -992,23 +998,29 @@ export default function LiveChartView() {
     const lowerLine = chart.addLineSeries({ color: 'rgba(239,83,80,0.5)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     lowerLineRef.current = lowerLine;
 
-    // Crosshair HUD subscription
+    // Crosshair HUD subscription (direct 0ms DOM update, no React re-render lag)
     chart.subscribeCrosshairMove((param) => {
-      if (!param || !param.time) {
-        setHoverBarInfo(null);
+      if (!hudRef.current) return;
+      if (!param || !param.time || !param.point) {
+        hudRef.current.style.display = 'none';
         return;
       }
       const candleData = param.seriesData.get(candle);
       if (candleData && typeof candleData.open === 'number') {
+        hudRef.current.style.display = 'flex';
         const chg = candleData.open ? ((candleData.close - candleData.open) / candleData.open) * 100 : 0;
-        setHoverBarInfo({
-          time: param.time,
-          open: candleData.open,
-          high: candleData.high,
-          low: candleData.low,
-          close: candleData.close,
-          changePct: chg,
-        });
+        const isUp = chg >= 0;
+        const upCol = '#10B981';
+        const dnCol = '#EF5350';
+        hudRef.current.innerHTML = `
+          <span style="color:#94A3B8">O: <strong style="color:#F1F5F9">₹${candleData.open.toFixed(2)}</strong></span>
+          <span style="color:#94A3B8">H: <strong style="color:${upCol}">₹${candleData.high.toFixed(2)}</strong></span>
+          <span style="color:#94A3B8">L: <strong style="color:${dnCol}">₹${candleData.low.toFixed(2)}</strong></span>
+          <span style="color:#94A3B8">C: <strong style="color:${isUp ? upCol : dnCol}">₹${candleData.close.toFixed(2)}</strong></span>
+          <span style="color:${isUp ? upCol : dnCol};font-weight:700">${isUp ? '+' : ''}${chg.toFixed(2)}%</span>
+        `;
+      } else {
+        hudRef.current.style.display = 'none';
       }
     });
 
@@ -2778,6 +2790,7 @@ export default function LiveChartView() {
           <DrawingTools
             chartRef={chartRef}
             candleRef={candleRef}
+            candles={rawHistory || []}
             symbol={selectedSymbol}
             interval={interval}
             chartReady={chartReady}
@@ -2786,7 +2799,7 @@ export default function LiveChartView() {
 
           {/* ── Center Chart Canvas ── */}
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden', height: '100%' }}>
-            {/* ── TradingView Style On-Chart Active Indicators Legend ── */}
+            {/* ── TradingView Style On-Chart Active Indicators Legend & HUD ── */}
             <div style={{
               position: 'absolute',
               top: 10,
@@ -2795,32 +2808,27 @@ export default function LiveChartView() {
               display: 'flex',
               flexDirection: 'column',
               gap: 4,
-              pointerEvents: 'auto',
+              pointerEvents: 'none',
               userSelect: 'none',
             }}>
-              {/* Live Hover OHLCV HUD */}
-              {hoverBarInfo && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8, fontSize: 11,
-                  background: 'rgba(7, 10, 20, 0.92)', padding: '3px 10px', borderRadius: 4,
-                  backdropFilter: 'blur(6px)', border: '1px solid rgba(99,102,241,0.3)',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.6)', fontFamily: 'JetBrains Mono, monospace'
-                }}>
-                  <span style={{ color: '#94A3B8' }}>O: <strong style={{ color: '#F1F5F9' }}>₹{hoverBarInfo.open.toFixed(2)}</strong></span>
-                  <span style={{ color: '#94A3B8' }}>H: <strong style={{ color: '#10B981' }}>₹{hoverBarInfo.high.toFixed(2)}</strong></span>
-                  <span style={{ color: '#94A3B8' }}>L: <strong style={{ color: '#EF5350' }}>₹{hoverBarInfo.low.toFixed(2)}</strong></span>
-                  <span style={{ color: '#94A3B8' }}>C: <strong style={{ color: hoverBarInfo.changePct >= 0 ? '#10B981' : '#EF5350' }}>₹{hoverBarInfo.close.toFixed(2)}</strong></span>
-                  <span style={{ 
-                    color: hoverBarInfo.changePct >= 0 ? '#10B981' : '#EF5350',
-                    fontWeight: 700 
-                  }}>
-                    {hoverBarInfo.changePct >= 0 ? '+' : ''}{hoverBarInfo.changePct.toFixed(2)}%
-                  </span>
-                </div>
-              )}
-
-
-
+              {/* Ultra-Fast Live Hover OHLCV HUD (Direct 0ms DOM Ref) */}
+              <div
+                ref={hudRef}
+                style={{
+                  display: 'none',
+                  alignItems: 'center',
+                  gap: 8,
+                  fontSize: 11,
+                  background: 'rgba(7, 10, 20, 0.92)',
+                  padding: '3px 10px',
+                  borderRadius: 4,
+                  backdropFilter: 'blur(6px)',
+                  border: '1px solid rgba(99,102,241,0.3)',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
+                  fontFamily: 'JetBrains Mono, monospace',
+                  pointerEvents: 'none',
+                }}
+              />
             </div>
 
             {loading && (
