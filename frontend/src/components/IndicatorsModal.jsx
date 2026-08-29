@@ -20,10 +20,7 @@ const ALL_SCRIPTS = [
   { id: 'sma_20', name: 'Simple Moving Average (SMA 20)', type: 'overlay', category: 'technicals', tab: 'Indicators', desc: 'Arithmetic average of closing prices over 20 periods.' },
   { id: 'rsi_14', name: 'Relative Strength Index (RSI 14)', type: 'oscillator', category: 'technicals', tab: 'Indicators', desc: 'Momentum oscillator measuring the speed and magnitude of recent price changes.' },
   { id: 'macd', name: 'MACD (12, 26, 9)', type: 'oscillator', category: 'technicals', tab: 'Indicators', desc: 'Moving Average Convergence Divergence trend-following momentum oscillator.' },
-  { id: 'vpvr', name: 'Volume Profile (VPVR)', type: 'profile', category: 'technicals', tab: 'Profiles', badge: 'PRO', badgeColor: '#38BDF8', desc: 'Volume-at-Price histogram highlighting Point of Control (POC) and Value Areas.' },
-  { id: 'orderflow', name: 'Order Flow Delta', type: 'profile', category: 'technicals', tab: 'Profiles', badge: 'PRO', badgeColor: '#A855F7', desc: 'Aggregated buyer vs seller tick delta imbalance.' },
   { id: 'ai_patterns', name: 'AI Pattern Recognition Scanner', type: 'pattern', category: 'technicals', tab: 'Patterns', badge: 'AI', badgeColor: '#10B981', desc: 'Detects Head & Shoulders, Double Bottoms, Triangles, and Flags using neural nets.' },
-  { id: 'mtf_matrix', name: 'Multi-Timeframe Correlation Matrix', type: 'breadth', category: 'technicals', tab: 'Strategies', badge: 'PRO', badgeColor: '#6366F1', desc: 'Correlates 1m, 5m, 15m, 1h, 1d price actions.' },
   { id: 'backtester', name: 'Strategy Backtester Overlay', type: 'strategy', category: 'technicals', tab: 'Strategies', badge: 'LAB', badgeColor: '#F59E0B', desc: 'Historical equity curve and trade simulation on chart candles.' },
 ];
 
@@ -38,7 +35,7 @@ const SIDEBAR_NAV = [
   { id: 'marketplace', label: 'Marketplace', icon: ShoppingBag },
 ];
 
-const TOP_TABS = ['Indicators', 'Strategies', 'Profiles', 'Patterns'];
+const TOP_TABS = ['Indicators', 'Strategies', 'Patterns'];
 
 export default function IndicatorsModal({
   isOpen,
@@ -49,7 +46,7 @@ export default function IndicatorsModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState('Indicators');
   const [activeSidebar, setActiveSidebar] = useState('technicals');
-  const [favorites, setFavorites] = useState(['boll', 'rsi_14', 'vpvr', 'ai_patterns']);
+  const [favorites, setFavorites] = useState(['boll', 'rsi_14', 'ai_patterns']);
 
   const toggleFavorite = (id, e) => {
     e.stopPropagation();

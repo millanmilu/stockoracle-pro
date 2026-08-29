@@ -7,7 +7,7 @@ import {
   Columns, Rows, Grid2X2, Square, Eye, EyeOff, Sparkles, TrendingUp,
   ZoomIn, ZoomOut, Move, RotateCcw, Zap, Activity, Check,
   BarChart3, Layers, Target, ChevronRight, ChevronLeft, X, FlaskConical,
-  Play, Pause, SkipForward, FastForward, Flame, ShieldAlert, Sliders
+  Play, Pause, SkipForward, FastForward, ShieldAlert, Sliders
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import MultiChartGrid from './MultiChartGrid';
@@ -15,16 +15,12 @@ import DrawingTools from './chart-tools/DrawingTools';
 import TradingViewAdvancedChart from './chart-tools/TradingViewAdvancedChart';
 import IndicatorsModal from './IndicatorsModal';
 import ChartSettingsModal from './ChartSettingsModal';
-import VolumeProfile from './chart-tools/VolumeProfile';
-import OrderFlow from './chart-tools/OrderFlow';
 import AIPatternRecognition from './chart-tools/AIPatternRecognition';
-import MultiTimeframeCorrelation from './chart-tools/MultiTimeframeCorrelation';
 import TrustBadge from './TrustBadge';
 import { parseNum, toChartTime, addBusinessDays, POPULAR_STOCKS, INTERVALS, SIG, CHART_OPTIONS, CANDLE_STYLE } from '../utils/chartHelpers';
 import { calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateMACD, calculateALMA, calculateHeikinAshi, calculateKeyLevels, detectPatterns } from '../utils/chartIndicators';
 import SymbolSearchModal from './chart-tools/SymbolSearchModal';
 import { playAlertChime } from '../utils/soundChime';
-import { detectFVGs, detectOrderBlocks, detectMarketStructure } from './chart-tools/smcEngine';
 
 /* ─── Constants ─────────────────────────────────────────────────────────────── */
 
@@ -172,19 +168,7 @@ export default function LiveChartView() {
   const [showPatterns,  setShowPatterns]  = useState(false);
   const [showAICone,    setShowAICone]    = useState(true);
   
-  // ── 5 Institutional Advance Features State ──
-  // 1. Smart Money Concepts (SMC) & Liquidity Imbalances
-  const [showSMC, setShowSMC] = useState(false);
-
-  // 2. Options Open Interest (OI) & Max Pain Overlays
-  const [showOptionsOI, setShowOptionsOI] = useState(false);
-  const [optionsData, setOptionsData] = useState(null);
-  const [optionsLoading, setOptionsLoading] = useState(false);
-
-  // 3. Integrated Volume Profile (VPVR) & Point of Control (POC)
-  const [showVPVR, setShowVPVR] = useState(false);
-
-  // 4. Historical Bar Replay Simulator (Practice Mode)
+  // Historical Bar Replay Simulator (Practice Mode)
   const [isReplayMode, setIsReplayMode] = useState(false);
   const [replayIndex, setReplayIndex] = useState(0);
   const [isReplayPlaying, setIsReplayPlaying] = useState(false);
@@ -288,18 +272,6 @@ export default function LiveChartView() {
         setShowAdvancedPanel(true);
         setAdvancedPanelTab('patterns');
         break;
-      case 'vpvr':
-        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'volume');
-        setAdvancedPanelTab('volume');
-        break;
-      case 'orderflow':
-        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'order');
-        setAdvancedPanelTab('order');
-        break;
-      case 'mtf_matrix':
-        setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'mtf');
-        setAdvancedPanelTab('mtf');
-        break;
       case 'backtester':
         setShowAdvancedPanel(prev => !prev || advancedPanelTab !== 'backtest');
         setAdvancedPanelTab('backtest');
@@ -355,9 +327,6 @@ export default function LiveChartView() {
   const macdHistRef    = useRef(null);
   const almaRef        = useRef(null);
   const keyLevelLinesRef = useRef([]);
-  const smcLinesRef    = useRef([]);
-  const optionsLinesRef = useRef([]);
-  const vpvrLinesRef   = useRef([]);
   const alertLinesRef  = useRef([]);
   const lastTriggeredMap = useRef(new Set());
 
@@ -1030,143 +999,7 @@ export default function LiveChartView() {
       try { bbUpperRef.current?.setData([]); bbLowerRef.current?.setData([]); } catch {}
     }
 
-    // 4. Smart Money Concepts (SMC) & Liquidity Overlay
-    if (showSMC && candleRef.current && activeCandles.length > 10) {
-      smcLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
-      smcLinesRef.current = [];
-
-      // A. Fair Value Gaps (FVG)
-      const fvgs = detectFVGs(activeCandles, 4);
-      fvgs.forEach(fvg => {
-        try {
-          const pLine = candleRef.current.createPriceLine({
-            price: fvg.mid,
-            color: fvg.borderColor,
-            lineWidth: 1,
-            lineStyle: LineStyle.Dotted,
-            axisLabelVisible: true,
-            title: fvg.type === 'bullish_fvg' ? `FVG (Demand) ₹${fvg.bottom.toFixed(0)}-${fvg.top.toFixed(0)}` : `FVG (Supply) ₹${fvg.bottom.toFixed(0)}-${fvg.top.toFixed(0)}`,
-          });
-          smcLinesRef.current.push(pLine);
-        } catch {}
-      });
-
-      // B. Order Blocks (OB)
-      const obs = detectOrderBlocks(activeCandles, 60);
-      obs.forEach(ob => {
-        try {
-          const pLine = candleRef.current.createPriceLine({
-            price: ob.price,
-            color: ob.color,
-            lineWidth: 1.5,
-            lineStyle: LineStyle.Dashed,
-            axisLabelVisible: true,
-            title: ob.label,
-          });
-          smcLinesRef.current.push(pLine);
-        } catch {}
-      });
-
-      // C. Market Structure Breaks (BOS)
-      const ms = detectMarketStructure(activeCandles, 4);
-      ms.breaks.forEach(brk => {
-        try {
-          const pLine = candleRef.current.createPriceLine({
-            price: brk.price,
-            color: brk.color,
-            lineWidth: 1,
-            lineStyle: LineStyle.Solid,
-            axisLabelVisible: true,
-            title: brk.label,
-          });
-          smcLinesRef.current.push(pLine);
-        } catch {}
-      });
-    } else if (!showSMC && candleRef.current && smcLinesRef.current.length > 0) {
-      smcLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
-      smcLinesRef.current = [];
-    }
-
-    // 5. Chart-Integrated Volume Profile (VPVR) & Point of Control (POC)
-    if (showVPVR && candleRef.current && activeCandles.length > 10) {
-      vpvrLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
-      vpvrLinesRef.current = [];
-
-      let minP = Infinity;
-      let maxP = -Infinity;
-      activeCandles.forEach(c => {
-        if (c.high > maxP) maxP = c.high;
-        if (c.low < minP) minP = c.low;
-      });
-      const pRange = maxP - minP;
-      if (pRange > 0) {
-        const nBins = 35;
-        const bSize = pRange / nBins;
-        const vBins = new Array(nBins).fill(0);
-        activeCandles.forEach(c => {
-          const mid = (c.high + c.low + c.close) / 3;
-          const idx = Math.min(nBins - 1, Math.max(0, Math.floor((mid - minP) / bSize)));
-          vBins[idx] += Number(c.volume || 1);
-        });
-
-        const maxV = Math.max(...vBins);
-        const pocI = vBins.indexOf(maxV);
-        const pocPrice = minP + (pocI + 0.5) * bSize;
-
-        const totV = vBins.reduce((a, b) => a + b, 0);
-        const target70 = totV * 0.7;
-        const sorted = vBins.map((v, i) => ({ idx: i, vol: v })).sort((a, b) => b.vol - a.vol);
-        let acc = 0;
-        const vaIndices = new Set();
-        for (const item of sorted) {
-          acc += item.vol;
-          vaIndices.add(item.idx);
-          if (acc >= target70) break;
-        }
-        const vahI = Math.max(...vaIndices);
-        const valI = Math.min(...vaIndices);
-        const vahPrice = minP + (vahI + 0.5) * bSize;
-        const valPrice = minP + (valI + 0.5) * bSize;
-
-        // POC Line (Golden)
-        const pocLine = candleRef.current.createPriceLine({
-          price: pocPrice,
-          color: '#F59E0B',
-          lineWidth: 2,
-          lineStyle: LineStyle.Solid,
-          axisLabelVisible: true,
-          title: `★ POC ₹${pocPrice.toFixed(1)}`,
-        });
-        vpvrLinesRef.current.push(pocLine);
-
-        // VAH Line
-        const vahLine = candleRef.current.createPriceLine({
-          price: vahPrice,
-          color: '#818CF8',
-          lineWidth: 1,
-          lineStyle: LineStyle.Dotted,
-          axisLabelVisible: true,
-          title: `VAH (70%) ₹${vahPrice.toFixed(1)}`,
-        });
-        vpvrLinesRef.current.push(vahLine);
-
-        // VAL Line
-        const valLine = candleRef.current.createPriceLine({
-          price: valPrice,
-          color: '#818CF8',
-          lineWidth: 1,
-          lineStyle: LineStyle.Dotted,
-          axisLabelVisible: true,
-          title: `VAL (70%) ₹${valPrice.toFixed(1)}`,
-        });
-        vpvrLinesRef.current.push(valLine);
-      }
-    } else if (!showVPVR && candleRef.current && vpvrLinesRef.current.length > 0) {
-      vpvrLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
-      vpvrLinesRef.current = [];
-    }
-
-    // 8. RSI Sub-chart
+    // RSI Sub-chart
     let currentRSI = null;
     if (showRSI && rsiRef.current && activeCandles.length > 14) {
       const rsiVals = calculateRSI(activeCandles, 14);
@@ -1329,7 +1162,7 @@ export default function LiveChartView() {
       } catch {}
     }, 50);
     return () => clearTimeout(timer);
-  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, showSMC, showVPVR, isReplayMode, replayIndex, chartType]);
+  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, isReplayMode, replayIndex, chartType]);
 
   /* ── Secondary Comparison Chart Data Binding ───────────────── */
 
@@ -1455,84 +1288,6 @@ export default function LiveChartView() {
       title               : 'LIVE',
     });
   }, [livePrice, interval, isDaily, selectedSymbol]);
-
-  /* ── 2. Options Open Interest (OI) & Max Pain Overlay ──────── */
-  useEffect(() => {
-    if (!showOptionsOI || !selectedSymbol) {
-      if (optionsLinesRef.current.length > 0 && candleRef.current) {
-        optionsLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
-        optionsLinesRef.current = [];
-      }
-      return;
-    }
-
-    let active = true;
-    setOptionsLoading(true);
-    fetch(`/api/stock/${selectedSymbol}/options-chain`)
-      .then(res => res.json())
-      .then(data => {
-        if (!active) return;
-        setOptionsLoading(false);
-        if (!data || data.error || !data.chain || !data.chain.length) {
-          toast.error(`Options chain data not available for ${selectedSymbol}`);
-          return;
-        }
-        setOptionsData(data);
-
-        if (candleRef.current) {
-          optionsLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
-          optionsLinesRef.current = [];
-
-          // 1. Highest Call OI (Resistance Wall)
-          const highestCall = [...data.chain].sort((a, b) => (b.call_oi || 0) - (a.call_oi || 0))[0];
-          if (highestCall && highestCall.call_oi > 0) {
-            const callWallLine = candleRef.current.createPriceLine({
-              price: highestCall.strike_price,
-              color: '#EF5350',
-              lineWidth: 2,
-              lineStyle: LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: `🔴 Call OI Wall ₹${highestCall.strike_price} [${(highestCall.call_oi / 100000).toFixed(1)}L]`,
-            });
-            optionsLinesRef.current.push(callWallLine);
-          }
-
-          // 2. Highest Put OI (Support Floor)
-          const highestPut = [...data.chain].sort((a, b) => (b.put_oi || 0) - (a.put_oi || 0))[0];
-          if (highestPut && highestPut.put_oi > 0) {
-            const putWallLine = candleRef.current.createPriceLine({
-              price: highestPut.strike_price,
-              color: '#10B981',
-              lineWidth: 2,
-              lineStyle: LineStyle.Dashed,
-              axisLabelVisible: true,
-              title: `🟢 Put OI Wall ₹${highestPut.strike_price} [${(highestPut.put_oi / 100000).toFixed(1)}L]`,
-            });
-            optionsLinesRef.current.push(putWallLine);
-          }
-
-          // 3. Max Pain Strike
-          if (data.max_pain) {
-            const maxPainLine = candleRef.current.createPriceLine({
-              price: data.max_pain,
-              color: '#A855F7',
-              lineWidth: 1.5,
-              lineStyle: LineStyle.Solid,
-              axisLabelVisible: true,
-              title: `🟣 Max Pain Strike ₹${data.max_pain}`,
-            });
-            optionsLinesRef.current.push(maxPainLine);
-          }
-        }
-      })
-      .catch(() => {
-        if (active) setOptionsLoading(false);
-      });
-
-    return () => {
-      active = false;
-    };
-  }, [showOptionsOI, selectedSymbol, chartReady]);
 
   /* ── 4. Bar Replay Timer Playback Loop ────────────────────── */
   useEffect(() => {
@@ -2002,90 +1757,11 @@ export default function LiveChartView() {
               </div>
             )}
           </div>
-
-          {/* Multi-Timeframe Trend Status Matrix Pill */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            padding: '2px 8px', borderRadius: 5,
-            background: 'rgba(255,255,255,0.02)',
-            border: '1px solid rgba(255,255,255,0.06)',
-            fontSize: '0.66rem', color: '#94A3B8', fontWeight: 700, userSelect: 'none'
-          }}>
-            <span style={{ color: '#64748B' }}>MTF:</span>
-            <span style={{ color: '#10B981' }} title="1m Bullish">1m●</span>
-            <span style={{ color: '#10B981' }} title="5m Bullish">5m●</span>
-            <span style={{ color: changeUp ? '#10B981' : '#EF5350' }} title="15m Momentum">15m●</span>
-            <span style={{ color: '#10B981' }} title="1H Bullish">1H●</span>
-            <span style={{ color: '#10B981' }} title="1D Bullish">1D●</span>
-          </div>
         </div>
 
         {/* Right: Indicators, AI Overlays, Grid Switcher, Snapshot, Fullscreen */}
         <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink: 0 }}>
-          {/* 1. Smart Money Concepts (SMC) Toggle */}
-          <button
-            onClick={() => {
-              setShowSMC(prev => !prev);
-              toast.success(!showSMC ? '🏛️ Smart Money Concepts (FVG, OB, BOS) Enabled' : 'SMC Disabled');
-            }}
-            title="Smart Money Concepts: Fair Value Gaps, Order Blocks, BOS/CHoCH"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '3px 8px', borderRadius: 4,
-              border: showSMC ? '1px solid #10B981' : '1px solid rgba(255,255,255,0.08)',
-              background: showSMC ? 'rgba(16,185,129,0.2)' : 'rgba(255,255,255,0.03)',
-              color: showSMC ? '#10B981' : '#CBD5E1',
-              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
-            }}
-          >
-            <span>🏛️ SMC</span>
-          </button>
-
-          {/* 2. Options OI & Max Pain Toggle */}
-          <button
-            onClick={() => {
-              setShowOptionsOI(prev => !prev);
-              toast.success(!showOptionsOI ? '⚡ Options Open Interest & Max Pain Overlays Enabled' : 'Options OI Disabled');
-            }}
-            title="Options Chain Open Interest Walls & Max Pain Strike"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '3px 8px', borderRadius: 4,
-              border: showOptionsOI ? '1px solid #EF5350' : '1px solid rgba(255,255,255,0.08)',
-              background: showOptionsOI ? 'rgba(239,83,80,0.2)' : 'rgba(255,255,255,0.03)',
-              color: showOptionsOI ? '#EF5350' : '#CBD5E1',
-              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
-            }}
-          >
-            <Flame size={12} style={{ color: '#EF5350' }} />
-            <span>Options OI</span>
-            {optionsData?.pcr && showOptionsOI && (
-              <span style={{ fontSize: '0.62rem', background: 'rgba(255,255,255,0.1)', padding: '1px 4px', borderRadius: 3 }}>
-                PCR {optionsData.pcr}
-              </span>
-            )}
-          </button>
-
-          {/* 3. Integrated Volume Profile (VPVR & POC) Toggle */}
-          <button
-            onClick={() => {
-              setShowVPVR(prev => !prev);
-              toast.success(!showVPVR ? '📊 Volume Profile (POC & Value Area) Enabled' : 'VPVR Disabled');
-            }}
-            title="Volume-at-Price Histogram with Point of Control (POC)"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '3px 8px', borderRadius: 4,
-              border: showVPVR ? '1px solid #F59E0B' : '1px solid rgba(255,255,255,0.08)',
-              background: showVPVR ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.03)',
-              color: showVPVR ? '#F59E0B' : '#CBD5E1',
-              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
-            }}
-          >
-            <span>📊 VPVR</span>
-          </button>
-
-          {/* 4. Historical Bar Replay Simulator Toggle */}
+          {/* Historical Bar Replay Simulator Toggle */}
           <button
             onClick={() => {
               const nextState = !isReplayMode;
