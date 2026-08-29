@@ -574,9 +574,6 @@ export default function LiveChartView() {
       macdSignalRef.current = null;
       macdHistRef.current = null;
       keyLevelLinesRef.current = [];
-      smcLinesRef.current = [];
-      optionsLinesRef.current = [];
-      vpvrLinesRef.current = [];
       alertLinesRef.current = [];
       predLineRef.current = null;
       upperLineRef.current = null;
