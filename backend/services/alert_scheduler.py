@@ -124,8 +124,8 @@ async def evaluate_single_alert(alert: dict, auto_trigger: bool = True) -> dict:
                 if target_sig in actual_sig:
                     triggered = True
                     reason = f"AI Prediction model issued {actual_sig} signal"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Alert AI signal parse failed for #%s: %s", alert_id, exc)
 
         # If triggered and auto_trigger is enabled, update DB and dispatch Telegram notification
         if triggered and auto_trigger and not alert.get("triggered"):
@@ -134,8 +134,8 @@ async def evaluate_single_alert(alert: dict, auto_trigger: bool = True) -> dict:
             try:
                 from backend.services.telegram_bot import send_telegram_alert
                 send_telegram_alert(ticker, alert_type, reason, price=float(current_val.replace('₹', '').replace(',', '')) if '₹' in current_val else None)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Telegram notification dispatch failed for alert #%s: %s", alert_id, exc)
 
     except Exception as e:
         logger.error(f"Error evaluating alert #{alert_id} ({ticker}): {e}")

@@ -103,7 +103,7 @@ async def websocket_price_broadcast_loop():
                         if get_session_status() and smartApi:
                             tok = get_token_info(t)
                             if tok:
-                                ltp_resp = smartApi.ltpData(tok["exch_seg"], tok["symbol"], tok["token"])
+                                ltp_resp = await asyncio.to_thread(smartApi.ltpData, tok["exch_seg"], tok["symbol"], tok["token"])
                                 if ltp_resp and ltp_resp.get("status") and ltp_resp.get("data"):
                                     ltp = float(ltp_resp["data"].get("ltp", 0.0))
                                     prev_close = float(ltp_resp["data"].get("close", 0.0))
@@ -133,7 +133,9 @@ async def websocket_price_broadcast_loop():
 
                         base_price = prices_cache.get(t)
                         if not base_price:
-                            info = get_company_info(t) or get_stale_company_info(t)
+                            info = await asyncio.to_thread(get_company_info, t)
+                            if not info:
+                                info = await asyncio.to_thread(get_stale_company_info, t)
                             if info and info.get("current_price"):
                                 base_price = float(info["current_price"])
                                 prices_cache[t] = base_price
@@ -233,6 +235,17 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Enforces essential security headers across all HTTP responses."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return response
+
+
 # ── WebSocket Endpoint ────────────────────────────────────────────────────────
 @app.websocket("/ws/prices")
 async def websocket_endpoint(websocket: WebSocket):
@@ -244,8 +257,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 msg = json.loads(raw)
                 if "subscribe" in msg and isinstance(msg["subscribe"], list):
                     manager.subscribe(websocket, msg["subscribe"])
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("WebSocket incoming message parse failed: %s (raw: %r)", exc, raw)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 

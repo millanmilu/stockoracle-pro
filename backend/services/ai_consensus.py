@@ -6,11 +6,14 @@ Combines:
   3. Fundamental & Sentiment Engine (Gemini 2.0 + Financial Ratios)
 Yields an institutional-grade Consensus Score (0-100) and Agreement State.
 """
+import logging
 from typing import Dict, Any
 import numpy as np
 
 from backend.data.fetcher import fetch_stock_data, fetch_company_info
 from backend.analysis.indicators import enrich_stock_dataframe
+
+logger = logging.getLogger("StockOracle.AIConsensus")
 
 def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
     ticker = ticker.upper().strip()
@@ -80,7 +83,8 @@ def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
             ml_score = max(15.0, 45.0 - (pred_conf * 0.3) - (abs(pred_return) * 150))
         else:
             ml_score = 50.0 + (pred_return * 100)
-    except Exception:
+    except Exception as exc:
+        logger.debug("ML consensus calculation fallback for %s: %s", ticker, exc)
         ml_score = tech_score * 0.95
 
     ml_score = round(min(98.0, max(12.0, ml_score)), 1)
@@ -100,8 +104,8 @@ def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
         if pe and pe < 30.0:
             fund_score += 10
             fund_reasons.append(f"Attractive P/E ({pe:.1f})")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Fundamental consensus calculation fallback for %s: %s", ticker, exc)
 
     fund_score = round(min(95.0, max(20.0, fund_score + (tech_score - 50.0) * 0.3)), 1)
     fund_signal = "BUY" if fund_score >= 60 else ("SELL" if fund_score <= 45 else "HOLD")

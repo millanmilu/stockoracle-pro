@@ -1049,9 +1049,9 @@ def get_paper_positions(user_id: str = "default_user") -> list:
 
 def place_paper_order(ticker: str, order_type: str, action: str, shares: float, price: float, stop_loss: float = None, target_price: float = None, user_id: str = "default_user") -> dict:
     """
-    Executes a paper order:
-    - If action == 'BUY': checks cash balance, debits cash, and creates a paper position.
-    - Records order in paper_orders journal.
+    Executes a paper order atomically:
+    - Checks cash balance under transaction lock, debits cash, creates paper position.
+    - Records order in paper_orders journal and audit logs.
     """
     ticker = ticker.upper().strip()
     action = action.upper().strip()
@@ -1059,46 +1059,58 @@ def place_paper_order(ticker: str, order_type: str, action: str, shares: float, 
     total_cost = shares * price
     now_str = datetime.now().isoformat()
 
-    account = get_paper_account(user_id)
+    if action != "BUY":
+        raise ValueError("Direct SELL without position not supported. Use close_paper_position() to exit holdings.")
+
+    if shares <= 0 or price <= 0:
+        raise ValueError("Shares and price must be positive numbers.")
 
     with get_db_connection() as conn:
-        if action == "BUY":
-            if account["cash_balance"] < total_cost:
-                raise ValueError(f"Insufficient virtual cash balance. Needed ₹{total_cost:,.2f}, Available ₹{account['cash_balance']:,.2f}")
-
-            new_cash = account["cash_balance"] - total_cost
-            conn.execute("UPDATE paper_accounts SET cash_balance = ?, updated_at = ? WHERE user_id = ?", (new_cash, now_str, user_id))
-
-            cursor = conn.execute(
-                """
-                INSERT INTO paper_positions (user_id, ticker, order_type, shares, avg_buy_price, stop_loss, target_price, opened_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (user_id, ticker, order_type, shares, price, stop_loss, target_price, now_str)
-            )
-            pos_id = cursor.lastrowid
-
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT cash_balance FROM paper_accounts WHERE user_id = ?", (user_id,)).fetchone()
+        if not row:
             conn.execute(
-                """
-                INSERT INTO paper_orders (user_id, ticker, order_type, action, shares, executed_price, realized_pnl, status, executed_at)
-                VALUES (?, ?, ?, 'BUY', ?, ?, 0.0, 'EXECUTED', ?)
-                """,
-                (user_id, ticker, order_type, shares, price, now_str)
+                "INSERT OR IGNORE INTO paper_accounts (user_id, cash_balance, starting_balance, updated_at) VALUES (?, 1000000.0, 1000000.0, ?)",
+                (user_id, now_str)
             )
-            conn.commit()
-            write_audit_log("BUY", "paper_order", entity_id=pos_id,
-                            details=f"ticker={ticker} shares={shares} price={price} cost={total_cost:.2f}",
-                            user_id=user_id)
-            return {"status": "SUCCESS", "position_id": pos_id, "action": "BUY", "ticker": ticker, "shares": shares, "price": price, "remaining_cash": new_cash}
+            row = conn.execute("SELECT cash_balance FROM paper_accounts WHERE user_id = ?", (user_id,)).fetchone()
 
-        else:
-            raise ValueError("Direct SELL without position not supported. Use close_paper_position() to exit holdings.")
+        cash_balance = float(row["cash_balance"])
+        if cash_balance < total_cost:
+            raise ValueError(f"Insufficient virtual cash balance. Needed ₹{total_cost:,.2f}, Available ₹{cash_balance:,.2f}")
+
+        new_cash = cash_balance - total_cost
+        conn.execute("UPDATE paper_accounts SET cash_balance = ?, updated_at = ? WHERE user_id = ?", (new_cash, now_str, user_id))
+
+        cursor = conn.execute(
+            """
+            INSERT INTO paper_positions (user_id, ticker, order_type, shares, avg_buy_price, stop_loss, target_price, opened_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, ticker, order_type, shares, price, stop_loss, target_price, now_str)
+        )
+        pos_id = cursor.lastrowid
+
+        conn.execute(
+            """
+            INSERT INTO paper_orders (user_id, ticker, order_type, action, shares, executed_price, realized_pnl, status, executed_at)
+            VALUES (?, ?, ?, 'BUY', ?, ?, 0.0, 'EXECUTED', ?)
+            """,
+            (user_id, ticker, order_type, shares, price, now_str)
+        )
+        conn.commit()
+
+    write_audit_log("BUY", "paper_order", entity_id=pos_id,
+                    details=f"ticker={ticker} shares={shares} price={price} cost={total_cost:.2f}",
+                    user_id=user_id)
+    return {"status": "SUCCESS", "position_id": pos_id, "action": "BUY", "ticker": ticker, "shares": shares, "price": price, "remaining_cash": new_cash}
 
 
 def close_paper_position(position_id: int, current_price: float, user_id: str = "default_user") -> dict:
-    """Closes an open position at current live price and calculates realized P&L."""
+    """Closes an open position at current live price and calculates realized P&L atomically."""
     now_str = datetime.now().isoformat()
     with get_db_connection() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         pos = conn.execute("SELECT id, user_id, ticker, order_type, shares, avg_buy_price FROM paper_positions WHERE id = ? AND user_id = ?", (position_id, user_id)).fetchone()
         if not pos:
             raise ValueError(f"Position #{position_id} not found.")
@@ -1108,9 +1120,10 @@ def close_paper_position(position_id: int, current_price: float, user_id: str = 
         pnl    = (current_price - buy_p) * shares
         proceeds = shares * current_price
 
-        # Update Account Cash
-        acc = get_paper_account(user_id)
-        new_cash = acc["cash_balance"] + proceeds
+        # Update Account Cash atomically
+        acc = conn.execute("SELECT cash_balance FROM paper_accounts WHERE user_id = ?", (user_id,)).fetchone()
+        current_cash = float(acc["cash_balance"]) if acc else 1000000.0
+        new_cash = current_cash + proceeds
         conn.execute("UPDATE paper_accounts SET cash_balance = ?, updated_at = ? WHERE user_id = ?", (new_cash, now_str, user_id))
 
         # Record Close Order in Journal
