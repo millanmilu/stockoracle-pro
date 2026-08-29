@@ -939,12 +939,19 @@ export default function LiveChartView() {
     
     // Bar Replay Active Candle Slicing
     const activeCandles = isReplayMode
-      ? dedupedCandles.slice(0, Math.min(Math.max(5, replayIndex || dedupedCandles.length - 30), dedupedCandles.length))
+      ? dedupedCandles.slice(0, Math.min(Math.max(5, replayIndex || (dedupedCandles.length - 60)), dedupedCandles.length))
       : dedupedCandles;
 
     try { 
       candleRef.current.setData(activeCandles); 
-      if (!isReplayMode) {
+      if (isReplayMode && chartRef.current && activeCandles.length > 0) {
+        const total = activeCandles.length;
+        const visibleCount = Math.min(total, 80);
+        chartRef.current.timeScale().setVisibleLogicalRange({
+          from: Math.max(0, total - visibleCount),
+          to: total + 3,
+        });
+      } else if (!isReplayMode) {
         chartRef.current?.timeScale().fitContent();
       }
     } catch (e) {}
@@ -1287,20 +1294,24 @@ export default function LiveChartView() {
 
   /* ── 4. Bar Replay Auto-Play Loop ────────────────────────── */
   useEffect(() => {
-    if (!isReplayMode || !isReplayPlaying || !rawHistory?.length) return;
-    const baseDelay = 700; // 700ms at 1x
-    const delay = Math.max(70, Math.round(baseDelay / replaySpeed));
+    if (!isReplayMode || !isReplayPlaying || !rawHistory || rawHistory.length < 5) return;
+
+    const baseDelay = 500; // 500ms at 1x
+    const delay = Math.max(50, Math.round(baseDelay / replaySpeed));
+
     const intervalId = setInterval(() => {
       setReplayIndex(prev => {
-        const next = (prev || 10) + 1;
-        if (next >= rawHistory.length) {
+        const total = rawHistory.length;
+        const current = (typeof prev === 'number' && prev > 0) ? prev : Math.max(5, total - 60);
+        if (current >= total) {
           setIsReplayPlaying(false);
           toast.success('🎉 Replay completed to the latest candle!');
-          return rawHistory.length;
+          return total;
         }
-        return next;
+        return current + 1;
       });
     }, delay);
+
     return () => clearInterval(intervalId);
   }, [isReplayMode, isReplayPlaying, replaySpeed, rawHistory]);
 
@@ -1983,13 +1994,23 @@ export default function LiveChartView() {
 
             {/* Play / Pause Auto Play Button */}
             <button
-              onClick={() => setIsReplayPlaying(!isReplayPlaying)}
+              onClick={() => {
+                if (!isReplayPlaying) {
+                  const total = rawHistory?.length || 100;
+                  if (!replayIndex || replayIndex >= total - 1) {
+                    setReplayIndex(Math.max(5, total - 60));
+                  }
+                  setIsReplayPlaying(true);
+                } else {
+                  setIsReplayPlaying(false);
+                }
+              }}
               style={{
                 padding: '5px 16px', borderRadius: 6,
                 background: isReplayPlaying ? 'linear-gradient(135deg, #EF4444, #DC2626)' : 'linear-gradient(135deg, #10B981, #059669)',
                 color: '#FFF', border: 'none', fontWeight: 800, fontSize: '0.76rem',
                 cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-                boxShadow: isReplayPlaying ? '0 2px 10px rgba(239,68,68,0.4)' : '0 2px 10px rgba(168,85,247,0.4)',
+                boxShadow: isReplayPlaying ? '0 2px 10px rgba(239,68,68,0.4)' : '0 2px 10px rgba(16,185,129,0.4)',
                 transition: 'all 0.15s ease'
               }}
             >
