@@ -1,8 +1,17 @@
-from backend.data.fetcher import _load_scrip_master, _scrip_map
+import requests
 
-_load_scrip_master(force=True)
-tata_matches = {k: v for k, v in _scrip_map.items() if "TATA" in k.upper()}
-print("Total TATA keys in Angel One ScripMaster:", len(tata_matches))
-for k in sorted(tata_matches.keys())[:25]:
-    item = tata_matches[k]
-    print(f"Key: {k:20} -> Symbol: {item.get('symbol')} | Token: {item.get('token')} | Name: {item.get('name')}")
+url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
+print("Downloading Angel One master...")
+data = requests.get(url, timeout=30).json()
+
+print("Searching for MOTORS in Angel One...")
+found = []
+for item in data:
+    name = (item.get("name") or "").upper()
+    sym = (item.get("symbol") or "").upper()
+    if "MOTOR" in name or "MOTOR" in sym:
+        found.append(item)
+
+print(f"Total MOTOR items found: {len(found)}")
+for item in found[:30]:
+    print(f"Exch: {item.get('exch_seg'):5} | Sym: {item.get('symbol'):20} | Token: {item.get('token'):8} | Name: {item.get('name')}")
