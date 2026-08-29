@@ -1,6 +1,7 @@
 import logging
 logging.basicConfig(level=logging.INFO)
-from backend.data.fetcher import get_token_info, ensure_session, smartApi, _call_api, _load_scrip_master, _scrip_map, clear_ticker_history, fetch_stock_data
+from backend.data.fetcher import get_token_info, ensure_session, smartApi, _call_api, _load_scrip_master, fetch_stock_data
+from backend.data.database import clear_ticker_history
 
 _load_scrip_master(force=True)
 info = get_token_info("TATAMOTORS")
@@ -20,6 +21,8 @@ if smartApi and info:
     print("Angel API response status:", res.get("status") if res else None)
     if res and res.get("data"):
         print("Angel candles count:", len(res["data"]))
-        print("Last candle:", res["data"][-1])
+        print("Last 3 candles from Angel One:")
+        for c in res["data"][-3:]:
+            print(c)
     else:
         print("Angel response error:", res)
