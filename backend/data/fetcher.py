@@ -4,6 +4,7 @@ import asyncio
 import requests
 import pyotp
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -439,8 +440,12 @@ def _synthesize_fallback_candles(ticker: str, target_price: float = 1000.0, high
     for i in range(n_days):
         close_p = round(float(price_curve[i]), 2)
         open_p = round(float(price_curve[i] * (1.0 + np.random.normal(0, 0.004))), 2)
-        high_p = round(max(open_p, close_p) * (1.0 + abs(np.random.normal(0.003, 0.005))), 2)
-        low_p = round(min(open_p, close_p) * (1.0 - abs(np.random.normal(0.003, 0.005))), 2)
+        max_oc = max(open_p, close_p)
+        min_oc = min(open_p, close_p)
+        high_p = round(max_oc * (1.0 + abs(float(np.random.normal(0.004, 0.006)))), 2)
+        low_p = round(min_oc * (1.0 - abs(float(np.random.normal(0.004, 0.006)))), 2)
+        high_p = max(high_p, max_oc)
+        low_p = max(0.1, min(low_p, min_oc))
         vol = int(np.random.uniform(500000, 3000000))
         records.append({
             "date": dates[i],
