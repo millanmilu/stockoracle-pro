@@ -1,13 +1,19 @@
-import requests
+from backend.data.fetcher import ensure_session, smartApi, _call_api
 
-url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-data = requests.get(url, timeout=30).json()
-
-print("Exact match search for TATA MOTORS in Angel One:")
-for item in data:
-    name = (item.get("name") or "").strip()
-    sym = (item.get("symbol") or "").strip()
-    token = str(item.get("token", ""))
-    if token in ["3456", "3499", "3405", "500570"] or "TATA MOTORS" in name or sym.startswith("TATAMOTORS"):
-        if item.get("exch_seg") in ["NSE", "BSE"]:
-            print(f"Exch: {item.get('exch_seg')} | Symbol: {item.get('symbol')} | Token: {item.get('token')} | Name: {item.get('name')}")
+ensure_session()
+param = {
+    "exchange": "NSE",
+    "symboltoken": "3456",
+    "interval": "ONE_DAY",
+    "fromdate": "2024-01-01 09:15",
+    "todate": "2026-08-29 15:30"
+}
+res = _call_api(smartApi.getCandleData, param)
+print("Angel API response status:", res.get("status") if res else None)
+if res and res.get("data"):
+    print(f"Total REAL Angel One candles for Tata Motors (Token 3456): {len(res['data'])}")
+    print("Latest 3 real candles:")
+    for c in res["data"][-3:]:
+        print(c)
+else:
+    print("Angel API error:", res)
