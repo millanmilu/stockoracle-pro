@@ -33,6 +33,17 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
   const [results, setResults] = useState([]);
   const searchRef = useRef(null);
 
+  // Click outside listener for search dropdown
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (searchRef.current && !searchRef.current.contains(e.target)) {
+        setResults([]);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // Fetch tape data
   useEffect(() => {
     const fetchTape = async () => {
@@ -92,7 +103,21 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
   const tapeItems = [...indices, ...indices];
 
   return (
-    <div className="pro-top-bar" style={{ display: 'flex', alignItems: 'center', height: '42px', padding: '0 12px', gap: '10px', background: '#050713', borderBottom: '1px solid rgba(255,255,255,0.07)', position: 'relative', overflow: 'hidden' }}>
+    <div
+      className="pro-top-bar"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        height: '42px',
+        padding: '0 12px',
+        gap: '10px',
+        background: '#050713',
+        borderBottom: '1px solid rgba(255,255,255,0.07)',
+        position: 'relative',
+        overflow: 'visible',
+        zIndex: 100
+      }}
+    >
       <style>{`
         @keyframes topbar-marquee {
           0% { transform: translate3d(0, 0, 0); }
@@ -111,7 +136,7 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
       `}</style>
 
       {/* Left: Brand + Active Symbol + Quick Search */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, position: 'relative', zIndex: 110 }}>
         <button onClick={onToggleSidebar} style={{ background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer', display: 'flex', padding: 2 }}>
           <Menu size={18} />
         </button>
@@ -124,21 +149,46 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
         </div>
 
         {/* Compact Search Input */}
-        <div style={{ position: 'relative', width: 140 }} ref={searchRef}>
+        <div style={{ position: 'relative', width: 145 }} ref={searchRef}>
           <Search size={11} style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)', color: '#6B7280' }} />
           <input
             type="text"
             placeholder="Search symbol..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            style={{ width: '100%', padding: '3px 6px 3px 22px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 5, color: '#fff', fontSize: '0.72rem', outline: 'none' }}
+            style={{ width: '100%', padding: '4px 6px 4px 22px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, color: '#fff', fontSize: '0.72rem', outline: 'none' }}
           />
           {results.length > 0 && (
-            <div style={{ position: 'absolute', top: '100%', left: 0, width: 220, background: '#0C1022', border: '1px solid #1E293B', borderRadius: 6, marginTop: 4, zIndex: 1000, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,0.8)' }}>
+            <div style={{
+              position: 'absolute',
+              top: 'calc(100% + 5px)',
+              left: 0,
+              width: 240,
+              background: '#0B0F22',
+              border: '1px solid rgba(99,102,241,0.3)',
+              borderRadius: 8,
+              zIndex: 9999,
+              overflow: 'hidden',
+              boxShadow: '0 12px 30px rgba(0,0,0,0.9), 0 0 15px rgba(99,102,241,0.2)'
+            }}>
               {results.slice(0, 8).map((r, i) => (
-                <div key={i} onClick={() => handleSelectResult(r.symbol || r.ticker)} style={{ padding: '6px 10px', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ fontWeight: 700, color: '#818CF8', fontSize: '0.75rem' }}>{r.symbol || r.ticker}</span>
-                  <span style={{ color: '#9CA3AF', fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{r.name || r.companyName}</span>
+                <div
+                  key={i}
+                  onClick={() => handleSelectResult(r.symbol || r.ticker)}
+                  style={{
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    borderBottom: '1px solid rgba(255,255,255,0.05)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    transition: 'background 0.1s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(99,102,241,0.15)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <span style={{ fontWeight: 700, color: '#818CF8', fontSize: '0.76rem', fontFamily: 'JetBrains Mono, monospace' }}>{r.symbol || r.ticker}</span>
+                  <span style={{ color: '#94A3B8', fontSize: '0.68rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{r.name || r.companyName}</span>
                 </div>
               ))}
             </div>
@@ -199,7 +249,7 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
       </div>
 
       {/* Right: Actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, position: 'relative', zIndex: 110 }}>
         <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} style={{ background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer', display: 'flex', padding: 3 }}>
           {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
         </button>
