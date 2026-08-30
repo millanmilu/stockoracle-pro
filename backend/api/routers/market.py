@@ -130,3 +130,17 @@ def get_stock_news(ticker: str, limit: int = 8):
     except Exception as exc:
         logger.warning("Error fetching news for %s: %s", t, exc)
         return []
+
+
+@router.get("/market/heatmap")
+def get_market_heatmap(
+    universe: str = Query("ALL", description="Index universe (e.g. ALL, NIFTY 50, BANK NIFTY, NIFTY IT)"),
+    metric: str = Query("change_1d_pct", description="Metric to visualize (e.g. change_1d_pct, change_1w_pct, change_1m_pct, rsi_14, volume_ratio_20d, pe_ratio, ai_consensus_score)")
+):
+    """
+    Returns structured sectoral stock heatmap data with market breadth,
+    multi-metric calculations, and market cap tier weighting for Treemap UI.
+    """
+    from backend.analysis.market_heatmap import compute_market_heatmap_data
+    return compute_market_heatmap_data(universe=universe, metric=metric)
+

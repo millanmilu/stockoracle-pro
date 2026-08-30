@@ -304,9 +304,9 @@ def get_screener_advanced_legacy():
 
 
 @app.get("/api/market/heatmap")
-def get_market_heatmap_legacy():
-    from backend.data.database import get_screener_results
-    return get_screener_results() or []
+def get_market_heatmap_legacy(universe: str = "ALL", metric: str = "change_1d_pct"):
+    from backend.analysis.market_heatmap import compute_market_heatmap_data
+    return compute_market_heatmap_data(universe=universe, metric=metric)
 
 
 @app.post("/api/settings/telegram-test")
