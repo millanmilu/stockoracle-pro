@@ -9,7 +9,7 @@ import {
   BookOpen, TrendingUp, TrendingDown, RefreshCw, Layers,
   PieChart as PieIcon, Users, Calendar, Table, CheckCircle2, ShieldAlert,
   ShieldCheck, AlertTriangle, Activity, Download, Bell, ArrowUpRight, DollarSign,
-  Award, Sparkles, Scale, Info, Check, X, ChevronRight, HelpCircle
+  Award, Sparkles, Scale, Info, Check, X, ChevronRight, LayoutGrid, FileText
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -119,6 +119,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const ticker = (propTicker || selectedSymbol || 'RELIANCE').toUpperCase();
 
   const [activeTab, setActiveTab] = useState('overview');
+  const [viewMode, setViewMode] = useState('tabbed'); // 'tabbed' | 'full'
   const [data, setData] = useState(null);
   const [deepData, setDeepData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -254,15 +255,580 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const divYieldVal = data?.dividend_yield ?? deepData?.dividend_yield ?? corpCal?.dividend_yield_pct;
 
   const TABS = [
-    { id: 'overview', label: 'Overview', icon: Award },
-    { id: 'quarters', label: `Quarterly (${quarterly.length})`, icon: Table },
-    { id: 'annual', label: `Annual P&L (${annualPl.length})`, icon: Layers },
-    { id: 'balancesheet', label: 'Balance Sheet', icon: Scale },
-    { id: 'cashflow', label: 'Cash Flows', icon: TrendingUp },
-    { id: 'shareholding', label: `Shareholding (${shareholding.length})`, icon: PieIcon },
-    { id: 'peers', label: `Peers (${peers.length})`, icon: Users },
-    { id: 'valuation', label: 'DCF Fair Value', icon: DollarSign },
+    { id: 'overview', label: 'Overview', badge: 'Scorecard', icon: Award },
+    { id: 'quarters', label: 'Quarterly', badge: `${quarterly.length}Q`, icon: Table },
+    { id: 'annual', label: 'Annual P&L', badge: `${annualPl.length}Y`, icon: Layers },
+    { id: 'balancesheet', label: 'Balance Sheet', badge: 'Assets/Liab', icon: Scale },
+    { id: 'cashflow', label: 'Cash Flows', badge: 'CFO/CFI', icon: TrendingUp },
+    { id: 'shareholding', label: 'Shareholding', badge: `${shareholding.length}Q`, icon: PieIcon },
+    { id: 'peers', label: 'Peers', badge: `${peers.length}`, icon: Users },
+    { id: 'valuation', label: 'DCF Fair Value', badge: 'Intrinsic', icon: DollarSign },
   ];
+
+  // Helper renderer for each section
+  const renderOverviewSection = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Core Valuation & Return Ratios with Mini Sparklines */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8 }}>
+        <RatioCard label="Market Cap" value={mcapVal} sub="Consolidated" />
+        <RatioCard label="Stock P/E" value={peVal} colorFn={(v) => v > 40 ? '#EF5350' : v < 20 ? '#10B981' : '#F8FAFC'} sub={peVal && peVal < 20 ? 'Attractive Value' : 'Premium'} />
+        <RatioCard label="P/B Ratio" value={pbVal} />
+        <RatioCard label="ROCE %" value={roceVal} unit="%" colorFn={(v) => v > 20 ? '#10B981' : '#F8FAFC'} sub="Capital Eff." sparkData={roceSpark} sparkColor="#10B981" />
+        <RatioCard label="ROE %" value={roeVal} unit="%" colorFn={(v) => v > 15 ? '#10B981' : '#F8FAFC'} sub="Return" sparkData={roeSpark} sparkColor="#10B981" />
+        <RatioCard label="Debt/Eq" value={deVal} colorFn={(v) => v > 1 ? '#EF5350' : '#10B981'} sub={deVal && deVal < 0.5 ? 'Conservative' : 'Leveraged'} sparkData={deSpark} sparkColor="#EF5350" />
+        <RatioCard label="Promoter" value={promoterVal} unit="%" sub="Insider" />
+        <RatioCard
+          label="Div Yield"
+          value={divYieldVal}
+          unit="%"
+          colorFn={(v) => v > 1.5 ? '#10B981' : '#F8FAFC'}
+          sub={
+            divYieldVal
+              ? `Payout: ${corpCal.dividend_payout_ratio || '—'}%`
+              : 'Non-dividend paying / 0%'
+          }
+        />
+      </div>
+
+      {/* Quality Scores & Intrinsic Valuation Triad */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
+        {/* Piotroski F-Score Card */}
+        <div style={{ ...cardStyle, border: '1px solid rgba(16,185,129,0.25)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <ShieldCheck size={14} color="#10B981" />
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#10B981' }}>Piotroski F-Score</span>
+            </div>
+            <span style={{ fontSize: '0.94rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: piotroski.score >= 7 ? '#10B981' : piotroski.score >= 4 ? '#F59E0B' : '#EF5350' }}>
+              {piotroski.score}/9
+            </span>
+          </div>
+          <div style={{ fontSize: '0.62rem', color: '#94A3B8', marginBottom: 6 }}>
+            {piotroski.rating}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {(piotroski.criteria?.length ? piotroski.criteria : []).slice(0, 3).map((c, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.62rem', color: '#CBD5E1' }}>
+                <span>{c.name}</span>
+                <span style={{ color: c.passed ? '#10B981' : '#EF5350', fontWeight: 700 }}>{c.passed ? '✓ PASS' : '✗ FAIL'}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 6, fontSize: '0.62rem', color: '#818CF8', cursor: 'pointer', textAlign: 'right', fontWeight: 600 }} onClick={() => setShowQualityModal(true)}>
+            View 9-point criteria audit →
+          </div>
+        </div>
+
+        {/* Altman Z-Score Card */}
+        <div style={{ ...cardStyle, border: '1px solid rgba(99,102,241,0.25)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <Scale size={14} color="#818CF8" />
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#818CF8' }}>Altman Z-Score</span>
+            </div>
+            <span style={{ fontSize: '0.94rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: altman.z_score >= 2.99 ? '#10B981' : altman.z_score >= 1.81 ? '#F59E0B' : '#EF5350' }}>
+              {altman.z_score}
+            </span>
+          </div>
+          <div style={{ fontSize: '0.62rem', color: '#94A3B8', marginBottom: 6 }}>
+            Zone: <strong style={{ color: altman.z_score >= 2.99 ? '#10B981' : '#F59E0B' }}>{altman.zone}</strong>
+          </div>
+          <p style={{ fontSize: '0.60rem', color: '#94A3B8', margin: 0, lineHeight: 1.3 }}>
+            {altman.description || 'Solvency score evaluating working capital, retained earnings, and asset coverage.'}
+          </p>
+        </div>
+
+        {/* DCF Intrinsic Value Card */}
+        <div style={{ ...cardStyle, border: '1px solid rgba(168,85,247,0.25)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <DollarSign size={14} color="#C084FC" />
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#C084FC' }}>DCF Intrinsic Value</span>
+            </div>
+            <span style={{ fontSize: '0.94rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: (dcf.margin_of_safety_pct || 0) >= 0 ? '#10B981' : '#EF5350' }}>
+              ₹{dcf.dcf_fair_value || '—'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.62rem', color: '#94A3B8', marginBottom: 4 }}>
+            <span>Margin of Safety:</span>
+            <strong style={{ color: (dcf.margin_of_safety_pct || 0) >= 0 ? '#10B981' : '#EF5350' }}>
+              {(dcf.margin_of_safety_pct || 0) >= 0 ? '+' : ''}{dcf.margin_of_safety_pct}%
+            </strong>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.60rem', color: '#CBD5E1', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 4 }}>
+            <span>Graham Number:</span><strong>₹{dcf.graham_number || '—'}</strong>
+          </div>
+        </div>
+      </div>
+
+      {/* 10-Year Revenue vs Net Profit Chart with Empty Fallback */}
+      {annualPl.length > 0 ? (
+        <div style={cardStyle}>
+          <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+            <span>10-Year Revenue & Net Profit Trajectory (₹ Cr)</span>
+            <span><span style={{ color: '#6366F1' }}>■</span> Sales &nbsp;|&nbsp; <span style={{ color: '#10B981' }}>■</span> Net Profit</span>
+          </div>
+          <ResponsiveContainer width="100%" height={180}>
+            <ComposedChart data={annualPl} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+              <XAxis dataKey="period" stroke="#64748B" fontSize={9} tickLine={false} />
+              <YAxis stroke="#64748B" fontSize={9} tickLine={false} tickFormatter={(v) => `₹${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
+              <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')} Cr`]} />
+              <Bar dataKey="Sales" fill="#6366F1" fillOpacity={0.75} radius={[3, 3, 0, 0]} name="Sales" />
+              <Line type="monotone" dataKey="Net Profit" stroke="#10B981" strokeWidth={2} name="Net Profit" dot={{ fill: '#10B981', r: 2 }} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      ) : (
+        <EmptyState
+          icon={Layers}
+          title="Annual Statements Not Available"
+          message="Historical revenue and net profit trajectory requires audited annual statement records."
+          minHeight={150}
+        />
+      )}
+
+      {/* Dynamic CAGR Grid */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
+          <div style={cardStyle}>
+            <div style={{ fontSize: '0.66rem', color: '#818CF8', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>
+              Compounded Sales Growth
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <span>10 Years:</span><strong>{cagr?.sales_growth?.['10y'] != null ? `${cagr.sales_growth['10y']}%` : '—'}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <span>5 Years:</span><strong>{cagr?.sales_growth?.['5y'] != null ? `${cagr.sales_growth['5y']}%` : '—'}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0' }}>
+              <span>3 Years:</span><strong style={{ color: '#10B981' }}>{cagr?.sales_growth?.['3y'] != null ? `${cagr.sales_growth['3y']}%` : '—'}</strong>
+            </div>
+          </div>
+
+          <div style={cardStyle}>
+            <div style={{ fontSize: '0.66rem', color: '#818CF8', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>
+              Compounded Profit Growth
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <span>10 Years:</span><strong>{cagr?.profit_growth?.['10y'] != null ? `${cagr.profit_growth['10y']}%` : '—'}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <span>5 Years:</span><strong>{cagr?.profit_growth?.['5y'] != null ? `${cagr.profit_growth['5y']}%` : '—'}</strong>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0' }}>
+              <span>3 Years:</span><strong style={{ color: '#10B981' }}>{cagr?.profit_growth?.['3y'] != null ? `${cagr.profit_growth['3y']}%` : '—'}</strong>
+            </div>
+          </div>
+        </div>
+        <div style={{ fontSize: '0.58rem', color: '#64748B', fontStyle: 'italic', paddingLeft: 2 }}>
+          * Dynamic CAGR computed from audited statements. '—' denotes that the stock does not yet possess continuous historical records for that specific timeframe.
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderQuartersSection = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {quarterly.length > 0 ? (
+        <>
+          <div style={cardStyle}>
+            <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Last 8 Quarters Revenue & Profit (₹ Cr)</div>
+            <ResponsiveContainer width="100%" height={180}>
+              <ComposedChart data={quarterly} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                <XAxis dataKey="period" stroke="#64748B" fontSize={9} tickLine={false} />
+                <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
+                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')} Cr`]} />
+                <Bar dataKey="revenue" fill="#6366F1" radius={[3, 3, 0, 0]} name="Revenue" />
+                <Line type="monotone" dataKey="net_profit" stroke="#10B981" strokeWidth={2} name="Net Profit" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div style={{ ...cardStyle, overflowX: 'auto' }}>
+            <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Quarterly Financials (₹ Cr)</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
+                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Period</th>
+                  <th style={{ padding: '6px 8px' }}>Sales</th>
+                  <th style={{ padding: '6px 8px' }}>Expenses</th>
+                  <th style={{ padding: '6px 8px' }}>Op. Profit</th>
+                  <th style={{ padding: '6px 8px' }}>OPM %</th>
+                  <th style={{ padding: '6px 8px' }}>Net Profit</th>
+                  <th style={{ padding: '6px 8px' }}>EPS ₹</th>
+                </tr>
+              </thead>
+              <tbody>
+                {quarterly.map((q, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
+                    <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{q.period}</td>
+                    <td style={{ padding: '6px 8px' }}>{q.revenue != null ? Number(q.revenue).toLocaleString('en-IN') : (q['Sales'] != null ? Number(q['Sales']).toLocaleString('en-IN') : '—')}</td>
+                    <td style={{ padding: '6px 8px' }}>{q['Expenses'] != null ? Number(q['Expenses']).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '6px 8px' }}>{q['Operating Profit'] != null ? Number(q['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '6px 8px' }}>{q['OPM %'] != null ? `${q['OPM %']}%` : '—'}</td>
+                    <td style={{ padding: '6px 8px', fontWeight: 700, color: '#10B981' }}>{q.net_profit != null ? Number(q.net_profit).toLocaleString('en-IN') : (q['Net Profit'] != null ? Number(q['Net Profit']).toLocaleString('en-IN') : '—')}</td>
+                    <td style={{ padding: '6px 8px' }}>{q.eps != null ? q.eps : (q['EPS in Rs'] || '—')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <EmptyState
+          icon={Table}
+          title="Quarterly Results Not Available"
+          message="Quarterly disclosures have not yet been published for this security."
+          minHeight={160}
+        />
+      )}
+    </div>
+  );
+
+  const renderAnnualSection = () => (
+    <div style={{ ...cardStyle, overflowX: 'auto' }}>
+      <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Annual 10-Year P&L (₹ Cr)</div>
+      {annualPl.length > 0 ? (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
+              <th style={{ textAlign: 'left', padding: '6px 8px' }}>Year</th>
+              <th style={{ padding: '6px 8px' }}>Sales</th>
+              <th style={{ padding: '6px 8px' }}>Expenses</th>
+              <th style={{ padding: '6px 8px' }}>Op. Profit</th>
+              <th style={{ padding: '6px 8px' }}>OPM %</th>
+              <th style={{ padding: '6px 8px' }}>Net Profit</th>
+              <th style={{ padding: '6px 8px' }}>EPS ₹</th>
+              <th style={{ padding: '6px 8px' }}>Payout %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {annualPl.map((yr, idx) => (
+              <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
+                <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{yr.period}</td>
+                <td style={{ padding: '6px 8px' }}>{yr['Sales'] != null ? Number(yr['Sales']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '6px 8px' }}>{yr['Expenses'] != null ? Number(yr['Expenses']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '6px 8px' }}>{yr['Operating Profit'] != null ? Number(yr['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '6px 8px' }}>{yr['OPM %'] != null ? `${yr['OPM %']}%` : '—'}</td>
+                <td style={{ padding: '6px 8px', fontWeight: 700, color: '#818CF8' }}>{yr['Net Profit'] != null ? Number(yr['Net Profit']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '6px 8px' }}>{yr['EPS in Rs'] != null ? yr['EPS in Rs'] : '—'}</td>
+                <td style={{ padding: '6px 8px' }}>{yr['Dividend Payout %'] != null ? `${yr['Dividend Payout %']}%` : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <EmptyState
+          icon={Layers}
+          title="Annual Statements Not Available"
+          message="No audited annual statement records found for this ticker."
+          minHeight={140}
+        />
+      )}
+    </div>
+  );
+
+  const renderBalanceSheetSection = () => (
+    <div style={{ ...cardStyle, overflowX: 'auto' }}>
+      <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Consolidated Balance Sheet (₹ Cr)</div>
+      {balanceSheet.length > 0 ? (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
+              <th style={{ textAlign: 'left', padding: '6px 8px' }}>Year</th>
+              <th style={{ padding: '6px 8px' }}>Equity</th>
+              <th style={{ padding: '6px 8px' }}>Reserves</th>
+              <th style={{ padding: '6px 8px' }}>Borrowings</th>
+              <th style={{ padding: '6px 8px' }}>Other Liab</th>
+              <th style={{ padding: '6px 8px' }}>Total Liab</th>
+              <th style={{ padding: '6px 8px' }}>Fixed Assets</th>
+              <th style={{ padding: '6px 8px' }}>Total Assets</th>
+            </tr>
+          </thead>
+          <tbody>
+            {balanceSheet.map((bs, idx) => (
+              <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
+                <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{bs.period}</td>
+                <td style={{ padding: '6px 8px' }}>{bs['Equity Capital'] != null ? Number(bs['Equity Capital']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '6px 8px' }}>{bs['Reserves'] != null ? Number(bs['Reserves']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '6px 8px', color: '#F59E0B' }}>{bs['Borrowings'] != null ? Number(bs['Borrowings']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '6px 8px' }}>{bs['Other Liabilities'] != null ? Number(bs['Other Liabilities']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '6px 8px', fontWeight: 700 }}>{bs['Total Liabilities'] != null ? Number(bs['Total Liabilities']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '6px 8px' }}>{bs['Fixed Assets'] != null ? Number(bs['Fixed Assets']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '6px 8px', fontWeight: 700, color: '#818CF8' }}>{bs['Total Assets'] != null ? Number(bs['Total Assets']).toLocaleString('en-IN') : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <EmptyState
+          icon={Scale}
+          title="Balance Sheet Data Not Available"
+          message="No audited balance sheet records found for this company."
+          minHeight={140}
+        />
+      )}
+    </div>
+  );
+
+  const renderCashFlowSection = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {cashFlow.length > 0 ? (
+        <>
+          <div style={cardStyle}>
+            <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Cash Flow Decomposition (CFO vs CFI vs CFF in ₹ Cr)</div>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={cashFlow} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                <XAxis dataKey="period" stroke="#64748B" fontSize={9} tickLine={false} />
+                <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
+                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} />
+                <Bar dataKey="Cash from Operating Activity" fill="#10B981" name="Operating (CFO)" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Cash from Investing Activity" fill="#F59E0B" name="Investing (CFI)" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="Cash from Financing Activity" fill="#EF5350" name="Financing (CFF)" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div style={{ ...cardStyle, overflowX: 'auto' }}>
+            <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Cash Flow Statement (₹ Cr)</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
+                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Period</th>
+                  <th style={{ padding: '6px 8px' }}>Operating (CFO)</th>
+                  <th style={{ padding: '6px 8px' }}>Investing (CFI)</th>
+                  <th style={{ padding: '6px 8px' }}>Financing (CFF)</th>
+                  <th style={{ padding: '6px 8px' }}>Net Cash Flow</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cashFlow.map((cf, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
+                    <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{cf.period}</td>
+                    <td style={{ padding: '6px 8px', color: (cf['Cash from Operating Activity'] || 0) >= 0 ? '#10B981' : '#EF5350' }}>
+                      {cf['Cash from Operating Activity'] != null ? Number(cf['Cash from Operating Activity']).toLocaleString('en-IN') : '—'}
+                    </td>
+                    <td style={{ padding: '6px 8px' }}>{cf['Cash from Investing Activity'] != null ? Number(cf['Cash from Investing Activity']).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '6px 8px' }}>{cf['Cash from Financing Activity'] != null ? Number(cf['Cash from Financing Activity']).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '6px 8px', fontWeight: 700, color: '#818CF8' }}>
+                      {cf['Net Cash Flow'] != null ? Number(cf['Net Cash Flow']).toLocaleString('en-IN') : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <EmptyState
+          icon={TrendingUp}
+          title="Cash Flow Data Not Available"
+          message="Cash flow statement records are not reported or unavailable for this ticker."
+          minHeight={160}
+        />
+      )}
+    </div>
+  );
+
+  const renderShareholdingSection = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {shareholding.length > 0 ? (
+        <>
+          <div style={cardStyle}>
+            <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Institutional & Insider Ownership Trend (%)</div>
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={shareholding} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                <XAxis dataKey="quarter" stroke="#64748B" fontSize={9} tickLine={false} />
+                <YAxis stroke="#64748B" fontSize={9} tickLine={false} domain={['auto', 'auto']} tickFormatter={(v) => `${v}%`} />
+                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} formatter={(v) => [`${v}%`]} />
+                <Line type="monotone" dataKey="promoter" stroke="#10B981" strokeWidth={2} name="Promoters" dot={{ r: 2 }} />
+                <Line type="monotone" dataKey="fii" stroke="#818CF8" strokeWidth={1.8} name="FIIs" dot={{ r: 2 }} />
+                <Line type="monotone" dataKey="dii" stroke="#F59E0B" strokeWidth={1.8} name="DIIs" dot={{ r: 2 }} />
+                <Line type="monotone" dataKey="public" stroke="#64748B" strokeWidth={1.2} name="Public" dot={{ r: 2 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
+            <div style={{ ...cardStyle, overflowX: 'auto' }}>
+              <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Quarterly Breakdown (%)</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 8px' }}>Quarter</th>
+                    <th style={{ padding: '6px 8px' }}>Promoter</th>
+                    <th style={{ padding: '6px 8px' }}>FII</th>
+                    <th style={{ padding: '6px 8px' }}>DII</th>
+                    <th style={{ padding: '6px 8px' }}>Public</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shareholding.map((sh, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
+                      <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{sh.quarter}</td>
+                      <td style={{ padding: '6px 8px', color: '#10B981' }}>{sh.promoter}%</td>
+                      <td style={{ padding: '6px 8px', color: '#818CF8' }}>{sh.fii}%</td>
+                      <td style={{ padding: '6px 8px', color: '#F59E0B' }}>{sh.dii}%</td>
+                      <td style={{ padding: '6px 8px' }}>{sh.public}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ fontSize: '0.70rem', color: '#818CF8', fontWeight: 700, alignSelf: 'flex-start', marginBottom: 6 }}>Latest Ownership Distribution</div>
+              <div style={{ width: '100%', height: 160 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: 'Promoters', value: shareholding[shareholding.length - 1].promoter, color: '#10B981' },
+                        { name: 'FIIs', value: shareholding[shareholding.length - 1].fii, color: '#818CF8' },
+                        { name: 'DIIs', value: shareholding[shareholding.length - 1].dii, color: '#F59E0B' },
+                        { name: 'Public', value: shareholding[shareholding.length - 1].public, color: '#64748B' },
+                      ]}
+                      dataKey="value"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      outerRadius={55}
+                      label={({ name, value }) => `${name} ${value}%`}
+                    >
+                      {[
+                        { color: '#10B981' },
+                        { color: '#818CF8' },
+                        { color: '#F59E0B' },
+                        { color: '#64748B' },
+                      ].map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <EmptyState
+          icon={PieIcon}
+          title="No Shareholding Pattern Data Available"
+          message="Shareholding pattern has not been reported for this security or is not yet published in exchange filings."
+          minHeight={180}
+        />
+      )}
+    </div>
+  );
+
+  const renderPeersSection = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {peers.length > 0 ? (
+        <>
+          <div style={cardStyle}>
+            <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Peer Valuation (P/E Ratio) vs Quality (ROCE %)</div>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={peers} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                <XAxis dataKey="name" stroke="#64748B" fontSize={9} tickLine={false} />
+                <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
+                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} />
+                <Bar dataKey="pe_ratio" fill="#6366F1" name="P/E Ratio" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="roce" fill="#10B981" name="ROCE %" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div style={{ ...cardStyle, overflowX: 'auto' }}>
+            <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Sector Peer Ranking Table</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
+                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Company</th>
+                  <th style={{ padding: '6px 8px' }}>CMP ₹</th>
+                  <th style={{ padding: '6px 8px' }}>P/E</th>
+                  <th style={{ padding: '6px 8px' }}>Mar Cap ₹ Cr</th>
+                  <th style={{ padding: '6px 8px' }}>ROCE %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {peers.map((p, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
+                    <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: p.name.includes(ticker) ? '#818CF8' : '#F0F0FF' }}>
+                      {p.name}
+                    </td>
+                    <td style={{ padding: '6px 8px' }}>{p.price != null ? Number(p.price).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '6px 8px' }}>{p.pe_ratio != null ? p.pe_ratio : '—'}</td>
+                    <td style={{ padding: '6px 8px' }}>{p.market_cap != null ? Number(p.market_cap).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '6px 8px', color: (p.roce || 0) > 15 ? '#10B981' : '#CBD5E1' }}>
+                      {p.roce != null ? `${p.roce}%` : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <EmptyState
+          icon={Users}
+          title="No Peer Comparison Data for this Sector"
+          message="Peer groupings are unavailable or not yet categorized for this specific sector."
+          minHeight={160}
+        />
+      )}
+    </div>
+  );
+
+  const renderValuationSection = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
+        <RatioCard label="DCF Fair Value" value={dcf.dcf_fair_value} unit=" ₹" col="#10B981" sub="Multi-Stage FCF" />
+        <RatioCard label="Graham Number" value={dcf.graham_number} unit=" ₹" col="#818CF8" sub="EPS & BV Formula" />
+        <RatioCard label="Peter Lynch Target" value={dcf.peter_lynch_value} unit=" ₹" col="#C084FC" sub="Growth Multiple" />
+        <RatioCard label="Margin of Safety" value={dcf.margin_of_safety_pct} unit="%" colorFn={(v) => v >= 0 ? '#10B981' : '#EF5350'} sub={dcf.valuation_verdict} />
+      </div>
+
+      <div style={cardStyle}>
+        <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#818CF8', marginBottom: 4 }}>DCF Valuation Forecast & Assumptions</div>
+        <p style={{ fontSize: '0.64rem', color: '#94A3B8', lineHeight: 1.4, margin: '0 0 8px' }}>
+          Growth Rate: <strong style={{ color: '#F8FAFC' }}>{dcf.assumed_growth_rate_pct || 12}%</strong> | Discount WACC: <strong style={{ color: '#F8FAFC' }}>{dcf.discount_rate_wacc_pct || 11.5}%</strong> | Terminal Rate: <strong style={{ color: '#F8FAFC' }}>4.5%</strong>.
+        </p>
+        {dcf.projected_fcf?.length > 0 ? (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.70rem', fontFamily: 'JetBrains Mono, monospace' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.62rem', textTransform: 'uppercase' }}>
+                <th style={{ textAlign: 'left', padding: '5px 8px' }}>Period</th>
+                <th style={{ padding: '5px 8px' }}>Projected FCF / Share (₹)</th>
+                <th style={{ padding: '5px 8px' }}>Present Value (PV)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dcf.projected_fcf.map((p, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
+                  <td style={{ textAlign: 'left', padding: '5px 8px', fontWeight: 600, color: '#F0F0FF' }}>{p.year}</td>
+                  <td style={{ padding: '5px 8px' }}>₹{p.fcf_per_share}</td>
+                  <td style={{ padding: '5px 8px', color: '#10B981', fontWeight: 700 }}>₹{p.pv_fcf}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <EmptyState
+            icon={DollarSign}
+            title="DCF Forecast Model Unavailable"
+            message="DCF projection model requires 3+ consecutive years of historical cash flow data to extrapolate terminal growth."
+            minHeight={90}
+          />
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <div style={{ padding: 'clamp(10px, 1.8vw, 18px)', display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 1280, margin: '0 auto', color: '#F8FAFC', fontFamily: 'system-ui, sans-serif' }}>
@@ -274,8 +840,8 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         border: '1px solid rgba(99,102,241,0.20)', borderRadius: 10, padding: '10px 14px',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818CF8' }}>
-            <Award size={15} />
+          <div style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818CF8' }}>
+            <Award size={16} />
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -303,8 +869,39 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
           </div>
         </div>
 
-        {/* Action Controls */}
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        {/* Action Controls & View Mode Toggle */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          {/* Segmented View Mode Toggle: Tabbed vs Full Continuous Report */}
+          <div style={{
+            display: 'flex', background: 'rgba(0,0,0,0.35)', borderRadius: 6, padding: 2,
+            border: '1px solid rgba(255,255,255,0.08)'
+          }}>
+            <button
+              onClick={() => setViewMode('tabbed')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 4,
+                border: 'none',
+                background: viewMode === 'tabbed' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                color: viewMode === 'tabbed' ? '#818CF8' : '#94A3B8',
+                fontWeight: viewMode === 'tabbed' ? 700 : 500, fontSize: '0.66rem', cursor: 'pointer'
+              }}
+            >
+              <LayoutGrid size={11} />Tabs
+            </button>
+            <button
+              onClick={() => setViewMode('full')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 4,
+                border: 'none',
+                background: viewMode === 'full' ? 'rgba(99,102,241,0.3)' : 'transparent',
+                color: viewMode === 'full' ? '#818CF8' : '#94A3B8',
+                fontWeight: viewMode === 'full' ? 700 : 500, fontSize: '0.66rem', cursor: 'pointer'
+              }}
+            >
+              <FileText size={11} />All Panels
+            </button>
+          </div>
+
           <button onClick={handleExportCSV} style={{ padding: '5px 9px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', fontWeight: 600 }}>
             <Download size={12} />CSV
           </button>
@@ -317,597 +914,122 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         </div>
       </div>
 
-      {/* ── Sub Navigation Tabs ── */}
-      <div style={{ display: 'flex', gap: 4, overflowX: 'auto', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: 4 }}>
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          const isSel = activeTab === tab.id;
-          return (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 6,
-                border: `1px solid ${isSel ? 'rgba(99,102,241,0.5)' : 'transparent'}`,
-                background: isSel ? 'rgba(99,102,241,0.2)' : 'transparent',
-                color: isSel ? '#818CF8' : '#94A3B8',
-                fontWeight: isSel ? 700 : 500, fontSize: '0.72rem', cursor: 'pointer', whiteSpace: 'nowrap'
-              }}>
-              <Icon size={12} />
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+      {/* ── Sub Navigation Tabs (Prominent Cockpit Pills) ── */}
+      {viewMode === 'tabbed' && (
+        <div style={{
+          display: 'flex', gap: 6, overflowX: 'auto', padding: '4px 2px 8px',
+          borderBottom: '1px solid rgba(255,255,255,0.08)'
+        }}>
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            const isSel = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 8,
+                  border: isSel ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
+                  background: isSel
+                    ? 'linear-gradient(135deg, rgba(99,102,241,0.32), rgba(139,92,246,0.22))'
+                    : 'rgba(15,23,42,0.60)',
+                  color: isSel ? '#FFFFFF' : '#94A3B8',
+                  fontWeight: isSel ? 700 : 500, fontSize: '0.74rem', cursor: 'pointer', whiteSpace: 'nowrap',
+                  boxShadow: isSel ? '0 2px 10px rgba(99,102,241,0.25)' : 'none',
+                  transition: 'all 0.15s ease-in-out'
+                }}
+              >
+                <Icon size={14} color={isSel ? '#818CF8' : '#64748B'} />
+                <span>{tab.label}</span>
+                {tab.badge && (
+                  <span style={{
+                    fontSize: '0.58rem',
+                    background: isSel ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.06)',
+                    color: isSel ? '#E0E7FF' : '#64748B',
+                    padding: '1px 5px',
+                    borderRadius: 4,
+                    fontWeight: 700
+                  }}>
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      {/* ── TAB 1: OVERVIEW & COMPOSITE SCORECARD ── */}
-      {activeTab === 'overview' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* ── TABBED VIEW: Individual Selected Panel ── */}
+      {viewMode === 'tabbed' && (
+        <>
+          {activeTab === 'overview' && renderOverviewSection()}
+          {activeTab === 'quarters' && renderQuartersSection()}
+          {activeTab === 'annual' && renderAnnualSection()}
+          {activeTab === 'balancesheet' && renderBalanceSheetSection()}
+          {activeTab === 'cashflow' && renderCashFlowSection()}
+          {activeTab === 'shareholding' && renderShareholdingSection()}
+          {activeTab === 'peers' && renderPeersSection()}
+          {activeTab === 'valuation' && renderValuationSection()}
+        </>
+      )}
 
-          {/* Core Valuation & Return Ratios with Mini Sparklines */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8 }}>
-            <RatioCard label="Market Cap" value={mcapVal} sub="Consolidated" />
-            <RatioCard label="Stock P/E" value={peVal} colorFn={(v) => v > 40 ? '#EF5350' : v < 20 ? '#10B981' : '#F8FAFC'} sub={peVal && peVal < 20 ? 'Attractive Value' : 'Premium'} />
-            <RatioCard label="P/B Ratio" value={pbVal} />
-            <RatioCard label="ROCE %" value={roceVal} unit="%" colorFn={(v) => v > 20 ? '#10B981' : '#F8FAFC'} sub="Capital Eff." sparkData={roceSpark} sparkColor="#10B981" />
-            <RatioCard label="ROE %" value={roeVal} unit="%" colorFn={(v) => v > 15 ? '#10B981' : '#F8FAFC'} sub="Return" sparkData={roeSpark} sparkColor="#10B981" />
-            <RatioCard label="Debt/Eq" value={deVal} colorFn={(v) => v > 1 ? '#EF5350' : '#10B981'} sub={deVal && deVal < 0.5 ? 'Conservative' : 'Leveraged'} sparkData={deSpark} sparkColor="#EF5350" />
-            <RatioCard label="Promoter" value={promoterVal} unit="%" sub="Insider" />
-            <RatioCard
-              label="Div Yield"
-              value={divYieldVal}
-              unit="%"
-              colorFn={(v) => v > 1.5 ? '#10B981' : '#F8FAFC'}
-              sub={
-                divYieldVal
-                  ? `Payout: ${corpCal.dividend_payout_ratio || '—'}%`
-                  : 'Non-dividend paying / 0%'
-              }
-            />
-          </div>
-
-          {/* Quality Scores & Intrinsic Valuation Triad */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
-
-            {/* Piotroski F-Score Card */}
-            <div style={{ ...cardStyle, border: '1px solid rgba(16,185,129,0.25)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <ShieldCheck size={14} color="#10B981" />
-                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#10B981' }}>Piotroski F-Score</span>
-                </div>
-                <span style={{ fontSize: '0.94rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: piotroski.score >= 7 ? '#10B981' : piotroski.score >= 4 ? '#F59E0B' : '#EF5350' }}>
-                  {piotroski.score}/9
-                </span>
-              </div>
-              <div style={{ fontSize: '0.62rem', color: '#94A3B8', marginBottom: 6 }}>
-                {piotroski.rating}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {(piotroski.criteria?.length ? piotroski.criteria : []).slice(0, 3).map((c, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.62rem', color: '#CBD5E1' }}>
-                    <span>{c.name}</span>
-                    <span style={{ color: c.passed ? '#10B981' : '#EF5350', fontWeight: 700 }}>{c.passed ? '✓ PASS' : '✗ FAIL'}</span>
-                  </div>
-                ))}
-              </div>
-              <div style={{ marginTop: 6, fontSize: '0.62rem', color: '#818CF8', cursor: 'pointer', textAlign: 'right', fontWeight: 600 }} onClick={() => setShowQualityModal(true)}>
-                View 9-point criteria audit →
-              </div>
-            </div>
-
-            {/* Altman Z-Score Card */}
-            <div style={{ ...cardStyle, border: '1px solid rgba(99,102,241,0.25)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <Scale size={14} color="#818CF8" />
-                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#818CF8' }}>Altman Z-Score</span>
-                </div>
-                <span style={{ fontSize: '0.94rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: altman.z_score >= 2.99 ? '#10B981' : altman.z_score >= 1.81 ? '#F59E0B' : '#EF5350' }}>
-                  {altman.z_score}
-                </span>
-              </div>
-              <div style={{ fontSize: '0.62rem', color: '#94A3B8', marginBottom: 6 }}>
-                Zone: <strong style={{ color: altman.z_score >= 2.99 ? '#10B981' : '#F59E0B' }}>{altman.zone}</strong>
-              </div>
-              <p style={{ fontSize: '0.60rem', color: '#94A3B8', margin: 0, lineHeight: 1.3 }}>
-                {altman.description || 'Solvency score evaluating working capital, retained earnings, and asset coverage.'}
-              </p>
-            </div>
-
-            {/* DCF Intrinsic Value Card */}
-            <div style={{ ...cardStyle, border: '1px solid rgba(168,85,247,0.25)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <DollarSign size={14} color="#C084FC" />
-                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#C084FC' }}>DCF Intrinsic Value</span>
-                </div>
-                <span style={{ fontSize: '0.94rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: (dcf.margin_of_safety_pct || 0) >= 0 ? '#10B981' : '#EF5350' }}>
-                  ₹{dcf.dcf_fair_value || '—'}
-                </span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.62rem', color: '#94A3B8', marginBottom: 4 }}>
-                <span>Margin of Safety:</span>
-                <strong style={{ color: (dcf.margin_of_safety_pct || 0) >= 0 ? '#10B981' : '#EF5350' }}>
-                  {(dcf.margin_of_safety_pct || 0) >= 0 ? '+' : ''}{dcf.margin_of_safety_pct}%
-                </strong>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.60rem', color: '#CBD5E1', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 4 }}>
-                <span>Graham Number:</span><strong>₹{dcf.graham_number || '—'}</strong>
-              </div>
-            </div>
-          </div>
-
-          {/* 10-Year Revenue vs Net Profit Chart with Empty Fallback */}
-          {annualPl.length > 0 ? (
-            <div style={cardStyle}>
-              <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-                <span>10-Year Revenue & Net Profit Trajectory (₹ Cr)</span>
-                <span><span style={{ color: '#6366F1' }}>■</span> Sales &nbsp;|&nbsp; <span style={{ color: '#10B981' }}>■</span> Net Profit</span>
-              </div>
-              <ResponsiveContainer width="100%" height={180}>
-                <ComposedChart data={annualPl} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                  <XAxis dataKey="period" stroke="#64748B" fontSize={9} tickLine={false} />
-                  <YAxis stroke="#64748B" fontSize={9} tickLine={false} tickFormatter={(v) => `₹${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
-                  <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')} Cr`]} />
-                  <Bar dataKey="Sales" fill="#6366F1" fillOpacity={0.75} radius={[3, 3, 0, 0]} name="Sales" />
-                  <Line type="monotone" dataKey="Net Profit" stroke="#10B981" strokeWidth={2} name="Net Profit" dot={{ fill: '#10B981', r: 2 }} />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          ) : (
-            <EmptyState
-              icon={Layers}
-              title="Annual Statements Not Available"
-              message="Historical revenue and net profit trajectory requires audited annual statement records."
-              minHeight={150}
-            />
-          )}
-
-          {/* Dynamic CAGR Grid */}
+      {/* ── FULL REPORT MODE: All 8 Panels Stacked Continuously ── */}
+      {viewMode === 'full' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
-              <div style={cardStyle}>
-                <div style={{ fontSize: '0.66rem', color: '#818CF8', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>
-                  Compounded Sales Growth
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span>10 Years:</span><strong>{cagr?.sales_growth?.['10y'] != null ? `${cagr.sales_growth['10y']}%` : '—'}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span>5 Years:</span><strong>{cagr?.sales_growth?.['5y'] != null ? `${cagr.sales_growth['5y']}%` : '—'}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0' }}>
-                  <span>3 Years:</span><strong style={{ color: '#10B981' }}>{cagr?.sales_growth?.['3y'] != null ? `${cagr.sales_growth['3y']}%` : '—'}</strong>
-                </div>
-              </div>
-
-              <div style={cardStyle}>
-                <div style={{ fontSize: '0.66rem', color: '#818CF8', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>
-                  Compounded Profit Growth
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span>10 Years:</span><strong>{cagr?.profit_growth?.['10y'] != null ? `${cagr.profit_growth['10y']}%` : '—'}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                  <span>5 Years:</span><strong>{cagr?.profit_growth?.['5y'] != null ? `${cagr.profit_growth['5y']}%` : '—'}</strong>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0' }}>
-                  <span>3 Years:</span><strong style={{ color: '#10B981' }}>{cagr?.profit_growth?.['3y'] != null ? `${cagr.profit_growth['3y']}%` : '—'}</strong>
-                </div>
-              </div>
+            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Award size={15} /> 1. Executive Summary & Composite Scorecard
             </div>
-            <div style={{ fontSize: '0.58rem', color: '#64748B', fontStyle: 'italic', paddingLeft: 2 }}>
-              * Dynamic CAGR computed from audited statements. '—' denotes that the stock does not yet possess continuous historical records for that specific timeframe (e.g. requires 3Y, 5Y, or 10Y continuous data).
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── TAB 2: QUARTERLY RESULTS & CHARTS ── */}
-      {activeTab === 'quarters' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {quarterly.length > 0 ? (
-            <>
-              <div style={cardStyle}>
-                <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Last 8 Quarters Revenue & Profit (₹ Cr)</div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <ComposedChart data={quarterly} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="period" stroke="#64748B" fontSize={9} tickLine={false} />
-                    <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
-                    <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')} Cr`]} />
-                    <Bar dataKey="revenue" fill="#6366F1" radius={[3, 3, 0, 0]} name="Revenue" />
-                    <Line type="monotone" dataKey="net_profit" stroke="#10B981" strokeWidth={2} name="Net Profit" />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div style={{ ...cardStyle, overflowX: 'auto' }}>
-                <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Quarterly Financials (₹ Cr)</div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-                      <th style={{ textAlign: 'left', padding: '6px 8px' }}>Period</th>
-                      <th style={{ padding: '6px 8px' }}>Sales</th>
-                      <th style={{ padding: '6px 8px' }}>Expenses</th>
-                      <th style={{ padding: '6px 8px' }}>Op. Profit</th>
-                      <th style={{ padding: '6px 8px' }}>OPM %</th>
-                      <th style={{ padding: '6px 8px' }}>Net Profit</th>
-                      <th style={{ padding: '6px 8px' }}>EPS ₹</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {quarterly.map((q, idx) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                        <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{q.period}</td>
-                        <td style={{ padding: '6px 8px' }}>{q.revenue != null ? Number(q.revenue).toLocaleString('en-IN') : (q['Sales'] != null ? Number(q['Sales']).toLocaleString('en-IN') : '—')}</td>
-                        <td style={{ padding: '6px 8px' }}>{q['Expenses'] != null ? Number(q['Expenses']).toLocaleString('en-IN') : '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{q['Operating Profit'] != null ? Number(q['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{q['OPM %'] != null ? `${q['OPM %']}%` : '—'}</td>
-                        <td style={{ padding: '6px 8px', fontWeight: 700, color: '#10B981' }}>{q.net_profit != null ? Number(q.net_profit).toLocaleString('en-IN') : (q['Net Profit'] != null ? Number(q['Net Profit']).toLocaleString('en-IN') : '—')}</td>
-                        <td style={{ padding: '6px 8px' }}>{q.eps != null ? q.eps : (q['EPS in Rs'] || '—')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : (
-            <EmptyState
-              icon={Table}
-              title="Quarterly Results Not Available"
-              message="Quarterly disclosures have not yet been published for this security."
-              minHeight={160}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── TAB 3: ANNUAL 10-YEAR P&L ── */}
-      {activeTab === 'annual' && (
-        <div style={{ ...cardStyle, overflowX: 'auto' }}>
-          <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Annual 10-Year P&L (₹ Cr)</div>
-          {annualPl.length > 0 ? (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Year</th>
-                  <th style={{ padding: '6px 8px' }}>Sales</th>
-                  <th style={{ padding: '6px 8px' }}>Expenses</th>
-                  <th style={{ padding: '6px 8px' }}>Op. Profit</th>
-                  <th style={{ padding: '6px 8px' }}>OPM %</th>
-                  <th style={{ padding: '6px 8px' }}>Net Profit</th>
-                  <th style={{ padding: '6px 8px' }}>EPS ₹</th>
-                  <th style={{ padding: '6px 8px' }}>Payout %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {annualPl.map((yr, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                    <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{yr.period}</td>
-                    <td style={{ padding: '6px 8px' }}>{yr['Sales'] != null ? Number(yr['Sales']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{yr['Expenses'] != null ? Number(yr['Expenses']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{yr['Operating Profit'] != null ? Number(yr['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{yr['OPM %'] != null ? `${yr['OPM %']}%` : '—'}</td>
-                    <td style={{ padding: '6px 8px', fontWeight: 700, color: '#818CF8' }}>{yr['Net Profit'] != null ? Number(yr['Net Profit']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{yr['EPS in Rs'] != null ? yr['EPS in Rs'] : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{yr['Dividend Payout %'] != null ? `${yr['Dividend Payout %']}%` : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <EmptyState
-              icon={Layers}
-              title="Annual Statements Not Available"
-              message="No audited annual statement records found for this ticker."
-              minHeight={140}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── TAB 4: BALANCE SHEET ── */}
-      {activeTab === 'balancesheet' && (
-        <div style={{ ...cardStyle, overflowX: 'auto' }}>
-          <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Consolidated Balance Sheet (₹ Cr)</div>
-          {balanceSheet.length > 0 ? (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Year</th>
-                  <th style={{ padding: '6px 8px' }}>Equity</th>
-                  <th style={{ padding: '6px 8px' }}>Reserves</th>
-                  <th style={{ padding: '6px 8px' }}>Borrowings</th>
-                  <th style={{ padding: '6px 8px' }}>Other Liab</th>
-                  <th style={{ padding: '6px 8px' }}>Total Liab</th>
-                  <th style={{ padding: '6px 8px' }}>Fixed Assets</th>
-                  <th style={{ padding: '6px 8px' }}>Total Assets</th>
-                </tr>
-              </thead>
-              <tbody>
-                {balanceSheet.map((bs, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                    <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{bs.period}</td>
-                    <td style={{ padding: '6px 8px' }}>{bs['Equity Capital'] != null ? Number(bs['Equity Capital']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{bs['Reserves'] != null ? Number(bs['Reserves']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px', color: '#F59E0B' }}>{bs['Borrowings'] != null ? Number(bs['Borrowings']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{bs['Other Liabilities'] != null ? Number(bs['Other Liabilities']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px', fontWeight: 700 }}>{bs['Total Liabilities'] != null ? Number(bs['Total Liabilities']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{bs['Fixed Assets'] != null ? Number(bs['Fixed Assets']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px', fontWeight: 700, color: '#818CF8' }}>{bs['Total Assets'] != null ? Number(bs['Total Assets']).toLocaleString('en-IN') : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <EmptyState
-              icon={Scale}
-              title="Balance Sheet Data Not Available"
-              message="No audited balance sheet records found for this company."
-              minHeight={140}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── TAB 5: CASH FLOWS & WATERFALL DECOMPOSITION ── */}
-      {activeTab === 'cashflow' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {cashFlow.length > 0 ? (
-            <>
-              <div style={cardStyle}>
-                <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Cash Flow Decomposition (CFO vs CFI vs CFF in ₹ Cr)</div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <BarChart data={cashFlow} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="period" stroke="#64748B" fontSize={9} tickLine={false} />
-                    <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
-                    <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} />
-                    <Bar dataKey="Cash from Operating Activity" fill="#10B981" name="Operating (CFO)" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="Cash from Investing Activity" fill="#F59E0B" name="Investing (CFI)" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="Cash from Financing Activity" fill="#EF5350" name="Financing (CFF)" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div style={{ ...cardStyle, overflowX: 'auto' }}>
-                <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Cash Flow Statement (₹ Cr)</div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-                      <th style={{ textAlign: 'left', padding: '6px 8px' }}>Period</th>
-                      <th style={{ padding: '6px 8px' }}>Operating (CFO)</th>
-                      <th style={{ padding: '6px 8px' }}>Investing (CFI)</th>
-                      <th style={{ padding: '6px 8px' }}>Financing (CFF)</th>
-                      <th style={{ padding: '6px 8px' }}>Net Cash Flow</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cashFlow.map((cf, idx) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                        <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{cf.period}</td>
-                        <td style={{ padding: '6px 8px', color: (cf['Cash from Operating Activity'] || 0) >= 0 ? '#10B981' : '#EF5350' }}>
-                          {cf['Cash from Operating Activity'] != null ? Number(cf['Cash from Operating Activity']).toLocaleString('en-IN') : '—'}
-                        </td>
-                        <td style={{ padding: '6px 8px' }}>{cf['Cash from Investing Activity'] != null ? Number(cf['Cash from Investing Activity']).toLocaleString('en-IN') : '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{cf['Cash from Financing Activity'] != null ? Number(cf['Cash from Financing Activity']).toLocaleString('en-IN') : '—'}</td>
-                        <td style={{ padding: '6px 8px', fontWeight: 700, color: '#818CF8' }}>
-                          {cf['Net Cash Flow'] != null ? Number(cf['Net Cash Flow']).toLocaleString('en-IN') : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : (
-            <EmptyState
-              icon={TrendingUp}
-              title="Cash Flow Data Not Available"
-              message="Cash flow statement records are not reported or unavailable for this ticker."
-              minHeight={160}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── TAB 6: SHAREHOLDING PATTERN ── */}
-      {activeTab === 'shareholding' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {shareholding.length > 0 ? (
-            <>
-              <div style={cardStyle}>
-                <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Institutional & Insider Ownership Trend (%)</div>
-                <ResponsiveContainer width="100%" height={180}>
-                  <LineChart data={shareholding} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="quarter" stroke="#64748B" fontSize={9} tickLine={false} />
-                    <YAxis stroke="#64748B" fontSize={9} tickLine={false} domain={['auto', 'auto']} tickFormatter={(v) => `${v}%`} />
-                    <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} formatter={(v) => [`${v}%`]} />
-                    <Line type="monotone" dataKey="promoter" stroke="#10B981" strokeWidth={2} name="Promoters" dot={{ r: 2 }} />
-                    <Line type="monotone" dataKey="fii" stroke="#818CF8" strokeWidth={1.8} name="FIIs" dot={{ r: 2 }} />
-                    <Line type="monotone" dataKey="dii" stroke="#F59E0B" strokeWidth={1.8} name="DIIs" dot={{ r: 2 }} />
-                    <Line type="monotone" dataKey="public" stroke="#64748B" strokeWidth={1.2} name="Public" dot={{ r: 2 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
-                <div style={{ ...cardStyle, overflowX: 'auto' }}>
-                  <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Quarterly Breakdown (%)</div>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
-                    <thead>
-                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-                        <th style={{ textAlign: 'left', padding: '6px 8px' }}>Quarter</th>
-                        <th style={{ padding: '6px 8px' }}>Promoter</th>
-                        <th style={{ padding: '6px 8px' }}>FII</th>
-                        <th style={{ padding: '6px 8px' }}>DII</th>
-                        <th style={{ padding: '6px 8px' }}>Public</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {shareholding.map((sh, idx) => (
-                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                          <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{sh.quarter}</td>
-                          <td style={{ padding: '6px 8px', color: '#10B981' }}>{sh.promoter}%</td>
-                          <td style={{ padding: '6px 8px', color: '#818CF8' }}>{sh.fii}%</td>
-                          <td style={{ padding: '6px 8px', color: '#F59E0B' }}>{sh.dii}%</td>
-                          <td style={{ padding: '6px 8px' }}>{sh.public}%</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                  <div style={{ fontSize: '0.70rem', color: '#818CF8', fontWeight: 700, alignSelf: 'flex-start', marginBottom: 6 }}>Latest Ownership Distribution</div>
-                  <div style={{ width: '100%', height: 160 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={[
-                            { name: 'Promoters', value: shareholding[shareholding.length - 1].promoter, color: '#10B981' },
-                            { name: 'FIIs', value: shareholding[shareholding.length - 1].fii, color: '#818CF8' },
-                            { name: 'DIIs', value: shareholding[shareholding.length - 1].dii, color: '#F59E0B' },
-                            { name: 'Public', value: shareholding[shareholding.length - 1].public, color: '#64748B' },
-                          ]}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          outerRadius={55}
-                          label={({ name, value }) => `${name} ${value}%`}
-                        >
-                          {[
-                            { color: '#10B981' },
-                            { color: '#818CF8' },
-                            { color: '#F59E0B' },
-                            { color: '#64748B' },
-                          ].map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              </div>
-            </>
-          ) : (
-            <EmptyState
-              icon={PieIcon}
-              title="No Shareholding Pattern Data Available"
-              message="Shareholding pattern has not been reported for this security or is not yet published in exchange filings."
-              minHeight={180}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── TAB 7: PEER COMPARISON ── */}
-      {activeTab === 'peers' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {peers.length > 0 ? (
-            <>
-              <div style={cardStyle}>
-                <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Peer Valuation (P/E Ratio) vs Quality (ROCE %)</div>
-                <ResponsiveContainer width="100%" height={160}>
-                  <BarChart data={peers} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                    <XAxis dataKey="name" stroke="#64748B" fontSize={9} tickLine={false} />
-                    <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
-                    <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} />
-                    <Bar dataKey="pe_ratio" fill="#6366F1" name="P/E Ratio" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="roce" fill="#10B981" name="ROCE %" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-
-              <div style={{ ...cardStyle, overflowX: 'auto' }}>
-                <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Sector Peer Ranking Table</div>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-                      <th style={{ textAlign: 'left', padding: '6px 8px' }}>Company</th>
-                      <th style={{ padding: '6px 8px' }}>CMP ₹</th>
-                      <th style={{ padding: '6px 8px' }}>P/E</th>
-                      <th style={{ padding: '6px 8px' }}>Mar Cap ₹ Cr</th>
-                      <th style={{ padding: '6px 8px' }}>ROCE %</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {peers.map((p, idx) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                        <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: p.name.includes(ticker) ? '#818CF8' : '#F0F0FF' }}>
-                          {p.name}
-                        </td>
-                        <td style={{ padding: '6px 8px' }}>{p.price != null ? Number(p.price).toLocaleString('en-IN') : '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{p.pe_ratio != null ? p.pe_ratio : '—'}</td>
-                        <td style={{ padding: '6px 8px' }}>{p.market_cap != null ? Number(p.market_cap).toLocaleString('en-IN') : '—'}</td>
-                        <td style={{ padding: '6px 8px', color: (p.roce || 0) > 15 ? '#10B981' : '#CBD5E1' }}>
-                          {p.roce != null ? `${p.roce}%` : '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          ) : (
-            <EmptyState
-              icon={Users}
-              title="No Peer Comparison Data for this Sector"
-              message="Peer groupings are unavailable or not yet categorized for this specific sector."
-              minHeight={160}
-            />
-          )}
-        </div>
-      )}
-
-      {/* ── TAB 8: DCF INTRINSIC VALUATION ── */}
-      {activeTab === 'valuation' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-            <RatioCard label="DCF Fair Value" value={dcf.dcf_fair_value} unit=" ₹" col="#10B981" sub="Multi-Stage FCF" />
-            <RatioCard label="Graham Number" value={dcf.graham_number} unit=" ₹" col="#818CF8" sub="EPS & BV Formula" />
-            <RatioCard label="Peter Lynch Target" value={dcf.peter_lynch_value} unit=" ₹" col="#C084FC" sub="Growth Multiple" />
-            <RatioCard label="Margin of Safety" value={dcf.margin_of_safety_pct} unit="%" colorFn={(v) => v >= 0 ? '#10B981' : '#EF5350'} sub={dcf.valuation_verdict} />
+            {renderOverviewSection()}
           </div>
 
-          <div style={cardStyle}>
-            <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#818CF8', marginBottom: 4 }}>DCF Valuation Forecast & Assumptions</div>
-            <p style={{ fontSize: '0.64rem', color: '#94A3B8', lineHeight: 1.4, margin: '0 0 8px' }}>
-              Growth Rate: <strong style={{ color: '#F8FAFC' }}>{dcf.assumed_growth_rate_pct || 12}%</strong> | Discount WACC: <strong style={{ color: '#F8FAFC' }}>{dcf.discount_rate_wacc_pct || 11.5}%</strong> | Terminal Rate: <strong style={{ color: '#F8FAFC' }}>4.5%</strong>.
-            </p>
-            {dcf.projected_fcf?.length > 0 ? (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.70rem', fontFamily: 'JetBrains Mono, monospace' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.62rem', textTransform: 'uppercase' }}>
-                    <th style={{ textAlign: 'left', padding: '5px 8px' }}>Period</th>
-                    <th style={{ padding: '5px 8px' }}>Projected FCF / Share (₹)</th>
-                    <th style={{ padding: '5px 8px' }}>Present Value (PV)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {dcf.projected_fcf.map((p, i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                      <td style={{ textAlign: 'left', padding: '5px 8px', fontWeight: 600, color: '#F0F0FF' }}>{p.year}</td>
-                      <td style={{ padding: '5px 8px' }}>₹{p.fcf_per_share}</td>
-                      <td style={{ padding: '5px 8px', color: '#10B981', fontWeight: 700 }}>₹{p.pv_fcf}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <EmptyState
-                icon={DollarSign}
-                title="DCF Forecast Model Unavailable"
-                message="DCF projection model requires 3+ consecutive years of historical cash flow data to extrapolate terminal growth."
-                minHeight={90}
-              />
-            )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Table size={15} /> 2. Quarterly Earnings & Disclosures
+            </div>
+            {renderQuartersSection()}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Layers size={15} /> 3. Annual 10-Year Profit & Loss Statement
+            </div>
+            {renderAnnualSection()}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Scale size={15} /> 4. Consolidated Balance Sheet & Capital Structure
+            </div>
+            {renderBalanceSheetSection()}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <TrendingUp size={15} /> 5. Cash Flow Decomposition & Quality
+            </div>
+            {renderCashFlowSection()}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <PieIcon size={15} /> 6. Institutional & Insider Ownership
+            </div>
+            {renderShareholdingSection()}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Users size={15} /> 7. Industry Peer Comparison & Relative Ranking
+            </div>
+            {renderPeersSection()}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <DollarSign size={15} /> 8. DCF Multi-Stage Intrinsic Valuation
+            </div>
+            {renderValuationSection()}
           </div>
         </div>
       )}
