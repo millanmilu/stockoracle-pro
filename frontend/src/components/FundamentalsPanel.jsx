@@ -192,12 +192,43 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         </button>
       </div>
     );
-   const quarterly = deepData?.quarterly_results?.length ? deepData.quarterly_results : (data?.quarterly_results || []);
-  const annualPl = deepData?.annual_pl?.length ? deepData.annual_pl : (data?.annual_pl || []);
+  const quarterly = (deepData?.quarterly_results?.length ? deepData.quarterly_results : (data?.quarterly_results || [])).map(q => ({
+    ...q,
+    revenue: q.revenue ?? q.Sales ?? q['Sales+'] ?? q.Revenue ?? 0,
+    net_profit: q.net_profit ?? q['Net Profit'] ?? q['Net Profit+'] ?? 0,
+    eps: q.eps ?? q['EPS in Rs'] ?? 0,
+  }));
+
+  const annualPl = (deepData?.annual_pl?.length ? deepData.annual_pl : (data?.annual_pl || [])).map(a => ({
+    ...a,
+    Sales: a.Sales ?? a.revenue ?? a['Sales+'] ?? 0,
+    'Net Profit': a['Net Profit'] ?? a.net_profit ?? a['Net Profit+'] ?? 0,
+    'EPS in Rs': a['EPS in Rs'] ?? a.eps ?? 0,
+  }));
+
   const balanceSheet = deepData?.balance_sheet?.length ? deepData.balance_sheet : (data?.balance_sheet || []);
-  const cashFlow = deepData?.cash_flow?.length ? deepData.cash_flow : (data?.cash_flow || []);
-  const shareholding = deepData?.shareholding?.length ? deepData.shareholding : (data?.shareholding || []);
-  const peers = deepData?.peers?.length ? deepData.peers : (data?.peers || []);
+
+  const cashFlow = (deepData?.cash_flow?.length ? deepData.cash_flow : (data?.cash_flow || [])).map(cf => ({
+    ...cf,
+    'Cash from Operating Activity': cf['Cash from Operating Activity'] ?? cf['Operating Activity'] ?? cf['CFO'] ?? 0,
+    'Cash from Investing Activity': cf['Cash from Investing Activity'] ?? cf['Investing Activity'] ?? cf['CFI'] ?? 0,
+    'Cash from Financing Activity': cf['Cash from Financing Activity'] ?? cf['Financing Activity'] ?? cf['CFF'] ?? 0,
+  }));
+
+  const shareholding = (deepData?.shareholding?.length ? deepData.shareholding : (data?.shareholding || [])).map(s => ({
+    ...s,
+    promoter: s.promoter ?? s.Promoters ?? 0,
+    fii: s.fii ?? s.FIIs ?? s.FII ?? 0,
+    dii: s.dii ?? s.DIIs ?? s.DII ?? 0,
+    public: s.public ?? s.Public ?? 0,
+  }));
+
+  const peers = (deepData?.peers?.length ? deepData.peers : (data?.peers || [])).map(p => ({
+    ...p,
+    pe_ratio: p.pe_ratio ?? p.pe ?? 0,
+    roce: p.roce ?? 0,
+  }));
+
   const cagr = deepData?.ratios_cagr || {};
   const piotroski = deepData?.piotroski_f_score || { score: 6, rating: 'MODERATE (Stable)', criteria: [] };
   const altman = deepData?.altman_z_score || { z_score: 3.0, zone: 'Safe Zone' };
