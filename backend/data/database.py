@@ -1052,16 +1052,67 @@ def get_paper_account(user_id: str = "default_user") -> dict:
 
 
 def get_paper_positions(user_id: str = "default_user") -> list:
-    """Returns active open paper trading positions."""
+    """Returns active open paper trading positions enriched with live LTP, market value, and unrealized P&L."""
     with get_db_connection() as conn:
         rows = conn.execute(
             "SELECT id, user_id, ticker, order_type, shares, avg_buy_price, stop_loss, target_price, opened_at FROM paper_positions WHERE user_id = ? ORDER BY opened_at DESC",
             (user_id,)
         ).fetchall()
-    return [dict(r) for r in rows]
+
+    positions = []
+    for r in rows:
+        p = dict(r)
+        ticker = p["ticker"]
+        shares = float(p["shares"])
+        buy_p = float(p["avg_buy_price"])
+
+        # Fetch current price from cache or screener table
+        current_p = buy_p
+        sector = "Diversified"
+        try:
+            info = get_company_info(ticker)
+            if info and info.get("current_price") and float(info["current_price"]) > 0:
+                current_p = float(info["current_price"])
+            else:
+                with get_db_connection() as conn:
+                    scr_row = conn.execute(
+                        "SELECT close_price, sector FROM screener_daily_metrics WHERE ticker = ? LIMIT 1",
+                        (ticker,)
+                    ).fetchone()
+                    if scr_row and scr_row["close_price"]:
+                        current_p = float(scr_row["close_price"])
+                    if scr_row and scr_row["sector"]:
+                        sector = scr_row["sector"]
+        except Exception:
+            current_p = buy_p
+
+        # Auto-trigger Stop Loss or Target if conditions are met
+        sl = float(p["stop_loss"]) if p.get("stop_loss") else None
+        tp = float(p["target_price"]) if p.get("target_price") else None
+        if sl and current_p <= sl and current_p > 0:
+            close_paper_position(p["id"], current_price=current_p, user_id=user_id, exit_reason="STOP_LOSS_HIT")
+            continue
+        if tp and current_p >= tp and current_p > 0:
+            close_paper_position(p["id"], current_price=current_p, user_id=user_id, exit_reason="TARGET_HIT")
+            continue
+
+        invested_val = round(shares * buy_p, 2)
+        market_val = round(shares * current_p, 2)
+        unrealized = round((current_p - buy_p) * shares, 2)
+        unrealized_pct = round(((current_p - buy_p) / max(0.01, buy_p)) * 100, 2)
+
+        p["current_price"] = round(current_p, 2)
+        p["sector"] = sector
+        p["invested_value"] = invested_val
+        p["market_value"] = market_val
+        p["unrealized_pnl"] = unrealized
+        p["unrealized_pnl_pct"] = unrealized_pct
+        positions.append(p)
+
+    return positions
 
 
-def place_paper_order(ticker: str, order_type: str, action: str, shares: float, price: float, stop_loss: float = None, target_price: float = None, user_id: str = "default_user") -> dict:
+def place_paper_order(ticker: str, order_type: str, action: str, shares: float, price: float, stop_loss: float = None, target_price: float = None, notes: str = None, user_id: str = "default_user") -> dict:
     """
     Executes a paper order atomically:
     - Checks cash balance under transaction lock, debits cash, creates paper position.
@@ -1074,7 +1125,7 @@ def place_paper_order(ticker: str, order_type: str, action: str, shares: float, 
     now_str = datetime.now().isoformat()
 
     if action != "BUY":
-        raise ValueError("Direct SELL without position not supported. Use close_paper_position() to exit holdings.")
+        raise ValueError("Direct SELL without position not supported. Use sell_paper_position() to exit holdings.")
 
     if shares <= 0 or price <= 0:
         raise ValueError("Shares and price must be positive numbers.")
@@ -1105,12 +1156,13 @@ def place_paper_order(ticker: str, order_type: str, action: str, shares: float, 
         )
         pos_id = cursor.lastrowid
 
+        order_note = notes or f"BUY {ticker} @ ₹{price:.2f}"
         conn.execute(
             """
             INSERT INTO paper_orders (user_id, ticker, order_type, action, shares, executed_price, realized_pnl, status, executed_at)
-            VALUES (?, ?, ?, 'BUY', ?, ?, 0.0, 'EXECUTED', ?)
+            VALUES (?, ?, ?, 'BUY', ?, ?, 0.0, ?, ?)
             """,
-            (user_id, ticker, order_type, shares, price, now_str)
+            (user_id, ticker, order_type, shares, price, order_note, now_str)
         )
         conn.commit()
 
@@ -1120,8 +1172,11 @@ def place_paper_order(ticker: str, order_type: str, action: str, shares: float, 
     return {"status": "SUCCESS", "position_id": pos_id, "action": "BUY", "ticker": ticker, "shares": shares, "price": price, "remaining_cash": new_cash}
 
 
-def close_paper_position(position_id: int, current_price: float, user_id: str = "default_user") -> dict:
-    """Closes an open position at current live price and calculates realized P&L atomically."""
+def sell_paper_position(position_id: int, shares_to_sell: float, current_price: float, notes: str = None, user_id: str = "default_user") -> dict:
+    """Executes a full or partial sell order on an open paper position atomically."""
+    if shares_to_sell <= 0 or current_price <= 0:
+        raise ValueError("Shares to sell and current price must be greater than zero.")
+
     now_str = datetime.now().isoformat()
     with get_db_connection() as conn:
         conn.execute("BEGIN IMMEDIATE")
@@ -1129,37 +1184,72 @@ def close_paper_position(position_id: int, current_price: float, user_id: str = 
         if not pos:
             raise ValueError(f"Position #{position_id} not found.")
 
-        shares = float(pos["shares"])
-        buy_p  = float(pos["avg_buy_price"])
-        pnl    = (current_price - buy_p) * shares
-        proceeds = shares * current_price
+        current_shares = float(pos["shares"])
+        if shares_to_sell > current_shares:
+            shares_to_sell = current_shares
 
-        # Update Account Cash atomically
+        buy_p = float(pos["avg_buy_price"])
+        pnl = (current_price - buy_p) * shares_to_sell
+        proceeds = shares_to_sell * current_price
+
+        # Update Account Cash
         acc = conn.execute("SELECT cash_balance FROM paper_accounts WHERE user_id = ?", (user_id,)).fetchone()
         current_cash = float(acc["cash_balance"]) if acc else 1000000.0
         new_cash = current_cash + proceeds
         conn.execute("UPDATE paper_accounts SET cash_balance = ?, updated_at = ? WHERE user_id = ?", (new_cash, now_str, user_id))
 
-        # Record Close Order in Journal
+        status_text = notes or ("CLOSED" if shares_to_sell >= current_shares else f"PARTIAL_SELL ({shares_to_sell}/{current_shares})")
+
+        # Record Sell Order in Journal
         conn.execute(
             """
             INSERT INTO paper_orders (user_id, ticker, order_type, action, shares, executed_price, realized_pnl, status, executed_at)
-            VALUES (?, ?, ?, 'SELL', ?, ?, ?, 'EXECUTED', ?)
+            VALUES (?, ?, ?, 'SELL', ?, ?, ?, ?, ?)
             """,
-            (user_id, pos["ticker"], pos["order_type"], shares, current_price, pnl, now_str)
+            (user_id, pos["ticker"], pos["order_type"], shares_to_sell, current_price, pnl, status_text, now_str)
         )
 
-        # Delete Position
-        conn.execute("DELETE FROM paper_positions WHERE id = ?", (position_id,))
+        # Update or delete position
+        remaining_shares = current_shares - shares_to_sell
+        if remaining_shares > 0.0001:
+            conn.execute("UPDATE paper_positions SET shares = ? WHERE id = ?", (remaining_shares, position_id))
+        else:
+            conn.execute("DELETE FROM paper_positions WHERE id = ?", (position_id,))
         conn.commit()
 
     write_audit_log("SELL", "paper_order", entity_id=position_id,
-                    details=f"ticker={pos['ticker']} shares={shares} exit_price={current_price} pnl={pnl:.2f}",
+                    details=f"ticker={pos['ticker']} shares_sold={shares_to_sell} remaining={remaining_shares} exit_price={current_price} pnl={pnl:.2f}",
                     user_id=user_id)
-    return {"status": "CLOSED", "position_id": position_id, "ticker": pos["ticker"], "shares": shares, "exit_price": current_price, "realized_pnl": round(pnl, 2), "new_cash": round(new_cash, 2)}
+    return {
+        "status": "SUCCESS",
+        "position_id": position_id,
+        "ticker": pos["ticker"],
+        "shares_sold": shares_to_sell,
+        "remaining_shares": round(remaining_shares, 2),
+        "exit_price": current_price,
+        "realized_pnl": round(pnl, 2),
+        "new_cash": round(new_cash, 2)
+    }
 
 
-def get_paper_trade_history(user_id: str = "default_user", limit: int = 50) -> list:
+def close_paper_position(position_id: int, current_price: float, user_id: str = "default_user", exit_reason: str = "MANUAL_CLOSE") -> dict:
+    """Closes an open position fully at current live price and calculates realized P&L."""
+    with get_db_connection() as conn:
+        pos = conn.execute("SELECT shares FROM paper_positions WHERE id = ? AND user_id = ?", (position_id, user_id)).fetchone()
+        if not pos:
+            raise ValueError(f"Position #{position_id} not found.")
+        shares = float(pos["shares"])
+
+    return sell_paper_position(
+        position_id=position_id,
+        shares_to_sell=shares,
+        current_price=current_price,
+        notes=exit_reason,
+        user_id=user_id
+    )
+
+
+def get_paper_trade_history(user_id: str = "default_user", limit: int = 100) -> list:
     """Returns past executed orders journal."""
     with get_db_connection() as conn:
         rows = conn.execute(
@@ -1167,6 +1257,77 @@ def get_paper_trade_history(user_id: str = "default_user", limit: int = 50) -> l
             (user_id, limit)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def get_paper_analytics(user_id: str = "default_user") -> dict:
+    """Computes full portfolio analytics: net worth, win rate, profit factor, best/worst trade, and sector allocation."""
+    account = get_paper_account(user_id=user_id)
+    positions = get_paper_positions(user_id=user_id)
+    history = get_paper_trade_history(user_id=user_id, limit=200)
+
+    cash = float(account.get("cash_balance", 1000000.0))
+    start_balance = float(account.get("starting_balance", 1000000.0))
+    invested_val = sum(p.get("invested_value", 0.0) for p in positions)
+    market_val = sum(p.get("market_value", 0.0) for p in positions)
+    unrealized_pnl = sum(p.get("unrealized_pnl", 0.0) for p in positions)
+
+    total_net_worth = cash + market_val
+    total_realized_pnl = sum(float(h.get("realized_pnl") or 0.0) for h in history if h.get("action") == "SELL")
+
+    # Trade statistics
+    closed_trades = [h for h in history if h.get("action") == "SELL"]
+    total_closed = len(closed_trades)
+    winning_trades = [h for h in closed_trades if float(h.get("realized_pnl") or 0.0) > 0]
+    losing_trades = [h for h in closed_trades if float(h.get("realized_pnl") or 0.0) < 0]
+
+    win_count = len(winning_trades)
+    loss_count = len(losing_trades)
+    win_rate = round((win_count / total_closed * 100), 1) if total_closed > 0 else 0.0
+
+    gross_profit = sum(float(h["realized_pnl"]) for h in winning_trades)
+    gross_loss = abs(sum(float(h["realized_pnl"]) for h in losing_trades))
+    profit_factor = round(gross_profit / max(1.0, gross_loss), 2) if gross_loss > 0 else (gross_profit if gross_profit > 0 else 1.0)
+
+    best_trade = max([float(h["realized_pnl"]) for h in closed_trades], default=0.0)
+    worst_trade = min([float(h["realized_pnl"]) for h in closed_trades], default=0.0)
+
+    # Sector Allocation
+    sector_map = {}
+    for p in positions:
+        sec = p.get("sector") or "Diversified"
+        mval = float(p.get("market_value") or 0.0)
+        sector_map[sec] = sector_map.get(sec, 0.0) + mval
+
+    sector_allocation = []
+    if market_val > 0:
+        for sec, val in sorted(sector_map.items(), key=lambda x: x[1], reverse=True):
+            sector_allocation.append({
+                "sector": sec,
+                "value": round(val, 2),
+                "pct": round((val / market_val) * 100, 1)
+            })
+
+    total_return_pct = round(((total_net_worth - start_balance) / start_balance) * 100, 2)
+
+    return {
+        "cash_balance": round(cash, 2),
+        "starting_balance": round(start_balance, 2),
+        "invested_value": round(invested_val, 2),
+        "market_value": round(market_val, 2),
+        "total_net_worth": round(total_net_worth, 2),
+        "total_realized_pnl": round(total_realized_pnl, 2),
+        "total_unrealized_pnl": round(unrealized_pnl, 2),
+        "total_return_pct": total_return_pct,
+        "win_rate_pct": win_rate,
+        "total_trades": total_closed,
+        "win_count": win_count,
+        "loss_count": loss_count,
+        "profit_factor": profit_factor,
+        "best_trade": round(best_trade, 2),
+        "worst_trade": round(worst_trade, 2),
+        "open_positions_count": len(positions),
+        "sector_allocation": sector_allocation
+    }
 
 
 def reset_paper_account(user_id: str = "default_user") -> dict:
