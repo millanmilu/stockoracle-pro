@@ -165,10 +165,6 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     toast.success(`${ticker} Financials exported to CSV!`);
   };
 
-  const handleSetAlert = (type) => {
-    toast.success(`Fundamental Alert set for ${ticker} (${type})`);
-  };
-
   if (loading) {
     return (
       <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -197,41 +193,44 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     );
   }
 
+  // Bug 2: Normalization uses null defaults to avoid showing fake 0
   const quarterly = (deepData?.quarterly_results?.length ? deepData.quarterly_results : (data?.quarterly_results || [])).map(q => ({
     ...q,
-    revenue: q.revenue ?? q.Sales ?? q['Sales+'] ?? q.Revenue ?? 0,
-    net_profit: q.net_profit ?? q['Net Profit'] ?? q['Net Profit+'] ?? 0,
-    eps: q.eps ?? q['EPS in Rs'] ?? 0,
+    revenue: q.revenue ?? q.Sales ?? q['Sales+'] ?? q.Revenue ?? null,
+    net_profit: q.net_profit ?? q['Net Profit'] ?? q['Net Profit+'] ?? null,
+    eps: q.eps ?? q['EPS in Rs'] ?? null,
   }));
 
   const annualPl = (deepData?.annual_pl?.length ? deepData.annual_pl : (data?.annual_pl || [])).map(a => ({
     ...a,
-    Sales: a.Sales ?? a.revenue ?? a['Sales+'] ?? 0,
-    'Net Profit': a['Net Profit'] ?? a.net_profit ?? a['Net Profit+'] ?? 0,
-    'EPS in Rs': a['EPS in Rs'] ?? a.eps ?? 0,
+    Sales: a.Sales ?? a.revenue ?? a['Sales+'] ?? null,
+    'Net Profit': a['Net Profit'] ?? a.net_profit ?? a['Net Profit+'] ?? null,
+    'EPS in Rs': a['EPS in Rs'] ?? a.eps ?? null,
   }));
 
   const balanceSheet = deepData?.balance_sheet?.length ? deepData.balance_sheet : (data?.balance_sheet || []);
 
+  // Bug 5 & Bug 9: Normalize Net Cash Flow and use null defaults for missing items
   const cashFlow = (deepData?.cash_flow?.length ? deepData.cash_flow : (data?.cash_flow || [])).map(cf => ({
     ...cf,
-    'Cash from Operating Activity': cf['Cash from Operating Activity'] ?? cf['Operating Activity'] ?? cf['CFO'] ?? 0,
-    'Cash from Investing Activity': cf['Cash from Investing Activity'] ?? cf['Investing Activity'] ?? cf['CFI'] ?? 0,
-    'Cash from Financing Activity': cf['Cash from Financing Activity'] ?? cf['Financing Activity'] ?? cf['CFF'] ?? 0,
+    'Cash from Operating Activity': cf['Cash from Operating Activity'] ?? cf['Operating Activity'] ?? cf['CFO'] ?? null,
+    'Cash from Investing Activity': cf['Cash from Investing Activity'] ?? cf['Investing Activity'] ?? cf['CFI'] ?? null,
+    'Cash from Financing Activity': cf['Cash from Financing Activity'] ?? cf['Financing Activity'] ?? cf['CFF'] ?? null,
+    'Net Cash Flow': cf['Net Cash Flow'] ?? cf.net_cash_flow ?? null,
   }));
 
   const shareholding = (deepData?.shareholding?.length ? deepData.shareholding : (data?.shareholding || [])).map(s => ({
     ...s,
-    promoter: s.promoter ?? s.Promoters ?? 0,
-    fii: s.fii ?? s.FIIs ?? s.FII ?? 0,
-    dii: s.dii ?? s.DIIs ?? s.DII ?? 0,
-    public: s.public ?? s.Public ?? 0,
+    promoter: s.promoter ?? s.Promoters ?? null,
+    fii: s.fii ?? s.FIIs ?? s.FII ?? null,
+    dii: s.dii ?? s.DIIs ?? s.DII ?? null,
+    public: s.public ?? s.Public ?? null,
   }));
 
   const peers = (deepData?.peers?.length ? deepData.peers : (data?.peers || [])).map(p => ({
     ...p,
-    pe_ratio: p.pe_ratio ?? p.pe ?? 0,
-    roce: p.roce ?? 0,
+    pe_ratio: p.pe_ratio ?? p.pe ?? null,
+    roce: p.roce ?? null,
   }));
 
   const cagr = deepData?.ratios_cagr || {};
@@ -673,16 +672,17 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                   {shareholding.map((sh, idx) => (
                     <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
                       <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{sh.quarter}</td>
-                      <td style={{ padding: '6px 8px', color: '#10B981' }}>{sh.promoter}%</td>
-                      <td style={{ padding: '6px 8px', color: '#818CF8' }}>{sh.fii}%</td>
-                      <td style={{ padding: '6px 8px', color: '#F59E0B' }}>{sh.dii}%</td>
-                      <td style={{ padding: '6px 8px' }}>{sh.public}%</td>
+                      <td style={{ padding: '6px 8px', color: '#10B981' }}>{sh.promoter != null ? `${sh.promoter}%` : '—'}</td>
+                      <td style={{ padding: '6px 8px', color: '#818CF8' }}>{sh.fii != null ? `${sh.fii}%` : '—'}</td>
+                      <td style={{ padding: '6px 8px', color: '#F59E0B' }}>{sh.dii != null ? `${sh.dii}%` : '—'}</td>
+                      <td style={{ padding: '6px 8px' }}>{sh.public != null ? `${sh.public}%` : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
 
+            {/* Bug 6: Fallback for all 4 pie chart values so NaN never crashes Recharts */}
             <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
               <div style={{ fontSize: '0.70rem', color: '#818CF8', fontWeight: 700, alignSelf: 'flex-start', marginBottom: 6 }}>Latest Ownership Distribution</div>
               <div style={{ width: '100%', height: 160 }}>
@@ -690,10 +690,10 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                   <PieChart>
                     <Pie
                       data={[
-                        { name: 'Promoters', value: shareholding[shareholding.length - 1].promoter, color: '#10B981' },
-                        { name: 'FIIs', value: shareholding[shareholding.length - 1].fii, color: '#818CF8' },
-                        { name: 'DIIs', value: shareholding[shareholding.length - 1].dii, color: '#F59E0B' },
-                        { name: 'Public', value: shareholding[shareholding.length - 1].public, color: '#64748B' },
+                        { name: 'Promoters', value: shareholding[shareholding.length - 1]?.promoter || 0, color: '#10B981' },
+                        { name: 'FIIs', value: shareholding[shareholding.length - 1]?.fii || 0, color: '#818CF8' },
+                        { name: 'DIIs', value: shareholding[shareholding.length - 1]?.dii || 0, color: '#F59E0B' },
+                        { name: 'Public', value: shareholding[shareholding.length - 1]?.public || 0, color: '#64748B' },
                       ]}
                       dataKey="value"
                       nameKey="name"
@@ -788,19 +788,21 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     </div>
   );
 
+  // Bug 1: Correct colorFn props instead of wrong col prop
+  // Bug 3 & Bug 4: No fake numbers; proper null checks for Growth Rate, WACC, and Terminal Rate
   const renderValuationSection = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
-        <RatioCard label="DCF Fair Value" value={dcf.dcf_fair_value} unit=" ₹" col="#10B981" sub="Multi-Stage FCF" />
-        <RatioCard label="Graham Number" value={dcf.graham_number} unit=" ₹" col="#818CF8" sub="EPS & BV Formula" />
-        <RatioCard label="Peter Lynch Target" value={dcf.peter_lynch_value} unit=" ₹" col="#C084FC" sub="Growth Multiple" />
+        <RatioCard label="DCF Fair Value" value={dcf.dcf_fair_value} unit=" ₹" colorFn={() => '#10B981'} sub="Multi-Stage FCF" />
+        <RatioCard label="Graham Number" value={dcf.graham_number} unit=" ₹" colorFn={() => '#818CF8'} sub="EPS & BV Formula" />
+        <RatioCard label="Peter Lynch Target" value={dcf.peter_lynch_value} unit=" ₹" colorFn={() => '#C084FC'} sub="Growth Multiple" />
         <RatioCard label="Margin of Safety" value={dcf.margin_of_safety_pct} unit="%" colorFn={(v) => v >= 0 ? '#10B981' : '#EF5350'} sub={dcf.valuation_verdict} />
       </div>
 
       <div style={cardStyle}>
         <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#818CF8', marginBottom: 4 }}>DCF Valuation Forecast & Assumptions</div>
         <p style={{ fontSize: '0.64rem', color: '#94A3B8', lineHeight: 1.4, margin: '0 0 8px' }}>
-          Growth Rate: <strong style={{ color: '#F8FAFC' }}>{dcf.assumed_growth_rate_pct || 12}%</strong> | Discount WACC: <strong style={{ color: '#F8FAFC' }}>{dcf.discount_rate_wacc_pct || 11.5}%</strong> | Terminal Rate: <strong style={{ color: '#F8FAFC' }}>4.5%</strong>.
+          Growth Rate: <strong style={{ color: '#F8FAFC' }}>{dcf.assumed_growth_rate_pct != null ? `${dcf.assumed_growth_rate_pct}%` : '—'}</strong> | Discount WACC: <strong style={{ color: '#F8FAFC' }}>{dcf.discount_rate_wacc_pct != null ? `${dcf.discount_rate_wacc_pct}%` : '—'}</strong> | Terminal Rate: <strong style={{ color: '#F8FAFC' }}>{dcf.terminal_growth_rate_pct != null ? `${dcf.terminal_growth_rate_pct}%` : '—'}</strong>.
         </p>
         {dcf.projected_fcf?.length > 0 ? (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.70rem', fontFamily: 'JetBrains Mono, monospace' }}>
@@ -916,9 +918,17 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
           <button onClick={handleExportCSV} style={{ padding: '5px 9px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', fontWeight: 600 }}>
             <Download size={12} />CSV
           </button>
-          <button onClick={() => handleSetAlert('P/E Revaluation < 20')} style={{ padding: '5px 9px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', fontWeight: 600 }}>
-            <Bell size={12} />Alert
+
+          {/* Bug 8: Visually disabled Alert button with "Coming Soon" note */}
+          <button
+            type="button"
+            disabled
+            title="Fundamental Alerts coming soon in Phase 6"
+            style={{ padding: '5px 9px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', color: '#64748B', border: '1px solid rgba(255,255,255,0.06)', cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', fontWeight: 600, opacity: 0.6 }}
+          >
+            <Bell size={12} />Alert (Soon)
           </button>
+
           <button onClick={fetchData} style={{ padding: '5px 11px', borderRadius: 6, background: 'linear-gradient(135deg,#6366F1,#8B5CF6)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.70rem', fontWeight: 700 }}>
             <RefreshCw size={12} />Refresh
           </button>
@@ -1047,6 +1057,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       )}
 
       {/* ── QUALITY MODAL: FULL PIOTROSKI F-SCORE CHECKLIST ── */}
+      {/* Bug 7: Show clean empty state if criteria array is empty */}
       {showQualityModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
           <div style={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 12, padding: 18, maxWidth: 520, width: '100%', maxHeight: '80vh', overflowY: 'auto' }}>
@@ -1063,25 +1074,21 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
               Score: <strong style={{ color: piotroski.score >= 7 ? '#10B981' : '#F59E0B' }}>{piotroski.score}/9 ({piotroski.rating})</strong>
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {(piotroski.criteria?.length ? piotroski.criteria : [
-                { name: 'Positive Net Income', category: 'Profitability', passed: true, detail: 'Evaluates positive bottom-line earnings after tax' },
-                { name: 'Positive Operating Cash Flow', category: 'Profitability', passed: true, detail: 'Evaluates core operational cash generation' },
-                { name: 'Positive Return on Assets (ROA)', category: 'Profitability', passed: true, detail: 'Measures asset productivity' },
-                { name: 'Quality of Earnings (CFO > Net Income)', category: 'Profitability', passed: true, detail: 'Operating cash flow exceeds accounting net profit' },
-                { name: 'Debt Reduction / Stable Leverage', category: 'Leverage', passed: true, detail: 'Long-term borrowings remain controlled' },
-                { name: 'Solvency & Working Capital Balance', category: 'Liquidity', passed: true, detail: 'Current assets exceed short-term obligations' },
-                { name: 'No Equity Dilution', category: 'Capital Structure', passed: true, detail: 'No new share issuances detected' },
-                { name: 'Operating Margin Expansion', category: 'Efficiency', passed: false, detail: 'OPM trajectory compared to prior periods' },
-                { name: 'Asset Turnover Efficiency', category: 'Efficiency', passed: false, detail: 'Asset efficiency and revenue generation per asset' },
-              ]).map((c, idx) => (
-                <div key={idx} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${c.passed ? 'rgba(16,185,129,0.2)' : 'rgba(239,83,80,0.2)'}`, borderRadius: 6, padding: '7px 10px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                    <strong style={{ fontSize: '0.74rem', color: '#F8FAFC' }}>{idx + 1}. {c.name}</strong>
-                    <span style={{ fontSize: '0.64rem', fontWeight: 800, color: c.passed ? '#10B981' : '#EF5350' }}>{c.passed ? '✓ PASS (+1)' : '✗ FAIL (0)'}</span>
+              {piotroski.criteria?.length > 0 ? (
+                piotroski.criteria.map((c, idx) => (
+                  <div key={idx} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${c.passed ? 'rgba(16,185,129,0.2)' : 'rgba(239,83,80,0.2)'}`, borderRadius: 6, padding: '7px 10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+                      <strong style={{ fontSize: '0.74rem', color: '#F8FAFC' }}>{idx + 1}. {c.name}</strong>
+                      <span style={{ fontSize: '0.64rem', fontWeight: 800, color: c.passed ? '#10B981' : '#EF5350' }}>{c.passed ? '✓ PASS (+1)' : '✗ FAIL (0)'}</span>
+                    </div>
+                    <div style={{ fontSize: '0.64rem', color: '#94A3B8' }}>{c.detail}</div>
                   </div>
-                  <div style={{ fontSize: '0.64rem', color: '#94A3B8' }}>{c.detail}</div>
+                ))
+              ) : (
+                <div style={{ padding: '16px', textAlign: 'center', color: '#94A3B8', fontSize: '0.74rem', background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
+                  No detailed 9-point criteria breakdown available for this security.
                 </div>
-              ))}
+              )}
             </div>
           </div>
         </div>
