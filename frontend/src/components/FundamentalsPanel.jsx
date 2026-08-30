@@ -439,7 +439,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       {quarterly.length > 0 ? (
         <>
           <div style={cardStyle}>
-            <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
+            <div style={{ fontSize: '0.72rem', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
               Last 8 Quarters Revenue & Net Profit (₹ Cr)
             </div>
             <ResponsiveContainer width="100%" height={200}>
@@ -586,7 +586,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       {cashFlow.length > 0 ? (
         <>
           <div style={cardStyle}>
-            <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
+            <div style={{ fontSize: '0.72rem', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
               Cash Flow Decomposition (CFO vs CFI vs CFF in ₹ Cr)
             </div>
             <ResponsiveContainer width="100%" height={200}>
@@ -648,7 +648,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       {shareholding.length > 0 ? (
         <>
           <div style={cardStyle}>
-            <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
+            <div style={{ fontSize: '0.72rem', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
               Institutional & Insider Ownership Trend (%)
             </div>
             <ResponsiveContainer width="100%" height={200}>
@@ -744,7 +744,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       {peers.length > 0 ? (
         <>
           <div style={cardStyle}>
-            <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
+            <div style={{ fontSize: '0.72rem', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
               Sector Peer Valuation (P/E Ratio) vs Quality (ROCE %)
             </div>
             <ResponsiveContainer width="100%" height={180}>
