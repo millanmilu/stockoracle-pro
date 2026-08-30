@@ -82,12 +82,12 @@ def get_stock_levels(ticker: str):
 
 @router.get("/stock/{ticker}/volatility")
 def get_stock_volatility(ticker: str):
-    """Calculates GARCH(1,1) forward volatility forecast and historical volatility cone."""
+    """Calculates MLE GARCH(1,1) forward volatility forecast, IV vs HV, and volatility cone."""
     t = ticker.upper().strip()
     df = fetch_stock_data(t, period="1Y")
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
-    return calculate_volatility_forecast(df)
+    return calculate_volatility_forecast(df, ticker=t)
 
 
 @router.get("/stock/{ticker}/montecarlo")
