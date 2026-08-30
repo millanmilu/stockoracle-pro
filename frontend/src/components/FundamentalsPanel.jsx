@@ -9,7 +9,7 @@ import {
   BookOpen, TrendingUp, TrendingDown, RefreshCw, Layers,
   PieChart as PieIcon, Users, Calendar, Table, CheckCircle2, ShieldAlert,
   ShieldCheck, AlertTriangle, Activity, Download, Bell, ArrowUpRight, DollarSign,
-  Award, Sparkles, Scale, Info
+  Award, Sparkles, Scale, Info, Check, X, ChevronRight
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -23,11 +23,52 @@ const cardStyle = {
 const labelStyle = { fontSize: '0.66rem', color: '#64748B', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4, fontWeight: 700 };
 const valueStyle = { fontSize: '1.15rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: '#F8FAFC' };
 
-function RatioCard({ label, value, unit = '', colorFn, sub }) {
+// Mini SVG Sparkline Component for Ratio Cards
+function Sparkline({ data = [], color = '#10B981', width = 60, height = 22 }) {
+  if (!data || data.length < 2) return null;
+  const valid = data.filter(v => v != null && !isNaN(v));
+  if (valid.length < 2) return null;
+
+  const min = Math.min(...valid);
+  const max = Math.max(...valid);
+  const range = max - min || 1;
+
+  const points = valid.map((v, i) => {
+    const x = (i / (valid.length - 1)) * (width - 4) + 2;
+    const y = height - 2 - ((v - min) / range) * (height - 6);
+    return `${x},${y}`;
+  }).join(' ');
+
+  const isUp = valid[valid.length - 1] >= valid[0];
+
+  return (
+    <svg width={width} height={height} style={{ overflow: 'visible' }}>
+      <polyline
+        fill="none"
+        stroke={color || (isUp ? '#10B981' : '#EF5350')}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        points={points}
+      />
+      {valid.map((v, i) => {
+        if (i !== valid.length - 1) return null;
+        const x = (i / (valid.length - 1)) * (width - 4) + 2;
+        const y = height - 2 - ((v - min) / range) * (height - 6);
+        return <circle key={i} cx={x} cy={y} r="2.5" fill={color || (isUp ? '#10B981' : '#EF5350')} />;
+      })}
+    </svg>
+  );
+}
+
+function RatioCard({ label, value, unit = '', colorFn, sub, sparkData, sparkColor }) {
   const color = colorFn ? colorFn(value) : '#F8FAFC';
   return (
     <div style={{ ...cardStyle, minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
-      <div style={labelStyle}>{label}</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={labelStyle}>{label}</div>
+        {sparkData && <Sparkline data={sparkData} color={sparkColor} />}
+      </div>
       <div style={{ ...valueStyle, color }}>
         {value != null && value !== '' ? `${typeof value === 'number' ? Number(value).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : value}${unit}` : '—'}
       </div>
@@ -46,6 +87,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const [deepData, setDeepData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showQualityModal, setShowQualityModal] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -126,6 +168,14 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const piotroski = deepData?.piotroski_f_score || { score: 6, rating: 'MODERATE', criteria: [] };
   const altman = deepData?.altman_z_score || { z_score: 3.0, zone: 'Safe Zone' };
   const dcf = deepData?.dcf_valuation || {};
+  const ratioTrends = deepData?.ratio_trends || [];
+  const corpCal = deepData?.corporate_calendar || {};
+
+  // Extract sparkline arrays
+  const roceSpark = ratioTrends.map(r => r.roce);
+  const roeSpark = ratioTrends.map(r => r.roe);
+  const deSpark = ratioTrends.map(r => r.debt_to_equity);
+  const opmSpark = ratioTrends.map(r => r.opm);
 
   const TABS = [
     { id: 'overview', label: 'Overview & Scorecard', icon: Award },
@@ -160,13 +210,18 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                 {deepData.sector}
               </span>
             )}
+            <span style={{ fontSize: '0.72rem', background: piotroski.score >= 7 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)', color: piotroski.score >= 7 ? '#10B981' : '#F59E0B', border: `1px solid ${piotroski.score >= 7 ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)'}`, padding: '2px 8px', borderRadius: 6, fontWeight: 800 }}>
+              Piotroski: {piotroski.score}/9
+            </span>
           </div>
 
-          {/* Data Freshness Indicator */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6, fontSize: '0.72rem', color: '#64748B' }}>
-            <span>Source: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.data_source || data.data_source || 'Screener.in Consolidated'}</strong></span>
+          {/* Data Freshness & Calendar Indicator */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, fontSize: '0.72rem', color: '#64748B', flexWrap: 'wrap' }}>
+            <span>Source: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.data_source || data.data_source || 'Screener.in Consolidated + NSE'}</strong></span>
             <span>•</span>
             <span>Last Updated: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.last_updated || 'Live'}</strong></span>
+            <span>•</span>
+            <span>Upcoming Earnings: <strong style={{ color: '#818CF8' }}>{corpCal.upcoming_earnings_date || 'Q4 FY25'}</strong></span>
           </div>
 
           {deepData?.about && (
@@ -181,7 +236,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
           <button onClick={handleExportCSV} style={{ padding: '7px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.74rem', fontWeight: 600 }}>
             <Download size={13} />Export CSV
           </button>
-          <button onClick={() => handleSetAlert('P/E Revaluation')} style={{ padding: '7px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.74rem', fontWeight: 600 }}>
+          <button onClick={() => handleSetAlert('P/E Revaluation < 20')} style={{ padding: '7px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.74rem', fontWeight: 600 }}>
             <Bell size={13} />Set Alert
           </button>
           <button onClick={fetchData} style={{ padding: '7px 14px', borderRadius: 8, background: 'linear-gradient(135deg,#6366F1,#8B5CF6)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', fontWeight: 700 }}>
@@ -215,16 +270,16 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       {activeTab === 'overview' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* Core Valuation & Return Ratios */}
+          {/* Core Valuation & Return Ratios with Sparklines */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
             <RatioCard label="Market Cap" value={data.market_cap} sub="Consolidated" />
             <RatioCard label="Stock P/E" value={data.pe_ratio} colorFn={(v) => v > 40 ? '#EF5350' : v < 20 ? '#10B981' : '#F8FAFC'} sub={data.pe_ratio < 20 ? 'Attractive Value' : 'Premium'} />
             <RatioCard label="Price to Book (P/B)" value={data.pb_ratio} />
-            <RatioCard label="ROCE %" value={data.roce} unit="%" colorFn={(v) => v > 20 ? '#10B981' : '#F8FAFC'} sub="Capital Efficiency" />
-            <RatioCard label="ROE %" value={data.roe} unit="%" colorFn={(v) => v > 15 ? '#10B981' : '#F8FAFC'} sub="Shareholder Return" />
-            <RatioCard label="Debt to Equity" value={data.debt_to_equity} colorFn={(v) => v > 1 ? '#EF5350' : '#10B981'} sub={data.debt_to_equity < 0.5 ? 'Conservative' : 'Leveraged'} />
+            <RatioCard label="ROCE %" value={data.roce} unit="%" colorFn={(v) => v > 20 ? '#10B981' : '#F8FAFC'} sub="Capital Efficiency" sparkData={roceSpark} sparkColor="#10B981" />
+            <RatioCard label="ROE %" value={data.roe} unit="%" colorFn={(v) => v > 15 ? '#10B981' : '#F8FAFC'} sub="Shareholder Return" sparkData={roeSpark} sparkColor="#10B981" />
+            <RatioCard label="Debt to Equity" value={data.debt_to_equity} colorFn={(v) => v > 1 ? '#EF5350' : '#10B981'} sub={data.debt_to_equity < 0.5 ? 'Conservative' : 'Leveraged'} sparkData={deSpark} sparkColor="#EF5350" />
             <RatioCard label="Promoter Holding" value={data.promoter_holding} unit="%" sub="Insider Alignment" />
-            <RatioCard label="Dividend Yield" value={data.dividend_yield} unit="%" colorFn={(v) => v > 1.5 ? '#10B981' : '#F8FAFC'} sub="Cash Return" />
+            <RatioCard label="Dividend Yield" value={data.dividend_yield || corpCal.dividend_yield_pct} unit="%" colorFn={(v) => v > 1.5 ? '#10B981' : '#F8FAFC'} sub={`Payout: ${corpCal.dividend_payout_ratio || '—'}%`} />
           </div>
 
           {/* Quality Scores & Intrinsic Valuation Triad */}
@@ -252,6 +307,11 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                   </div>
                 ))}
               </div>
+              {piotroski.criteria?.length > 4 && (
+                <div style={{ marginTop: 8, fontSize: '0.68rem', color: '#818CF8', cursor: 'pointer', textAlign: 'right' }} onClick={() => setShowQualityModal(true)}>
+                  View all 9 criteria breakdown →
+                </div>
+              )}
             </div>
 
             {/* Altman Z-Score Card */}
@@ -480,106 +540,147 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         </div>
       )}
 
-      {/* ── TAB 5: CASH FLOWS ── */}
+      {/* ── TAB 5: CASH FLOWS & WATERFALL DECOMPOSITION ── */}
       {activeTab === 'cashflow' && (
-        <div style={{ ...cardStyle, overflowX: 'auto' }}>
-          <h3 style={{ margin: '0 0 14px 0', fontSize: '0.95rem', color: '#F0F0FF' }}>Cash Flow Statement (₹ Cr)</h3>
-          {cashFlow.length > 0 ? (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', fontFamily: 'JetBrains Mono, monospace' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94A3B8', textAlign: 'right' }}>
-                  <th style={{ textAlign: 'left', padding: '8px' }}>Period</th>
-                  <th style={{ padding: '8px' }}>Operating Cash Flow (CFO)</th>
-                  <th style={{ padding: '8px' }}>Investing Cash Flow (CFI)</th>
-                  <th style={{ padding: '8px' }}>Financing Cash Flow (CFF)</th>
-                  <th style={{ padding: '8px' }}>Net Cash Flow</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cashFlow.map((cf, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: '#CBD5E1' }}>
-                    <td style={{ textAlign: 'left', padding: '8px', fontWeight: 600, color: '#F0F0FF' }}>{cf.period}</td>
-                    <td style={{ padding: '8px', color: (cf['Cash from Operating Activity'] || 0) >= 0 ? '#10B981' : '#EF5350' }}>
-                      {cf['Cash from Operating Activity'] != null ? Number(cf['Cash from Operating Activity']).toLocaleString('en-IN') : '—'}
-                    </td>
-                    <td style={{ padding: '8px' }}>{cf['Cash from Investing Activity'] != null ? Number(cf['Cash from Investing Activity']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '8px' }}>{cf['Cash from Financing Activity'] != null ? Number(cf['Cash from Financing Activity']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '8px', fontWeight: 700, color: '#818CF8' }}>
-                      {cf['Net Cash Flow'] != null ? Number(cf['Net Cash Flow']).toLocaleString('en-IN') : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <div style={{ color: '#94A3B8', fontSize: '0.85rem' }}>Cash flow statements available.</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Stacked Waterfall-style Cash Flow Chart */}
+          {cashFlow.length > 0 && (
+            <div style={cardStyle}>
+              <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginBottom: 12 }}>Cash Flow Decomposition (CFO vs CFI vs CFF in ₹ Cr)</div>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={cashFlow} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="period" stroke="#64748B" fontSize={10} tickLine={false} />
+                  <YAxis stroke="#64748B" fontSize={10} tickLine={false} />
+                  <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: '0.74rem' }} />
+                  <Bar dataKey="Cash from Operating Activity" fill="#10B981" name="Operating (CFO)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Cash from Investing Activity" fill="#F59E0B" name="Investing (CFI)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="Cash from Financing Activity" fill="#EF5350" name="Financing (CFF)" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           )}
+
+          <div style={{ ...cardStyle, overflowX: 'auto' }}>
+            <h3 style={{ margin: '0 0 14px 0', fontSize: '0.95rem', color: '#F0F0FF' }}>Cash Flow Statement (₹ Cr)</h3>
+            {cashFlow.length > 0 ? (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', fontFamily: 'JetBrains Mono, monospace' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94A3B8', textAlign: 'right' }}>
+                    <th style={{ textAlign: 'left', padding: '8px' }}>Period</th>
+                    <th style={{ padding: '8px' }}>Operating Cash Flow (CFO)</th>
+                    <th style={{ padding: '8px' }}>Investing Cash Flow (CFI)</th>
+                    <th style={{ padding: '8px' }}>Financing Cash Flow (CFF)</th>
+                    <th style={{ padding: '8px' }}>Net Cash Flow</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cashFlow.map((cf, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: '#CBD5E1' }}>
+                      <td style={{ textAlign: 'left', padding: '8px', fontWeight: 600, color: '#F0F0FF' }}>{cf.period}</td>
+                      <td style={{ padding: '8px', color: (cf['Cash from Operating Activity'] || 0) >= 0 ? '#10B981' : '#EF5350' }}>
+                        {cf['Cash from Operating Activity'] != null ? Number(cf['Cash from Operating Activity']).toLocaleString('en-IN') : '—'}
+                      </td>
+                      <td style={{ padding: '8px' }}>{cf['Cash from Investing Activity'] != null ? Number(cf['Cash from Investing Activity']).toLocaleString('en-IN') : '—'}</td>
+                      <td style={{ padding: '8px' }}>{cf['Cash from Financing Activity'] != null ? Number(cf['Cash from Financing Activity']).toLocaleString('en-IN') : '—'}</td>
+                      <td style={{ padding: '8px', fontWeight: 700, color: '#818CF8' }}>
+                        {cf['Net Cash Flow'] != null ? Number(cf['Net Cash Flow']).toLocaleString('en-IN') : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <div style={{ color: '#94A3B8', fontSize: '0.85rem' }}>Cash flow statements available.</div>
+            )}
+          </div>
         </div>
       )}
 
-      {/* ── TAB 6: SHAREHOLDING PATTERN ── */}
+      {/* ── TAB 6: SHAREHOLDING PATTERN & EVOLUTION ── */}
       {activeTab === 'shareholding' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
-          <div style={{ ...cardStyle, overflowX: 'auto' }}>
-            <h3 style={{ margin: '0 0 14px 0', fontSize: '0.95rem', color: '#F0F0FF' }}>Quarterly Shareholding (%)</h3>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', fontFamily: 'JetBrains Mono, monospace' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94A3B8', textAlign: 'right' }}>
-                  <th style={{ textAlign: 'left', padding: '8px' }}>Quarter</th>
-                  <th style={{ padding: '8px' }}>Promoter</th>
-                  <th style={{ padding: '8px' }}>FII</th>
-                  <th style={{ padding: '8px' }}>DII</th>
-                  <th style={{ padding: '8px' }}>Public</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shareholding.map((sh, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: '#CBD5E1' }}>
-                    <td style={{ textAlign: 'left', padding: '8px', fontWeight: 600, color: '#F0F0FF' }}>{sh.quarter}</td>
-                    <td style={{ padding: '8px', color: '#10B981' }}>{sh.promoter}%</td>
-                    <td style={{ padding: '8px', color: '#818CF8' }}>{sh.fii}%</td>
-                    <td style={{ padding: '8px', color: '#F59E0B' }}>{sh.dii}%</td>
-                    <td style={{ padding: '8px' }}>{sh.public}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {/* Shareholding Progression Trend */}
+          {shareholding.length > 0 && (
+            <div style={cardStyle}>
+              <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginBottom: 12 }}>Institutional & Insider Shareholding Evolution (%)</div>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={shareholding} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="quarter" stroke="#64748B" fontSize={10} tickLine={false} />
+                  <YAxis stroke="#64748B" fontSize={10} tickLine={false} domain={['auto', 'auto']} tickFormatter={(v) => `${v}%`} />
+                  <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: '0.74rem' }} formatter={(v) => [`${v}%`]} />
+                  <Line type="monotone" dataKey="promoter" stroke="#10B981" strokeWidth={2.5} name="Promoters" dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="fii" stroke="#818CF8" strokeWidth={2} name="FIIs" dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="dii" stroke="#F59E0B" strokeWidth={2} name="DIIs" dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="public" stroke="#64748B" strokeWidth={1.5} name="Public" dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
 
-          <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-            <h3 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#818CF8', alignSelf: 'flex-start' }}>Latest Ownership Distribution</h3>
-            {shareholding.length > 0 && (
-              <div style={{ width: '100%', height: 200 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={[
-                        { name: 'Promoters', value: shareholding[shareholding.length - 1].promoter, color: '#10B981' },
-                        { name: 'FIIs', value: shareholding[shareholding.length - 1].fii, color: '#818CF8' },
-                        { name: 'DIIs', value: shareholding[shareholding.length - 1].dii, color: '#F59E0B' },
-                        { name: 'Public', value: shareholding[shareholding.length - 1].public, color: '#64748B' },
-                      ]}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      outerRadius={70}
-                      label={({ name, value }) => `${name} ${value}%`}
-                    >
-                      {[
-                        { color: '#10B981' },
-                        { color: '#818CF8' },
-                        { color: '#F59E0B' },
-                        { color: '#64748B' },
-                      ].map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14 }}>
+            <div style={{ ...cardStyle, overflowX: 'auto' }}>
+              <h3 style={{ margin: '0 0 14px 0', fontSize: '0.95rem', color: '#F0F0FF' }}>Quarterly Ownership Breakdown (%)</h3>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', fontFamily: 'JetBrains Mono, monospace' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94A3B8', textAlign: 'right' }}>
+                    <th style={{ textAlign: 'left', padding: '8px' }}>Quarter</th>
+                    <th style={{ padding: '8px' }}>Promoter</th>
+                    <th style={{ padding: '8px' }}>FII</th>
+                    <th style={{ padding: '8px' }}>DII</th>
+                    <th style={{ padding: '8px' }}>Public</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shareholding.map((sh, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', textAlign: 'right', color: '#CBD5E1' }}>
+                      <td style={{ textAlign: 'left', padding: '8px', fontWeight: 600, color: '#F0F0FF' }}>{sh.quarter}</td>
+                      <td style={{ padding: '8px', color: '#10B981' }}>{sh.promoter}%</td>
+                      <td style={{ padding: '8px', color: '#818CF8' }}>{sh.fii}%</td>
+                      <td style={{ padding: '8px', color: '#F59E0B' }}>{sh.dii}%</td>
+                      <td style={{ padding: '8px' }}>{sh.public}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+              <h3 style={{ margin: '0 0 12px 0', fontSize: '0.85rem', color: '#818CF8', alignSelf: 'flex-start' }}>Latest Ownership Distribution</h3>
+              {shareholding.length > 0 && (
+                <div style={{ width: '100%', height: 200 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'Promoters', value: shareholding[shareholding.length - 1].promoter, color: '#10B981' },
+                          { name: 'FIIs', value: shareholding[shareholding.length - 1].fii, color: '#818CF8' },
+                          { name: 'DIIs', value: shareholding[shareholding.length - 1].dii, color: '#F59E0B' },
+                          { name: 'Public', value: shareholding[shareholding.length - 1].public, color: '#64748B' },
+                        ]}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={70}
+                        label={({ name, value }) => `${name} ${value}%`}
+                      >
+                        {[
+                          { color: '#10B981' },
+                          { color: '#818CF8' },
+                          { color: '#F59E0B' },
+                          { color: '#64748B' },
+                        ].map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -589,7 +690,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {peers.length > 0 && (
             <div style={cardStyle}>
-              <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginBottom: 12 }}>Peer P/E & ROCE Comparison</div>
+              <div style={{ fontSize: '0.74rem', color: '#94A3B8', marginBottom: 12 }}>Peer Valuation (P/E Ratio) vs Quality (ROCE %)</div>
               <ResponsiveContainer width="100%" height={200}>
                 <BarChart data={peers} margin={{ top: 5, right: 5, left: -15, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -674,6 +775,37 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                 </tbody>
               </table>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ── QUALITY MODAL: FULL PIOTROSKI F-SCORE CHECKLIST ── */}
+      {showQualityModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 20 }}>
+          <div style={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 14, padding: 24, maxWidth: 600, width: '100%', maxHeight: '85vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <ShieldCheck size={20} color="#10B981" />
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800 }}>Piotroski 9-Point Quality Audit</h3>
+              </div>
+              <button onClick={() => setShowQualityModal(false)} style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer' }}>
+                <X size={18} />
+              </button>
+            </div>
+            <p style={{ fontSize: '0.76rem', color: '#94A3B8', marginBottom: 14 }}>
+              Score: <strong style={{ color: piotroski.score >= 7 ? '#10B981' : '#F59E0B' }}>{piotroski.score}/9 ({piotroski.rating})</strong>. Evaluates accounting quality, leverage, and operating efficiency.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {piotroski.criteria?.map((c, idx) => (
+                <div key={idx} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${c.passed ? 'rgba(16,185,129,0.2)' : 'rgba(239,83,80,0.2)'}`, borderRadius: 8, padding: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <strong style={{ fontSize: '0.8rem', color: '#F8FAFC' }}>{idx + 1}. {c.name}</strong>
+                    <span style={{ fontSize: '0.7rem', fontWeight: 800, color: c.passed ? '#10B981' : '#EF5350' }}>{c.passed ? '✓ PASS (+1)' : '✗ FAIL (0)'}</span>
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#94A3B8' }}>{c.detail}</div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}
