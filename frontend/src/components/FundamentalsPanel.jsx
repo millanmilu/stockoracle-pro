@@ -9,7 +9,8 @@ import {
   BookOpen, TrendingUp, TrendingDown, RefreshCw, Layers,
   PieChart as PieIcon, Users, Calendar, Table, CheckCircle2, ShieldAlert,
   ShieldCheck, AlertTriangle, Activity, Download, Bell, ArrowUpRight, DollarSign,
-  Award, Sparkles, Scale, Info, Check, X, ChevronRight, LayoutGrid, FileText
+  Award, Sparkles, Scale, Info, Check, X, ChevronRight, LayoutGrid, FileText,
+  Printer, ArrowDownRight, Target, Flame
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -17,20 +18,20 @@ const cardStyle = {
   background: 'rgba(15, 23, 42, 0.85)',
   border: '1px solid rgba(255, 255, 255, 0.08)',
   borderRadius: 10,
-  padding: '10px 14px',
+  padding: '12px 14px',
 };
 
 const labelStyle = {
-  fontSize: '0.60rem',
+  fontSize: '0.62rem',
   color: '#64748B',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
-  marginBottom: 2,
+  marginBottom: 3,
   fontWeight: 700
 };
 
 const valueStyle = {
-  fontSize: '0.94rem',
+  fontSize: '0.96rem',
   fontWeight: 800,
   fontFamily: 'JetBrains Mono, monospace',
   color: '#F8FAFC'
@@ -49,18 +50,18 @@ function EmptyState({ icon: Icon = Info, title = 'Data Not Available', message, 
       textAlign: 'center',
       border: '1px dashed rgba(255, 255, 255, 0.12)',
       background: 'rgba(15, 23, 42, 0.50)',
-      padding: '16px 20px',
+      padding: '18px 22px',
       gap: 6,
     }}>
-      <Icon size={20} color="#64748B" style={{ opacity: 0.7 }} />
-      <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#CBD5E1' }}>{title}</div>
-      {message && <div style={{ fontSize: '0.64rem', color: '#94A3B8', maxWidth: 420, lineHeight: 1.4 }}>{message}</div>}
+      <Icon size={22} color="#64748B" style={{ opacity: 0.7 }} />
+      <div style={{ fontSize: '0.76rem', fontWeight: 700, color: '#CBD5E1' }}>{title}</div>
+      {message && <div style={{ fontSize: '0.64rem', color: '#94A3B8', maxWidth: 440, lineHeight: 1.4 }}>{message}</div>}
     </div>
   );
 }
 
 // Mini SVG Sparkline Component for Ratio Cards
-function Sparkline({ data = [], color = '#10B981', width = 50, height = 18 }) {
+function Sparkline({ data = [], color = '#10B981', width = 54, height = 20 }) {
   if (!data || data.length < 2) return null;
   const valid = data.filter(v => v != null && !isNaN(v));
   if (valid.length < 2) return null;
@@ -83,7 +84,7 @@ function Sparkline({ data = [], color = '#10B981', width = 50, height = 18 }) {
       <polyline
         fill="none"
         stroke={strokeColor}
-        strokeWidth="1.5"
+        strokeWidth="1.6"
         strokeLinecap="round"
         strokeLinejoin="round"
         points={points}
@@ -109,7 +110,7 @@ function RatioCard({ label, value, unit = '', colorFn, sub, sparkData, sparkColo
       <div style={{ ...valueStyle, color, marginTop: 2 }}>
         {value != null && value !== '' ? `${typeof value === 'number' ? Number(value).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : value}${unit}` : '—'}
       </div>
-      {sub && <div style={{ fontSize: '0.58rem', color: '#94A3B8', marginTop: 2 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: '0.60rem', color: '#94A3B8', marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
@@ -118,7 +119,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const selectedSymbol = useStore((s) => s.selectedSymbol);
   const ticker = (propTicker || selectedSymbol || 'RELIANCE').toUpperCase();
 
-  // State Management: 'tabs' (single isolated view) vs 'all_panels' (all widgets in CSS grid layout)
+  // State Management: 'tabs' (single isolated view) vs 'all_panels' (continuous report)
   const [viewMode, setViewMode] = useState('tabs');
   const [activeTab, setActiveTab] = useState('overview');
 
@@ -165,16 +166,20 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     toast.success(`${ticker} Financials exported to CSV!`);
   };
 
+  const handlePrint = () => {
+    window.print();
+  };
+
   if (loading) {
     return (
-      <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <RefreshCw size={16} color="#6366F1" style={{ animation: 'spin 1s linear infinite' }} />
-          <span style={{ color: '#818CF8', fontSize: '0.80rem', fontWeight: 700 }}>Loading Fundamental Statements & Ratios…</span>
+          <span style={{ color: '#818CF8', fontSize: '0.82rem', fontWeight: 700 }}>Loading Fundamental Statements & Ratios…</span>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
           {Array(8).fill(0).map((_, i) => (
-            <div key={i} style={{ ...cardStyle, height: 60, background: 'rgba(255,255,255,0.03)' }} />
+            <div key={i} style={{ ...cardStyle, height: 65, background: 'rgba(255,255,255,0.03)' }} />
           ))}
         </div>
       </div>
@@ -183,17 +188,17 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
   if (error || !data) {
     return (
-      <div style={{ padding: '30px 20px', textAlign: 'center', color: '#94A3B8' }}>
-        <BookOpen size={30} style={{ margin: '0 auto 10px', opacity: 0.4 }} />
-        <div style={{ marginBottom: 12, fontSize: '0.80rem' }}>{error || 'No fundamental data available.'}</div>
-        <button onClick={fetchData} style={{ padding: '6px 14px', borderRadius: 6, background: 'rgba(99,102,241,0.15)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer', fontSize: '0.74rem' }}>
-          <RefreshCw size={12} style={{ marginRight: 5 }} />Retry
+      <div style={{ padding: '36px 20px', textAlign: 'center', color: '#94A3B8' }}>
+        <BookOpen size={32} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
+        <div style={{ marginBottom: 12, fontSize: '0.82rem' }}>{error || 'No fundamental data available.'}</div>
+        <button onClick={fetchData} style={{ padding: '7px 16px', borderRadius: 6, background: 'rgba(99,102,241,0.15)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer', fontSize: '0.76rem', fontWeight: 600 }}>
+          <RefreshCw size={12} style={{ marginRight: 6 }} />Retry
         </button>
       </div>
     );
   }
 
-  // Bug 2: Normalization uses null defaults to avoid showing fake 0
+  // Defensive Normalizations
   const quarterly = (deepData?.quarterly_results?.length ? deepData.quarterly_results : (data?.quarterly_results || [])).map(q => ({
     ...q,
     revenue: q.revenue ?? q.Sales ?? q['Sales+'] ?? q.Revenue ?? null,
@@ -210,7 +215,6 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
   const balanceSheet = deepData?.balance_sheet?.length ? deepData.balance_sheet : (data?.balance_sheet || []);
 
-  // Bug 5 & Bug 9: Normalize Net Cash Flow and use null defaults for missing items
   const cashFlow = (deepData?.cash_flow?.length ? deepData.cash_flow : (data?.cash_flow || [])).map(cf => ({
     ...cf,
     'Cash from Operating Activity': cf['Cash from Operating Activity'] ?? cf['Operating Activity'] ?? cf['CFO'] ?? null,
@@ -257,28 +261,28 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
   // Sub-navigation tabs
   const TABS = [
-    { id: 'overview', label: 'Overview Scorecard', badge: 'Key Ratios', icon: Award },
+    { id: 'overview', label: 'Executive Summary', badge: 'Key Ratios', icon: Award },
     { id: 'quarters', label: 'Quarterly', badge: `${quarterly.length}Q`, icon: Table },
-    { id: 'annual', label: 'Annual P&L', badge: `${annualPl.length}Y`, icon: Layers },
+    { id: 'annual', label: 'Annual 10Y P&L', badge: `${annualPl.length}Y`, icon: Layers },
     { id: 'balancesheet', label: 'Balance Sheet', badge: 'Assets/Liab', icon: Scale },
     { id: 'cashflow', label: 'Cash Flows', badge: 'CFO/CFI', icon: TrendingUp },
     { id: 'shareholding', label: 'Shareholding', badge: `${shareholding.length}Q`, icon: PieIcon },
-    { id: 'peers', label: 'Peers', badge: `${peers.length}`, icon: Users },
-    { id: 'valuation', label: 'DCF Valuation', badge: 'Intrinsic Target', icon: DollarSign },
+    { id: 'peers', label: 'Sector Peers', badge: `${peers.length}`, icon: Users },
+    { id: 'valuation', label: 'DCF Fair Value', badge: 'Intrinsic Target', icon: DollarSign },
   ];
 
   // ── Modular Section Renderers (Each properly isolated) ──
   const renderOverviewSection = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {/* Core Valuation & Return Ratios with Mini Sparklines */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8 }}>
-        <RatioCard label="Market Cap" value={mcapVal} sub="Consolidated" />
+        <RatioCard label="Market Cap" value={mcapVal} sub="Consolidated ₹ Cr" />
         <RatioCard label="Stock P/E" value={peVal} colorFn={(v) => v > 40 ? '#EF5350' : v < 20 ? '#10B981' : '#F8FAFC'} sub={peVal && peVal < 20 ? 'Attractive Value' : 'Premium'} />
-        <RatioCard label="P/B Ratio" value={pbVal} />
-        <RatioCard label="ROCE %" value={roceVal} unit="%" colorFn={(v) => v > 20 ? '#10B981' : '#F8FAFC'} sub="Capital Eff." sparkData={roceSpark} sparkColor="#10B981" />
-        <RatioCard label="ROE %" value={roeVal} unit="%" colorFn={(v) => v > 15 ? '#10B981' : '#F8FAFC'} sub="Return" sparkData={roeSpark} sparkColor="#10B981" />
+        <RatioCard label="P/B Ratio" value={pbVal} sub="Price to Book" />
+        <RatioCard label="ROCE %" value={roceVal} unit="%" colorFn={(v) => v > 20 ? '#10B981' : '#F8FAFC'} sub="Capital Efficiency" sparkData={roceSpark} sparkColor="#10B981" />
+        <RatioCard label="ROE %" value={roeVal} unit="%" colorFn={(v) => v > 15 ? '#10B981' : '#F8FAFC'} sub="Return on Equity" sparkData={roeSpark} sparkColor="#10B981" />
         <RatioCard label="Debt/Eq" value={deVal} colorFn={(v) => v > 1 ? '#EF5350' : '#10B981'} sub={deVal && deVal < 0.5 ? 'Conservative' : 'Leveraged'} sparkData={deSpark} sparkColor="#EF5350" />
-        <RatioCard label="Promoter" value={promoterVal} unit="%" sub="Insider" />
+        <RatioCard label="Promoter" value={promoterVal} unit="%" sub="Insider Stake" />
         <RatioCard
           label="Div Yield"
           value={divYieldVal}
@@ -287,28 +291,28 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
           sub={
             divYieldVal
               ? `Payout: ${corpCal.dividend_payout_ratio || '—'}%`
-              : 'Non-dividend paying / 0%'
+              : 'Non-dividend / 0%'
           }
         />
       </div>
 
       {/* Quality Scores & Intrinsic Valuation Triad */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
         {/* Piotroski F-Score Card */}
-        <div style={{ ...cardStyle, border: '1px solid rgba(16,185,129,0.25)' }}>
+        <div style={{ ...cardStyle, border: '1px solid rgba(16,185,129,0.25)', background: 'linear-gradient(180deg, rgba(16,185,129,0.05), rgba(15,23,42,0.9))' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <ShieldCheck size={14} color="#10B981" />
-              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#10B981' }}>Piotroski F-Score</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <ShieldCheck size={16} color="#10B981" />
+              <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#10B981' }}>Piotroski F-Score</span>
             </div>
-            <span style={{ fontSize: '0.94rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: piotroski.score >= 7 ? '#10B981' : piotroski.score >= 4 ? '#F59E0B' : '#EF5350' }}>
+            <span style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: piotroski.score >= 7 ? '#10B981' : piotroski.score >= 4 ? '#F59E0B' : '#EF5350' }}>
               {piotroski.score}/9
             </span>
           </div>
-          <div style={{ fontSize: '0.62rem', color: '#94A3B8', marginBottom: 6 }}>
-            {piotroski.rating}
+          <div style={{ fontSize: '0.64rem', color: '#94A3B8', marginBottom: 8 }}>
+            Rating: <strong style={{ color: piotroski.score >= 7 ? '#10B981' : '#F59E0B' }}>{piotroski.rating}</strong>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {(piotroski.criteria?.length ? piotroski.criteria : []).slice(0, 3).map((c, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.62rem', color: '#CBD5E1' }}>
                 <span>{c.name}</span>
@@ -316,49 +320,49 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 6, fontSize: '0.62rem', color: '#818CF8', cursor: 'pointer', textAlign: 'right', fontWeight: 600 }} onClick={() => setShowQualityModal(true)}>
-            View 9-point criteria audit →
+          <div style={{ marginTop: 8, fontSize: '0.64rem', color: '#818CF8', cursor: 'pointer', textAlign: 'right', fontWeight: 700 }} onClick={() => setShowQualityModal(true)}>
+            View complete 9-point audit criteria →
           </div>
         </div>
 
         {/* Altman Z-Score Card */}
-        <div style={{ ...cardStyle, border: '1px solid rgba(99,102,241,0.25)' }}>
+        <div style={{ ...cardStyle, border: '1px solid rgba(99,102,241,0.25)', background: 'linear-gradient(180deg, rgba(99,102,241,0.05), rgba(15,23,42,0.9))' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <Scale size={14} color="#818CF8" />
-              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#818CF8' }}>Altman Z-Score</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Scale size={16} color="#818CF8" />
+              <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#818CF8' }}>Altman Z-Score</span>
             </div>
-            <span style={{ fontSize: '0.94rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: altman.z_score >= 2.99 ? '#10B981' : altman.z_score >= 1.81 ? '#F59E0B' : '#EF5350' }}>
+            <span style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: altman.z_score >= 2.99 ? '#10B981' : altman.z_score >= 1.81 ? '#F59E0B' : '#EF5350' }}>
               {altman.z_score}
             </span>
           </div>
-          <div style={{ fontSize: '0.62rem', color: '#94A3B8', marginBottom: 6 }}>
+          <div style={{ fontSize: '0.64rem', color: '#94A3B8', marginBottom: 8 }}>
             Zone: <strong style={{ color: altman.z_score >= 2.99 ? '#10B981' : '#F59E0B' }}>{altman.zone}</strong>
           </div>
-          <p style={{ fontSize: '0.60rem', color: '#94A3B8', margin: 0, lineHeight: 1.3 }}>
-            {altman.description || 'Solvency score evaluating working capital, retained earnings, and asset coverage.'}
+          <p style={{ fontSize: '0.62rem', color: '#94A3B8', margin: 0, lineHeight: 1.35 }}>
+            {altman.description || 'Solvency gauge measuring liquidity, cumulative profitability, and asset coverage to quantify bankruptcy buffer.'}
           </p>
         </div>
 
         {/* DCF Intrinsic Value Card */}
-        <div style={{ ...cardStyle, border: '1px solid rgba(168,85,247,0.25)' }}>
+        <div style={{ ...cardStyle, border: '1px solid rgba(168,85,247,0.25)', background: 'linear-gradient(180deg, rgba(168,85,247,0.05), rgba(15,23,42,0.9))' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <DollarSign size={14} color="#C084FC" />
-              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#C084FC' }}>DCF Intrinsic Value</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <DollarSign size={16} color="#C084FC" />
+              <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#C084FC' }}>DCF Intrinsic Target</span>
             </div>
-            <span style={{ fontSize: '0.94rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: (dcf.margin_of_safety_pct || 0) >= 0 ? '#10B981' : '#EF5350' }}>
-              ₹{dcf.dcf_fair_value || '—'}
+            <span style={{ fontSize: '1.05rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: (dcf.margin_of_safety_pct || 0) >= 0 ? '#10B981' : '#EF5350' }}>
+              {dcf.dcf_fair_value != null ? `₹${dcf.dcf_fair_value}` : '—'}
             </span>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.62rem', color: '#94A3B8', marginBottom: 4 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.64rem', color: '#94A3B8', marginBottom: 6 }}>
             <span>Margin of Safety:</span>
             <strong style={{ color: (dcf.margin_of_safety_pct || 0) >= 0 ? '#10B981' : '#EF5350' }}>
-              {(dcf.margin_of_safety_pct || 0) >= 0 ? '+' : ''}{dcf.margin_of_safety_pct}%
+              {dcf.margin_of_safety_pct != null ? `${dcf.margin_of_safety_pct >= 0 ? '+' : ''}${dcf.margin_of_safety_pct}%` : '—'}
             </strong>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.60rem', color: '#CBD5E1', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 4 }}>
-            <span>Graham Number:</span><strong>₹{dcf.graham_number || '—'}</strong>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.62rem', color: '#CBD5E1', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 5 }}>
+            <span>Graham Value:</span><strong>{dcf.graham_number != null ? `₹${dcf.graham_number}` : '—'}</strong>
           </div>
         </div>
       </div>
@@ -366,18 +370,18 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       {/* 10-Year Revenue vs Net Profit Chart with Empty Fallback */}
       {annualPl.length > 0 ? (
         <div style={cardStyle}>
-          <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-            <span>10-Year Revenue & Net Profit Trajectory (₹ Cr)</span>
-            <span><span style={{ color: '#6366F1' }}>■</span> Sales &nbsp;|&nbsp; <span style={{ color: '#10B981' }}>■</span> Net Profit</span>
+          <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginBottom: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontWeight: 700, color: '#F0F0FF' }}>10-Year Revenue & Net Profit Trajectory (₹ Cr)</span>
+            <span style={{ fontSize: '0.66rem' }}><span style={{ color: '#6366F1' }}>■</span> Sales &nbsp;|&nbsp; <span style={{ color: '#10B981' }}>■</span> Net Profit</span>
           </div>
-          <ResponsiveContainer width="100%" height={180}>
-            <ComposedChart data={annualPl} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+          <ResponsiveContainer width="100%" height={200}>
+            <ComposedChart data={annualPl} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-              <XAxis dataKey="period" stroke="#64748B" fontSize={9} tickLine={false} />
-              <YAxis stroke="#64748B" fontSize={9} tickLine={false} tickFormatter={(v) => `₹${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
-              <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')} Cr`]} />
-              <Bar dataKey="Sales" fill="#6366F1" fillOpacity={0.75} radius={[3, 3, 0, 0]} name="Sales" />
-              <Line type="monotone" dataKey="Net Profit" stroke="#10B981" strokeWidth={2} name="Net Profit" dot={{ fill: '#10B981', r: 2 }} />
+              <XAxis dataKey="period" stroke="#64748B" fontSize={10} tickLine={false} />
+              <YAxis stroke="#64748B" fontSize={10} tickLine={false} tickFormatter={(v) => `₹${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
+              <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: '0.72rem' }} formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')} Cr`]} />
+              <Bar dataKey="Sales" fill="#6366F1" fillOpacity={0.8} radius={[4, 4, 0, 0]} name="Sales" />
+              <Line type="monotone" dataKey="Net Profit" stroke="#10B981" strokeWidth={2.2} name="Net Profit" dot={{ fill: '#10B981', r: 3 }} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -392,86 +396,88 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
       {/* Dynamic CAGR Grid */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
           <div style={cardStyle}>
-            <div style={{ fontSize: '0.66rem', color: '#818CF8', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>
-              Compounded Sales Growth
+            <div style={{ fontSize: '0.68rem', color: '#818CF8', textTransform: 'uppercase', fontWeight: 800, marginBottom: 6 }}>
+              Compounded Sales Growth (CAGR)
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: '#CBD5E1', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
               <span>10 Years:</span><strong>{cagr?.sales_growth?.['10y'] != null ? `${cagr.sales_growth['10y']}%` : '—'}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: '#CBD5E1', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
               <span>5 Years:</span><strong>{cagr?.sales_growth?.['5y'] != null ? `${cagr.sales_growth['5y']}%` : '—'}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: '#CBD5E1', padding: '4px 0' }}>
               <span>3 Years:</span><strong style={{ color: '#10B981' }}>{cagr?.sales_growth?.['3y'] != null ? `${cagr.sales_growth['3y']}%` : '—'}</strong>
             </div>
           </div>
 
           <div style={cardStyle}>
-            <div style={{ fontSize: '0.66rem', color: '#818CF8', textTransform: 'uppercase', fontWeight: 700, marginBottom: 4 }}>
-              Compounded Profit Growth
+            <div style={{ fontSize: '0.68rem', color: '#818CF8', textTransform: 'uppercase', fontWeight: 800, marginBottom: 6 }}>
+              Compounded Profit Growth (CAGR)
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: '#CBD5E1', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
               <span>10 Years:</span><strong>{cagr?.profit_growth?.['10y'] != null ? `${cagr.profit_growth['10y']}%` : '—'}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: '#CBD5E1', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
               <span>5 Years:</span><strong>{cagr?.profit_growth?.['5y'] != null ? `${cagr.profit_growth['5y']}%` : '—'}</strong>
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.70rem', color: '#CBD5E1', padding: '3px 0' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', color: '#CBD5E1', padding: '4px 0' }}>
               <span>3 Years:</span><strong style={{ color: '#10B981' }}>{cagr?.profit_growth?.['3y'] != null ? `${cagr.profit_growth['3y']}%` : '—'}</strong>
             </div>
           </div>
         </div>
-        <div style={{ fontSize: '0.58rem', color: '#64748B', fontStyle: 'italic', paddingLeft: 2 }}>
-          * Dynamic CAGR computed from audited statements. '—' denotes that the stock does not yet possess continuous historical records for that specific timeframe.
+        <div style={{ fontSize: '0.60rem', color: '#64748B', fontStyle: 'italic', paddingLeft: 2 }}>
+          * Dynamic CAGR computed from audited statements. '—' denotes that continuous historical records are not available for that specific timeframe.
         </div>
       </div>
     </div>
   );
 
   const renderQuartersSection = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {quarterly.length > 0 ? (
         <>
           <div style={cardStyle}>
-            <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Last 8 Quarters Revenue & Profit (₹ Cr)</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <ComposedChart data={quarterly} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+            <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
+              Last 8 Quarters Revenue & Net Profit (₹ Cr)
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <ComposedChart data={quarterly} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                <XAxis dataKey="period" stroke="#64748B" fontSize={9} tickLine={false} />
-                <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
-                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')} Cr`]} />
-                <Bar dataKey="revenue" fill="#6366F1" radius={[3, 3, 0, 0]} name="Revenue" />
-                <Line type="monotone" dataKey="net_profit" stroke="#10B981" strokeWidth={2} name="Net Profit" />
+                <XAxis dataKey="period" stroke="#64748B" fontSize={10} tickLine={false} />
+                <YAxis stroke="#64748B" fontSize={10} tickLine={false} />
+                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: '0.72rem' }} formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')} Cr`]} />
+                <Bar dataKey="revenue" fill="#6366F1" radius={[4, 4, 0, 0]} name="Revenue" />
+                <Line type="monotone" dataKey="net_profit" stroke="#10B981" strokeWidth={2.2} name="Net Profit" />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
 
           <div style={{ ...cardStyle, overflowX: 'auto' }}>
-            <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Quarterly Financials (₹ Cr)</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+            <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Quarterly Financials (₹ Cr)</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Period</th>
-                  <th style={{ padding: '6px 8px' }}>Sales</th>
-                  <th style={{ padding: '6px 8px' }}>Expenses</th>
-                  <th style={{ padding: '6px 8px' }}>Op. Profit</th>
-                  <th style={{ padding: '6px 8px' }}>OPM %</th>
-                  <th style={{ padding: '6px 8px' }}>Net Profit</th>
-                  <th style={{ padding: '6px 8px' }}>EPS ₹</th>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 10px' }}>Period</th>
+                  <th style={{ padding: '8px 10px' }}>Sales</th>
+                  <th style={{ padding: '8px 10px' }}>Expenses</th>
+                  <th style={{ padding: '8px 10px' }}>Op. Profit</th>
+                  <th style={{ padding: '8px 10px' }}>OPM %</th>
+                  <th style={{ padding: '8px 10px' }}>Net Profit</th>
+                  <th style={{ padding: '8px 10px' }}>EPS ₹</th>
                 </tr>
               </thead>
               <tbody>
                 {quarterly.map((q, idx) => (
                   <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                    <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{q.period}</td>
-                    <td style={{ padding: '6px 8px' }}>{q.revenue != null ? Number(q.revenue).toLocaleString('en-IN') : (q['Sales'] != null ? Number(q['Sales']).toLocaleString('en-IN') : '—')}</td>
-                    <td style={{ padding: '6px 8px' }}>{q['Expenses'] != null ? Number(q['Expenses']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{q['Operating Profit'] != null ? Number(q['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{q['OPM %'] != null ? `${q['OPM %']}%` : '—'}</td>
-                    <td style={{ padding: '6px 8px', fontWeight: 700, color: '#10B981' }}>{q.net_profit != null ? Number(q.net_profit).toLocaleString('en-IN') : (q['Net Profit'] != null ? Number(q['Net Profit']).toLocaleString('en-IN') : '—')}</td>
-                    <td style={{ padding: '6px 8px' }}>{q.eps != null ? q.eps : (q['EPS in Rs'] || '—')}</td>
+                    <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{q.period}</td>
+                    <td style={{ padding: '8px 10px' }}>{q.revenue != null ? Number(q.revenue).toLocaleString('en-IN') : (q['Sales'] != null ? Number(q['Sales']).toLocaleString('en-IN') : '—')}</td>
+                    <td style={{ padding: '8px 10px' }}>{q['Expenses'] != null ? Number(q['Expenses']).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '8px 10px' }}>{q['Operating Profit'] != null ? Number(q['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '8px 10px' }}>{q['OPM %'] != null ? `${q['OPM %']}%` : '—'}</td>
+                    <td style={{ padding: '8px 10px', fontWeight: 700, color: '#10B981' }}>{q.net_profit != null ? Number(q.net_profit).toLocaleString('en-IN') : (q['Net Profit'] != null ? Number(q['Net Profit']).toLocaleString('en-IN') : '—')}</td>
+                    <td style={{ padding: '8px 10px' }}>{q.eps != null ? q.eps : (q['EPS in Rs'] || '—')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -491,32 +497,32 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
   const renderAnnualSection = () => (
     <div style={{ ...cardStyle, overflowX: 'auto' }}>
-      <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Annual 10-Year P&L (₹ Cr)</div>
+      <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Annual 10-Year Consolidated P&L (₹ Cr)</div>
       {annualPl.length > 0 ? (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-              <th style={{ textAlign: 'left', padding: '6px 8px' }}>Year</th>
-              <th style={{ padding: '6px 8px' }}>Sales</th>
-              <th style={{ padding: '6px 8px' }}>Expenses</th>
-              <th style={{ padding: '6px 8px' }}>Op. Profit</th>
-              <th style={{ padding: '6px 8px' }}>OPM %</th>
-              <th style={{ padding: '6px 8px' }}>Net Profit</th>
-              <th style={{ padding: '6px 8px' }}>EPS ₹</th>
-              <th style={{ padding: '6px 8px' }}>Payout %</th>
+            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
+              <th style={{ textAlign: 'left', padding: '8px 10px' }}>Year</th>
+              <th style={{ padding: '8px 10px' }}>Sales</th>
+              <th style={{ padding: '8px 10px' }}>Expenses</th>
+              <th style={{ padding: '8px 10px' }}>Op. Profit</th>
+              <th style={{ padding: '8px 10px' }}>OPM %</th>
+              <th style={{ padding: '8px 10px' }}>Net Profit</th>
+              <th style={{ padding: '8px 10px' }}>EPS ₹</th>
+              <th style={{ padding: '8px 10px' }}>Payout %</th>
             </tr>
           </thead>
           <tbody>
             {annualPl.map((yr, idx) => (
               <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{yr.period}</td>
-                <td style={{ padding: '6px 8px' }}>{yr['Sales'] != null ? Number(yr['Sales']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '6px 8px' }}>{yr['Expenses'] != null ? Number(yr['Expenses']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '6px 8px' }}>{yr['Operating Profit'] != null ? Number(yr['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '6px 8px' }}>{yr['OPM %'] != null ? `${yr['OPM %']}%` : '—'}</td>
-                <td style={{ padding: '6px 8px', fontWeight: 700, color: '#818CF8' }}>{yr['Net Profit'] != null ? Number(yr['Net Profit']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '6px 8px' }}>{yr['EPS in Rs'] != null ? yr['EPS in Rs'] : '—'}</td>
-                <td style={{ padding: '6px 8px' }}>{yr['Dividend Payout %'] != null ? `${yr['Dividend Payout %']}%` : '—'}</td>
+                <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{yr.period}</td>
+                <td style={{ padding: '8px 10px' }}>{yr['Sales'] != null ? Number(yr['Sales']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '8px 10px' }}>{yr['Expenses'] != null ? Number(yr['Expenses']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '8px 10px' }}>{yr['Operating Profit'] != null ? Number(yr['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '8px 10px' }}>{yr['OPM %'] != null ? `${yr['OPM %']}%` : '—'}</td>
+                <td style={{ padding: '8px 10px', fontWeight: 700, color: '#818CF8' }}>{yr['Net Profit'] != null ? Number(yr['Net Profit']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '8px 10px' }}>{yr['EPS in Rs'] != null ? yr['EPS in Rs'] : '—'}</td>
+                <td style={{ padding: '8px 10px' }}>{yr['Dividend Payout %'] != null ? `${yr['Dividend Payout %']}%` : '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -534,32 +540,32 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
   const renderBalanceSheetSection = () => (
     <div style={{ ...cardStyle, overflowX: 'auto' }}>
-      <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Consolidated Balance Sheet (₹ Cr)</div>
+      <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Consolidated Balance Sheet & Capital Structure (₹ Cr)</div>
       {balanceSheet.length > 0 ? (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-              <th style={{ textAlign: 'left', padding: '6px 8px' }}>Year</th>
-              <th style={{ padding: '6px 8px' }}>Equity</th>
-              <th style={{ padding: '6px 8px' }}>Reserves</th>
-              <th style={{ padding: '6px 8px' }}>Borrowings</th>
-              <th style={{ padding: '6px 8px' }}>Other Liab</th>
-              <th style={{ padding: '6px 8px' }}>Total Liab</th>
-              <th style={{ padding: '6px 8px' }}>Fixed Assets</th>
-              <th style={{ padding: '6px 8px' }}>Total Assets</th>
+            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
+              <th style={{ textAlign: 'left', padding: '8px 10px' }}>Year</th>
+              <th style={{ padding: '8px 10px' }}>Equity</th>
+              <th style={{ padding: '8px 10px' }}>Reserves</th>
+              <th style={{ padding: '8px 10px' }}>Borrowings</th>
+              <th style={{ padding: '8px 10px' }}>Other Liab</th>
+              <th style={{ padding: '8px 10px' }}>Total Liab</th>
+              <th style={{ padding: '8px 10px' }}>Fixed Assets</th>
+              <th style={{ padding: '8px 10px' }}>Total Assets</th>
             </tr>
           </thead>
           <tbody>
             {balanceSheet.map((bs, idx) => (
               <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{bs.period}</td>
-                <td style={{ padding: '6px 8px' }}>{bs['Equity Capital'] != null ? Number(bs['Equity Capital']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '6px 8px' }}>{bs['Reserves'] != null ? Number(bs['Reserves']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '6px 8px', color: '#F59E0B' }}>{bs['Borrowings'] != null ? Number(bs['Borrowings']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '6px 8px' }}>{bs['Other Liabilities'] != null ? Number(bs['Other Liabilities']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '6px 8px', fontWeight: 700 }}>{bs['Total Liabilities'] != null ? Number(bs['Total Liabilities']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '6px 8px' }}>{bs['Fixed Assets'] != null ? Number(bs['Fixed Assets']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '6px 8px', fontWeight: 700, color: '#818CF8' }}>{bs['Total Assets'] != null ? Number(bs['Total Assets']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{bs.period}</td>
+                <td style={{ padding: '8px 10px' }}>{bs['Equity Capital'] != null ? Number(bs['Equity Capital']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '8px 10px' }}>{bs['Reserves'] != null ? Number(bs['Reserves']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '8px 10px', color: '#F59E0B' }}>{bs['Borrowings'] != null ? Number(bs['Borrowings']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '8px 10px' }}>{bs['Other Liabilities'] != null ? Number(bs['Other Liabilities']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '8px 10px', fontWeight: 700 }}>{bs['Total Liabilities'] != null ? Number(bs['Total Liabilities']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '8px 10px' }}>{bs['Fixed Assets'] != null ? Number(bs['Fixed Assets']).toLocaleString('en-IN') : '—'}</td>
+                <td style={{ padding: '8px 10px', fontWeight: 700, color: '#818CF8' }}>{bs['Total Assets'] != null ? Number(bs['Total Assets']).toLocaleString('en-IN') : '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -576,46 +582,48 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   );
 
   const renderCashFlowSection = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {cashFlow.length > 0 ? (
         <>
           <div style={cardStyle}>
-            <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Cash Flow Decomposition (CFO vs CFI vs CFF in ₹ Cr)</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={cashFlow} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+            <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
+              Cash Flow Decomposition (CFO vs CFI vs CFF in ₹ Cr)
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={cashFlow} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                <XAxis dataKey="period" stroke="#64748B" fontSize={9} tickLine={false} />
-                <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
-                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} />
-                <Bar dataKey="Cash from Operating Activity" fill="#10B981" name="Operating (CFO)" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Cash from Investing Activity" fill="#F59E0B" name="Investing (CFI)" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="Cash from Financing Activity" fill="#EF5350" name="Financing (CFF)" radius={[3, 3, 0, 0]} />
+                <XAxis dataKey="period" stroke="#64748B" fontSize={10} tickLine={false} />
+                <YAxis stroke="#64748B" fontSize={10} tickLine={false} />
+                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: '0.72rem' }} />
+                <Bar dataKey="Cash from Operating Activity" fill="#10B981" name="Operating (CFO)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Cash from Investing Activity" fill="#F59E0B" name="Investing (CFI)" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="Cash from Financing Activity" fill="#EF5350" name="Financing (CFF)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
           <div style={{ ...cardStyle, overflowX: 'auto' }}>
-            <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Cash Flow Statement (₹ Cr)</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+            <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>10-Year Cash Flow Statement (₹ Cr)</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Period</th>
-                  <th style={{ padding: '6px 8px' }}>Operating (CFO)</th>
-                  <th style={{ padding: '6px 8px' }}>Investing (CFI)</th>
-                  <th style={{ padding: '6px 8px' }}>Financing (CFF)</th>
-                  <th style={{ padding: '6px 8px' }}>Net Cash Flow</th>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 10px' }}>Period</th>
+                  <th style={{ padding: '8px 10px' }}>Operating (CFO)</th>
+                  <th style={{ padding: '8px 10px' }}>Investing (CFI)</th>
+                  <th style={{ padding: '8px 10px' }}>Financing (CFF)</th>
+                  <th style={{ padding: '8px 10px' }}>Net Cash Flow</th>
                 </tr>
               </thead>
               <tbody>
                 {cashFlow.map((cf, idx) => (
                   <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                    <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{cf.period}</td>
-                    <td style={{ padding: '6px 8px', color: (cf['Cash from Operating Activity'] || 0) >= 0 ? '#10B981' : '#EF5350' }}>
+                    <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{cf.period}</td>
+                    <td style={{ padding: '8px 10px', color: (cf['Cash from Operating Activity'] || 0) >= 0 ? '#10B981' : '#EF5350' }}>
                       {cf['Cash from Operating Activity'] != null ? Number(cf['Cash from Operating Activity']).toLocaleString('en-IN') : '—'}
                     </td>
-                    <td style={{ padding: '6px 8px' }}>{cf['Cash from Investing Activity'] != null ? Number(cf['Cash from Investing Activity']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{cf['Cash from Financing Activity'] != null ? Number(cf['Cash from Financing Activity']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px', fontWeight: 700, color: '#818CF8' }}>
+                    <td style={{ padding: '8px 10px' }}>{cf['Cash from Investing Activity'] != null ? Number(cf['Cash from Investing Activity']).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '8px 10px' }}>{cf['Cash from Financing Activity'] != null ? Number(cf['Cash from Financing Activity']).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '8px 10px', fontWeight: 700, color: '#818CF8' }}>
                       {cf['Net Cash Flow'] != null ? Number(cf['Net Cash Flow']).toLocaleString('en-IN') : '—'}
                     </td>
                   </tr>
@@ -636,56 +644,58 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   );
 
   const renderShareholdingSection = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {shareholding.length > 0 ? (
         <>
           <div style={cardStyle}>
-            <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Institutional & Insider Ownership Trend (%)</div>
-            <ResponsiveContainer width="100%" height={180}>
-              <LineChart data={shareholding} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+            <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
+              Institutional & Insider Ownership Trend (%)
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={shareholding} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                <XAxis dataKey="quarter" stroke="#64748B" fontSize={9} tickLine={false} />
-                <YAxis stroke="#64748B" fontSize={9} tickLine={false} domain={['auto', 'auto']} tickFormatter={(v) => `${v}%`} />
-                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} formatter={(v) => [`${v}%`]} />
-                <Line type="monotone" dataKey="promoter" stroke="#10B981" strokeWidth={2} name="Promoters" dot={{ r: 2 }} />
-                <Line type="monotone" dataKey="fii" stroke="#818CF8" strokeWidth={1.8} name="FIIs" dot={{ r: 2 }} />
-                <Line type="monotone" dataKey="dii" stroke="#F59E0B" strokeWidth={1.8} name="DIIs" dot={{ r: 2 }} />
-                <Line type="monotone" dataKey="public" stroke="#64748B" strokeWidth={1.2} name="Public" dot={{ r: 2 }} />
+                <XAxis dataKey="quarter" stroke="#64748B" fontSize={10} tickLine={false} />
+                <YAxis stroke="#64748B" fontSize={10} tickLine={false} domain={['auto', 'auto']} tickFormatter={(v) => `${v}%`} />
+                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: '0.72rem' }} formatter={(v) => [`${v}%`]} />
+                <Line type="monotone" dataKey="promoter" stroke="#10B981" strokeWidth={2.2} name="Promoters" dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="fii" stroke="#818CF8" strokeWidth={2} name="FIIs" dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="dii" stroke="#F59E0B" strokeWidth={2} name="DIIs" dot={{ r: 3 }} />
+                <Line type="monotone" dataKey="public" stroke="#64748B" strokeWidth={1.5} name="Public" dot={{ r: 3 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
             <div style={{ ...cardStyle, overflowX: 'auto' }}>
-              <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Quarterly Breakdown (%)</div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+              <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Quarterly Breakdown (%)</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-                    <th style={{ textAlign: 'left', padding: '6px 8px' }}>Quarter</th>
-                    <th style={{ padding: '6px 8px' }}>Promoter</th>
-                    <th style={{ padding: '6px 8px' }}>FII</th>
-                    <th style={{ padding: '6px 8px' }}>DII</th>
-                    <th style={{ padding: '6px 8px' }}>Public</th>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
+                    <th style={{ textAlign: 'left', padding: '8px 10px' }}>Quarter</th>
+                    <th style={{ padding: '8px 10px' }}>Promoter</th>
+                    <th style={{ padding: '8px 10px' }}>FII</th>
+                    <th style={{ padding: '8px 10px' }}>DII</th>
+                    <th style={{ padding: '8px 10px' }}>Public</th>
                   </tr>
                 </thead>
                 <tbody>
                   {shareholding.map((sh, idx) => (
                     <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                      <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: '#F0F0FF' }}>{sh.quarter}</td>
-                      <td style={{ padding: '6px 8px', color: '#10B981' }}>{sh.promoter != null ? `${sh.promoter}%` : '—'}</td>
-                      <td style={{ padding: '6px 8px', color: '#818CF8' }}>{sh.fii != null ? `${sh.fii}%` : '—'}</td>
-                      <td style={{ padding: '6px 8px', color: '#F59E0B' }}>{sh.dii != null ? `${sh.dii}%` : '—'}</td>
-                      <td style={{ padding: '6px 8px' }}>{sh.public != null ? `${sh.public}%` : '—'}</td>
+                      <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{sh.quarter}</td>
+                      <td style={{ padding: '8px 10px', color: '#10B981' }}>{sh.promoter != null ? `${sh.promoter}%` : '—'}</td>
+                      <td style={{ padding: '8px 10px', color: '#818CF8' }}>{sh.fii != null ? `${sh.fii}%` : '—'}</td>
+                      <td style={{ padding: '8px 10px', color: '#F59E0B' }}>{sh.dii != null ? `${sh.dii}%` : '—'}</td>
+                      <td style={{ padding: '8px 10px' }}>{sh.public != null ? `${sh.public}%` : '—'}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
 
-            {/* Bug 6: Fallback for all 4 pie chart values so NaN never crashes Recharts */}
+            {/* Latest Ownership Distribution Pie Chart with NaN fallback */}
             <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ fontSize: '0.70rem', color: '#818CF8', fontWeight: 700, alignSelf: 'flex-start', marginBottom: 6 }}>Latest Ownership Distribution</div>
-              <div style={{ width: '100%', height: 160 }}>
+              <div style={{ fontSize: '0.74rem', color: '#818CF8', fontWeight: 800, alignSelf: 'flex-start', marginBottom: 6 }}>Latest Ownership Distribution</div>
+              <div style={{ width: '100%', height: 170 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -699,7 +709,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                       nameKey="name"
                       cx="50%"
                       cy="50%"
-                      outerRadius={55}
+                      outerRadius={60}
                       label={({ name, value }) => `${name} ${value}%`}
                     >
                       {[
@@ -730,45 +740,47 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   );
 
   const renderPeersSection = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {peers.length > 0 ? (
         <>
           <div style={cardStyle}>
-            <div style={{ fontSize: '0.68rem', color: '#94A3B8', marginBottom: 8 }}>Peer Valuation (P/E Ratio) vs Quality (ROCE %)</div>
-            <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={peers} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+            <div style={{ fontSize: '0.72rem', color: '#94A3B8', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
+              Sector Peer Valuation (P/E Ratio) vs Quality (ROCE %)
+            </div>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={peers} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                <XAxis dataKey="name" stroke="#64748B" fontSize={9} tickLine={false} />
-                <YAxis stroke="#64748B" fontSize={9} tickLine={false} />
-                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, fontSize: '0.70rem' }} />
-                <Bar dataKey="pe_ratio" fill="#6366F1" name="P/E Ratio" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="roce" fill="#10B981" name="ROCE %" radius={[3, 3, 0, 0]} />
+                <XAxis dataKey="name" stroke="#64748B" fontSize={10} tickLine={false} />
+                <YAxis stroke="#64748B" fontSize={10} tickLine={false} />
+                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: '0.72rem' }} />
+                <Bar dataKey="pe_ratio" fill="#6366F1" name="P/E Ratio" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="roce" fill="#10B981" name="ROCE %" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
           <div style={{ ...cardStyle, overflowX: 'auto' }}>
-            <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#F0F0FF', marginBottom: 8 }}>Sector Peer Ranking Table</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem', fontFamily: 'JetBrains Mono, monospace' }}>
+            <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Sector Peer Ranking & Relative Valuation</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.64rem', textTransform: 'uppercase' }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Company</th>
-                  <th style={{ padding: '6px 8px' }}>CMP ₹</th>
-                  <th style={{ padding: '6px 8px' }}>P/E</th>
-                  <th style={{ padding: '6px 8px' }}>Mar Cap ₹ Cr</th>
-                  <th style={{ padding: '6px 8px' }}>ROCE %</th>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 10px' }}>Company</th>
+                  <th style={{ padding: '8px 10px' }}>CMP ₹</th>
+                  <th style={{ padding: '8px 10px' }}>P/E</th>
+                  <th style={{ padding: '8px 10px' }}>Mar Cap ₹ Cr</th>
+                  <th style={{ padding: '8px 10px' }}>ROCE %</th>
                 </tr>
               </thead>
               <tbody>
                 {peers.map((p, idx) => (
                   <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                    <td style={{ textAlign: 'left', padding: '6px 8px', fontWeight: 600, color: p.name.includes(ticker) ? '#818CF8' : '#F0F0FF' }}>
+                    <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: p.name.includes(ticker) ? '#818CF8' : '#F0F0FF' }}>
                       {p.name}
                     </td>
-                    <td style={{ padding: '6px 8px' }}>{p.price != null ? Number(p.price).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{p.pe_ratio != null ? p.pe_ratio : '—'}</td>
-                    <td style={{ padding: '6px 8px' }}>{p.market_cap != null ? Number(p.market_cap).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '6px 8px', color: (p.roce || 0) > 15 ? '#10B981' : '#CBD5E1' }}>
+                    <td style={{ padding: '8px 10px' }}>{p.price != null ? Number(p.price).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '8px 10px' }}>{p.pe_ratio != null ? p.pe_ratio : '—'}</td>
+                    <td style={{ padding: '8px 10px' }}>{p.market_cap != null ? Number(p.market_cap).toLocaleString('en-IN') : '—'}</td>
+                    <td style={{ padding: '8px 10px', color: (p.roce || 0) > 15 ? '#10B981' : '#CBD5E1' }}>
                       {p.roce != null ? `${p.roce}%` : '—'}
                     </td>
                   </tr>
@@ -788,10 +800,8 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     </div>
   );
 
-  // Bug 1: Correct colorFn props instead of wrong col prop
-  // Bug 3 & Bug 4: No fake numbers; proper null checks for Growth Rate, WACC, and Terminal Rate
   const renderValuationSection = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
         <RatioCard label="DCF Fair Value" value={dcf.dcf_fair_value} unit=" ₹" colorFn={() => '#10B981'} sub="Multi-Stage FCF" />
         <RatioCard label="Graham Number" value={dcf.graham_number} unit=" ₹" colorFn={() => '#818CF8'} sub="EPS & BV Formula" />
@@ -800,25 +810,25 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       </div>
 
       <div style={cardStyle}>
-        <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#818CF8', marginBottom: 4 }}>DCF Valuation Forecast & Assumptions</div>
-        <p style={{ fontSize: '0.64rem', color: '#94A3B8', lineHeight: 1.4, margin: '0 0 8px' }}>
+        <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#818CF8', marginBottom: 4 }}>DCF Valuation Forecast & Assumptions</div>
+        <p style={{ fontSize: '0.66rem', color: '#94A3B8', lineHeight: 1.4, margin: '0 0 10px' }}>
           Growth Rate: <strong style={{ color: '#F8FAFC' }}>{dcf.assumed_growth_rate_pct != null ? `${dcf.assumed_growth_rate_pct}%` : '—'}</strong> | Discount WACC: <strong style={{ color: '#F8FAFC' }}>{dcf.discount_rate_wacc_pct != null ? `${dcf.discount_rate_wacc_pct}%` : '—'}</strong> | Terminal Rate: <strong style={{ color: '#F8FAFC' }}>{dcf.terminal_growth_rate_pct != null ? `${dcf.terminal_growth_rate_pct}%` : '—'}</strong>.
         </p>
         {dcf.projected_fcf?.length > 0 ? (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.70rem', fontFamily: 'JetBrains Mono, monospace' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
             <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.62rem', textTransform: 'uppercase' }}>
-                <th style={{ textAlign: 'left', padding: '5px 8px' }}>Period</th>
-                <th style={{ padding: '5px 8px' }}>Projected FCF / Share (₹)</th>
-                <th style={{ padding: '5px 8px' }}>Present Value (PV)</th>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
+                <th style={{ textAlign: 'left', padding: '8px 10px' }}>Period</th>
+                <th style={{ padding: '8px 10px' }}>Projected FCF / Share (₹)</th>
+                <th style={{ padding: '8px 10px' }}>Present Value (PV)</th>
               </tr>
             </thead>
             <tbody>
               {dcf.projected_fcf.map((p, i) => (
                 <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                  <td style={{ textAlign: 'left', padding: '5px 8px', fontWeight: 600, color: '#F0F0FF' }}>{p.year}</td>
-                  <td style={{ padding: '5px 8px' }}>₹{p.fcf_per_share}</td>
-                  <td style={{ padding: '5px 8px', color: '#10B981', fontWeight: 700 }}>₹{p.pv_fcf}</td>
+                  <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{p.year}</td>
+                  <td style={{ padding: '8px 10px' }}>₹{p.fcf_per_share}</td>
+                  <td style={{ padding: '8px 10px', color: '#10B981', fontWeight: 700 }}>₹{p.pv_fcf}</td>
                 </tr>
               ))}
             </tbody>
@@ -836,37 +846,38 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   );
 
   return (
-    <div style={{ padding: 'clamp(10px, 1.8vw, 18px)', display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 1280, margin: '0 auto', color: '#F8FAFC', fontFamily: 'system-ui, sans-serif' }}>
+    <div style={{ padding: 'clamp(12px, 2vw, 20px)', display: 'flex', flexDirection: 'column', gap: 14, maxWidth: 1320, margin: '0 auto', color: '#F8FAFC', fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
 
-      {/* ── Compact Header Cockpit ── */}
+      {/* ── Institutional Executive Cockpit Header ── */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10,
-        background: 'linear-gradient(180deg, rgba(17,24,39,0.95), rgba(15,23,42,0.85))',
-        border: '1px solid rgba(99,102,241,0.20)', borderRadius: 10, padding: '10px 14px',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
+        background: 'linear-gradient(180deg, rgba(17,24,39,0.98), rgba(15,23,42,0.92))',
+        border: '1px solid rgba(99,102,241,0.25)', borderRadius: 12, padding: '12px 16px',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.35)'
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <div style={{ width: 30, height: 30, borderRadius: 6, background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818CF8' }}>
-            <Award size={16} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ width: 34, height: 34, borderRadius: 8, background: 'linear-gradient(135deg, rgba(99,102,241,0.25), rgba(139,92,246,0.2))', border: '1px solid rgba(99,102,241,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818CF8' }}>
+            <Award size={18} />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '1.05rem', fontWeight: 800, color: '#F8FAFC' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '1.12rem', fontWeight: 800, color: '#F8FAFC', letterSpacing: '-0.02em' }}>
                 {deepData?.name || ticker}
               </span>
-              <span style={{ fontSize: '0.64rem', background: 'rgba(99,102,241,0.15)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.3)', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+              <span style={{ fontSize: '0.66rem', background: 'rgba(99,102,241,0.20)', color: '#818CF8', border: '1px solid rgba(99,102,241,0.4)', padding: '2px 7px', borderRadius: 5, fontWeight: 800 }}>
                 NSE: {ticker}
               </span>
               {deepData?.sector && (
-                <span style={{ fontSize: '0.64rem', background: 'rgba(255,255,255,0.06)', color: '#94A3B8', padding: '1px 6px', borderRadius: 4 }}>
+                <span style={{ fontSize: '0.66rem', background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.1)', padding: '2px 7px', borderRadius: 5, fontWeight: 600 }}>
                   {deepData.sector}
                 </span>
               )}
-              <span style={{ fontSize: '0.64rem', background: piotroski.score >= 7 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)', color: piotroski.score >= 7 ? '#10B981' : '#F59E0B', border: `1px solid ${piotroski.score >= 7 ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)'}`, padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+              <span style={{ fontSize: '0.66rem', background: piotroski.score >= 7 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)', color: piotroski.score >= 7 ? '#10B981' : '#F59E0B', border: `1px solid ${piotroski.score >= 7 ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.35)'}`, padding: '2px 7px', borderRadius: 5, fontWeight: 800 }}>
                 Piotroski: {piotroski.score}/9
               </span>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, fontSize: '0.64rem', color: '#64748B' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3, fontSize: '0.66rem', color: '#64748B' }}>
               <span>Source: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.data_source || data?.data_source || 'Screener.in Consolidated + NSE'}</strong></span>
               <span>•</span>
               <span>Updated: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.last_updated || 'Live'}</strong></span>
@@ -878,7 +889,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {/* Segmented View Mode Toggle: 'tabs' vs 'all_panels' */}
           <div style={{
-            display: 'flex', background: 'rgba(0,0,0,0.40)', borderRadius: 8, padding: 3,
+            display: 'flex', background: 'rgba(0,0,0,0.45)', borderRadius: 8, padding: 3,
             border: '1px solid rgba(255,255,255,0.10)'
           }}>
             <button
@@ -889,7 +900,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                 border: 'none',
                 background: viewMode === 'tabs' ? 'linear-gradient(135deg, rgba(99,102,241,0.45), rgba(139,92,246,0.35))' : 'transparent',
                 color: viewMode === 'tabs' ? '#FFFFFF' : '#94A3B8',
-                fontWeight: viewMode === 'tabs' ? 700 : 500, fontSize: '0.70rem', cursor: 'pointer',
+                fontWeight: viewMode === 'tabs' ? 800 : 500, fontSize: '0.72rem', cursor: 'pointer',
                 boxShadow: viewMode === 'tabs' ? '0 1px 6px rgba(99,102,241,0.3)' : 'none',
                 transition: 'all 0.15s ease'
               }}
@@ -905,7 +916,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                 border: 'none',
                 background: viewMode === 'all_panels' ? 'linear-gradient(135deg, rgba(99,102,241,0.45), rgba(139,92,246,0.35))' : 'transparent',
                 color: viewMode === 'all_panels' ? '#FFFFFF' : '#94A3B8',
-                fontWeight: viewMode === 'all_panels' ? 700 : 500, fontSize: '0.70rem', cursor: 'pointer',
+                fontWeight: viewMode === 'all_panels' ? 800 : 500, fontSize: '0.72rem', cursor: 'pointer',
                 boxShadow: viewMode === 'all_panels' ? '0 1px 6px rgba(99,102,241,0.3)' : 'none',
                 transition: 'all 0.15s ease'
               }}
@@ -915,22 +926,25 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
             </button>
           </div>
 
-          <button onClick={handleExportCSV} style={{ padding: '5px 9px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', fontWeight: 600 }}>
-            <Download size={12} />CSV
+          <button onClick={handleExportCSV} style={{ padding: '6px 11px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.70rem', fontWeight: 600 }}>
+            <Download size={13} />CSV
           </button>
 
-          {/* Bug 8: Visually disabled Alert button with "Coming Soon" note */}
+          <button onClick={handlePrint} style={{ padding: '6px 11px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.70rem', fontWeight: 600 }}>
+            <Printer size={13} />Print
+          </button>
+
           <button
             type="button"
             disabled
             title="Fundamental Alerts coming soon in Phase 6"
-            style={{ padding: '5px 9px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', color: '#64748B', border: '1px solid rgba(255,255,255,0.06)', cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem', fontWeight: 600, opacity: 0.6 }}
+            style={{ padding: '6px 10px', borderRadius: 6, background: 'rgba(255,255,255,0.03)', color: '#64748B', border: '1px solid rgba(255,255,255,0.06)', cursor: 'not-allowed', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.70rem', fontWeight: 600, opacity: 0.6 }}
           >
             <Bell size={12} />Alert (Soon)
           </button>
 
-          <button onClick={fetchData} style={{ padding: '5px 11px', borderRadius: 6, background: 'linear-gradient(135deg,#6366F1,#8B5CF6)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.70rem', fontWeight: 700 }}>
-            <RefreshCw size={12} />Refresh
+          <button onClick={fetchData} style={{ padding: '6px 13px', borderRadius: 6, background: 'linear-gradient(135deg,#6366F1,#8B5CF6)', color: '#fff', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', fontWeight: 800, boxShadow: '0 2px 8px rgba(99,102,241,0.4)' }}>
+            <RefreshCw size={13} />Refresh
           </button>
         </div>
       </div>
@@ -950,14 +964,14 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 8,
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8,
                   border: isSel ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
                   background: isSel
-                    ? 'linear-gradient(135deg, rgba(99,102,241,0.32), rgba(139,92,246,0.22))'
-                    : 'rgba(15,23,42,0.60)',
+                    ? 'linear-gradient(135deg, rgba(99,102,241,0.35), rgba(139,92,246,0.25))'
+                    : 'rgba(15,23,42,0.65)',
                   color: isSel ? '#FFFFFF' : '#94A3B8',
-                  fontWeight: isSel ? 700 : 500, fontSize: '0.74rem', cursor: 'pointer', whiteSpace: 'nowrap',
-                  boxShadow: isSel ? '0 2px 10px rgba(99,102,241,0.25)' : 'none',
+                  fontWeight: isSel ? 800 : 500, fontSize: '0.76rem', cursor: 'pointer', whiteSpace: 'nowrap',
+                  boxShadow: isSel ? '0 2px 12px rgba(99,102,241,0.30)' : 'none',
                   transition: 'all 0.15s ease-in-out'
                 }}
               >
@@ -965,12 +979,12 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                 <span>{tab.label}</span>
                 {tab.badge && (
                   <span style={{
-                    fontSize: '0.58rem',
-                    background: isSel ? 'rgba(99,102,241,0.40)' : 'rgba(255,255,255,0.06)',
+                    fontSize: '0.60rem',
+                    background: isSel ? 'rgba(99,102,241,0.45)' : 'rgba(255,255,255,0.06)',
                     color: isSel ? '#E0E7FF' : '#64748B',
-                    padding: '1px 5px',
+                    padding: '1px 6px',
                     borderRadius: 4,
-                    fontWeight: 700
+                    fontWeight: 800
                   }}>
                     {tab.badge}
                   </span>
@@ -983,7 +997,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
       {/* ── MODE 1: TABS (Strictly isolated single active component) ── */}
       {viewMode === 'tabs' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {activeTab === 'overview' && renderOverviewSection()}
           {activeTab === 'quarters' && renderQuartersSection()}
           {activeTab === 'annual' && renderAnnualSection()}
@@ -997,59 +1011,59 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
       {/* ── MODE 2: ALL PANELS (Sub-tab menu hidden, all data widgets rendered in continuous layout) ── */}
       {viewMode === 'all_panels' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Award size={15} /> 1. Executive Summary & Composite Scorecard
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <Award size={16} /> 1. Executive Summary & Composite Scorecard
             </div>
             {renderOverviewSection()}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Table size={15} /> 2. Quarterly Earnings & Disclosures
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <Table size={16} /> 2. Quarterly Earnings & Disclosures
             </div>
             {renderQuartersSection()}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Layers size={15} /> 3. Annual 10-Year Profit & Loss Statement
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <Layers size={16} /> 3. Annual 10-Year Profit & Loss Statement
             </div>
             {renderAnnualSection()}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Scale size={15} /> 4. Consolidated Balance Sheet & Capital Structure
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <Scale size={16} /> 4. Consolidated Balance Sheet & Capital Structure
             </div>
             {renderBalanceSheetSection()}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <TrendingUp size={15} /> 5. Cash Flow Decomposition & Quality
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <TrendingUp size={16} /> 5. Cash Flow Decomposition & Quality
             </div>
             {renderCashFlowSection()}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <PieIcon size={15} /> 6. Institutional & Insider Ownership
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <PieIcon size={16} /> 6. Institutional & Insider Ownership
             </div>
             {renderShareholdingSection()}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Users size={15} /> 7. Industry Peer Comparison & Relative Ranking
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <Users size={16} /> 7. Industry Peer Comparison & Relative Ranking
             </div>
             {renderPeersSection()}
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <DollarSign size={15} /> 8. DCF Multi-Stage Intrinsic Valuation
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ fontSize: '0.86rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 7 }}>
+              <DollarSign size={16} /> 8. DCF Multi-Stage Intrinsic Valuation
             </div>
             {renderValuationSection()}
           </div>
@@ -1057,35 +1071,34 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       )}
 
       {/* ── QUALITY MODAL: FULL PIOTROSKI F-SCORE CHECKLIST ── */}
-      {/* Bug 7: Show clean empty state if criteria array is empty */}
       {showQualityModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
-          <div style={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 12, padding: 18, maxWidth: 520, width: '100%', maxHeight: '80vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <ShieldCheck size={18} color="#10B981" />
-                <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800 }}>Piotroski 9-Point Quality Audit</h3>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.80)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }}>
+          <div style={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.35)', borderRadius: 14, padding: 20, maxWidth: 540, width: '100%', maxHeight: '82vh', overflowY: 'auto', boxShadow: '0 10px 40px rgba(0,0,0,0.6)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <ShieldCheck size={20} color="#10B981" />
+                <h3 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 800 }}>Piotroski 9-Point Quality Audit</h3>
               </div>
-              <button onClick={() => setShowQualityModal(false)} style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer' }}>
-                <X size={16} />
+              <button onClick={() => setShowQualityModal(false)} style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 4 }}>
+                <X size={18} />
               </button>
             </div>
-            <p style={{ fontSize: '0.70rem', color: '#94A3B8', marginBottom: 10 }}>
+            <p style={{ fontSize: '0.72rem', color: '#94A3B8', marginBottom: 12 }}>
               Score: <strong style={{ color: piotroski.score >= 7 ? '#10B981' : '#F59E0B' }}>{piotroski.score}/9 ({piotroski.rating})</strong>
             </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {piotroski.criteria?.length > 0 ? (
                 piotroski.criteria.map((c, idx) => (
-                  <div key={idx} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${c.passed ? 'rgba(16,185,129,0.2)' : 'rgba(239,83,80,0.2)'}`, borderRadius: 6, padding: '7px 10px' }}>
+                  <div key={idx} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${c.passed ? 'rgba(16,185,129,0.22)' : 'rgba(239,83,80,0.22)'}`, borderRadius: 8, padding: '8px 12px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-                      <strong style={{ fontSize: '0.74rem', color: '#F8FAFC' }}>{idx + 1}. {c.name}</strong>
-                      <span style={{ fontSize: '0.64rem', fontWeight: 800, color: c.passed ? '#10B981' : '#EF5350' }}>{c.passed ? '✓ PASS (+1)' : '✗ FAIL (0)'}</span>
+                      <strong style={{ fontSize: '0.76rem', color: '#F8FAFC' }}>{idx + 1}. {c.name}</strong>
+                      <span style={{ fontSize: '0.66rem', fontWeight: 800, color: c.passed ? '#10B981' : '#EF5350' }}>{c.passed ? '✓ PASS (+1)' : '✗ FAIL (0)'}</span>
                     </div>
-                    <div style={{ fontSize: '0.64rem', color: '#94A3B8' }}>{c.detail}</div>
+                    <div style={{ fontSize: '0.66rem', color: '#94A3B8' }}>{c.detail}</div>
                   </div>
                 ))
               ) : (
-                <div style={{ padding: '16px', textAlign: 'center', color: '#94A3B8', fontSize: '0.74rem', background: 'rgba(255,255,255,0.02)', borderRadius: 6 }}>
+                <div style={{ padding: '18px', textAlign: 'center', color: '#94A3B8', fontSize: '0.76rem', background: 'rgba(255,255,255,0.02)', borderRadius: 8 }}>
                   No detailed 9-point criteria breakdown available for this security.
                 </div>
               )}
