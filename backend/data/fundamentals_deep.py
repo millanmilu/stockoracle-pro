@@ -412,6 +412,61 @@ def get_deep_financials(ticker: str) -> Dict[str, Any]:
                 if p:
                     data["about"] = p.get_text(strip=True)
 
+            def _normalize_label(raw: str) -> str:
+                cleaned = re.sub(r"[\+\s]+$", "", raw).strip()
+                low = cleaned.lower()
+                if "sales" in low or "revenue" in low:
+                    return "Sales"
+                if "expenses" in low:
+                    return "Expenses"
+                if "operating profit" in low:
+                    return "Operating Profit"
+                if "opm" in low:
+                    return "OPM %"
+                if "other income" in low:
+                    return "Other Income"
+                if "interest" in low:
+                    return "Interest"
+                if "depreciation" in low:
+                    return "Depreciation"
+                if "profit before tax" in low:
+                    return "Profit before tax"
+                if "tax" in low and "%" in low:
+                    return "Tax %"
+                if "net profit" in low:
+                    return "Net Profit"
+                if "eps" in low:
+                    return "EPS in Rs"
+                if "dividend payout" in low:
+                    return "Dividend Payout %"
+                if "borrowings" in low:
+                    return "Borrowings"
+                if "reserves" in low:
+                    return "Reserves"
+                if "equity capital" in low:
+                    return "Equity Capital"
+                if "other liabilities" in low:
+                    return "Other Liabilities"
+                if "total liabilities" in low:
+                    return "Total Liabilities"
+                if "fixed assets" in low:
+                    return "Fixed Assets"
+                if "investments" in low:
+                    return "Investments"
+                if "other assets" in low:
+                    return "Other Assets"
+                if "total assets" in low:
+                    return "Total Assets"
+                if "operating activity" in low or "cash from operating" in low:
+                    return "Cash from Operating Activity"
+                if "investing activity" in low or "cash from investing" in low:
+                    return "Cash from Investing Activity"
+                if "financing activity" in low or "cash from financing" in low:
+                    return "Cash from Financing Activity"
+                if "net cash flow" in low:
+                    return "Net Cash Flow"
+                return cleaned
+
             def parse_table_section(section_id: str) -> List[Dict[str, Any]]:
                 sec = soup.find("section", id=section_id)
                 if not sec:
@@ -425,7 +480,7 @@ def get_deep_financials(ticker: str) -> Dict[str, Any]:
                     tds = row.find_all("td")
                     if not tds:
                         continue
-                    row_label = tds[0].get_text(strip=True)
+                    row_label = _normalize_label(tds[0].get_text(strip=True))
                     values = [_parse_num(td.get_text(strip=True)) for td in tds[1:]]
                     rows_data.append({"metric": row_label, "values": values})
 
@@ -435,22 +490,22 @@ def get_deep_financials(ticker: str) -> Dict[str, Any]:
                     for r in rows_data:
                         val = r["values"][i] if i < len(r["values"]) else None
                         period_obj[r["metric"]] = val
+                        # Add normalized aliases
+                        if r["metric"] == "Sales":
+                            period_obj["revenue"] = val
+                        elif r["metric"] == "Net Profit":
+                            period_obj["net_profit"] = val
+                        elif r["metric"] == "EPS in Rs":
+                            period_obj["eps"] = val
                     periods_list.append(period_obj)
                 return periods_list
 
             q_res = parse_table_section("quarters")
             if q_res:
-                # Add revenue / net profit aliases
-                for q in q_res:
-                    q["revenue"] = q.get("Sales") or q.get("Revenue")
-                    q["net_profit"] = q.get("Net Profit")
                 data["quarterly_results"] = q_res[-8:]
 
             pl_res = parse_table_section("profit-loss")
             if pl_res:
-                for pl in pl_res:
-                    pl["revenue"] = pl.get("Sales")
-                    pl["net_profit"] = pl.get("Net Profit")
                 data["annual_pl"] = pl_res[-10:]
 
             bs_res = parse_table_section("balance-sheet")
@@ -460,6 +515,7 @@ def get_deep_financials(ticker: str) -> Dict[str, Any]:
             cf_res = parse_table_section("cash-flow")
             if cf_res:
                 data["cash_flow"] = cf_res[-10:]
+
 
             # Parse Shareholding Table
             sh_sec = soup.find("section", id="shareholding")
