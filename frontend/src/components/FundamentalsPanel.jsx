@@ -192,14 +192,12 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         </button>
       </div>
     );
-  }
-
-  const quarterly = deepData?.quarterly_results?.length ? deepData.quarterly_results : (data.quarterly_results || []);
-  const annualPl = deepData?.annual_pl || [];
-  const balanceSheet = deepData?.balance_sheet || [];
-  const cashFlow = deepData?.cash_flow || [];
-  const shareholding = deepData?.shareholding || [];
-  const peers = deepData?.peers || [];
+   const quarterly = deepData?.quarterly_results?.length ? deepData.quarterly_results : (data?.quarterly_results || []);
+  const annualPl = deepData?.annual_pl?.length ? deepData.annual_pl : (data?.annual_pl || []);
+  const balanceSheet = deepData?.balance_sheet?.length ? deepData.balance_sheet : (data?.balance_sheet || []);
+  const cashFlow = deepData?.cash_flow?.length ? deepData.cash_flow : (data?.cash_flow || []);
+  const shareholding = deepData?.shareholding?.length ? deepData.shareholding : (data?.shareholding || []);
+  const peers = deepData?.peers?.length ? deepData.peers : (data?.peers || []);
   const cagr = deepData?.ratios_cagr || {};
   const piotroski = deepData?.piotroski_f_score || { score: 6, rating: 'MODERATE (Stable)', criteria: [] };
   const altman = deepData?.altman_z_score || { z_score: 3.0, zone: 'Safe Zone' };
@@ -211,6 +209,16 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const roceSpark = ratioTrends.map(r => r.roce);
   const roeSpark = ratioTrends.map(r => r.roe);
   const deSpark = ratioTrends.map(r => r.debt_to_equity);
+
+  // Merged top ratio values
+  const peVal = data?.pe_ratio ?? deepData?.pe_ratio;
+  const pbVal = data?.pb_ratio ?? deepData?.pb_ratio;
+  const roceVal = data?.roce ?? deepData?.roce ?? (ratioTrends.length ? ratioTrends[ratioTrends.length - 1]?.roce : null);
+  const roeVal = data?.roe ?? deepData?.roe ?? (ratioTrends.length ? ratioTrends[ratioTrends.length - 1]?.roe : null);
+  const deVal = data?.debt_to_equity ?? deepData?.debt_to_equity ?? (ratioTrends.length ? ratioTrends[ratioTrends.length - 1]?.debt_to_equity : null);
+  const promoterVal = data?.promoter_holding ?? deepData?.promoter_holding ?? (shareholding.length ? shareholding[shareholding.length - 1]?.promoter : null);
+  const mcapVal = data?.market_cap ?? deepData?.market_cap;
+  const divYieldVal = data?.dividend_yield ?? deepData?.dividend_yield ?? corpCal?.dividend_yield_pct;
 
   const TABS = [
     { id: 'overview', label: 'Overview', icon: Award },
@@ -255,7 +263,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2, fontSize: '0.64rem', color: '#64748B' }}>
-              <span>Source: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.data_source || data.data_source || 'Screener.in Consolidated + NSE'}</strong></span>
+              <span>Source: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.data_source || data?.data_source || 'Screener.in Consolidated + NSE'}</strong></span>
               <span>•</span>
               <span>Updated: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.last_updated || 'Live'}</strong></span>
             </div>
@@ -303,20 +311,20 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
           {/* Core Valuation & Return Ratios with Mini Sparklines */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 8 }}>
-            <RatioCard label="Market Cap" value={data.market_cap} sub="Consolidated" />
-            <RatioCard label="Stock P/E" value={data.pe_ratio} colorFn={(v) => v > 40 ? '#EF5350' : v < 20 ? '#10B981' : '#F8FAFC'} sub={data.pe_ratio < 20 ? 'Attractive Value' : 'Premium'} />
-            <RatioCard label="P/B Ratio" value={data.pb_ratio} />
-            <RatioCard label="ROCE %" value={data.roce} unit="%" colorFn={(v) => v > 20 ? '#10B981' : '#F8FAFC'} sub="Capital Eff." sparkData={roceSpark} sparkColor="#10B981" />
-            <RatioCard label="ROE %" value={data.roe} unit="%" colorFn={(v) => v > 15 ? '#10B981' : '#F8FAFC'} sub="Return" sparkData={roeSpark} sparkColor="#10B981" />
-            <RatioCard label="Debt/Eq" value={data.debt_to_equity} colorFn={(v) => v > 1 ? '#EF5350' : '#10B981'} sub={data.debt_to_equity < 0.5 ? 'Conservative' : 'Leveraged'} sparkData={deSpark} sparkColor="#EF5350" />
-            <RatioCard label="Promoter" value={data.promoter_holding} unit="%" sub="Insider" />
+            <RatioCard label="Market Cap" value={mcapVal} sub="Consolidated" />
+            <RatioCard label="Stock P/E" value={peVal} colorFn={(v) => v > 40 ? '#EF5350' : v < 20 ? '#10B981' : '#F8FAFC'} sub={peVal && peVal < 20 ? 'Attractive Value' : 'Premium'} />
+            <RatioCard label="P/B Ratio" value={pbVal} />
+            <RatioCard label="ROCE %" value={roceVal} unit="%" colorFn={(v) => v > 20 ? '#10B981' : '#F8FAFC'} sub="Capital Eff." sparkData={roceSpark} sparkColor="#10B981" />
+            <RatioCard label="ROE %" value={roeVal} unit="%" colorFn={(v) => v > 15 ? '#10B981' : '#F8FAFC'} sub="Return" sparkData={roeSpark} sparkColor="#10B981" />
+            <RatioCard label="Debt/Eq" value={deVal} colorFn={(v) => v > 1 ? '#EF5350' : '#10B981'} sub={deVal && deVal < 0.5 ? 'Conservative' : 'Leveraged'} sparkData={deSpark} sparkColor="#EF5350" />
+            <RatioCard label="Promoter" value={promoterVal} unit="%" sub="Insider" />
             <RatioCard
               label="Div Yield"
-              value={data.dividend_yield || corpCal.dividend_yield_pct}
+              value={divYieldVal}
               unit="%"
               colorFn={(v) => v > 1.5 ? '#10B981' : '#F8FAFC'}
               sub={
-                (data.dividend_yield || corpCal.dividend_yield_pct)
+                divYieldVal
                   ? `Payout: ${corpCal.dividend_payout_ratio || '—'}%`
                   : 'Non-dividend paying / 0%'
               }

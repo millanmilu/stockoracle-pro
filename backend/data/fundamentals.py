@@ -224,17 +224,14 @@ def get_fundamentals(ticker: str) -> dict:
                         prev_rev = rev
                         prev_profit = profit
 
-                    data["quarterly_results"] = quarterly
-
-        else:
-            # Fallback to yfinance
-            logger.info("Screener HTTP %d for %s — triggering yfinance fallback", resp.status_code, ticker)
-            yf_data = _fetch_yfinance_fallback(ticker)
-            if yf_data:
-                for k, v in yf_data.items():
-                    if v is not None:
-                        data[k] = v
-                data["data_source"] = "Yahoo Finance Real-Time Fallback"
+            # Fill any missing top ratios from yfinance fallback if Screener was incomplete
+            missing_ratio_keys = [k for k in ["pe_ratio", "pb_ratio", "roce", "roe", "debt_to_equity", "promoter_holding", "dividend_yield", "market_cap"] if data.get(k) is None]
+            if missing_ratio_keys:
+                yf_data = _fetch_yfinance_fallback(ticker)
+                if yf_data:
+                    for k in missing_ratio_keys:
+                        if yf_data.get(k) is not None:
+                            data[k] = yf_data[k]
 
         # Calculate EPS from PE & CMP if missing
         if data.get("eps") is None and data.get("pe_ratio") and data["pe_ratio"] > 0:
