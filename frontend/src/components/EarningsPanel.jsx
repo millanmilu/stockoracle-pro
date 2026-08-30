@@ -8,7 +8,7 @@ import api from "../utils/api";
 import {
   BarChart2, TrendingUp, TrendingDown, RefreshCw, Layers, Calendar, Table,
   DollarSign, Activity, Download, ArrowUpRight, ArrowDownRight, Award,
-  Sparkles, Info, ShieldCheck, CheckCircle2, ChevronUp, ChevronDown
+  Sparkles, Info, ShieldCheck, CheckCircle2, ChevronUp, ChevronDown, Check
 } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -29,7 +29,7 @@ const labelStyle = {
 };
 
 const valueStyle = {
-  fontSize: "1.02rem",
+  fontSize: "1.05rem",
   fontWeight: 800,
   fontFamily: "JetBrains Mono, monospace",
   color: "#F8FAFC"
@@ -43,16 +43,16 @@ function GrowthPill({ value, suffix = "%" }) {
       display: "inline-flex",
       alignItems: "center",
       gap: 2,
-      padding: "2px 6px",
+      padding: "2px 7px",
       borderRadius: 4,
-      fontSize: "0.66rem",
+      fontSize: "0.68rem",
       fontWeight: 700,
       fontFamily: "JetBrains Mono, monospace",
       background: isPos ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 83, 80, 0.12)",
       color: isPos ? "#10B981" : "#EF5350",
       border: `1px solid ${isPos ? "rgba(16, 185, 129, 0.25)" : "rgba(239, 83, 80, 0.25)"}`
     }}>
-      {isPos ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
+      {isPos ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
       {isPos ? "+" : ""}{Number(value).toFixed(1)}{suffix}
     </span>
   );
@@ -124,8 +124,8 @@ export default function EarningsPanel({ ticker: propTicker }) {
     chronological.forEach((q, i) => {
       if (q.eps != null && !isNaN(q.eps)) {
         sumX += i;
-        sumY += q.eps;
-        sumXY += i * q.eps;
+        sumY += Number(q.eps);
+        sumXY += i * Number(q.eps);
         sumXX += i * i;
         validEpsCount++;
       }
@@ -270,7 +270,7 @@ export default function EarningsPanel({ ticker: propTicker }) {
 
   if (loading) {
     return (
-      <div style={{ padding: "24px 20px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 1240, margin: "0 auto" }}>
+      <div style={{ padding: "24px 20px 80px", display: "flex", flexDirection: "column", gap: 16, maxWidth: 1300, margin: "0 auto" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <RefreshCw size={18} color="#6366F1" style={{ animation: "spin 1s linear infinite" }} />
           <span style={{ color: "#818CF8", fontSize: "0.86rem", fontWeight: 700 }}>Analyzing Quarterly Results, QoQ Deltas & EPS Trends…</span>
@@ -285,9 +285,9 @@ export default function EarningsPanel({ ticker: propTicker }) {
     );
   }
 
-  if (error || !fundData && !deepData) {
+  if (error || (!fundData && !deepData)) {
     return (
-      <div style={{ padding: "40px 20px", textAlign: "center", color: "#94A3B8" }}>
+      <div style={{ padding: "40px 20px 80px", textAlign: "center", color: "#94A3B8" }}>
         <BarChart2 size={36} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
         <div style={{ marginBottom: 14, fontSize: "0.86rem" }}>{error || "No quarterly earnings disclosures found for this ticker."}</div>
         <button onClick={fetchData} style={{ padding: "8px 18px", borderRadius: 8, background: "rgba(99,102,241,0.18)", color: "#818CF8", border: "1px solid rgba(99,102,241,0.35)", cursor: "pointer", fontSize: "0.78rem", fontWeight: 700 }}>
@@ -300,7 +300,16 @@ export default function EarningsPanel({ ticker: propTicker }) {
   const latestQ = summaryStats?.latest;
 
   return (
-    <div style={{ padding: "clamp(12px, 2vw, 22px)", display: "flex", flexDirection: "column", gap: 16, maxWidth: 1300, margin: "0 auto", color: "#F8FAFC", fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif" }}>
+    <div style={{
+      padding: "clamp(12px, 2vw, 22px) clamp(12px, 2vw, 22px) 90px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 16,
+      maxWidth: 1300,
+      margin: "0 auto",
+      color: "#F8FAFC",
+      fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif"
+    }}>
 
       {/* ── 1. HEADER SECTION COCKPIT ── */}
       <div style={{
@@ -362,13 +371,13 @@ export default function EarningsPanel({ ticker: propTicker }) {
               <div style={labelStyle}>Latest Quarter Performance ({latestQ?.period})</div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4 }}>
                 <span style={{ fontSize: "1.1rem", fontWeight: 800, color: "#F8FAFC", fontFamily: "JetBrains Mono, monospace" }}>
-                  ₹{latestQ?.revenue != null ? Number(latestQ.revenue).toLocaleString("en-IN") : "—"} Cr
+                  ₹{latestQ?.revenue != null && !isNaN(Number(latestQ.revenue)) ? Number(latestQ.revenue).toLocaleString("en-IN") : "—"} Cr
                 </span>
                 <GrowthPill value={latestQ?.revQoQ} />
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.66rem", color: "#94A3B8", marginTop: 6, paddingTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
-                <span>Net Profit: <strong style={{ color: "#10B981" }}>₹{latestQ?.net_profit != null ? Number(latestQ.net_profit).toLocaleString("en-IN") : "—"} Cr</strong></span>
-                <span>EPS: <strong style={{ color: "#F59E0B" }}>₹{latestQ?.eps ?? "—"}</strong></span>
+                <span>Net Profit: <strong style={{ color: "#10B981" }}>₹{latestQ?.net_profit != null && !isNaN(Number(latestQ.net_profit)) ? Number(latestQ.net_profit).toLocaleString("en-IN") : "—"} Cr</strong></span>
+                <span>EPS: <strong style={{ color: "#F59E0B" }}>{latestQ?.eps != null ? `₹${latestQ.eps}` : "—"}</strong></span>
               </div>
             </div>
 
@@ -415,7 +424,7 @@ export default function EarningsPanel({ ticker: propTicker }) {
             </div>
           </div>
 
-          {/* ── 3. REVENUE VS NET PROFIT COMPOSED CHART (Improved visual weight) ── */}
+          {/* ── 3. REVENUE VS NET PROFIT COMPOSED CHART ── */}
           <div style={cardStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
               <div>
@@ -446,7 +455,7 @@ export default function EarningsPanel({ ticker: propTicker }) {
                 <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: "#10B981" }} tickLine={false} tickFormatter={(v) => `₹${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
                 <Tooltip
                   contentStyle={{ background: "#0F172A", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, color: "#F0F0FF", fontSize: "0.74rem" }}
-                  formatter={(val, name) => [`₹${val != null ? Number(val).toLocaleString("en-IN") : "—"} Cr`, name]}
+                  formatter={(val, name) => [`₹${val != null && !isNaN(Number(val)) ? Number(val).toLocaleString("en-IN") : "—"} Cr`, name]}
                 />
                 <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill="url(#revenueBarGrad)" radius={[4, 4, 0, 0]} />
                 <Area yAxisId="right" type="monotone" dataKey="net_profit" name="Net Profit Area" fill="url(#profitAreaGrad)" stroke="none" />
@@ -521,62 +530,70 @@ export default function EarningsPanel({ ticker: propTicker }) {
 
           </div>
 
-          {/* ── 5. FULL QUARTERLY EARNINGS TABLE ── */}
-          <div style={{ ...cardStyle, overflowX: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
-              <div>
-                <span style={{ fontSize: "0.82rem", fontWeight: 800, color: "#F0F0FF" }}>Comprehensive Quarterly Disclosures</span>
-                <div style={{ fontSize: "0.64rem", color: "#94A3B8" }}>Detailed breakdown of quarterly sales, net margins, EPS, and YoY comparative deltas</div>
+          {/* ── 5. FULL QUARTERLY EARNINGS TABLE (High Visibility) ── */}
+          <div style={{ ...cardStyle, overflowX: "auto", border: "1px solid rgba(99,102,241,0.25)", background: "linear-gradient(180deg, rgba(15,23,42,0.95), rgba(10,15,30,0.95))" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Table size={18} color="#818CF8" />
+                <div>
+                  <span style={{ fontSize: "0.86rem", fontWeight: 800, color: "#F0F0FF" }}>Comprehensive Quarterly Financial Statements</span>
+                  <div style={{ fontSize: "0.64rem", color: "#94A3B8" }}>Detailed breakdown of quarterly sales, net margins, EPS, and comparative growth deltas</div>
+                </div>
               </div>
-              <div style={{ fontSize: "0.64rem", color: "#64748B", fontStyle: "italic" }}>
-                * Click column header to sort
+              <div style={{ fontSize: "0.66rem", color: "#818CF8", background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", padding: "3px 8px", borderRadius: 6, fontWeight: 700 }}>
+                💡 Click any column header to sort
               </div>
             </div>
 
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.74rem", fontFamily: "JetBrains Mono, monospace" }}>
+            <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse", fontSize: "0.75rem", fontFamily: "JetBrains Mono, monospace" }}>
               <thead>
-                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.10)", color: "#94A3B8", textAlign: "right", fontSize: "0.66rem", textTransform: "uppercase", background: "rgba(255,255,255,0.02)" }}>
-                  <th onClick={() => toggleSort("period")} style={{ textAlign: "left", padding: "8px 10px", cursor: "pointer" }}>
+                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.12)", color: "#94A3B8", textAlign: "right", fontSize: "0.68rem", textTransform: "uppercase", background: "rgba(255,255,255,0.03)" }}>
+                  <th onClick={() => toggleSort("period")} style={{ textAlign: "left", padding: "10px 12px", cursor: "pointer" }}>
                     Period {sortField === "period" && (sortAsc ? "▲" : "▼")}
                   </th>
-                  <th onClick={() => toggleSort("revenue")} style={{ padding: "8px 10px", cursor: "pointer" }}>
+                  <th onClick={() => toggleSort("revenue")} style={{ padding: "10px 12px", cursor: "pointer" }}>
                     Revenue (₹ Cr) {sortField === "revenue" && (sortAsc ? "▲" : "▼")}
                   </th>
-                  <th onClick={() => toggleSort("revQoQ")} style={{ padding: "8px 10px", cursor: "pointer" }}>
+                  <th onClick={() => toggleSort("revQoQ")} style={{ padding: "10px 12px", cursor: "pointer" }}>
                     Rev QoQ % {sortField === "revQoQ" && (sortAsc ? "▲" : "▼")}
                   </th>
-                  <th onClick={() => toggleSort("revYoY")} style={{ padding: "8px 10px", cursor: "pointer" }}>
+                  <th onClick={() => toggleSort("revYoY")} style={{ padding: "10px 12px", cursor: "pointer" }}>
                     Rev YoY % {sortField === "revYoY" && (sortAsc ? "▲" : "▼")}
                   </th>
-                  <th onClick={() => toggleSort("net_profit")} style={{ padding: "8px 10px", cursor: "pointer" }}>
+                  <th onClick={() => toggleSort("net_profit")} style={{ padding: "10px 12px", cursor: "pointer" }}>
                     Net Profit (₹ Cr) {sortField === "net_profit" && (sortAsc ? "▲" : "▼")}
                   </th>
-                  <th onClick={() => toggleSort("profitQoQ")} style={{ padding: "8px 10px", cursor: "pointer" }}>
+                  <th onClick={() => toggleSort("profitQoQ")} style={{ padding: "10px 12px", cursor: "pointer" }}>
                     NP QoQ % {sortField === "profitQoQ" && (sortAsc ? "▲" : "▼")}
                   </th>
-                  <th onClick={() => toggleSort("eps")} style={{ padding: "8px 10px", cursor: "pointer" }}>
+                  <th onClick={() => toggleSort("eps")} style={{ padding: "10px 12px", cursor: "pointer" }}>
                     EPS (₹) {sortField === "eps" && (sortAsc ? "▲" : "▼")}
                   </th>
-                  <th onClick={() => toggleSort("epsYoY")} style={{ padding: "8px 10px", cursor: "pointer" }}>
+                  <th onClick={() => toggleSort("epsYoY")} style={{ padding: "10px 12px", cursor: "pointer" }}>
                     EPS YoY % {sortField === "epsYoY" && (sortAsc ? "▲" : "▼")}
                   </th>
                 </tr>
               </thead>
               <tbody>
                 {sortedTableData.map((q, idx) => (
-                  <tr key={idx} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)", textAlign: "right", color: "#CBD5E1", background: idx % 2 === 0 ? "rgba(255,255,255,0.01)" : "transparent" }}>
-                    <td style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: "#F0F0FF" }}>{q.period}</td>
-                    <td style={{ padding: "8px 10px" }}>{q.revenue != null ? Number(q.revenue).toLocaleString("en-IN") : "—"}</td>
-                    <td style={{ padding: "8px 10px" }}><GrowthPill value={q.revQoQ} /></td>
-                    <td style={{ padding: "8px 10px" }}><GrowthPill value={q.revYoY} /></td>
-                    <td style={{ padding: "8px 10px", fontWeight: 700, color: "#10B981" }}>{q.net_profit != null ? Number(q.net_profit).toLocaleString("en-IN") : "—"}</td>
-                    <td style={{ padding: "8px 10px" }}><GrowthPill value={q.profitQoQ} /></td>
-                    <td style={{ padding: "8px 10px", color: "#F59E0B", fontWeight: 600 }}>{q.eps != null ? `₹${q.eps}` : "—"}</td>
-                    <td style={{ padding: "8px 10px" }}><GrowthPill value={q.epsYoY} /></td>
+                  <tr key={idx} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", textAlign: "right", color: "#CBD5E1", background: idx % 2 === 0 ? "rgba(255,255,255,0.015)" : "transparent" }}>
+                    <td style={{ textAlign: "left", padding: "10px 12px", fontWeight: 800, color: "#F0F0FF" }}>{q.period}</td>
+                    <td style={{ padding: "10px 12px" }}>{q.revenue != null && !isNaN(Number(q.revenue)) ? Number(q.revenue).toLocaleString("en-IN") : "—"}</td>
+                    <td style={{ padding: "10px 12px" }}><GrowthPill value={q.revQoQ} /></td>
+                    <td style={{ padding: "10px 12px" }}><GrowthPill value={q.revYoY} /></td>
+                    <td style={{ padding: "10px 12px", fontWeight: 800, color: "#10B981" }}>{q.net_profit != null && !isNaN(Number(q.net_profit)) ? Number(q.net_profit).toLocaleString("en-IN") : "—"}</td>
+                    <td style={{ padding: "10px 12px" }}><GrowthPill value={q.profitQoQ} /></td>
+                    <td style={{ padding: "10px 12px", color: "#F59E0B", fontWeight: 700 }}>{q.eps != null ? `₹${q.eps}` : "—"}</td>
+                    <td style={{ padding: "10px 12px" }}><GrowthPill value={q.epsYoY} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
+
+            <div style={{ marginTop: 12, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.06)", fontSize: "0.62rem", color: "#64748B", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+              <span>* YoY deltas are computed against the matching 4-quarter prior benchmark (i-4). QoQ deltas represent sequential momentum.</span>
+              <span>All monetary values represented in ₹ Crores (except EPS).</span>
+            </div>
           </div>
         </>
       ) : (
