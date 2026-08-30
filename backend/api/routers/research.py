@@ -61,13 +61,13 @@ def get_stock_options_chain(ticker: str, expiry: Optional[str] = None):
 
 
 @router.get("/stock/{ticker}/patterns")
-def get_stock_patterns(ticker: str):
-    """Detects candlestick and chart patterns (Head & Shoulders, Double Bottoms, Engulfing)."""
+def get_stock_patterns(ticker: str, period: Optional[str] = "1Y", lookback: Optional[int] = 45):
+    """Detects candlestick and chart patterns with real forward-return statistical backtesting and chart markers."""
     t = ticker.upper().strip()
-    df = fetch_stock_data(t, period="6M")
+    df = fetch_stock_data(t, period=period)
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
-    return get_pattern_summary(df)
+    return get_pattern_summary(df, lookback=lookback)
 
 
 @router.get("/stock/{ticker}/levels")

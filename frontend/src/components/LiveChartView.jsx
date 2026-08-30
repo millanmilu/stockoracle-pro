@@ -2238,16 +2238,17 @@ export default function LiveChartView() {
                     overflowY: 'auto',
                     padding: 10,
                   }}>
-                    {advancedPanelTab === 'patterns' && rawHistory && (
+                    {advancedPanelTab === 'patterns' && (
                       <AIPatternRecognition 
-                        candles={rawHistory.map(d => ({
-                          time: d.date,
-                          open: Number(d.open),
-                          high: Number(d.high),
-                          low: Number(d.low),
-                          close: Number(d.close),
-                        }))}
                         symbol={selectedSymbol}
+                        candles={rawHistory || []}
+                        onApplyMarkers={(markers) => {
+                          try {
+                            if (candleRef.current && markers && markers.length > 0) {
+                              candleRef.current.setMarkers(markers);
+                            }
+                          } catch {}
+                        }}
                       />
                     )}
 

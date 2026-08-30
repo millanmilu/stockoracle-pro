@@ -1,364 +1,312 @@
-import { useMemo, useState } from 'react';
-import { TrendingUp, TrendingDown, Minus, Zap, Target } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  Zap, TrendingUp, TrendingDown, Target, ShieldCheck, 
+  Layers, ArrowUpRight, ArrowDownRight, Award, Play, ExternalLink, RefreshCw 
+} from 'lucide-react';
+import api from '../../utils/api';
+import useStore from '../../store/useStore';
+import toast from 'react-hot-toast';
 
-const PATTERNS = [
-  { id: 'engulfing_bull', name: 'Bullish Engulfing', type: 'bullish', reliability: 0.72 },
-  { id: 'engulfing_bear', name: 'Bearish Engulfing', type: 'bearish', reliability: 0.68 },
-  { id: 'hammer', name: 'Hammer', type: 'bullish', reliability: 0.65 },
-  { id: 'shooting_star', name: 'Shooting Star', type: 'bearish', reliability: 0.63 },
-  { id: 'doji', name: 'Doji', type: 'neutral', reliability: 0.55 },
-  { id: 'morning_star', name: 'Morning Star', type: 'bullish', reliability: 0.78 },
-  { id: 'evening_star', name: 'Evening Star', type: 'bearish', reliability: 0.76 },
-  { id: 'three_white_soldiers', name: 'Three White Soldiers', type: 'bullish', reliability: 0.81 },
-  { id: 'three_black_crows', name: 'Three Black Crows', type: 'bearish', reliability: 0.79 },
-  { id: 'head_shoulders', name: 'Head & Shoulders', type: 'bearish', reliability: 0.74 },
-  { id: 'inverse_head_shoulders', name: 'Inverse H&S', type: 'bullish', reliability: 0.73 },
-  { id: 'double_top', name: 'Double Top', type: 'bearish', reliability: 0.71 },
-  { id: 'double_bottom', name: 'Double Bottom', type: 'bullish', reliability: 0.70 },
-  { id: 'triangle_asc', name: 'Ascending Triangle', type: 'bullish', reliability: 0.69 },
-  { id: 'triangle_desc', name: 'Descending Triangle', type: 'bearish', reliability: 0.67 },
-];
+export default function AIPatternRecognition({ symbol, candles = [], onApplyMarkers }) {
+  const selectedSymbol = useStore((s) => s.selectedSymbol);
+  const setActiveView = useStore((s) => s.setActiveView);
+  const currentSymbol = (symbol || selectedSymbol || 'RELIANCE').toUpperCase();
 
-// Simulated backtest results (in production, this would come from API)
-const BACKTEST_STATS = {
-  engulfing_bull: { successRate: 72.4, avgReturn: 2.3, trades: 1247 },
-  engulfing_bear: { successRate: 68.1, avgReturn: -2.1, trades: 1189 },
-  hammer: { successRate: 65.3, avgReturn: 1.8, trades: 892 },
-  shooting_star: { successRate: 63.2, avgReturn: -1.9, trades: 834 },
-  doji: { successRate: 55.1, avgReturn: 0.4, trades: 2341 },
-  morning_star: { successRate: 78.2, avgReturn: 3.1, trades: 456 },
-  evening_star: { successRate: 76.4, avgReturn: -2.9, trades: 423 },
-  three_white_soldiers: { successRate: 81.3, avgReturn: 4.2, trades: 287 },
-  three_black_crows: { successRate: 79.1, avgReturn: -3.8, trades: 264 },
-  head_shoulders: { successRate: 74.2, avgReturn: -3.4, trades: 512 },
-  inverse_head_shoulders: { successRate: 73.1, avgReturn: 3.2, trades: 489 },
-  double_top: { successRate: 71.3, avgReturn: -2.8, trades: 678 },
-  double_bottom: { successRate: 70.2, avgReturn: 2.6, trades: 654 },
-  triangle_asc: { successRate: 69.4, avgReturn: 2.4, trades: 534 },
-  triangle_desc: { successRate: 67.2, avgReturn: -2.2, trades: 512 },
-};
-
-export default function AIPatternRecognition({ candles, symbol }) {
+  const [patternData, setPatternData] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [selectedPattern, setSelectedPattern] = useState(null);
-  
-  const detectedPatterns = useMemo(() => {
-    if (!candles || candles.length < 5) return [];
-    
-    const patterns = [];
-    
-    // Scan for patterns in recent candles
-    for (let i = candles.length - 1; i >= Math.max(0, candles.length - 50); i--) {
-      const curr = candles[i];
-      const prev = candles[i - 1];
-      const prev2 = candles[i - 2];
-      
-      if (!prev || !prev2) continue;
-      
-      const bodyCurr = Math.abs(curr.close - curr.open);
-      const bodyPrev = Math.abs(prev.close - prev.open);
-      const rangeCurr = curr.high - curr.low;
-      const isCurrGreen = curr.close > curr.open;
-      const isPrevGreen = prev.close > prev.open;
-      
-      // Bullish Engulfing
-      if (!isPrevGreen && isCurrGreen && 
-          curr.open <= prev.close && curr.close >= prev.open &&
-          bodyCurr > bodyPrev * 1.5) {
-        patterns.push({
-          id: Date.now() + i,
-          patternId: 'engulfing_bull',
-          index: i,
-          time: curr.time,
-          price: curr.close,
-          confidence: 0.72 + Math.random() * 0.15,
-        });
-      }
-      
-      // Bearish Engulfing
-      if (isPrevGreen && !isCurrGreen && 
-          curr.open >= prev.close && curr.close <= prev.open &&
-          bodyCurr > bodyPrev * 1.5) {
-        patterns.push({
-          id: Date.now() + i,
-          patternId: 'engulfing_bear',
-          index: i,
-          time: curr.time,
-          price: curr.close,
-          confidence: 0.68 + Math.random() * 0.15,
-        });
-      }
-      
-      // Hammer
-      const lowerWick = Math.min(curr.open, curr.close) - curr.low;
-      const upperWick = curr.high - Math.max(curr.open, curr.close);
-      if (lowerWick > bodyCurr * 2 && upperWick < bodyCurr * 0.5 && bodyCurr > 0) {
-        patterns.push({
-          id: Date.now() + i,
-          patternId: 'hammer',
-          index: i,
-          time: curr.time,
-          price: curr.close,
-          confidence: 0.65 + Math.random() * 0.15,
-        });
-      }
-      
-      // Doji
-      if (bodyCurr < rangeCurr * 0.15 && rangeCurr > 0) {
-        patterns.push({
-          id: Date.now() + i,
-          patternId: 'doji',
-          index: i,
-          time: curr.time,
-          price: curr.close,
-          confidence: 0.55 + Math.random() * 0.15,
-        });
-      }
-    }
-    
-    return patterns.slice(0, 10).reverse();
-  }, [candles]);
+  const [activeTab, setActiveTab] = useState('recent'); // 'recent' | 'stats' | 'confluence'
 
-  const latestPattern = detectedPatterns[detectedPatterns.length - 1];
-  const patternInfo = latestPattern ? PATTERNS.find(p => p.id === latestPattern.patternId) : null;
-  const backtestStats = latestPattern ? BACKTEST_STATS[latestPattern.patternId] : null;
+  const fetchPatterns = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await api.get(`/api/stock/${currentSymbol}/patterns?period=1Y&lookback=45`);
+      if (res.data) {
+        setPatternData(res.data);
+        if (onApplyMarkers && res.data.chart_markers) {
+          onApplyMarkers(res.data.chart_markers);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch pattern recognition:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [currentSymbol, onApplyMarkers]);
+
+  useEffect(() => {
+    fetchPatterns();
+  }, [fetchPatterns]);
+
+  const handle1ClickPaperTrade = (p) => {
+    const isBull = p.direction === 'bullish';
+    if (!isBull) {
+      toast.error('Short selling is not supported in spot cash virtual account.');
+      return;
+    }
+
+    // Direct 1-click execution or notification
+    api.post('/api/paper/order', {
+      ticker: currentSymbol,
+      order_type: 'MARKET',
+      action: 'BUY',
+      shares: 10,
+      price: p.entry_price || p.close,
+      stop_loss: p.stop_loss,
+      target_price: p.target_price,
+      notes: `Pattern: ${p.pattern} (${p.confidence}% Conf)`,
+    }).then(() => {
+      toast.success(`Virtual Buy Order Placed for ${currentSymbol} on ${p.pattern} Setup! SL: ₹${p.stop_loss}, Target: ₹${p.target_price}`);
+    }).catch((err) => {
+      toast.error(err.response?.data?.detail || 'Failed to place pattern trade.');
+    });
+  };
+
+  const {
+    patterns = [],
+    backtest_stats = {},
+    confluence_setups = [],
+    bias_score = 50,
+    bias_label = 'Neutral',
+    bullish = 0,
+    bearish = 0,
+  } = patternData || {};
+
+  const biasColor = bias_score >= 60 ? '#10B981' : (bias_score <= 40 ? '#F43F5E' : '#F59E0B');
 
   return (
-    <div style={{ 
-      display: 'flex', 
-      flexDirection: 'column', 
-      gap: 8,
-      padding: '10px',
-      background: 'rgba(9,12,24,0.95)',
-      border: '1px solid rgba(168,85,247,0.2)',
-      borderRadius: 10,
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 12,
+      padding: '12px',
+      background: 'rgba(9, 12, 24, 0.95)',
+      border: '1px solid rgba(168, 85, 247, 0.25)',
+      borderRadius: 12,
+      color: '#F8FAFC',
+      fontSize: '0.78rem',
     }}>
       {/* Header */}
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 4
-      }}>
-        <div style={{ 
-          fontSize: '0.72rem', 
-          fontWeight: 700, 
-          color: '#A855F7',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 5
-        }}>
-          <Zap size={13} />
-          AI PATTERN RECOGNITION
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{
+            width: 24, height: 24, borderRadius: 6,
+            background: 'rgba(168, 85, 247, 0.15)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: '#C084FC',
+          }}>
+            <Zap size={14} />
+          </div>
+          <strong style={{ fontSize: '0.85rem', color: '#F8FAFC' }}>AI Pattern Recognition</strong>
+          <span style={{ fontSize: '0.66rem', color: '#A855F7', background: 'rgba(168,85,247,0.12)', padding: '1px 6px', borderRadius: 4 }}>
+            {currentSymbol}
+          </span>
         </div>
-        <div style={{ 
-          fontSize: '0.6rem', 
-          color: '#6B7280'
-        }}>
-          Last 50 candles
+
+        <button
+          onClick={fetchPatterns}
+          title="Refresh Patterns"
+          style={{
+            background: 'transparent', border: 'none',
+            color: '#94A3B8', cursor: 'pointer', display: 'flex', alignItems: 'center',
+          }}
+        >
+          <RefreshCw size={12} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+        </button>
+      </div>
+
+      {/* Pattern Bias Indicator */}
+      <div style={{
+        background: 'rgba(15, 23, 42, 0.8)',
+        border: '1px solid rgba(255, 255, 255, 0.06)',
+        borderRadius: 8, padding: '8px 10px',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      }}>
+        <div>
+          <span style={{ fontSize: '0.65rem', color: '#94A3B8', textTransform: 'uppercase' }}>45D Pattern Bias</span>
+          <div style={{ fontSize: '0.95rem', fontWeight: 800, color: biasColor, fontFamily: 'JetBrains Mono, monospace' }}>
+            {bias_label} ({bias_score}/100)
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 6, fontSize: '0.68rem', fontWeight: 700 }}>
+          <span style={{ color: '#10B981' }}>🟢 {bullish} Bullish</span>
+          <span style={{ color: '#F43F5E' }}>🔴 {bearish} Bearish</span>
         </div>
       </div>
 
-      {/* Latest Pattern Alert */}
-      {latestPattern && patternInfo && (
-        <div style={{
-          padding: '10px 12px',
-          borderRadius: 8,
-          background: patternInfo.type === 'bullish' 
-            ? 'rgba(38,166,154,0.1)' 
-            : patternInfo.type === 'bearish'
-            ? 'rgba(239,83,80,0.1)'
-            : 'rgba(245,158,11,0.1)',
-          border: `1px solid ${
-            patternInfo.type === 'bullish' 
-              ? 'rgba(38,166,154,0.3)' 
-              : patternInfo.type === 'bearish'
-              ? 'rgba(239,83,80,0.3)'
-              : 'rgba(245,158,11,0.3)'
-          }`,
-        }}>
-          <div style={{ 
-            display: 'flex', 
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 6
-          }}>
-            <div style={{ 
-              fontSize: '0.75rem', 
-              fontWeight: 700,
-              color: patternInfo.type === 'bullish' 
-                ? '#26A69A' 
-                : patternInfo.type === 'bearish'
-                ? '#EF5350'
-                : '#F59E0B',
-            }}>
-              {patternInfo.type === 'bullish' && <TrendingUp size={12} style={{ display: 'inline', marginRight: 4 }} />}
-              {patternInfo.type === 'bearish' && <TrendingDown size={12} style={{ display: 'inline', marginRight: 4 }} />}
-              {patternInfo.name}
-            </div>
-            <div style={{ 
-              fontSize: '0.65rem', 
-              color: '#9CA3AF',
-              fontFamily: 'JetBrains Mono, monospace'
-            }}>
-              ₹{latestPattern.price?.toFixed(2)}
-            </div>
-          </div>
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: 4, background: 'rgba(15, 23, 42, 0.6)', padding: 2, borderRadius: 6 }}>
+        {[
+          { id: 'recent', label: `Detections (${patterns.length})` },
+          { id: 'confluence', label: `Confluence (${confluence_setups.length})` },
+          { id: 'stats', label: 'Real Backtest Stats' },
+        ].map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            style={{
+              flex: 1, padding: '4px 6px', borderRadius: 4,
+              border: 'none', fontSize: '0.68rem', fontWeight: 700,
+              cursor: 'pointer',
+              background: activeTab === t.id ? '#8B5CF6' : 'transparent',
+              color: activeTab === t.id ? '#FFFFFF' : '#94A3B8',
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
-          {/* Confidence Bar */}
-          <div style={{ marginBottom: 6 }}>
-            <div style={{ 
-              display: 'flex', 
-              justifyContent: 'space-between',
-              fontSize: '0.62rem',
-              color: '#6B7280',
-              marginBottom: 3
-            }}>
-              <span>AI Confidence</span>
-              <span style={{ color: '#C084FC', fontWeight: 700 }}>
-                {(latestPattern.confidence * 100).toFixed(0)}%
-              </span>
-            </div>
-            <div style={{ 
-              height: 4, 
-              background: 'rgba(255,255,255,0.05)', 
-              borderRadius: 99, 
-              overflow: 'hidden' 
-            }}>
-              <div style={{
-                height: '100%',
-                width: `${latestPattern.confidence * 100}%`,
-                background: `linear-gradient(90deg, #A855F7, #C084FC)`,
-                borderRadius: 99,
-              }} />
-            </div>
-          </div>
+      {/* Tab 1: Recent Detected Patterns List */}
+      {activeTab === 'recent' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
+          {patterns.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 20, color: '#64748B' }}>No patterns detected in recent candles</div>
+          ) : (
+            patterns.slice(0, 15).map((p) => {
+              const isBull = p.direction === 'bullish';
+              const col = isBull ? '#10B981' : (p.direction === 'bearish' ? '#F43F5E' : '#F59E0B');
 
-          {/* Backtested Stats */}
-          {backtestStats && (
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(3, 1fr)', 
-              gap: 4,
-              marginTop: 8,
-              paddingTop: 8,
-              borderTop: '1px solid rgba(255,255,255,0.05)'
-            }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '0.55rem', color: '#6B7280' }}>Success Rate</div>
-                <div style={{ 
-                  fontSize: '0.7rem', 
-                  fontWeight: 700, 
-                  color: backtestStats.successRate >= 70 ? '#26A69A' : '#F59E0B'
-                }}>
-                  {backtestStats.successRate.toFixed(1)}%
+              return (
+                <div
+                  key={p.id}
+                  style={{
+                    background: 'rgba(15, 23, 42, 0.7)',
+                    border: `1px solid ${col}30`,
+                    borderLeft: `3px solid ${col}`,
+                    borderRadius: 6, padding: '8px 10px',
+                    display: 'flex', flexDirection: 'column', gap: 4,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong style={{ color: col, fontSize: '0.78rem' }}>{p.pattern}</strong>
+                    <span style={{
+                      fontSize: '0.66rem', fontWeight: 800,
+                      color: '#C084FC', background: 'rgba(168,85,247,0.12)',
+                      padding: '1px 6px', borderRadius: 4, fontFamily: 'JetBrains Mono, monospace'
+                    }}>
+                      {p.confidence}% Conf
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', color: '#94A3B8' }}>
+                    <span>{p.date} · Entry: ₹{p.entry_price?.toFixed(1)}</span>
+                    <span>SL: ₹{p.stop_loss} | T: ₹{p.target_price}</span>
+                  </div>
+
+                  {/* Confluences */}
+                  {p.confluences?.length > 0 && (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 }}>
+                      {p.confluences.map((c, i) => (
+                        <span key={i} style={{ fontSize: '0.6rem', color: '#38BDF8', background: 'rgba(56,189,248,0.1)', padding: '1px 4px', borderRadius: 3 }}>
+                          ⚡ {c}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* 1-Click Action */}
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 4 }}>
+                    <button
+                      onClick={() => handle1ClickPaperTrade(p)}
+                      style={{
+                        background: 'rgba(16, 185, 129, 0.15)',
+                        border: '1px solid rgba(16, 185, 129, 0.3)',
+                        borderRadius: 4, padding: '2px 8px',
+                        color: '#34D399', fontSize: '0.65rem', fontWeight: 700,
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
+                      }}
+                    >
+                      <Play size={10} />
+                      <span>1-Click Paper Trade</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '0.55rem', color: '#6B7280' }}>Avg Return</div>
-                <div style={{ 
-                  fontSize: '0.7rem', 
-                  fontWeight: 700, 
-                  color: backtestStats.avgReturn >= 0 ? '#26A69A' : '#EF5350'
-                }}>
-                  {backtestStats.avgReturn >= 0 ? '+' : ''}{backtestStats.avgReturn.toFixed(1)}%
-                </div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: '0.55rem', color: '#6B7280' }}>Backtests</div>
-                <div style={{ 
-                  fontSize: '0.7rem', 
-                  fontWeight: 700, 
-                  color: '#9CA3AF'
-                }}>
-                  {backtestStats.trades.toLocaleString()}
-                </div>
-              </div>
-            </div>
+              );
+            })
           )}
         </div>
       )}
 
-      {/* Pattern List */}
-      {detectedPatterns.length > 0 && (
-        <div style={{ 
-          maxHeight: 150, 
-          overflowY: 'auto',
-          borderTop: '1px solid rgba(255,255,255,0.05)',
-          paddingTop: 8
-        }}>
-          <div style={{ 
-            fontSize: '0.62rem', 
-            color: '#6B7280', 
-            marginBottom: 6,
-            fontWeight: 600
-          }}>
-            Recent Detections ({detectedPatterns.length})
-          </div>
-          {detectedPatterns.slice(-5).reverse().map((p, idx) => {
-            const pInfo = PATTERNS.find(pat => pat.id === p.patternId);
-            const stats = BACKTEST_STATS[p.patternId];
-            
-            return (
+      {/* Tab 2: High Confluence Setups */}
+      {activeTab === 'confluence' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
+          {confluence_setups.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 20, color: '#64748B' }}>No multi-factor confluence patterns found</div>
+          ) : (
+            confluence_setups.map((p) => (
               <div
                 key={p.id}
-                onClick={() => setSelectedPattern(selectedPattern === p.id ? null : p.id)}
                 style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '5px 8px',
-                  borderRadius: 6,
-                  background: selectedPattern === p.id ? 'rgba(168,85,247,0.1)' : 'rgba(255,255,255,0.02)',
-                  marginBottom: 3,
-                  cursor: 'pointer',
-                  border: selectedPattern === p.id ? '1px solid rgba(168,85,247,0.3)' : '1px solid transparent',
+                  background: 'linear-gradient(135deg, rgba(99,102,241,0.1) 0%, rgba(168,85,247,0.1) 100%)',
+                  border: '1px solid rgba(168,85,247,0.35)',
+                  borderRadius: 8, padding: '8px 10px',
+                  display: 'flex', flexDirection: 'column', gap: 4,
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {pInfo?.type === 'bullish' && <TrendingUp size={10} color="#26A69A" />}
-                  {pInfo?.type === 'bearish' && <TrendingDown size={10} color="#EF5350" />}
-                  {pInfo?.type === 'neutral' && <Minus size={10} color="#F59E0B" />}
-                  <span style={{ fontSize: '0.62rem', color: '#9CA3AF' }}>{pInfo?.name}</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: '0.58rem', color: '#6B7280' }}>
-                    {stats ? `${stats.successRate.toFixed(0)}%` : '--'}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <strong style={{ color: p.direction === 'bullish' ? '#34D399' : '#F87171' }}>
+                    {p.pattern}
+                  </strong>
+                  <span style={{ fontSize: '0.65rem', color: '#FCD34D', fontWeight: 800 }}>
+                    ⭐ {p.confluence_level}
                   </span>
-                  <Target size={10} color={p.confidence > 0.7 ? '#26A69A' : '#F59E0B'} />
+                </div>
+                <div style={{ fontSize: '0.68rem', color: '#94A3B8' }}>
+                  Date: {p.date} · Price: ₹{p.entry_price}
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                  {p.confluences.map((c, i) => (
+                    <span key={i} style={{ fontSize: '0.6rem', color: '#38BDF8', background: 'rgba(56,189,248,0.15)', padding: '2px 5px', borderRadius: 4 }}>
+                      ✓ {c}
+                    </span>
+                  ))}
                 </div>
               </div>
-            );
-          })}
+            ))
+          )}
         </div>
       )}
 
-      {/* No Patterns Message */}
-      {!latestPattern && (
-        <div style={{ 
-          padding: '15px 10px', 
-          textAlign: 'center', 
-          color: '#6B7280',
-          fontSize: '0.68rem',
-          background: 'rgba(255,255,255,0.01)',
-          borderRadius: 6
-        }}>
-          Scanning for patterns...<br/>
-          <span style={{ fontSize: '0.6rem', color: '#4B5563' }}>
-            AI analyzes last 50 candles for 15+ patterns
-          </span>
+      {/* Tab 3: Real Per-Stock Backtest Stats Table */}
+      {activeTab === 'stats' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflowY: 'auto' }}>
+          <div style={{ fontSize: '0.66rem', color: '#94A3B8', marginBottom: 2 }}>
+            Historical 1-Year forward return stats on <strong style={{ color: '#F8FAFC' }}>{currentSymbol}</strong>:
+          </div>
+          {Object.values(backtest_stats).map((st) => (
+            <div
+              key={st.pattern}
+              style={{
+                background: 'rgba(15, 23, 42, 0.7)',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+                borderRadius: 6, padding: '6px 8px',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              }}
+            >
+              <div>
+                <strong style={{ color: st.direction === 'bullish' ? '#34D399' : '#F87171', fontSize: '0.72rem' }}>
+                  {st.pattern}
+                </strong>
+                <div style={{ color: '#64748B', fontSize: '0.62rem' }}>
+                  {st.completed_trades} trades · Profit Factor: {st.profit_factor}
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span style={{
+                  color: st.win_rate >= 65 ? '#10B981' : '#F59E0B',
+                  fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', fontSize: '0.78rem',
+                }}>
+                  {st.win_rate}% Win
+                </span>
+                <div style={{ color: st.avg_5d_return_pct >= 0 ? '#34D399' : '#F87171', fontSize: '0.62rem', fontFamily: 'JetBrains Mono, monospace' }}>
+                  {st.avg_5d_return_pct >= 0 ? '+' : ''}{st.avg_5d_return_pct}% (5D)
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
-
-      {/* Info Footer */}
-      <div style={{ 
-        fontSize: '0.58rem', 
-        color: '#4B5563', 
-        textAlign: 'center',
-        borderTop: '1px solid rgba(255,255,255,0.05)',
-        paddingTop: 6
-      }}>
-        Success rates based on historical backtesting across NIFTY50 stocks
-      </div>
     </div>
   );
 }
