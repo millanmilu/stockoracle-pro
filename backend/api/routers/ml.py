@@ -103,13 +103,35 @@ def get_task_status_endpoint(task_id: str):
 
 
 @router.get("/stock/{ticker}/backtest")
-def get_stock_backtest(ticker: str, initial_capital: float = 100000.0, strategy: str = "ai_signals"):
-    """Runs realistic walk-forward backtest simulation with STT/brokerage fees."""
+def get_stock_backtest(
+    ticker: str,
+    initial_capital: float = 100000.0,
+    entry_threshold: float = 0.015,
+    stop_loss: float = 0.04,
+    take_profit: float = 0.08,
+    bearish_exit_threshold: float = -0.01,
+    train_test_split: float = 0.70,
+    max_holding_days: int = 20,
+):
+    """
+    Runs an out-of-sample walk-forward backtest on the trained XGBoost ensemble.
+    All strategy parameters are configurable. No look-ahead bias.
+    """
     t = ticker.upper().strip()
     df = fetch_stock_data(t, period="2Y")
-    if df is None or len(df) < 50:
+    if df is None or len(df) < 80:
         raise HTTPException(status_code=404, detail=f"Insufficient history for '{t}'.")
-    return run_backtest(df, t, initial_capital=initial_capital)
+    return run_backtest(
+        df, t,
+        initial_capital=initial_capital,
+        entry_threshold=entry_threshold,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        bearish_exit_threshold=bearish_exit_threshold,
+        train_test_split=train_test_split,
+        max_holding_days=max_holding_days,
+    )
+
 
 
 @router.get("/stock/{ticker}/ai-consensus")
