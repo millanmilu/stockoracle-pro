@@ -192,6 +192,8 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         </button>
       </div>
     );
+  }
+
   const quarterly = (deepData?.quarterly_results?.length ? deepData.quarterly_results : (data?.quarterly_results || [])).map(q => ({
     ...q,
     revenue: q.revenue ?? q.Sales ?? q['Sales+'] ?? q.Revenue ?? 0,
@@ -387,7 +389,6 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                   </div>
                 ))}
               </div>
-              {/* Always visible 9-criteria audit link */}
               <div style={{ marginTop: 6, fontSize: '0.62rem', color: '#818CF8', cursor: 'pointer', textAlign: 'right', fontWeight: 600 }} onClick={() => setShowQualityModal(true)}>
                 View 9-point criteria audit →
               </div>
