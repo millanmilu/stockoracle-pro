@@ -91,21 +91,59 @@ def get_stock_volatility(ticker: str):
 
 
 @router.get("/stock/{ticker}/montecarlo")
-def get_stock_monte_carlo(ticker: str):
-    """Simulates 1,000 Geometric Brownian Motion (GBM) paths with VaR calculations."""
+def get_stock_monte_carlo(
+    ticker: str,
+    simulations: int = 1000,
+    horizon: int = 30,
+    method: str = "gbm",
+    drift_type: str = "historical",
+    custom_drift_pct: Optional[float] = None,
+    custom_vol_pct: Optional[float] = None,
+    vol_multiplier: float = 1.0,
+    stress_scenario: Optional[str] = "none",
+    portfolio_capital: float = 100000.0,
+    risk_tolerance_pct: float = 2.0,
+):
+    """Simulates high-fidelity Monte Carlo paths (GBM, Bootstrap, Jump Diffusion, GARCH) with dual VaR/CVaR."""
     t = ticker.upper().strip()
-    from backend.data.database import get_monte_carlo_cached, save_monte_carlo
-    cached = get_monte_carlo_cached(t)
-    if cached:
-        return cached
+    is_default_query = (
+        simulations == 1000 and horizon == 30 and method == "gbm" and
+        drift_type == "historical" and (stress_scenario in (None, "none", "")) and
+        custom_drift_pct is None and custom_vol_pct is None and vol_multiplier == 1.0 and
+        portfolio_capital == 100000.0 and risk_tolerance_pct == 2.0
+    )
+
+    if is_default_query:
+        from backend.data.database import get_monte_carlo_cached, save_monte_carlo
+        cached = get_monte_carlo_cached(t)
+        if cached and "envelope" in cached and "risk_metrics" in cached:
+            return cached
 
     df = fetch_stock_data(t, period="1Y")
     if df is None or len(df) < 30:
         raise HTTPException(status_code=404, detail=f"Insufficient price history for '{t}'.")
 
-    result = run_monte_carlo_simulation(df["close"].values.astype(float).tolist())
-    save_monte_carlo(t, result)
+    result = run_monte_carlo_simulation(
+        prices=df["close"].values.astype(float),
+        simulations=simulations,
+        horizon=horizon,
+        method=method,
+        drift_type=drift_type,
+        custom_drift_pct=custom_drift_pct,
+        custom_vol_pct=custom_vol_pct,
+        vol_multiplier=vol_multiplier,
+        stress_scenario=stress_scenario,
+        portfolio_capital=portfolio_capital,
+        risk_tolerance_pct=risk_tolerance_pct,
+        ticker=t,
+    )
+
+    if is_default_query and "error" not in result:
+        from backend.data.database import save_monte_carlo
+        save_monte_carlo(t, result)
+
     return result
+
 
 
 
