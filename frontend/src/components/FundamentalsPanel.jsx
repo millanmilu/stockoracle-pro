@@ -118,8 +118,10 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const selectedSymbol = useStore((s) => s.selectedSymbol);
   const ticker = (propTicker || selectedSymbol || 'RELIANCE').toUpperCase();
 
+  // State Management: 'tabs' (single isolated view) vs 'all_panels' (all widgets in CSS grid layout)
+  const [viewMode, setViewMode] = useState('tabs');
   const [activeTab, setActiveTab] = useState('overview');
-  const [viewMode, setViewMode] = useState('tabbed'); // 'tabbed' | 'full'
+
   const [data, setData] = useState(null);
   const [deepData, setDeepData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -254,18 +256,19 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const mcapVal = data?.market_cap ?? deepData?.market_cap;
   const divYieldVal = data?.dividend_yield ?? deepData?.dividend_yield ?? corpCal?.dividend_yield_pct;
 
+  // Sub-navigation tabs
   const TABS = [
-    { id: 'overview', label: 'Overview', badge: 'Scorecard', icon: Award },
+    { id: 'overview', label: 'Overview Scorecard', badge: 'Key Ratios', icon: Award },
     { id: 'quarters', label: 'Quarterly', badge: `${quarterly.length}Q`, icon: Table },
     { id: 'annual', label: 'Annual P&L', badge: `${annualPl.length}Y`, icon: Layers },
     { id: 'balancesheet', label: 'Balance Sheet', badge: 'Assets/Liab', icon: Scale },
     { id: 'cashflow', label: 'Cash Flows', badge: 'CFO/CFI', icon: TrendingUp },
     { id: 'shareholding', label: 'Shareholding', badge: `${shareholding.length}Q`, icon: PieIcon },
     { id: 'peers', label: 'Peers', badge: `${peers.length}`, icon: Users },
-    { id: 'valuation', label: 'DCF Fair Value', badge: 'Intrinsic', icon: DollarSign },
+    { id: 'valuation', label: 'DCF Valuation', badge: 'Intrinsic Target', icon: DollarSign },
   ];
 
-  // Helper renderer for each section
+  // ── Modular Section Renderers (Each properly isolated) ──
   const renderOverviewSection = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {/* Core Valuation & Return Ratios with Mini Sparklines */}
@@ -871,34 +874,42 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
         {/* Action Controls & View Mode Toggle */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* Segmented View Mode Toggle: Tabbed vs Full Continuous Report */}
+          {/* Segmented View Mode Toggle: 'tabs' vs 'all_panels' */}
           <div style={{
-            display: 'flex', background: 'rgba(0,0,0,0.35)', borderRadius: 6, padding: 2,
-            border: '1px solid rgba(255,255,255,0.08)'
+            display: 'flex', background: 'rgba(0,0,0,0.40)', borderRadius: 8, padding: 3,
+            border: '1px solid rgba(255,255,255,0.10)'
           }}>
             <button
-              onClick={() => setViewMode('tabbed')}
+              type="button"
+              onClick={() => setViewMode('tabs')}
               style={{
-                display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 4,
+                display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6,
                 border: 'none',
-                background: viewMode === 'tabbed' ? 'rgba(99,102,241,0.3)' : 'transparent',
-                color: viewMode === 'tabbed' ? '#818CF8' : '#94A3B8',
-                fontWeight: viewMode === 'tabbed' ? 700 : 500, fontSize: '0.66rem', cursor: 'pointer'
+                background: viewMode === 'tabs' ? 'linear-gradient(135deg, rgba(99,102,241,0.45), rgba(139,92,246,0.35))' : 'transparent',
+                color: viewMode === 'tabs' ? '#FFFFFF' : '#94A3B8',
+                fontWeight: viewMode === 'tabs' ? 700 : 500, fontSize: '0.70rem', cursor: 'pointer',
+                boxShadow: viewMode === 'tabs' ? '0 1px 6px rgba(99,102,241,0.3)' : 'none',
+                transition: 'all 0.15s ease'
               }}
             >
-              <LayoutGrid size={11} />Tabs
+              <LayoutGrid size={13} color={viewMode === 'tabs' ? '#818CF8' : '#64748B'} />
+              <span>Tabs</span>
             </button>
             <button
-              onClick={() => setViewMode('full')}
+              type="button"
+              onClick={() => setViewMode('all_panels')}
               style={{
-                display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderRadius: 4,
+                display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px', borderRadius: 6,
                 border: 'none',
-                background: viewMode === 'full' ? 'rgba(99,102,241,0.3)' : 'transparent',
-                color: viewMode === 'full' ? '#818CF8' : '#94A3B8',
-                fontWeight: viewMode === 'full' ? 700 : 500, fontSize: '0.66rem', cursor: 'pointer'
+                background: viewMode === 'all_panels' ? 'linear-gradient(135deg, rgba(99,102,241,0.45), rgba(139,92,246,0.35))' : 'transparent',
+                color: viewMode === 'all_panels' ? '#FFFFFF' : '#94A3B8',
+                fontWeight: viewMode === 'all_panels' ? 700 : 500, fontSize: '0.70rem', cursor: 'pointer',
+                boxShadow: viewMode === 'all_panels' ? '0 1px 6px rgba(99,102,241,0.3)' : 'none',
+                transition: 'all 0.15s ease'
               }}
             >
-              <FileText size={11} />All Panels
+              <FileText size={13} color={viewMode === 'all_panels' ? '#818CF8' : '#64748B'} />
+              <span>All Panels</span>
             </button>
           </div>
 
@@ -914,8 +925,8 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         </div>
       </div>
 
-      {/* ── Sub Navigation Tabs (Prominent Cockpit Pills) ── */}
-      {viewMode === 'tabbed' && (
+      {/* ── Sub Navigation Menu (ONLY rendered when viewMode === 'tabs') ── */}
+      {viewMode === 'tabs' && (
         <div style={{
           display: 'flex', gap: 6, overflowX: 'auto', padding: '4px 2px 8px',
           borderBottom: '1px solid rgba(255,255,255,0.08)'
@@ -926,6 +937,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
             return (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => setActiveTab(tab.id)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 8,
@@ -944,7 +956,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                 {tab.badge && (
                   <span style={{
                     fontSize: '0.58rem',
-                    background: isSel ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.06)',
+                    background: isSel ? 'rgba(99,102,241,0.40)' : 'rgba(255,255,255,0.06)',
                     color: isSel ? '#E0E7FF' : '#64748B',
                     padding: '1px 5px',
                     borderRadius: 4,
@@ -959,9 +971,9 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         </div>
       )}
 
-      {/* ── TABBED VIEW: Individual Selected Panel ── */}
-      {viewMode === 'tabbed' && (
-        <>
+      {/* ── MODE 1: TABS (Strictly isolated single active component) ── */}
+      {viewMode === 'tabs' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {activeTab === 'overview' && renderOverviewSection()}
           {activeTab === 'quarters' && renderQuartersSection()}
           {activeTab === 'annual' && renderAnnualSection()}
@@ -970,11 +982,11 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
           {activeTab === 'shareholding' && renderShareholdingSection()}
           {activeTab === 'peers' && renderPeersSection()}
           {activeTab === 'valuation' && renderValuationSection()}
-        </>
+        </div>
       )}
 
-      {/* ── FULL REPORT MODE: All 8 Panels Stacked Continuously ── */}
-      {viewMode === 'full' && (
+      {/* ── MODE 2: ALL PANELS (Sub-tab menu hidden, all data widgets rendered in continuous layout) ── */}
+      {viewMode === 'all_panels' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
