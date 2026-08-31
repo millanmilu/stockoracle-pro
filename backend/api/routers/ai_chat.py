@@ -149,20 +149,18 @@ async def get_ai_trade_explain_endpoint(symbol: str):
             f"MACD: {macd_val} vs Signal: {macd_sig}\n"
         )
 
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            return {
-                "explanation": f"AI model indicates {signal} bias ({pred_return:+.1f}% 7D forecast). RSI is at {rsi}. Connect GEMINI_API_KEY for full AI trade commentary.",
-                "signal": signal,
-            }
-
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        resp = model.generate_content(
-            f"Explain this stock trade signal in 3 clear sentences for a trader:\n{prompt_context}\nInclude key technical drivers and one risk caveat."
+        from backend.ai.provider import ask_ai
+        system_instruction = "You are a quantitative technical strategist. Explain the trade signal in 3 clear sentences for a trader, highlighting key momentum drivers and one risk caveat."
+        explanation = await loop.run_in_executor(
+            None,
+            lambda: ask_ai(
+                question=f"Explain this trade signal:\n{prompt_context}",
+                system_instruction=system_instruction,
+                max_tokens=250,
+                temperature=0.2
+            )
         )
-        return {"explanation": resp.text.strip(), "signal": signal}
+        return {"explanation": explanation, "signal": signal}
     except Exception as exc:
         logger.warning("AI trade explain failed for %s: %s", sym, exc)
         return {"explanation": "Trade explanation temporarily unavailable.", "signal": "NEUTRAL"}

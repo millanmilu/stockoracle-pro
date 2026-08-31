@@ -122,7 +122,8 @@ export default function App() {
       case 'Fundamentals':
       case 'Earnings':          return <Suspense fallback={<LoadingFallback />}><FundamentalsPanel ticker={selectedSymbol} /></Suspense>;
       case 'Options Chain':     return <Suspense fallback={<LoadingFallback />}><OptionsChainView ticker={selectedSymbol} /></Suspense>;
-      case 'Broker Settings':   return <Suspense fallback={<LoadingFallback />}><BrokerSettingsView /></Suspense>;
+      case 'Broker Settings':   return <Suspense fallback={<LoadingFallback />}><BrokerSettingsView initialTab="broker" /></Suspense>;
+      case 'AI Providers':      return <Suspense fallback={<LoadingFallback />}><BrokerSettingsView initialTab="ai" /></Suspense>;
       default:                  return <LiveChartView />;
     }
   };

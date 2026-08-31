@@ -67,6 +67,10 @@ class BrokerApplyRequest(BaseModel):
     persist_to_disk: bool = True
 
 
+class BrokerClearRequest(BaseModel):
+    broker: str  # "angel_one" | "zerodha" | "upstox" | "fyers"
+
+
 # ── Database Helpers ───────────────────────────────────────────────────────────
 
 def save_broker_to_db(broker_name: str, creds_dict: dict, is_active: bool = True) -> bool:
@@ -82,8 +86,8 @@ def save_broker_to_db(broker_name: str, creds_dict: dict, is_active: bool = True
                     credentials_json  TEXT NOT NULL,
                     session_data_json TEXT,
                     last_verified_at  TEXT,
-                    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
-                    updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+                    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
                 )
             """)
             
@@ -268,10 +272,21 @@ def get_broker_accounts():
     return {"accounts": results}
 
 
+@router.get("/audit-logs")
+def get_broker_audit_logs_endpoint(limit: int = 10):
+    """Returns recent broker session and connection audit logs."""
+    from backend.data.database import get_recent_broker_audit_logs
+    return {"logs": get_recent_broker_audit_logs(limit=limit)}
+
+
 @router.post("/test")
 def test_broker_credentials(req: BrokerTestRequest):
     """Tests credentials without applying them to active sessions."""
+    import time
+    from backend.data.database import save_broker_audit_log
+
     broker = req.broker.lower().strip()
+    t0 = time.perf_counter()
 
     if broker == "angel_one":
         creds = req.angel_one
@@ -282,35 +297,136 @@ def test_broker_credentials(req: BrokerTestRequest):
             test_api = SmartConnect(api_key=creds.api_key.strip())
             totp = pyotp.TOTP(creds.totp_secret.strip()).now()
             data = test_api.generateSession(creds.client_id.strip(), creds.password.strip(), totp)
+            latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+
             if data and data.get("status"):
+                client_code = data.get("data", {}).get("clientcode", creds.client_id)
+                save_broker_audit_log("angel_one", "TEST", "SUCCESS", f"Session verified for client {client_code}", latency_ms)
                 return {
                     "success": True,
-                    "message": "Connection successful — Angel One session verified.",
-                    "client_id": data.get("data", {}).get("clientcode", creds.client_id),
+                    "message": f"Connection successful — Angel One session verified ({latency_ms}ms).",
+                    "client_id": client_code,
+                    "latency_ms": latency_ms,
                 }
             else:
                 msg = data.get("message", "Unknown error") if data else "No response"
-                return {"success": False, "message": f"Login failed: {msg}"}
+                save_broker_audit_log("angel_one", "TEST", "FAILED", msg, latency_ms)
+                return {"success": False, "message": f"Login failed: {msg}", "latency_ms": latency_ms}
         except Exception as exc:
-            return {"success": False, "message": f"Error: {str(exc)}"}
+            latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+            save_broker_audit_log("angel_one", "TEST", "ERROR", str(exc), latency_ms)
+            return {"success": False, "message": f"Error: {str(exc)}", "latency_ms": latency_ms}
 
     elif broker == "zerodha":
         creds = req.zerodha
-        if not creds or not creds.api_key:
-            raise HTTPException(status_code=422, detail="Zerodha API Key is required.")
-        return {"success": True, "message": "Zerodha credentials formatted successfully."}
+        if not creds or not creds.api_key or not creds.api_secret:
+            raise HTTPException(status_code=422, detail="Zerodha API Key and API Secret are required.")
+        
+        # Test Kite session if access token is available
+        if creds.access_token and len(creds.access_token.strip()) > 5:
+            try:
+                from kiteconnect import KiteConnect
+                kite = KiteConnect(api_key=creds.api_key.strip())
+                kite.set_access_token(creds.access_token.strip())
+                prof = kite.profile()
+                latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+                user_id = prof.get("user_id", creds.api_key)
+                save_broker_audit_log("zerodha", "TEST", "SUCCESS", f"Kite profile active: {user_id}", latency_ms)
+                return {
+                    "success": True,
+                    "message": f"Zerodha Kite session verified for user {user_id} ({latency_ms}ms).",
+                    "latency_ms": latency_ms,
+                }
+            except ImportError:
+                latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+                save_broker_audit_log("zerodha", "TEST", "NOTICE", "Credentials formatted (kiteconnect SDK not installed)", latency_ms)
+                return {
+                    "success": True,
+                    "message": f"Zerodha credentials validated ({latency_ms}ms). Install kiteconnect for live session probe.",
+                    "latency_ms": latency_ms,
+                }
+            except Exception as exc:
+                latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+                save_broker_audit_log("zerodha", "TEST", "FAILED", str(exc), latency_ms)
+                return {"success": False, "message": f"Zerodha session verification failed: {str(exc)}", "latency_ms": latency_ms}
+        
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        save_broker_audit_log("zerodha", "TEST", "VALIDATED", "Key & Secret validated format", latency_ms)
+        return {
+            "success": True,
+            "message": f"Zerodha API Key & Secret validated ({latency_ms}ms). Enter daily Access Token for live feed.",
+            "latency_ms": latency_ms,
+        }
 
     elif broker == "upstox":
         creds = req.upstox
-        if not creds or not creds.api_key:
-            raise HTTPException(status_code=422, detail="Upstox API Key is required.")
-        return {"success": True, "message": "Upstox credentials formatted successfully."}
+        if not creds or not creds.api_key or not creds.api_secret:
+            raise HTTPException(status_code=422, detail="Upstox Client ID and API Secret are required.")
+        
+        if creds.access_token and len(creds.access_token.strip()) > 5:
+            try:
+                from urllib.request import Request as UReq, urlopen as UOpen
+                req_up = UReq("https://api.upstox.com/v2/user/profile", headers={
+                    "Authorization": f"Bearer {creds.access_token.strip()}",
+                    "Accept": "application/json"
+                })
+                with UOpen(req_up, timeout=8) as resp:
+                    u_data = json.loads(resp.read().decode("utf-8"))
+                    latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+                    user_name = u_data.get("data", {}).get("user_name", "Upstox User")
+                    save_broker_audit_log("upstox", "TEST", "SUCCESS", f"Profile verified: {user_name}", latency_ms)
+                    return {
+                        "success": True,
+                        "message": f"Upstox session active for {user_name} ({latency_ms}ms).",
+                        "latency_ms": latency_ms,
+                    }
+            except Exception as exc:
+                latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+                save_broker_audit_log("upstox", "TEST", "FAILED", str(exc), latency_ms)
+                return {"success": False, "message": f"Upstox token probe failed: {str(exc)}", "latency_ms": latency_ms}
+
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        save_broker_audit_log("upstox", "TEST", "VALIDATED", "Format validated", latency_ms)
+        return {
+            "success": True,
+            "message": f"Upstox credentials validated ({latency_ms}ms). Provide daily OAuth Access Token for live feed.",
+            "latency_ms": latency_ms,
+        }
 
     elif broker == "fyers":
         creds = req.fyers
-        if not creds or not creds.app_id:
-            raise HTTPException(status_code=422, detail="Fyers App ID is required.")
-        return {"success": True, "message": "Fyers credentials formatted successfully."}
+        if not creds or not creds.app_id or not creds.secret_key:
+            raise HTTPException(status_code=422, detail="Fyers App ID and Secret Key are required.")
+        
+        if creds.access_token and len(creds.access_token.strip()) > 5:
+            try:
+                from urllib.request import Request as FReq, urlopen as FOpen
+                auth_hdr = f"{creds.app_id.strip()}:{creds.access_token.strip()}"
+                req_fy = FReq("https://api-t1.fyers.in/api/v3/profile", headers={
+                    "Authorization": auth_hdr,
+                    "Accept": "application/json"
+                })
+                with FOpen(req_fy, timeout=8) as resp:
+                    f_data = json.loads(resp.read().decode("utf-8"))
+                    latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+                    save_broker_audit_log("fyers", "TEST", "SUCCESS", "Fyers profile active", latency_ms)
+                    return {
+                        "success": True,
+                        "message": f"Fyers session verified successfully ({latency_ms}ms).",
+                        "latency_ms": latency_ms,
+                    }
+            except Exception as exc:
+                latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+                save_broker_audit_log("fyers", "TEST", "FAILED", str(exc), latency_ms)
+                return {"success": False, "message": f"Fyers token probe: {str(exc)}", "latency_ms": latency_ms}
+
+        latency_ms = round((time.perf_counter() - t0) * 1000, 1)
+        save_broker_audit_log("fyers", "TEST", "VALIDATED", "Format validated", latency_ms)
+        return {
+            "success": True,
+            "message": f"Fyers App ID & Secret Key validated ({latency_ms}ms). Enter daily 2FA Token for live feed.",
+            "latency_ms": latency_ms,
+        }
 
     raise HTTPException(status_code=400, detail=f"Unsupported broker: {broker}")
 
@@ -321,6 +437,7 @@ def apply_broker_credentials(req: BrokerApplyRequest):
     Saves credentials permanently to the database (broker_accounts) and .env,
     and activates the broker immediately for real-time live market feed.
     """
+    from backend.data.database import save_broker_audit_log
     broker = req.broker.lower().strip()
     creds_dict = {}
 
@@ -365,6 +482,7 @@ def apply_broker_credentials(req: BrokerApplyRequest):
 
         if success:
             logger.info("Angel One broker active and verified from database for client %s", creds_dict["client_id"])
+            save_broker_audit_log("angel_one", "APPLY", "ACTIVE", f"Client {creds_dict['client_id']} active")
             return {
                 "success": True,
                 "message": "Angel One activated and permanently stored in database! Live feed is active.",
@@ -374,6 +492,7 @@ def apply_broker_credentials(req: BrokerApplyRequest):
             }
         else:
             err = _fetcher.get_session_details().get("last_auth_error") or "Authentication failed"
+            save_broker_audit_log("angel_one", "APPLY", "AUTH_FAILED", err)
             return {
                 "success": False,
                 "message": f"Credentials stored permanently in database, but broker login failed: {err}",
@@ -393,6 +512,7 @@ def apply_broker_credentials(req: BrokerApplyRequest):
 
         db_saved = save_broker_to_db(broker, creds_dict, is_active=True)
         env_saved = _persist_credentials_to_env(broker, creds_dict) if req.persist_to_disk else False
+        save_broker_audit_log(broker, "APPLY", "ACTIVE", "Active broker updated in database")
 
         return {
             "success": True,
@@ -403,3 +523,43 @@ def apply_broker_credentials(req: BrokerApplyRequest):
         }
 
     raise HTTPException(status_code=400, detail=f"Unsupported broker '{broker}'.")
+
+
+@router.post("/clear")
+def clear_broker_credentials_endpoint(req: BrokerClearRequest):
+    """
+    Clears credentials for a broker from database and active memory.
+    """
+    from backend.data.database import save_broker_audit_log
+    broker = req.broker.lower().strip()
+    try:
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM broker_accounts WHERE broker = ?", (broker,))
+            conn.commit()
+
+        if broker == "angel_one":
+            for k in ["ANGEL_API_KEY", "ANGEL_CLIENT_ID", "ANGEL_PASSWORD", "ANGEL_TOTP_SECRET"]:
+                os.environ.pop(k, None)
+            _fetcher.ANGEL_API_KEY = ""
+            _fetcher.ANGEL_CLIENT_ID = ""
+            _fetcher.ANGEL_PASSWORD = ""
+            _fetcher.ANGEL_TOTP_SECRET = ""
+            _fetcher.reset_session()
+        elif broker == "zerodha":
+            for k in ["ZERODHA_API_KEY", "ZERODHA_API_SECRET", "ZERODHA_ACCESS_TOKEN"]:
+                os.environ.pop(k, None)
+        elif broker == "upstox":
+            for k in ["UPSTOX_API_KEY", "UPSTOX_API_SECRET", "UPSTOX_ACCESS_TOKEN"]:
+                os.environ.pop(k, None)
+        elif broker == "fyers":
+            for k in ["FYERS_APP_ID", "FYERS_SECRET_KEY", "FYERS_ACCESS_TOKEN"]:
+                os.environ.pop(k, None)
+
+        save_broker_audit_log(broker, "CLEAR", "SUCCESS", "Credentials removed from database and environment.")
+        return {
+            "success": True,
+            "message": f"Successfully cleared credentials for {broker.capitalize()}."
+        }
+    except Exception as exc:
+        save_broker_audit_log(broker, "CLEAR", "ERROR", str(exc))
+        raise HTTPException(status_code=500, detail=f"Failed clearing broker credentials: {str(exc)}")

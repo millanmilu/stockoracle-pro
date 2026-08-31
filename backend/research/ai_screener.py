@@ -56,12 +56,8 @@ def convert_natural_language_to_screener_query(prompt_text: str) -> Dict[str, An
         }
 
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-
-        system_instruction = """
-You are a financial quantitative query generator for StockOracle Pro.
+        from backend.ai.provider import ask_ai
+        system_instruction = """You are a financial quantitative query generator for StockOracle Pro.
 Convert the user's trading request into a valid Screener.in style formula DSL string.
 
 Available Metric Identifiers:
@@ -88,11 +84,17 @@ Rules:
   "explanation": "Finds quality companies with ROCE > 20% and low debt that are currently oversold."
 }
 2. Use uppercase for AND, OR, NOT.
-3. String values must be single-quoted (e.g. sector == 'IT').
-4. Do NOT output any markdown ticks other than ```json ```.
-"""
-        response = model.generate_content(f"{system_instruction}\nUser Prompt: \"{prompt}\"")
-        text = response.text.strip()
+3. String values must be single-quoted (e.g. sector == 'IT')."""
+
+        res_text = ask_ai(
+            question=f"User Prompt: \"{prompt}\"",
+            context="",
+            json_mode=True,
+            system_instruction=system_instruction,
+            max_tokens=250,
+            temperature=0.1
+        )
+        text = res_text.strip()
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):

@@ -275,6 +275,7 @@ from backend.api.routers.ml import router as ml_router
 from backend.api.routers.ai_chat import router as aichat_router
 from backend.api.routers.sentiment_ta import router as sentiment_ta_router
 from backend.api.routers.broker import router as broker_router
+from backend.api.routers.ai_providers import router as ai_providers_router
 
 app.include_router(system_router)
 app.include_router(market_router)
@@ -286,6 +287,7 @@ app.include_router(ml_router)
 app.include_router(aichat_router)
 app.include_router(sentiment_ta_router)
 app.include_router(broker_router)
+app.include_router(ai_providers_router)
 
 
 

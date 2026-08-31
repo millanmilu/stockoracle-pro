@@ -64,6 +64,7 @@ export default function ProSidebar({ collapsed, onToggleCollapse }) {
       title: 'ACCOUNT',
       items: [
         { label: 'Broker Settings', icon: <KeyRound size={16} />, view: 'Broker Settings', badge: { text: 'API', color: '#10B981' } },
+        { label: 'AI Providers', icon: <Brain size={16} />, view: 'AI Providers', badge: { text: 'AI', color: '#8B5CF6' } },
         { label: 'Price Alerts', icon: <Bell size={16} />, view: 'Price Alerts' },
         { label: 'Supply Chain', icon: <GitFork size={16} />, view: 'Supply Chain' },
       ]

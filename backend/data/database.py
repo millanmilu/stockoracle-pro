@@ -395,8 +395,52 @@ def init_db():
                 updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
             )
         """)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_screens_user ON user_screens (user_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_user_screens_token ON user_screens (share_token)")
+        # 22. AI Providers Table (Multi-AI Engine)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ai_providers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                provider_name TEXT NOT NULL UNIQUE,
+                api_key_encrypted TEXT,
+                api_key_masked TEXT,
+                selected_model TEXT,
+                is_active INTEGER DEFAULT 0,
+                last_tested_at TEXT,
+                last_test_status TEXT,
+                total_requests INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_providers_active ON ai_providers (is_active)")
+
+        # 23. Broker Accounts Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS broker_accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                broker TEXT NOT NULL UNIQUE,
+                is_active INTEGER NOT NULL DEFAULT 0,
+                credentials_json TEXT NOT NULL,
+                session_data_json TEXT,
+                last_verified_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_broker_accounts_active ON broker_accounts (is_active)")
+
+        # 24. Broker Audit Logs Table
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS broker_audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                broker TEXT NOT NULL,
+                event TEXT NOT NULL,
+                status TEXT NOT NULL,
+                details TEXT,
+                latency_ms REAL,
+                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_broker_audit_created ON broker_audit_logs (created_at)")
 
         # Cleanup: purge any legacy intraday records that polluted the daily historical_prices table
         cursor.execute("DELETE FROM historical_prices WHERE length(date) != 10")
@@ -1675,6 +1719,194 @@ def delete_user_screen_query(screen_id: int, user_id: str = "default_user") -> b
         conn.commit()
     write_audit_log("DELETE", "user_screen", entity_id=screen_id, user_id=user_id)
     return True
+
+
+# ── AI Providers Storage & Metrics Helpers ─────────────────────────────────────
+
+def save_ai_provider_to_db(
+    provider_name: str,
+    api_key_encrypted: str,
+    api_key_masked: str,
+    selected_model: str,
+    is_active: bool = False,
+    last_test_status: str = "Configured",
+) -> bool:
+    """Saves or updates an AI provider in SQLite."""
+    try:
+        with get_db_connection() as conn:
+            if is_active:
+                conn.execute("UPDATE ai_providers SET is_active = 0")
+            conn.execute("""
+                INSERT INTO ai_providers (
+                    provider_name, api_key_encrypted, api_key_masked,
+                    selected_model, is_active, last_tested_at, last_test_status, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                ON CONFLICT(provider_name) DO UPDATE SET
+                    api_key_encrypted = excluded.api_key_encrypted,
+                    api_key_masked = excluded.api_key_masked,
+                    selected_model = excluded.selected_model,
+                    is_active = excluded.is_active,
+                    last_tested_at = excluded.last_tested_at,
+                    last_test_status = excluded.last_test_status,
+                    updated_at = excluded.updated_at
+            """, (
+                provider_name, api_key_encrypted, api_key_masked,
+                selected_model, 1 if is_active else 0, last_test_status
+            ))
+            conn.commit()
+            return True
+    except Exception as exc:
+        logger.error("Failed saving AI provider %s: %s", provider_name, exc)
+        return False
+
+
+def get_all_ai_providers_from_db() -> Dict[str, dict]:
+    """Returns all AI providers configured in the database."""
+    result = {}
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.execute("""
+                SELECT id, provider_name, api_key_encrypted, api_key_masked,
+                       selected_model, is_active, last_tested_at, last_test_status,
+                       total_requests, created_at, updated_at
+                FROM ai_providers
+            """)
+            for row in cursor.fetchall():
+                result[row["provider_name"]] = {
+                    "id": row["id"],
+                    "provider_name": row["provider_name"],
+                    "api_key_encrypted": row["api_key_encrypted"],
+                    "api_key_masked": row["api_key_masked"],
+                    "selected_model": row["selected_model"],
+                    "is_active": bool(row["is_active"]),
+                    "last_tested_at": row["last_tested_at"],
+                    "last_test_status": row["last_test_status"],
+                    "total_requests": row["total_requests"] or 0,
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                }
+    except Exception as exc:
+        logger.warning("Could not read ai_providers table: %s", exc)
+    return result
+
+
+def get_active_ai_provider_from_db() -> Optional[dict]:
+    """Returns the currently active AI provider record."""
+    try:
+        with get_db_connection() as conn:
+            row = conn.execute("""
+                SELECT id, provider_name, api_key_encrypted, api_key_masked,
+                       selected_model, is_active, last_tested_at, last_test_status,
+                       total_requests, updated_at
+                FROM ai_providers
+                WHERE is_active = 1
+                LIMIT 1
+            """).fetchone()
+            if row:
+                return dict(row)
+    except Exception as exc:
+        logger.warning("Failed reading active AI provider: %s", exc)
+    return None
+
+
+def activate_ai_provider_in_db(provider_name: str) -> bool:
+    """Sets the designated provider as active and deactivates others."""
+    try:
+        with get_db_connection() as conn:
+            conn.execute("UPDATE ai_providers SET is_active = 0")
+            conn.execute(
+                "UPDATE ai_providers SET is_active = 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE provider_name = ?",
+                (provider_name,)
+            )
+            conn.commit()
+            return True
+    except Exception as exc:
+        logger.error("Failed activating AI provider %s: %s", provider_name, exc)
+        return False
+
+
+def delete_ai_provider_from_db(provider_name: str) -> bool:
+    """Removes an AI provider from database."""
+    try:
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM ai_providers WHERE provider_name = ?", (provider_name,))
+            conn.commit()
+            return True
+    except Exception as exc:
+        logger.error("Failed deleting AI provider %s: %s", provider_name, exc)
+        return False
+
+
+def update_ai_provider_test_status(provider_name: str, status: str, latency_ms: Optional[float] = None) -> bool:
+    """Updates last test timestamp and status string."""
+    try:
+        with get_db_connection() as conn:
+            conn.execute("""
+                UPDATE ai_providers
+                SET last_tested_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
+                    last_test_status = ?,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+                WHERE provider_name = ?
+            """, (status, provider_name))
+            conn.commit()
+            return True
+    except Exception as exc:
+        logger.warning("Failed updating test status for %s: %s", provider_name, exc)
+        return False
+
+
+def increment_ai_provider_requests(provider_name: str) -> None:
+    """Increments total requests counter for an AI provider."""
+    try:
+        with get_db_connection() as conn:
+            conn.execute("""
+                UPDATE ai_providers
+                SET total_requests = COALESCE(total_requests, 0) + 1,
+                    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
+                WHERE provider_name = ?
+            """, (provider_name,))
+            conn.commit()
+    except Exception:
+        pass
+
+
+# ── Broker Audit Logs Helpers ──────────────────────────────────────────────────
+
+def save_broker_audit_log(
+    broker: str,
+    event: str,
+    status: str,
+    details: Optional[str] = None,
+    latency_ms: Optional[float] = None
+) -> None:
+    """Records a broker session or connection event in broker_audit_logs."""
+    try:
+        with get_db_connection() as conn:
+            conn.execute("""
+                INSERT INTO broker_audit_logs (broker, event, status, details, latency_ms, created_at)
+                VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+            """, (broker, event, status, details, latency_ms))
+            conn.commit()
+    except Exception as exc:
+        logger.warning("Failed writing broker audit log: %s", exc)
+
+
+def get_recent_broker_audit_logs(limit: int = 10) -> list:
+    """Returns the most recent broker connection attempts and session events."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.execute("""
+                SELECT id, broker, event, status, details, latency_ms, created_at
+                FROM broker_audit_logs
+                ORDER BY id DESC
+                LIMIT ?
+            """, (limit,))
+            return [dict(row) for row in cursor.fetchall()]
+    except Exception as exc:
+        logger.warning("Failed retrieving broker audit logs: %s", exc)
+        return []
+
 
 
 
