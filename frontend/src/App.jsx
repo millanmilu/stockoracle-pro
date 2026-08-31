@@ -29,7 +29,6 @@ const MacroPanel = lazy(() => import('./components/MacroPanel'));
 const SupplyChainPanel = lazy(() => import('./components/SupplyChainPanel'));
 const AIChatPanel = lazy(() => import('./components/AIChatPanel'));
 const FundamentalsPanel = lazy(() => import('./components/FundamentalsPanel'));
-const EarningsPanel = lazy(() => import('./components/EarningsPanel'));
 const OptionsChainView = lazy(() => import('./components/OptionsChainView'));
 const PaperTradingView = lazy(() => import('./components/PaperTradingView'));
 
@@ -120,8 +119,8 @@ export default function App() {
       case 'Heatmap':           return <Suspense fallback={<LoadingFallback />}><MarketHeatmap /></Suspense>;
       case 'Macro Data':        return <Suspense fallback={<LoadingFallback />}><MacroPanel /></Suspense>;
       case 'Supply Chain':      return <Suspense fallback={<LoadingFallback />}><SupplyChainPanel /></Suspense>;
-      case 'Fundamentals':      return <Suspense fallback={<LoadingFallback />}><FundamentalsPanel ticker={selectedSymbol} /></Suspense>;
-      case 'Earnings':          return <Suspense fallback={<LoadingFallback />}><EarningsPanel ticker={selectedSymbol} /></Suspense>;
+      case 'Fundamentals':
+      case 'Earnings':          return <Suspense fallback={<LoadingFallback />}><FundamentalsPanel ticker={selectedSymbol} /></Suspense>;
       case 'Options Chain':     return <Suspense fallback={<LoadingFallback />}><OptionsChainView ticker={selectedSymbol} /></Suspense>;
       case 'Broker Settings':   return <Suspense fallback={<LoadingFallback />}><BrokerSettingsView /></Suspense>;
       default:                  return <LiveChartView />;

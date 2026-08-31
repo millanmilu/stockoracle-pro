@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import useStore from '../store/useStore';
 import {
   BarChart, Bar, LineChart, Line, ComposedChart, Area, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, CartesianGrid, Cell, PieChart, Pie
+  ResponsiveContainer, CartesianGrid, Cell, PieChart, Pie, ReferenceLine
 } from 'recharts';
 import api from '../utils/api';
 import {
@@ -10,7 +10,7 @@ import {
   PieChart as PieIcon, Users, Calendar, Table, CheckCircle2, ShieldAlert,
   ShieldCheck, AlertTriangle, Activity, Download, Bell, ArrowUpRight, DollarSign,
   Award, Sparkles, Scale, Info, Check, X, ChevronRight, LayoutGrid, FileText,
-  Printer, ArrowDownRight, Target, Flame
+  Printer, ArrowDownRight, Target, Flame, BarChart2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -36,6 +36,29 @@ const valueStyle = {
   fontFamily: 'JetBrains Mono, monospace',
   color: '#F8FAFC'
 };
+
+function GrowthPill({ value, suffix = "%" }) {
+  if (value == null || isNaN(value)) return <span style={{ color: "#64748B" }}>—</span>;
+  const isPos = value >= 0;
+  return (
+    <span style={{
+      display: "inline-flex",
+      alignItems: "center",
+      gap: 2,
+      padding: "2px 7px",
+      borderRadius: 4,
+      fontSize: "0.68rem",
+      fontWeight: 700,
+      fontFamily: "JetBrains Mono, monospace",
+      background: isPos ? "rgba(16, 185, 129, 0.12)" : "rgba(239, 83, 80, 0.12)",
+      color: isPos ? "#10B981" : "#EF5350",
+      border: `1px solid ${isPos ? "rgba(16, 185, 129, 0.25)" : "rgba(239, 83, 80, 0.25)"}`
+    }}>
+      {isPos ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
+      {isPos ? "+" : ""}{Number(value).toFixed(1)}{suffix}
+    </span>
+  );
+}
 
 // Reusable Empty State Box
 function EmptyState({ icon: Icon = Info, title = 'Data Not Available', message, minHeight = 120 }) {
@@ -129,6 +152,10 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const [error, setError] = useState(null);
   const [showQualityModal, setShowQualityModal] = useState(false);
 
+  // Sorting state for quarterly statements table
+  const [sortField, setSortField] = useState('idx');
+  const [sortAsc, setSortAsc] = useState(true);
+
   const fetchData = async () => {
     setLoading(true);
     setError(null);
@@ -170,6 +197,172 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     window.print();
   };
 
+  // Defensive Normalizations & Comprehensive Quarterly Analytics
+  const enrichedQuarters = useMemo(() => {
+    const rawQuarters =
+      (deepData?.quarterly_results?.length ? deepData.quarterly_results : null) ||
+      (data?.quarterly_results?.length ? data.quarterly_results : []);
+
+    if (!rawQuarters || rawQuarters.length === 0) return [];
+
+    const chronological = rawQuarters.map((q, idx) => ({
+      rawIndex: idx,
+      period: q.period || `Q${idx + 1}`,
+      revenue: q.revenue ?? q.Sales ?? q["Sales+"] ?? q.Revenue ?? null,
+      net_profit: q.net_profit ?? q["Net Profit"] ?? q["Net Profit+"] ?? null,
+      eps: q.eps ?? q["EPS in Rs"] ?? null,
+      opm: q["OPM %"] ?? (q.revenue && q.net_profit ? ((q.net_profit / q.revenue) * 100) : null),
+      revenue_qoq_pct: q.revenue_qoq_pct,
+      profit_qoq_pct: q.profit_qoq_pct,
+    }));
+
+    // Linear regression for EPS trendline
+    let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0, validEpsCount = 0;
+    chronological.forEach((q, i) => {
+      if (q.eps != null && !isNaN(q.eps)) {
+        sumX += i;
+        sumY += Number(q.eps);
+        sumXY += i * Number(q.eps);
+        sumXX += i * i;
+        validEpsCount++;
+      }
+    });
+
+    const slope = validEpsCount > 1 ? (validEpsCount * sumXY - sumX * sumY) / (validEpsCount * sumXX - sumX * sumX) : 0;
+    const intercept = validEpsCount > 1 ? (sumY - slope * sumX) / validEpsCount : (chronological[0]?.eps || 0);
+
+    return chronological.map((q, i) => {
+      const prevQ = i > 0 ? chronological[i - 1] : null;
+      const prevYearQ = i >= 4 ? chronological[i - 4] : null;
+
+      const revQoQ = q.revenue_qoq_pct != null
+        ? q.revenue_qoq_pct
+        : (prevQ?.revenue && q.revenue != null ? ((q.revenue - prevQ.revenue) / Math.abs(prevQ.revenue)) * 100 : null);
+
+      const profitQoQ = q.profit_qoq_pct != null
+        ? q.profit_qoq_pct
+        : (prevQ?.net_profit && q.net_profit != null ? ((q.net_profit - prevQ.net_profit) / Math.abs(prevQ.net_profit)) * 100 : null);
+
+      const epsQoQ = prevQ?.eps && q.eps != null ? ((q.eps - prevQ.eps) / Math.abs(prevQ.eps)) * 100 : null;
+
+      const revYoY = prevYearQ?.revenue && q.revenue != null ? ((q.revenue - prevYearQ.revenue) / Math.abs(prevYearQ.revenue)) * 100 : null;
+      const profitYoY = prevYearQ?.net_profit && q.net_profit != null ? ((q.net_profit - prevYearQ.net_profit) / Math.abs(prevYearQ.net_profit)) * 100 : null;
+      const epsYoY = prevYearQ?.eps && q.eps != null ? ((q.eps - prevYearQ.eps) / Math.abs(prevYearQ.eps)) * 100 : null;
+
+      const epsTrend = Number((slope * i + intercept).toFixed(2));
+
+      return {
+        ...q,
+        idx: i,
+        revQoQ: revQoQ != null ? Number(revQoQ.toFixed(1)) : null,
+        profitQoQ: profitQoQ != null ? Number(profitQoQ.toFixed(1)) : null,
+        epsQoQ: epsQoQ != null ? Number(epsQoQ.toFixed(1)) : null,
+        revYoY: revYoY != null ? Number(revYoY.toFixed(1)) : null,
+        profitYoY: profitYoY != null ? Number(profitYoY.toFixed(1)) : null,
+        epsYoY: epsYoY != null ? Number(epsYoY.toFixed(1)) : null,
+        epsTrend,
+      };
+    });
+  }, [data, deepData]);
+
+  // Aggregate summary metrics for quarterly results
+  const summaryStats = useMemo(() => {
+    if (!enrichedQuarters || enrichedQuarters.length === 0) return null;
+
+    const validRevQoQ = enrichedQuarters.map(q => q.revQoQ).filter(v => v != null);
+    const validProfitQoQ = enrichedQuarters.map(q => q.profitQoQ).filter(v => v != null);
+    const validEpsQoQ = enrichedQuarters.map(q => q.epsQoQ).filter(v => v != null);
+
+    const avgRevQoQ = validRevQoQ.length ? (validRevQoQ.reduce((a, b) => a + b, 0) / validRevQoQ.length) : null;
+    const avgProfitQoQ = validProfitQoQ.length ? (validProfitQoQ.reduce((a, b) => a + b, 0) / validProfitQoQ.length) : null;
+    const avgEpsQoQ = validEpsQoQ.length ? (validEpsQoQ.reduce((a, b) => a + b, 0) / validEpsQoQ.length) : null;
+
+    const latest = enrichedQuarters[enrichedQuarters.length - 1];
+    const prev = enrichedQuarters.length >= 2 ? enrichedQuarters[enrichedQuarters.length - 2] : null;
+
+    let trendVerdict = "Stable Trajectory";
+    let trendPositive = true;
+    if (avgRevQoQ != null && avgProfitQoQ != null) {
+      if (avgRevQoQ > 3 && avgProfitQoQ > 5) {
+        trendVerdict = "Strong Expansion";
+        trendPositive = true;
+      } else if (avgRevQoQ > 0 && avgProfitQoQ > 0) {
+        trendVerdict = "Moderate Growth";
+        trendPositive = true;
+      } else if (avgRevQoQ < 0 && avgProfitQoQ < 0) {
+        trendVerdict = "Cyclical Contraction";
+        trendPositive = false;
+      } else {
+        trendVerdict = "Mixed Margin Volatility";
+        trendPositive = avgProfitQoQ >= 0;
+      }
+    }
+
+    return {
+      avgRevQoQ,
+      avgProfitQoQ,
+      avgEpsQoQ,
+      trendVerdict,
+      trendPositive,
+      latest,
+      prev,
+    };
+  }, [enrichedQuarters]);
+
+  // Quarterly Table Sorting Logic
+  const sortedTableData = useMemo(() => {
+    const dataCopy = [...enrichedQuarters];
+    dataCopy.sort((a, b) => {
+      let aVal = a[sortField];
+      let bVal = b[sortField];
+      if (aVal == null) return 1;
+      if (bVal == null) return -1;
+      if (typeof aVal === 'string') {
+        return sortAsc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+      }
+      return sortAsc ? aVal - bVal : bVal - aVal;
+    });
+    return dataCopy;
+  }, [enrichedQuarters, sortField, sortAsc]);
+
+  const toggleSort = (field) => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(false);
+    }
+  };
+
+  const handleExportQuarterlyCSV = () => {
+    if (!enrichedQuarters || enrichedQuarters.length === 0) {
+      toast.error("No quarterly earnings records to export.");
+      return;
+    }
+    const headers = ["Period", "Revenue (Cr)", "Rev QoQ %", "Rev YoY %", "Net Profit (Cr)", "Profit QoQ %", "Profit YoY %", "EPS (Rs)", "EPS YoY %"];
+    const rows = enrichedQuarters.map(q => [
+      q.period,
+      q.revenue ?? "",
+      q.revQoQ ?? "",
+      q.revYoY ?? "",
+      q.net_profit ?? "",
+      q.profitQoQ ?? "",
+      q.profitYoY ?? "",
+      q.eps ?? "",
+      q.epsYoY ?? ""
+    ].map(v => `"${v}"`).join(","));
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `${ticker}_Quarterly_Earnings_Report.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    toast.success(`${ticker} Quarterly Earnings exported to CSV!`);
+  };
+
   if (loading) {
     return (
       <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -198,13 +391,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     );
   }
 
-  // Defensive Normalizations
-  const quarterly = (deepData?.quarterly_results?.length ? deepData.quarterly_results : (data?.quarterly_results || [])).map(q => ({
-    ...q,
-    revenue: q.revenue ?? q.Sales ?? q['Sales+'] ?? q.Revenue ?? null,
-    net_profit: q.net_profit ?? q['Net Profit'] ?? q['Net Profit+'] ?? null,
-    eps: q.eps ?? q['EPS in Rs'] ?? null,
-  }));
+  const quarterly = enrichedQuarters;
 
   const annualPl = (deepData?.annual_pl?.length ? deepData.annual_pl : (data?.annual_pl || [])).map(a => ({
     ...a,
@@ -262,7 +449,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   // Sub-navigation tabs
   const TABS = [
     { id: 'overview', label: 'Executive Summary', badge: 'Key Ratios', icon: Award },
-    { id: 'quarters', label: 'Quarterly', badge: `${quarterly.length}Q`, icon: Table },
+    { id: 'quarters', label: 'Quarterly & Earnings', badge: `${quarterly.length}Q`, icon: Table },
     { id: 'annual', label: 'Annual 10Y P&L', badge: `${annualPl.length}Y`, icon: Layers },
     { id: 'balancesheet', label: 'Balance Sheet', badge: 'Assets/Liab', icon: Scale },
     { id: 'cashflow', label: 'Cash Flows', badge: 'CFO/CFI', icon: TrendingUp },
@@ -434,68 +621,264 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     </div>
   );
 
-  const renderQuartersSection = () => (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {quarterly.length > 0 ? (
-        <>
-          <div style={cardStyle}>
-            <div style={{ fontSize: '0.72rem', marginBottom: 10, fontWeight: 700, color: '#F0F0FF' }}>
-              Last 8 Quarters Revenue & Net Profit (₹ Cr)
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <ComposedChart data={quarterly} margin={{ top: 5, right: 10, left: -15, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
-                <XAxis dataKey="period" stroke="#64748B" fontSize={10} tickLine={false} />
-                <YAxis stroke="#64748B" fontSize={10} tickLine={false} />
-                <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, fontSize: '0.72rem' }} formatter={(v) => [`₹${Number(v).toLocaleString('en-IN')} Cr`]} />
-                <Bar dataKey="revenue" fill="#6366F1" radius={[4, 4, 0, 0]} name="Revenue" />
-                <Line type="monotone" dataKey="net_profit" stroke="#10B981" strokeWidth={2.2} name="Net Profit" />
-              </ComposedChart>
-            </ResponsiveContainer>
-          </div>
+  const renderQuartersSection = () => {
+    const latestQ = summaryStats?.latest;
 
-          <div style={cardStyle}>
-            <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Comprehensive Quarterly Disclosures (₹ Cr)</div>
-            <div className="table-scroll-container" style={{ maxHeight: '380px', borderRadius: 8 }}>
-              <table style={{ width: '100%', minWidth: 600, borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
-                <thead style={{ position: 'sticky', top: 0, zIndex: 5, background: '#0F172A' }}>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase', background: '#0F172A' }}>
-                    <th style={{ textAlign: 'left', padding: '8px 10px', background: '#0F172A' }}>Period</th>
-                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Sales</th>
-                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Expenses</th>
-                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Op. Profit</th>
-                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>OPM %</th>
-                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Net Profit</th>
-                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>EPS ₹</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {quarterly.map((q, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1', background: idx % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'transparent' }}>
-                      <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{q.period}</td>
-                      <td style={{ padding: '8px 10px' }}>{q.revenue != null ? Number(q.revenue).toLocaleString('en-IN') : (q['Sales'] != null ? Number(q['Sales']).toLocaleString('en-IN') : '—')}</td>
-                      <td style={{ padding: '8px 10px' }}>{q['Expenses'] != null ? Number(q['Expenses']).toLocaleString('en-IN') : '—'}</td>
-                      <td style={{ padding: '8px 10px' }}>{q['Operating Profit'] != null ? Number(q['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
-                      <td style={{ padding: '8px 10px' }}>{q['OPM %'] != null ? `${q['OPM %']}%` : '—'}</td>
-                      <td style={{ padding: '8px 10px', fontWeight: 700, color: '#10B981' }}>{q.net_profit != null ? Number(q.net_profit).toLocaleString('en-IN') : (q['Net Profit'] != null ? Number(q['Net Profit']).toLocaleString('en-IN') : '—')}</td>
-                      <td style={{ padding: '8px 10px' }}>{q.eps != null ? q.eps : (q['EPS in Rs'] || '—')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {enrichedQuarters.length > 0 ? (
+          <>
+            {/* ── 1. SUMMARY STATS CARDS ROW ── */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+              {/* Latest Quarter Card */}
+              <div style={{ ...cardStyle, background: "linear-gradient(135deg, rgba(99,102,241,0.08), rgba(15,23,42,0.95))", border: "1px solid rgba(99,102,241,0.3)" }}>
+                <div style={labelStyle}>Latest Quarter Performance ({latestQ?.period})</div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4 }}>
+                  <span style={{ fontSize: "1.1rem", fontWeight: 800, color: "#F8FAFC", fontFamily: "JetBrains Mono, monospace" }}>
+                    ₹{latestQ?.revenue != null && !isNaN(Number(latestQ.revenue)) ? Number(latestQ.revenue).toLocaleString("en-IN") : "—"} Cr
+                  </span>
+                  <GrowthPill value={latestQ?.revQoQ} />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.66rem", color: "#94A3B8", marginTop: 6, paddingTop: 4, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                  <span>Net Profit: <strong style={{ color: "#10B981" }}>₹{latestQ?.net_profit != null && !isNaN(Number(latestQ.net_profit)) ? Number(latestQ.net_profit).toLocaleString("en-IN") : "—"} Cr</strong></span>
+                  <span>EPS: <strong style={{ color: "#F59E0B" }}>{latestQ?.eps != null ? `₹${latestQ.eps}` : "—"}</strong></span>
+                </div>
+              </div>
+
+              {/* Avg Revenue Growth */}
+              <div style={cardStyle}>
+                <div style={labelStyle}>Avg QoQ Revenue Growth</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                  <span style={{ ...valueStyle, color: (summaryStats?.avgRevQoQ || 0) >= 0 ? "#10B981" : "#EF5350" }}>
+                    {(summaryStats?.avgRevQoQ || 0) >= 0 ? "+" : ""}{summaryStats?.avgRevQoQ != null ? `${summaryStats.avgRevQoQ.toFixed(1)}%` : "—"}
+                  </span>
+                  <GrowthPill value={summaryStats?.avgRevQoQ} />
+                </div>
+                <div style={{ fontSize: "0.62rem", color: "#94A3B8", marginTop: 6 }}>
+                  Mean sequential top-line momentum across {enrichedQuarters.length} quarters
+                </div>
+              </div>
+
+              {/* Avg Profit Growth */}
+              <div style={cardStyle}>
+                <div style={labelStyle}>Avg QoQ Net Profit Growth</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                  <span style={{ ...valueStyle, color: (summaryStats?.avgProfitQoQ || 0) >= 0 ? "#10B981" : "#EF5350" }}>
+                    {(summaryStats?.avgProfitQoQ || 0) >= 0 ? "+" : ""}{summaryStats?.avgProfitQoQ != null ? `${summaryStats.avgProfitQoQ.toFixed(1)}%` : "—"}
+                  </span>
+                  <GrowthPill value={summaryStats?.avgProfitQoQ} />
+                </div>
+                <div style={{ fontSize: "0.62rem", color: "#94A3B8", marginTop: 6 }}>
+                  Bottom-line profitability compounding rate
+                </div>
+              </div>
+
+              {/* Revenue Trend Verdict */}
+              <div style={{ ...cardStyle, border: `1px solid ${summaryStats?.trendPositive ? "rgba(16,185,129,0.3)" : "rgba(245,158,11,0.3)"}` }}>
+                <div style={labelStyle}>Earnings Trajectory & Verdict</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+                  {summaryStats?.trendPositive ? <TrendingUp size={18} color="#10B981" /> : <TrendingDown size={18} color="#F59E0B" />}
+                  <span style={{ fontSize: "0.92rem", fontWeight: 800, color: summaryStats?.trendPositive ? "#10B981" : "#F59E0B" }}>
+                    {summaryStats?.trendVerdict}
+                  </span>
+                </div>
+                <div style={{ fontSize: "0.62rem", color: "#94A3B8", marginTop: 6 }}>
+                  Assessed from consecutive operating margins & bottom-line trends
+                </div>
+              </div>
             </div>
-          </div>
-        </>
-      ) : (
-        <EmptyState
-          icon={Table}
-          title="Quarterly Results Not Available"
-          message="Quarterly disclosures have not yet been published for this security."
-          minHeight={160}
-        />
-      )}
-    </div>
-  );
+
+            {/* ── 2. REVENUE VS NET PROFIT COMPOSED CHART ── */}
+            <div style={cardStyle}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 6 }}>
+                <div>
+                  <span style={{ fontSize: "0.78rem", fontWeight: 800, color: "#F0F0FF" }}>Quarterly Revenue & Net Profit Trajectory (₹ Cr)</span>
+                  <div style={{ fontSize: "0.62rem", color: "#94A3B8" }}>Dual-axis comparison of gross turnover vs bottom-line net profit</div>
+                </div>
+                <div style={{ fontSize: "0.68rem", display: "flex", gap: 12 }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 10, height: 10, background: "#6366F1", borderRadius: 2 }} /> Revenue</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 10, height: 10, background: "#10B981", borderRadius: 2 }} /> Net Profit</span>
+                </div>
+              </div>
+
+              <ResponsiveContainer width="100%" height={230}>
+                <ComposedChart data={enrichedQuarters} margin={{ top: 10, right: 15, bottom: 0, left: -10 }}>
+                  <defs>
+                    <linearGradient id="fundRevBarGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#818CF8" stopOpacity={0.9} />
+                      <stop offset="100%" stopColor="#4F46E5" stopOpacity={0.6} />
+                    </linearGradient>
+                    <linearGradient id="fundProfitAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#10B981" stopOpacity={0.35} />
+                      <stop offset="100%" stopColor="#10B981" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                  <XAxis dataKey="period" tick={{ fontSize: 10, fill: "#94A3B8" }} tickLine={false} />
+                  <YAxis yAxisId="left" tick={{ fontSize: 10, fill: "#94A3B8" }} tickLine={false} tickFormatter={(v) => `₹${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
+                  <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: "#10B981" }} tickLine={false} tickFormatter={(v) => `₹${v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}`} />
+                  <Tooltip
+                    contentStyle={{ background: "#0F172A", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, color: "#F0F0FF", fontSize: "0.74rem" }}
+                    formatter={(val, name) => [`₹${val != null && !isNaN(Number(val)) ? Number(val).toLocaleString("en-IN") : "—"} Cr`, name]}
+                  />
+                  <Bar yAxisId="left" dataKey="revenue" name="Revenue" fill="url(#fundRevBarGrad)" radius={[4, 4, 0, 0]} />
+                  <Area yAxisId="right" type="monotone" dataKey="net_profit" name="Net Profit Area" fill="url(#fundProfitAreaGrad)" stroke="none" />
+                  <Line yAxisId="right" type="monotone" dataKey="net_profit" name="Net Profit" stroke="#10B981" strokeWidth={2.4} dot={{ r: 4, fill: "#10B981", strokeWidth: 1.5, stroke: "#0F172A" }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* ── 3. TWO-COLUMN: REVENUE & PROFIT QOQ BARS + EPS TREND WITH TRENDLINE ── */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 12 }}>
+              {/* QoQ Growth % Divergence Bars */}
+              <div style={cardStyle}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div>
+                    <span style={{ fontSize: "0.76rem", fontWeight: 800, color: "#F0F0FF" }}>Quarter-on-Quarter (QoQ) Growth %</span>
+                    <div style={{ fontSize: "0.62rem", color: "#94A3B8" }}>Sequential expansion across revenue vs profit</div>
+                  </div>
+                </div>
+
+                <ResponsiveContainer width="100%" height={190}>
+                  <BarChart data={enrichedQuarters} margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="period" tick={{ fontSize: 9, fill: "#94A3B8" }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 9, fill: "#94A3B8" }} tickLine={false} tickFormatter={(v) => `${v}%`} />
+                    <ReferenceLine y={0} stroke="rgba(255,255,255,0.2)" />
+                    <Tooltip
+                      contentStyle={{ background: "#0F172A", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, color: "#F0F0FF", fontSize: "0.72rem" }}
+                      formatter={(val, name) => [`${val != null ? `${val >= 0 ? "+" : ""}${val}%` : "—"}`, name]}
+                    />
+                    <Bar dataKey="revQoQ" name="Revenue QoQ %" fill="#6366F1" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="profitQoQ" name="Profit QoQ %" radius={[3, 3, 0, 0]}>
+                      {enrichedQuarters.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={(entry.profitQoQ || 0) >= 0 ? "#10B981" : "#EF5350"} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* EPS Trend with Regression Line */}
+              <div style={cardStyle}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div>
+                    <span style={{ fontSize: "0.76rem", fontWeight: 800, color: "#F0F0FF" }}>EPS Trajectory & Trendline (₹)</span>
+                    <div style={{ fontSize: "0.62rem", color: "#94A3B8" }}>Diluted Earnings Per Share with linear trajectory</div>
+                  </div>
+                  {latestQ?.eps != null && (
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: "0.96rem", fontWeight: 800, color: "#F59E0B", fontFamily: "JetBrains Mono, monospace" }}>
+                        ₹{latestQ.eps}
+                      </span>
+                      <div style={{ fontSize: "0.58rem", color: "#94A3B8" }}>Latest Diluted EPS</div>
+                    </div>
+                  )}
+                </div>
+
+                <ResponsiveContainer width="100%" height={190}>
+                  <LineChart data={enrichedQuarters} margin={{ top: 10, right: 15, bottom: 0, left: -20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                    <XAxis dataKey="period" tick={{ fontSize: 9, fill: "#94A3B8" }} tickLine={false} />
+                    <YAxis tick={{ fontSize: 9, fill: "#94A3B8" }} tickLine={false} tickFormatter={(v) => `₹${v}`} />
+                    <Tooltip
+                      contentStyle={{ background: "#0F172A", border: "1px solid rgba(99,102,241,0.3)", borderRadius: 8, color: "#F0F0FF", fontSize: "0.72rem" }}
+                      formatter={(val, name) => [`₹${val != null ? val : "—"}`, name]}
+                    />
+                    <Line type="monotone" dataKey="eps" name="EPS (₹)" stroke="#F59E0B" strokeWidth={2.2} dot={{ r: 3.5, fill: "#F59E0B" }} />
+                    <Line type="linear" dataKey="epsTrend" name="Regression Trendline" stroke="#64748B" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* ── 4. FULL QUARTERLY EARNINGS & DISCLOSURES TABLE ── */}
+            <div style={{ ...cardStyle, border: "1px solid rgba(99,102,241,0.25)", background: "linear-gradient(180deg, rgba(15,23,42,0.95), rgba(10,15,30,0.95))" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <Table size={18} color="#818CF8" />
+                  <div>
+                    <span style={{ fontSize: "0.86rem", fontWeight: 800, color: "#F0F0FF" }}>Comprehensive Quarterly Disclosures & Financial Statements</span>
+                    <div style={{ fontSize: "0.64rem", color: "#94A3B8" }}>Detailed breakdown of quarterly sales, net margins, EPS, and comparative growth deltas</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button
+                    onClick={handleExportQuarterlyCSV}
+                    style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(255,255,255,0.06)", color: "#CBD5E1", border: "1px solid rgba(255,255,255,0.12)", cursor: "pointer", display: "flex", alignItems: "center", gap: 4, fontSize: "0.68rem", fontWeight: 600 }}
+                  >
+                    <Download size={12} />Export CSV
+                  </button>
+                  <div style={{ fontSize: "0.66rem", color: "#818CF8", background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", padding: "3px 8px", borderRadius: 6, fontWeight: 700 }}>
+                    💡 Click column to sort
+                  </div>
+                </div>
+              </div>
+
+              <div className="table-scroll-container" style={{ maxHeight: "440px", borderRadius: 8 }}>
+                <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse", fontSize: "0.75rem", fontFamily: "JetBrains Mono, monospace" }}>
+                  <thead style={{ position: "sticky", top: 0, zIndex: 5, background: "#0F172A" }}>
+                    <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.12)", color: "#94A3B8", textAlign: "right", fontSize: "0.68rem", textTransform: "uppercase", background: "#0F172A" }}>
+                      <th onClick={() => toggleSort("period")} style={{ textAlign: "left", padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                        Period {sortField === "period" && (sortAsc ? "▲" : "▼")}
+                      </th>
+                      <th onClick={() => toggleSort("revenue")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                        Revenue (₹ Cr) {sortField === "revenue" && (sortAsc ? "▲" : "▼")}
+                      </th>
+                      <th onClick={() => toggleSort("revQoQ")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                        Rev QoQ % {sortField === "revQoQ" && (sortAsc ? "▲" : "▼")}
+                      </th>
+                      <th onClick={() => toggleSort("revYoY")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                        Rev YoY % {sortField === "revYoY" && (sortAsc ? "▲" : "▼")}
+                      </th>
+                      <th onClick={() => toggleSort("net_profit")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                        Net Profit (₹ Cr) {sortField === "net_profit" && (sortAsc ? "▲" : "▼")}
+                      </th>
+                      <th onClick={() => toggleSort("profitQoQ")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                        NP QoQ % {sortField === "profitQoQ" && (sortAsc ? "▲" : "▼")}
+                      </th>
+                      <th onClick={() => toggleSort("eps")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                        EPS (₹) {sortField === "eps" && (sortAsc ? "▲" : "▼")}
+                      </th>
+                      <th onClick={() => toggleSort("epsYoY")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                        EPS YoY % {sortField === "epsYoY" && (sortAsc ? "▲" : "▼")}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedTableData.map((q, idx) => (
+                      <tr key={idx} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", textAlign: "right", color: "#CBD5E1", background: idx % 2 === 0 ? "rgba(255,255,255,0.015)" : "transparent" }}>
+                        <td style={{ textAlign: "left", padding: "10px 12px", fontWeight: 800, color: "#F0F0FF" }}>{q.period}</td>
+                        <td style={{ padding: "10px 12px" }}>{q.revenue != null && !isNaN(Number(q.revenue)) ? Number(q.revenue).toLocaleString("en-IN") : "—"}</td>
+                        <td style={{ padding: "10px 12px" }}><GrowthPill value={q.revQoQ} /></td>
+                        <td style={{ padding: "10px 12px" }}><GrowthPill value={q.revYoY} /></td>
+                        <td style={{ padding: "10px 12px", fontWeight: 800, color: "#10B981" }}>{q.net_profit != null && !isNaN(Number(q.net_profit)) ? Number(q.net_profit).toLocaleString("en-IN") : "—"}</td>
+                        <td style={{ padding: "10px 12px" }}><GrowthPill value={q.profitQoQ} /></td>
+                        <td style={{ padding: "10px 12px", color: "#F59E0B", fontWeight: 700 }}>{q.eps != null ? `₹${q.eps}` : "—"}</td>
+                        <td style={{ padding: "10px 12px" }}><GrowthPill value={q.epsYoY} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ marginTop: 12, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.06)", fontSize: "0.62rem", color: "#64748B", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+                <span>* YoY deltas are computed against the matching 4-quarter prior benchmark (i-4). QoQ deltas represent sequential momentum.</span>
+                <span>All monetary values represented in ₹ Crores (except EPS).</span>
+              </div>
+            </div>
+          </>
+        ) : (
+          <EmptyState
+            icon={Table}
+            title="Quarterly Disclosures Not Available"
+            message="Quarterly disclosures and financial filings have not yet been published for this security."
+            minHeight={160}
+          />
+        )}
+      </div>
+    );
+  };
 
   const renderAnnualSection = () => (
     <div style={cardStyle}>

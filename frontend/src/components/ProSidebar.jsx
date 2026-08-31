@@ -38,7 +38,6 @@ export default function ProSidebar({ collapsed, onToggleCollapse }) {
       title: 'FUNDAMENTALS',
       items: [
         { label: 'Fundamentals', icon: <BookOpen size={16} />, view: 'Fundamentals', badge: { text: 'NEW', color: '#10B981' } },
-        { label: 'Earnings', icon: <BarChart2 size={16} />, view: 'Earnings' },
         { label: 'Options Chain', icon: <Layers size={16} />, view: 'Options Chain' },
         { label: 'Valuation', icon: <BookOpen size={16} />, view: 'Valuation', badge: { text: 'DCF', color: '#F59E0B' } },
       ]
