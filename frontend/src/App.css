@@ -904,6 +904,7 @@ input, select, textarea { font-family: inherit; font-size: 0.78rem; }
   height: 100%;
   background: #07090F;
   position: relative;
+  scroll-padding-top: 20px;
   scrollbar-width: thin;
   scrollbar-color: rgba(99,102,241,0.25) transparent;
 }

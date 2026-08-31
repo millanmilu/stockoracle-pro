@@ -1911,7 +1911,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
       {/* ── Sub Navigation Tabs Menu (Visible when viewMode === 'tabs') ── */}
       {viewMode === 'tabs' && (
-        <div style={{ display: 'flex', gap: 5, overflowX: 'auto', padding: '4px 2px 8px', borderBottom: '1px solid rgba(255,255,255,0.08)', scrollbarWidth: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, overflowX: 'auto', padding: '4px 2px 8px', borderBottom: '1px solid rgba(255,255,255,0.08)', scrollbarWidth: 'none', minHeight: 48 }}>
           {TABS.map(tab => {
             const Icon = tab.icon;
             const isSel = activeTab === tab.id;
@@ -1921,7 +1921,10 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, whiteSpace: 'nowrap',
+                  display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                  height: 'auto',
+                  alignSelf: 'center',
                   border: isSel ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
                   background: isSel
                     ? 'linear-gradient(135deg, rgba(99,102,241,0.35), rgba(139,92,246,0.25))'
@@ -1932,10 +1935,10 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                   transition: 'all 0.15s ease-in-out'
                 }}
               >
-                <Icon size={14} color={isSel ? '#818CF8' : '#64748B'} />
+                <Icon size={14} color={isSel ? '#818CF8' : '#64748B'} style={{ flexShrink: 0 }} />
                 <span>{tab.label}</span>
                 {tab.badge && (
-                  <span style={{ fontSize: '0.60rem', background: isSel ? 'rgba(99,102,241,0.45)' : 'rgba(255,255,255,0.06)', color: isSel ? '#E0E7FF' : '#64748B', padding: '1px 6px', borderRadius: 4, fontWeight: 800 }}>
+                  <span style={{ fontSize: '0.60rem', background: isSel ? 'rgba(99,102,241,0.45)' : 'rgba(255,255,255,0.06)', color: isSel ? '#E0E7FF' : '#64748B', padding: '1px 6px', borderRadius: 4, fontWeight: 800, flexShrink: 0 }}>
                     {tab.badge}
                   </span>
                 )}
