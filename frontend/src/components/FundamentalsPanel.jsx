@@ -875,6 +875,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       )}
     </div>
   );
+};
 
   const renderAnnualSection = () => (
     <div style={cardStyle}>
