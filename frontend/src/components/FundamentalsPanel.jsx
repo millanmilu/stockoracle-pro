@@ -454,34 +454,36 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
             </ResponsiveContainer>
           </div>
 
-          <div style={{ ...cardStyle, overflowX: 'auto' }}>
-            <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Quarterly Financials (₹ Cr)</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
-                  <th style={{ textAlign: 'left', padding: '8px 10px' }}>Period</th>
-                  <th style={{ padding: '8px 10px' }}>Sales</th>
-                  <th style={{ padding: '8px 10px' }}>Expenses</th>
-                  <th style={{ padding: '8px 10px' }}>Op. Profit</th>
-                  <th style={{ padding: '8px 10px' }}>OPM %</th>
-                  <th style={{ padding: '8px 10px' }}>Net Profit</th>
-                  <th style={{ padding: '8px 10px' }}>EPS ₹</th>
-                </tr>
-              </thead>
-              <tbody>
-                {quarterly.map((q, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                    <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{q.period}</td>
-                    <td style={{ padding: '8px 10px' }}>{q.revenue != null ? Number(q.revenue).toLocaleString('en-IN') : (q['Sales'] != null ? Number(q['Sales']).toLocaleString('en-IN') : '—')}</td>
-                    <td style={{ padding: '8px 10px' }}>{q['Expenses'] != null ? Number(q['Expenses']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '8px 10px' }}>{q['Operating Profit'] != null ? Number(q['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '8px 10px' }}>{q['OPM %'] != null ? `${q['OPM %']}%` : '—'}</td>
-                    <td style={{ padding: '8px 10px', fontWeight: 700, color: '#10B981' }}>{q.net_profit != null ? Number(q.net_profit).toLocaleString('en-IN') : (q['Net Profit'] != null ? Number(q['Net Profit']).toLocaleString('en-IN') : '—')}</td>
-                    <td style={{ padding: '8px 10px' }}>{q.eps != null ? q.eps : (q['EPS in Rs'] || '—')}</td>
+          <div style={cardStyle}>
+            <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Comprehensive Quarterly Disclosures (₹ Cr)</div>
+            <div className="table-scroll-container" style={{ maxHeight: '380px', borderRadius: 8 }}>
+              <table style={{ width: '100%', minWidth: 600, borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 5, background: '#0F172A' }}>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase', background: '#0F172A' }}>
+                    <th style={{ textAlign: 'left', padding: '8px 10px', background: '#0F172A' }}>Period</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Sales</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Expenses</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Op. Profit</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>OPM %</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Net Profit</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>EPS ₹</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {quarterly.map((q, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1', background: idx % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'transparent' }}>
+                      <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{q.period}</td>
+                      <td style={{ padding: '8px 10px' }}>{q.revenue != null ? Number(q.revenue).toLocaleString('en-IN') : (q['Sales'] != null ? Number(q['Sales']).toLocaleString('en-IN') : '—')}</td>
+                      <td style={{ padding: '8px 10px' }}>{q['Expenses'] != null ? Number(q['Expenses']).toLocaleString('en-IN') : '—'}</td>
+                      <td style={{ padding: '8px 10px' }}>{q['Operating Profit'] != null ? Number(q['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
+                      <td style={{ padding: '8px 10px' }}>{q['OPM %'] != null ? `${q['OPM %']}%` : '—'}</td>
+                      <td style={{ padding: '8px 10px', fontWeight: 700, color: '#10B981' }}>{q.net_profit != null ? Number(q.net_profit).toLocaleString('en-IN') : (q['Net Profit'] != null ? Number(q['Net Profit']).toLocaleString('en-IN') : '—')}</td>
+                      <td style={{ padding: '8px 10px' }}>{q.eps != null ? q.eps : (q['EPS in Rs'] || '—')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       ) : (
@@ -496,37 +498,39 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   );
 
   const renderAnnualSection = () => (
-    <div style={{ ...cardStyle, overflowX: 'auto' }}>
+    <div style={cardStyle}>
       <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Annual 10-Year Consolidated P&L (₹ Cr)</div>
       {annualPl.length > 0 ? (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
-              <th style={{ textAlign: 'left', padding: '8px 10px' }}>Year</th>
-              <th style={{ padding: '8px 10px' }}>Sales</th>
-              <th style={{ padding: '8px 10px' }}>Expenses</th>
-              <th style={{ padding: '8px 10px' }}>Op. Profit</th>
-              <th style={{ padding: '8px 10px' }}>OPM %</th>
-              <th style={{ padding: '8px 10px' }}>Net Profit</th>
-              <th style={{ padding: '8px 10px' }}>EPS ₹</th>
-              <th style={{ padding: '8px 10px' }}>Payout %</th>
-            </tr>
-          </thead>
-          <tbody>
-            {annualPl.map((yr, idx) => (
-              <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{yr.period}</td>
-                <td style={{ padding: '8px 10px' }}>{yr['Sales'] != null ? Number(yr['Sales']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '8px 10px' }}>{yr['Expenses'] != null ? Number(yr['Expenses']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '8px 10px' }}>{yr['Operating Profit'] != null ? Number(yr['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '8px 10px' }}>{yr['OPM %'] != null ? `${yr['OPM %']}%` : '—'}</td>
-                <td style={{ padding: '8px 10px', fontWeight: 700, color: '#818CF8' }}>{yr['Net Profit'] != null ? Number(yr['Net Profit']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '8px 10px' }}>{yr['EPS in Rs'] != null ? yr['EPS in Rs'] : '—'}</td>
-                <td style={{ padding: '8px 10px' }}>{yr['Dividend Payout %'] != null ? `${yr['Dividend Payout %']}%` : '—'}</td>
+        <div className="table-scroll-container" style={{ maxHeight: '380px', borderRadius: 8 }}>
+          <table style={{ width: '100%', minWidth: 680, borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 5, background: '#0F172A' }}>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase', background: '#0F172A' }}>
+                <th style={{ textAlign: 'left', padding: '8px 10px', background: '#0F172A' }}>Year</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Sales</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Expenses</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Op. Profit</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>OPM %</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Net Profit</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>EPS ₹</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Payout %</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {annualPl.map((yr, idx) => (
+                <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1', background: idx % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'transparent' }}>
+                  <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{yr.period}</td>
+                  <td style={{ padding: '8px 10px' }}>{yr['Sales'] != null ? Number(yr['Sales']).toLocaleString('en-IN') : '—'}</td>
+                  <td style={{ padding: '8px 10px' }}>{yr['Expenses'] != null ? Number(yr['Expenses']).toLocaleString('en-IN') : '—'}</td>
+                  <td style={{ padding: '8px 10px' }}>{yr['Operating Profit'] != null ? Number(yr['Operating Profit']).toLocaleString('en-IN') : '—'}</td>
+                  <td style={{ padding: '8px 10px' }}>{yr['OPM %'] != null ? `${yr['OPM %']}%` : '—'}</td>
+                  <td style={{ padding: '8px 10px', fontWeight: 700, color: '#818CF8' }}>{yr['Net Profit'] != null ? Number(yr['Net Profit']).toLocaleString('en-IN') : '—'}</td>
+                  <td style={{ padding: '8px 10px' }}>{yr['EPS in Rs'] != null ? yr['EPS in Rs'] : '—'}</td>
+                  <td style={{ padding: '8px 10px' }}>{yr['Dividend Payout %'] != null ? `${yr['Dividend Payout %']}%` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <EmptyState
           icon={Layers}
@@ -539,37 +543,39 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   );
 
   const renderBalanceSheetSection = () => (
-    <div style={{ ...cardStyle, overflowX: 'auto' }}>
+    <div style={cardStyle}>
       <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Consolidated Balance Sheet & Capital Structure (₹ Cr)</div>
       {balanceSheet.length > 0 ? (
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
-              <th style={{ textAlign: 'left', padding: '8px 10px' }}>Year</th>
-              <th style={{ padding: '8px 10px' }}>Equity</th>
-              <th style={{ padding: '8px 10px' }}>Reserves</th>
-              <th style={{ padding: '8px 10px' }}>Borrowings</th>
-              <th style={{ padding: '8px 10px' }}>Other Liab</th>
-              <th style={{ padding: '8px 10px' }}>Total Liab</th>
-              <th style={{ padding: '8px 10px' }}>Fixed Assets</th>
-              <th style={{ padding: '8px 10px' }}>Total Assets</th>
-            </tr>
-          </thead>
-          <tbody>
-            {balanceSheet.map((bs, idx) => (
-              <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{bs.period}</td>
-                <td style={{ padding: '8px 10px' }}>{bs['Equity Capital'] != null ? Number(bs['Equity Capital']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '8px 10px' }}>{bs['Reserves'] != null ? Number(bs['Reserves']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '8px 10px', color: '#F59E0B' }}>{bs['Borrowings'] != null ? Number(bs['Borrowings']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '8px 10px' }}>{bs['Other Liabilities'] != null ? Number(bs['Other Liabilities']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '8px 10px', fontWeight: 700 }}>{bs['Total Liabilities'] != null ? Number(bs['Total Liabilities']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '8px 10px' }}>{bs['Fixed Assets'] != null ? Number(bs['Fixed Assets']).toLocaleString('en-IN') : '—'}</td>
-                <td style={{ padding: '8px 10px', fontWeight: 700, color: '#818CF8' }}>{bs['Total Assets'] != null ? Number(bs['Total Assets']).toLocaleString('en-IN') : '—'}</td>
+        <div className="table-scroll-container" style={{ maxHeight: '380px', borderRadius: 8 }}>
+          <table style={{ width: '100%', minWidth: 680, borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 5, background: '#0F172A' }}>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase', background: '#0F172A' }}>
+                <th style={{ textAlign: 'left', padding: '8px 10px', background: '#0F172A' }}>Year</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Equity</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Reserves</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Borrowings</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Other Liab</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Total Liab</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Fixed Assets</th>
+                <th style={{ padding: '8px 10px', background: '#0F172A' }}>Total Assets</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {balanceSheet.map((bs, idx) => (
+                <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1', background: idx % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'transparent' }}>
+                  <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{bs.period}</td>
+                  <td style={{ padding: '8px 10px' }}>{bs['Equity Capital'] != null ? Number(bs['Equity Capital']).toLocaleString('en-IN') : '—'}</td>
+                  <td style={{ padding: '8px 10px' }}>{bs['Reserves'] != null ? Number(bs['Reserves']).toLocaleString('en-IN') : '—'}</td>
+                  <td style={{ padding: '8px 10px', color: '#F59E0B' }}>{bs['Borrowings'] != null ? Number(bs['Borrowings']).toLocaleString('en-IN') : '—'}</td>
+                  <td style={{ padding: '8px 10px' }}>{bs['Other Liabilities'] != null ? Number(bs['Other Liabilities']).toLocaleString('en-IN') : '—'}</td>
+                  <td style={{ padding: '8px 10px', fontWeight: 700 }}>{bs['Total Liabilities'] != null ? Number(bs['Total Liabilities']).toLocaleString('en-IN') : '—'}</td>
+                  <td style={{ padding: '8px 10px' }}>{bs['Fixed Assets'] != null ? Number(bs['Fixed Assets']).toLocaleString('en-IN') : '—'}</td>
+                  <td style={{ padding: '8px 10px', fontWeight: 700, color: '#818CF8' }}>{bs['Total Assets'] != null ? Number(bs['Total Assets']).toLocaleString('en-IN') : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       ) : (
         <EmptyState
           icon={Scale}
@@ -602,34 +608,36 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
             </ResponsiveContainer>
           </div>
 
-          <div style={{ ...cardStyle, overflowX: 'auto' }}>
+          <div style={cardStyle}>
             <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>10-Year Cash Flow Statement (₹ Cr)</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
-                  <th style={{ textAlign: 'left', padding: '8px 10px' }}>Period</th>
-                  <th style={{ padding: '8px 10px' }}>Operating (CFO)</th>
-                  <th style={{ padding: '8px 10px' }}>Investing (CFI)</th>
-                  <th style={{ padding: '8px 10px' }}>Financing (CFF)</th>
-                  <th style={{ padding: '8px 10px' }}>Net Cash Flow</th>
-                </tr>
-              </thead>
-              <tbody>
-                {cashFlow.map((cf, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                    <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{cf.period}</td>
-                    <td style={{ padding: '8px 10px', color: (cf['Cash from Operating Activity'] || 0) >= 0 ? '#10B981' : '#EF5350' }}>
-                      {cf['Cash from Operating Activity'] != null ? Number(cf['Cash from Operating Activity']).toLocaleString('en-IN') : '—'}
-                    </td>
-                    <td style={{ padding: '8px 10px' }}>{cf['Cash from Investing Activity'] != null ? Number(cf['Cash from Investing Activity']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '8px 10px' }}>{cf['Cash from Financing Activity'] != null ? Number(cf['Cash from Financing Activity']).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '8px 10px', fontWeight: 700, color: '#818CF8' }}>
-                      {cf['Net Cash Flow'] != null ? Number(cf['Net Cash Flow']).toLocaleString('en-IN') : '—'}
-                    </td>
+            <div className="table-scroll-container" style={{ maxHeight: '380px', borderRadius: 8 }}>
+              <table style={{ width: '100%', minWidth: 600, borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 5, background: '#0F172A' }}>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase', background: '#0F172A' }}>
+                    <th style={{ textAlign: 'left', padding: '8px 10px', background: '#0F172A' }}>Period</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Operating (CFO)</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Investing (CFI)</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Financing (CFF)</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Net Cash Flow</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {cashFlow.map((cf, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
+                      <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{cf.period}</td>
+                      <td style={{ padding: '8px 10px', color: (cf['Cash from Operating Activity'] || 0) >= 0 ? '#10B981' : '#EF5350' }}>
+                        {cf['Cash from Operating Activity'] != null ? Number(cf['Cash from Operating Activity']).toLocaleString('en-IN') : '—'}
+                      </td>
+                      <td style={{ padding: '8px 10px' }}>{cf['Cash from Investing Activity'] != null ? Number(cf['Cash from Investing Activity']).toLocaleString('en-IN') : '—'}</td>
+                      <td style={{ padding: '8px 10px' }}>{cf['Cash from Financing Activity'] != null ? Number(cf['Cash from Financing Activity']).toLocaleString('en-IN') : '—'}</td>
+                      <td style={{ padding: '8px 10px', fontWeight: 700, color: '#818CF8' }}>
+                        {cf['Net Cash Flow'] != null ? Number(cf['Net Cash Flow']).toLocaleString('en-IN') : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       ) : (
@@ -666,30 +674,32 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
-            <div style={{ ...cardStyle, overflowX: 'auto' }}>
+            <div style={cardStyle}>
               <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Quarterly Breakdown (%)</div>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
-                    <th style={{ textAlign: 'left', padding: '8px 10px' }}>Quarter</th>
-                    <th style={{ padding: '8px 10px' }}>Promoter</th>
-                    <th style={{ padding: '8px 10px' }}>FII</th>
-                    <th style={{ padding: '8px 10px' }}>DII</th>
-                    <th style={{ padding: '8px 10px' }}>Public</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shareholding.map((sh, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                      <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{sh.quarter}</td>
-                      <td style={{ padding: '8px 10px', color: '#10B981' }}>{sh.promoter != null ? `${sh.promoter}%` : '—'}</td>
-                      <td style={{ padding: '8px 10px', color: '#818CF8' }}>{sh.fii != null ? `${sh.fii}%` : '—'}</td>
-                      <td style={{ padding: '8px 10px', color: '#F59E0B' }}>{sh.dii != null ? `${sh.dii}%` : '—'}</td>
-                      <td style={{ padding: '8px 10px' }}>{sh.public != null ? `${sh.public}%` : '—'}</td>
+              <div className="table-scroll-container" style={{ maxHeight: '200px', borderRadius: 8 }}>
+                <table style={{ width: '100%', minWidth: 320, borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 5, background: '#0F172A' }}>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase', background: '#0F172A' }}>
+                      <th style={{ textAlign: 'left', padding: '8px 10px', background: '#0F172A' }}>Quarter</th>
+                      <th style={{ padding: '8px 10px', background: '#0F172A' }}>Promoter</th>
+                      <th style={{ padding: '8px 10px', background: '#0F172A' }}>FII</th>
+                      <th style={{ padding: '8px 10px', background: '#0F172A' }}>DII</th>
+                      <th style={{ padding: '8px 10px', background: '#0F172A' }}>Public</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {shareholding.map((sh, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
+                        <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{sh.quarter}</td>
+                        <td style={{ padding: '8px 10px', color: '#10B981' }}>{sh.promoter != null ? `${sh.promoter}%` : '—'}</td>
+                        <td style={{ padding: '8px 10px', color: '#818CF8' }}>{sh.fii != null ? `${sh.fii}%` : '—'}</td>
+                        <td style={{ padding: '8px 10px', color: '#F59E0B' }}>{sh.dii != null ? `${sh.dii}%` : '—'}</td>
+                        <td style={{ padding: '8px 10px' }}>{sh.public != null ? `${sh.public}%` : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             {/* Latest Ownership Distribution Pie Chart with NaN fallback */}
@@ -759,34 +769,36 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
             </ResponsiveContainer>
           </div>
 
-          <div style={{ ...cardStyle, overflowX: 'auto' }}>
+          <div style={cardStyle}>
             <div style={{ fontSize: '0.76rem', fontWeight: 800, color: '#F0F0FF', marginBottom: 10 }}>Sector Peer Ranking & Relative Valuation</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
-                  <th style={{ textAlign: 'left', padding: '8px 10px' }}>Company</th>
-                  <th style={{ padding: '8px 10px' }}>CMP ₹</th>
-                  <th style={{ padding: '8px 10px' }}>P/E</th>
-                  <th style={{ padding: '8px 10px' }}>Mar Cap ₹ Cr</th>
-                  <th style={{ padding: '8px 10px' }}>ROCE %</th>
-                </tr>
-              </thead>
-              <tbody>
-                {peers.map((p, idx) => (
-                  <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                    <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: p.name.includes(ticker) ? '#818CF8' : '#F0F0FF' }}>
-                      {p.name}
-                    </td>
-                    <td style={{ padding: '8px 10px' }}>{p.price != null ? Number(p.price).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '8px 10px' }}>{p.pe_ratio != null ? p.pe_ratio : '—'}</td>
-                    <td style={{ padding: '8px 10px' }}>{p.market_cap != null ? Number(p.market_cap).toLocaleString('en-IN') : '—'}</td>
-                    <td style={{ padding: '8px 10px', color: (p.roce || 0) > 15 ? '#10B981' : '#CBD5E1' }}>
-                      {p.roce != null ? `${p.roce}%` : '—'}
-                    </td>
+            <div className="table-scroll-container" style={{ maxHeight: '380px', borderRadius: 8 }}>
+              <table style={{ width: '100%', minWidth: 500, borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 5, background: '#0F172A' }}>
+                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase', background: '#0F172A' }}>
+                    <th style={{ textAlign: 'left', padding: '8px 10px', background: '#0F172A' }}>Company</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>CMP ₹</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>P/E</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>Mar Cap ₹ Cr</th>
+                    <th style={{ padding: '8px 10px', background: '#0F172A' }}>ROCE %</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {peers.map((p, idx) => (
+                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
+                      <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: p.name.includes(ticker) ? '#818CF8' : '#F0F0FF' }}>
+                        {p.name}
+                      </td>
+                      <td style={{ padding: '8px 10px' }}>{p.price != null ? Number(p.price).toLocaleString('en-IN') : '—'}</td>
+                      <td style={{ padding: '8px 10px' }}>{p.pe_ratio != null ? p.pe_ratio : '—'}</td>
+                      <td style={{ padding: '8px 10px' }}>{p.market_cap != null ? Number(p.market_cap).toLocaleString('en-IN') : '—'}</td>
+                      <td style={{ padding: '8px 10px', color: (p.roce || 0) > 15 ? '#10B981' : '#CBD5E1' }}>
+                        {p.roce != null ? `${p.roce}%` : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </>
       ) : (
@@ -815,24 +827,26 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
           Growth Rate: <strong style={{ color: '#F8FAFC' }}>{dcf.assumed_growth_rate_pct != null ? `${dcf.assumed_growth_rate_pct}%` : '—'}</strong> | Discount WACC: <strong style={{ color: '#F8FAFC' }}>{dcf.discount_rate_wacc_pct != null ? `${dcf.discount_rate_wacc_pct}%` : '—'}</strong> | Terminal Rate: <strong style={{ color: '#F8FAFC' }}>{dcf.terminal_growth_rate_pct != null ? `${dcf.terminal_growth_rate_pct}%` : '—'}</strong>.
         </p>
         {dcf.projected_fcf?.length > 0 ? (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase' }}>
-                <th style={{ textAlign: 'left', padding: '8px 10px' }}>Period</th>
-                <th style={{ padding: '8px 10px' }}>Projected FCF / Share (₹)</th>
-                <th style={{ padding: '8px 10px' }}>Present Value (PV)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dcf.projected_fcf.map((p, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
-                  <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{p.year}</td>
-                  <td style={{ padding: '8px 10px' }}>₹{p.fcf_per_share}</td>
-                  <td style={{ padding: '8px 10px', color: '#10B981', fontWeight: 700 }}>₹{p.pv_fcf}</td>
+          <div className="table-scroll-container" style={{ maxHeight: '280px', borderRadius: 8 }}>
+            <table style={{ width: '100%', minWidth: 400, borderCollapse: 'collapse', fontSize: '0.74rem', fontFamily: 'JetBrains Mono, monospace' }}>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 5, background: '#0F172A' }}>
+                <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', textAlign: 'right', fontSize: '0.66rem', textTransform: 'uppercase', background: '#0F172A' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 10px', background: '#0F172A' }}>Period</th>
+                  <th style={{ padding: '8px 10px', background: '#0F172A' }}>Projected FCF / Share (₹)</th>
+                  <th style={{ padding: '8px 10px', background: '#0F172A' }}>Present Value (PV)</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {dcf.projected_fcf.map((p, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)', textAlign: 'right', color: '#CBD5E1' }}>
+                    <td style={{ textAlign: 'left', padding: '8px 10px', fontWeight: 600, color: '#F0F0FF' }}>{p.year}</td>
+                    <td style={{ padding: '8px 10px' }}>₹{p.fcf_per_share}</td>
+                    <td style={{ padding: '8px 10px', color: '#10B981', fontWeight: 700 }}>₹{p.pv_fcf}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
           <EmptyState
             icon={DollarSign}

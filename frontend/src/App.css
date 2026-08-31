@@ -915,6 +915,26 @@ input, select, textarea { font-family: inherit; font-size: 0.78rem; }
   width: 100%;
 }
 
+/* ── Custom Table Scroll Container ── */
+.table-scroll-container {
+  overflow-y: auto;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99,102,241,0.3) transparent;
+}
+.table-scroll-container::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.table-scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(99,102,241,0.35);
+  border-radius: 99px;
+}
+.table-scroll-container::-webkit-scrollbar-track {
+  background: rgba(15,23,42,0.6);
+}
+
+
 
 
 /* Pro Sidebar */

@@ -531,12 +531,12 @@ export default function EarningsPanel({ ticker: propTicker }) {
           </div>
 
           {/* ── 5. FULL QUARTERLY EARNINGS TABLE (High Visibility) ── */}
-          <div style={{ ...cardStyle, overflowX: "auto", border: "1px solid rgba(99,102,241,0.25)", background: "linear-gradient(180deg, rgba(15,23,42,0.95), rgba(10,15,30,0.95))" }}>
+          <div style={{ ...cardStyle, border: "1px solid rgba(99,102,241,0.25)", background: "linear-gradient(180deg, rgba(15,23,42,0.95), rgba(10,15,30,0.95))" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <Table size={18} color="#818CF8" />
                 <div>
-                  <span style={{ fontSize: "0.86rem", fontWeight: 800, color: "#F0F0FF" }}>Comprehensive Quarterly Financial Statements</span>
+                  <span style={{ fontSize: "0.86rem", fontWeight: 800, color: "#F0F0FF" }}>Comprehensive Quarterly Disclosures & Financial Statements</span>
                   <div style={{ fontSize: "0.64rem", color: "#94A3B8" }}>Detailed breakdown of quarterly sales, net margins, EPS, and comparative growth deltas</div>
                 </div>
               </div>
@@ -545,50 +545,52 @@ export default function EarningsPanel({ ticker: propTicker }) {
               </div>
             </div>
 
-            <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse", fontSize: "0.75rem", fontFamily: "JetBrains Mono, monospace" }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.12)", color: "#94A3B8", textAlign: "right", fontSize: "0.68rem", textTransform: "uppercase", background: "rgba(255,255,255,0.03)" }}>
-                  <th onClick={() => toggleSort("period")} style={{ textAlign: "left", padding: "10px 12px", cursor: "pointer" }}>
-                    Period {sortField === "period" && (sortAsc ? "▲" : "▼")}
-                  </th>
-                  <th onClick={() => toggleSort("revenue")} style={{ padding: "10px 12px", cursor: "pointer" }}>
-                    Revenue (₹ Cr) {sortField === "revenue" && (sortAsc ? "▲" : "▼")}
-                  </th>
-                  <th onClick={() => toggleSort("revQoQ")} style={{ padding: "10px 12px", cursor: "pointer" }}>
-                    Rev QoQ % {sortField === "revQoQ" && (sortAsc ? "▲" : "▼")}
-                  </th>
-                  <th onClick={() => toggleSort("revYoY")} style={{ padding: "10px 12px", cursor: "pointer" }}>
-                    Rev YoY % {sortField === "revYoY" && (sortAsc ? "▲" : "▼")}
-                  </th>
-                  <th onClick={() => toggleSort("net_profit")} style={{ padding: "10px 12px", cursor: "pointer" }}>
-                    Net Profit (₹ Cr) {sortField === "net_profit" && (sortAsc ? "▲" : "▼")}
-                  </th>
-                  <th onClick={() => toggleSort("profitQoQ")} style={{ padding: "10px 12px", cursor: "pointer" }}>
-                    NP QoQ % {sortField === "profitQoQ" && (sortAsc ? "▲" : "▼")}
-                  </th>
-                  <th onClick={() => toggleSort("eps")} style={{ padding: "10px 12px", cursor: "pointer" }}>
-                    EPS (₹) {sortField === "eps" && (sortAsc ? "▲" : "▼")}
-                  </th>
-                  <th onClick={() => toggleSort("epsYoY")} style={{ padding: "10px 12px", cursor: "pointer" }}>
-                    EPS YoY % {sortField === "epsYoY" && (sortAsc ? "▲" : "▼")}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedTableData.map((q, idx) => (
-                  <tr key={idx} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", textAlign: "right", color: "#CBD5E1", background: idx % 2 === 0 ? "rgba(255,255,255,0.015)" : "transparent" }}>
-                    <td style={{ textAlign: "left", padding: "10px 12px", fontWeight: 800, color: "#F0F0FF" }}>{q.period}</td>
-                    <td style={{ padding: "10px 12px" }}>{q.revenue != null && !isNaN(Number(q.revenue)) ? Number(q.revenue).toLocaleString("en-IN") : "—"}</td>
-                    <td style={{ padding: "10px 12px" }}><GrowthPill value={q.revQoQ} /></td>
-                    <td style={{ padding: "10px 12px" }}><GrowthPill value={q.revYoY} /></td>
-                    <td style={{ padding: "10px 12px", fontWeight: 800, color: "#10B981" }}>{q.net_profit != null && !isNaN(Number(q.net_profit)) ? Number(q.net_profit).toLocaleString("en-IN") : "—"}</td>
-                    <td style={{ padding: "10px 12px" }}><GrowthPill value={q.profitQoQ} /></td>
-                    <td style={{ padding: "10px 12px", color: "#F59E0B", fontWeight: 700 }}>{q.eps != null ? `₹${q.eps}` : "—"}</td>
-                    <td style={{ padding: "10px 12px" }}><GrowthPill value={q.epsYoY} /></td>
+            <div className="table-scroll-container" style={{ maxHeight: "440px", borderRadius: 8 }}>
+              <table style={{ width: "100%", minWidth: 720, borderCollapse: "collapse", fontSize: "0.75rem", fontFamily: "JetBrains Mono, monospace" }}>
+                <thead style={{ position: "sticky", top: 0, zIndex: 5, background: "#0F172A" }}>
+                  <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.12)", color: "#94A3B8", textAlign: "right", fontSize: "0.68rem", textTransform: "uppercase", background: "#0F172A" }}>
+                    <th onClick={() => toggleSort("period")} style={{ textAlign: "left", padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                      Period {sortField === "period" && (sortAsc ? "▲" : "▼")}
+                    </th>
+                    <th onClick={() => toggleSort("revenue")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                      Revenue (₹ Cr) {sortField === "revenue" && (sortAsc ? "▲" : "▼")}
+                    </th>
+                    <th onClick={() => toggleSort("revQoQ")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                      Rev QoQ % {sortField === "revQoQ" && (sortAsc ? "▲" : "▼")}
+                    </th>
+                    <th onClick={() => toggleSort("revYoY")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                      Rev YoY % {sortField === "revYoY" && (sortAsc ? "▲" : "▼")}
+                    </th>
+                    <th onClick={() => toggleSort("net_profit")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                      Net Profit (₹ Cr) {sortField === "net_profit" && (sortAsc ? "▲" : "▼")}
+                    </th>
+                    <th onClick={() => toggleSort("profitQoQ")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                      NP QoQ % {sortField === "profitQoQ" && (sortAsc ? "▲" : "▼")}
+                    </th>
+                    <th onClick={() => toggleSort("eps")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                      EPS (₹) {sortField === "eps" && (sortAsc ? "▲" : "▼")}
+                    </th>
+                    <th onClick={() => toggleSort("epsYoY")} style={{ padding: "10px 12px", cursor: "pointer", background: "#0F172A" }}>
+                      EPS YoY % {sortField === "epsYoY" && (sortAsc ? "▲" : "▼")}
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {sortedTableData.map((q, idx) => (
+                    <tr key={idx} style={{ borderBottom: "1px solid rgba(255,255,255,0.04)", textAlign: "right", color: "#CBD5E1", background: idx % 2 === 0 ? "rgba(255,255,255,0.015)" : "transparent" }}>
+                      <td style={{ textAlign: "left", padding: "10px 12px", fontWeight: 800, color: "#F0F0FF" }}>{q.period}</td>
+                      <td style={{ padding: "10px 12px" }}>{q.revenue != null && !isNaN(Number(q.revenue)) ? Number(q.revenue).toLocaleString("en-IN") : "—"}</td>
+                      <td style={{ padding: "10px 12px" }}><GrowthPill value={q.revQoQ} /></td>
+                      <td style={{ padding: "10px 12px" }}><GrowthPill value={q.revYoY} /></td>
+                      <td style={{ padding: "10px 12px", fontWeight: 800, color: "#10B981" }}>{q.net_profit != null && !isNaN(Number(q.net_profit)) ? Number(q.net_profit).toLocaleString("en-IN") : "—"}</td>
+                      <td style={{ padding: "10px 12px" }}><GrowthPill value={q.profitQoQ} /></td>
+                      <td style={{ padding: "10px 12px", color: "#F59E0B", fontWeight: 700 }}>{q.eps != null ? `₹${q.eps}` : "—"}</td>
+                      <td style={{ padding: "10px 12px" }}><GrowthPill value={q.epsYoY} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
 
             <div style={{ marginTop: 12, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.06)", fontSize: "0.62rem", color: "#64748B", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
               <span>* YoY deltas are computed against the matching 4-quarter prior benchmark (i-4). QoQ deltas represent sequential momentum.</span>
