@@ -6,9 +6,9 @@ import {
 } from 'recharts';
 import api from '../utils/api';
 import {
-  BookOpen, TrendingUp, RefreshCw, Layers,
+  BookOpen, TrendingUp, TrendingDown, RefreshCw, Layers,
   PieChart as PieIcon, Users, Calendar, Table, CheckCircle2,
-  ShieldCheck, Activity, Download, ArrowUpRight,
+  ShieldCheck, AlertTriangle, Activity, Download, ArrowUpRight,
   Award, Sparkles, Scale, Info, X, LayoutGrid, FileText,
   Printer, ArrowDownRight, Target, BarChart2, Sliders, Zap
 } from 'lucide-react';
