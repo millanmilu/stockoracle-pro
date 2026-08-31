@@ -6,11 +6,11 @@ import {
 } from 'recharts';
 import api from '../utils/api';
 import {
-  BookOpen, TrendingUp, TrendingDown, RefreshCw, Layers,
-  PieChart as PieIcon, Users, Calendar, Table, CheckCircle2, ShieldAlert,
-  ShieldCheck, AlertTriangle, Activity, Download, Bell, ArrowUpRight, DollarSign,
-  Award, Sparkles, Scale, Info, Check, X, ChevronRight, LayoutGrid, FileText,
-  Printer, ArrowDownRight, Target, Flame, BarChart2, Sliders, Zap
+  BookOpen, TrendingUp, RefreshCw, Layers,
+  PieChart as PieIcon, Users, Calendar, Table, CheckCircle2,
+  ShieldCheck, Activity, Download, ArrowUpRight,
+  Award, Sparkles, Scale, Info, X, LayoutGrid, FileText,
+  Printer, ArrowDownRight, Target, BarChart2, Sliders, Zap
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -249,8 +249,13 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       }
     });
 
-    const slope = validEpsCount > 1 ? (validEpsCount * sumXY - sumX * sumY) / (validEpsCount * sumXX - sumX * sumX) : 0;
-    const intercept = validEpsCount > 1 ? (sumY - slope * sumX) / validEpsCount : (chronological[0]?.eps || 0);
+    const denom = validEpsCount * sumXX - sumX * sumX;
+    const slope = (validEpsCount > 1 && denom !== 0)
+      ? (validEpsCount * sumXY - sumX * sumY) / denom
+      : 0;
+    const intercept = validEpsCount > 0
+      ? (sumY - slope * sumX) / validEpsCount
+      : 0;
 
     return chronological.map((q, i) => {
       const prevQ = i > 0 ? chronological[i - 1] : null;
@@ -467,14 +472,18 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     const latestPl = annualPl[annualPl.length - 1];
     const latestBs = balanceSheet[balanceSheet.length - 1];
 
-    const sales = Number(latestPl.Sales || 0);
-    const netProfit = Number(latestPl['Net Profit'] || 0);
-    const totalAssets = Number(latestBs['Total Assets'] || 1);
+    const sales = Number(latestPl.Sales);
+    const netProfit = Number(latestPl['Net Profit']);
+    const totalAssets = Number(latestBs['Total Assets']);
     const equity = Number(latestBs['Equity Capital'] || 0) + Number(latestBs['Reserves'] || 0);
 
-    const netMargin = sales > 0 ? (netProfit / sales) * 100 : 0;
-    const assetTurnover = totalAssets > 0 ? sales / totalAssets : 0;
-    const equityMultiplier = equity > 0 ? totalAssets / equity : 1;
+    if (!sales || isNaN(sales) || !totalAssets || isNaN(totalAssets) || !equity || isNaN(equity) || isNaN(netProfit)) {
+      return null;
+    }
+
+    const netMargin = (netProfit / sales) * 100;
+    const assetTurnover = sales / totalAssets;
+    const equityMultiplier = totalAssets / equity;
     const calculatedRoe = (netMargin / 100) * assetTurnover * equityMultiplier * 100;
 
     return {
@@ -489,10 +498,11 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   // ── DYNAMIC LIVE DCF VALUATION SANDBOX ──
   const liveDcf = useMemo(() => {
     const cmp = data?.current_price || deepData?.current_price || (peers.find(p => p.name?.includes(ticker))?.price) || 1000.0;
-    const eps = deepData?.eps || data?.eps || (annualPl.length ? annualPl[annualPl.length - 1]?.['EPS in Rs'] : 25.0) || 25.0;
-    const bvps = deepData?.book_value || (balanceSheet.length ? ((Number(balanceSheet[balanceSheet.length - 1]['Equity Capital'] || 0) + Number(balanceSheet[balanceSheet.length - 1]['Reserves'] || 0)) / 10) : 200.0) || 200.0;
+    const epsRaw = deepData?.eps ?? data?.eps ?? (annualPl.length ? annualPl[annualPl.length - 1]?.['EPS in Rs'] : null);
+    const eps = epsRaw != null && !isNaN(Number(epsRaw)) ? Number(epsRaw) : null;
+    const bvps = deepData?.book_value != null && !isNaN(Number(deepData.book_value)) ? Number(deepData.book_value) : null;
 
-    const baseFcf = Math.max(1.0, Number(eps) * 0.85);
+    const baseFcf = eps != null && eps > 0 ? Math.max(1.0, eps * 0.85) : Math.max(1.0, (cmp * 0.035) * 0.85);
     const g = dcfGrowthRate / 100.0;
     const w = Math.max(0.06, dcfWacc / 100.0);
     const tg = Math.min(w - 0.01, dcfTerminalGrowth / 100.0);
@@ -519,8 +529,12 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     const fairValue = Number((pvSum + pvTerminal).toFixed(2));
 
     const marginOfSafetyPct = cmp > 0 ? Number((((fairValue - cmp) / cmp) * 100).toFixed(1)) : 0;
-    const grahamNumber = Number(Math.sqrt(Math.max(1.0, 22.5 * Number(eps) * Number(bvps))).toFixed(2));
-    const peterLynchValue = Number((Number(eps) * Math.min(30, Math.max(5, dcfGrowthRate))).toFixed(2));
+    const grahamNumber = (eps != null && bvps != null && eps > 0 && bvps > 0)
+      ? Number(Math.sqrt(22.5 * eps * bvps).toFixed(2))
+      : null;
+    const peterLynchValue = (eps != null && eps > 0)
+      ? Number((eps * Math.min(30, Math.max(5, dcfGrowthRate))).toFixed(2))
+      : null;
 
     // Sensitivity Grid: WACC (9% to 14%) vs Terminal Growth (3.5% to 5.5%)
     const waccSteps = [9.0, 10.0, 11.0, 12.0, 13.0, 14.0];
@@ -562,7 +576,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       waccSteps,
       tgSteps
     };
-  }, [dcfGrowthRate, dcfWacc, dcfTerminalGrowth, data, deepData, peers, annualPl, balanceSheet, ticker]);
+  }, [dcfGrowthRate, dcfWacc, dcfTerminalGrowth, data, deepData, peers, annualPl, ticker]);
 
   // Ownership Net QoQ Delta
   const ownershipDelta = useMemo(() => {
@@ -677,13 +691,19 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
               <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#C084FC' }}>Earnings Quality Ratio</span>
             </div>
             <span style={{ fontSize: '1.1rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: '#10B981' }}>
-              {annualPl.length && cashFlow.length && Number(annualPl[annualPl.length - 1]['Net Profit'] || 0) > 0
+              {annualPl.length > 0 && cashFlow.length > 0 && Number(annualPl[annualPl.length - 1]['Net Profit'] || 0) !== 0 && !isNaN(Number(annualPl[annualPl.length - 1]['Net Profit'])) && !isNaN(Number(cashFlow[cashFlow.length - 1]['Cash from Operating Activity']))
                 ? `${((Number(cashFlow[cashFlow.length - 1]['Cash from Operating Activity'] || 0) / Number(annualPl[annualPl.length - 1]['Net Profit'])) * 100).toFixed(0)}%`
-                : '112%'}
+                : '—'}
             </span>
           </div>
           <div style={{ fontSize: '0.64rem', color: '#94A3B8', marginBottom: 6 }}>
-            CFO / Net Profit: <strong style={{ color: '#10B981' }}>High Cash Conversion</strong>
+            CFO / Net Profit: <strong style={{ color: '#10B981' }}>
+              {annualPl.length > 0 && cashFlow.length > 0 && Number(annualPl[annualPl.length - 1]['Net Profit'] || 0) > 0
+                ? (Number(cashFlow[cashFlow.length - 1]['Cash from Operating Activity'] || 0) >= Number(annualPl[annualPl.length - 1]['Net Profit'] || 0)
+                    ? 'High Cash Conversion'
+                    : 'Moderate Cash Conversion')
+                : 'Cash Conversion'}
+            </strong>
           </div>
           <p style={{ fontSize: '0.62rem', color: '#94A3B8', margin: 0, lineHeight: 1.35 }}>
             Operating cash flow matches or exceeds accounting net profit, confirming low non-cash accrual manipulation.
@@ -779,7 +799,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
             <div key={t} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.74rem', color: '#CBD5E1', padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
               <span>{t.replace('y', ' Years')}:</span>
               <strong style={{ color: '#10B981', fontFamily: 'JetBrains Mono, monospace' }}>
-                {cagr?.roe?.[t] != null ? `${cagr.roe[t]}%` : `${(Number(roeVal || 15) - (t === '10y' ? 2 : 0)).toFixed(1)}%`}
+                {cagr?.roe?.[t] != null ? `${cagr.roe[t]}%` : '—'}
               </strong>
             </div>
           ))}
@@ -1642,7 +1662,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '0.70rem', color: '#94A3B8' }}>
           <span>5-Year PV of FCFs: <strong style={{ color: '#818CF8' }}>₹{liveDcf.pvSum}</strong></span>
           <span>•</span>
-          <span>Discounted Terminal Value: <strong style={{ color: '#10B981' }}>₹{liveDcf.pvTerminal}</strong></span>
+          <span>Discounted Terminal Value (Terminal Rate: <strong style={{ color: '#10B981' }}>{dcfTerminalGrowth.toFixed(1)}%</strong>): <strong style={{ color: '#10B981' }}>₹{liveDcf.pvTerminal}</strong></span>
           <span>•</span>
           <span>Implied Fair Value: <strong style={{ color: '#F8FAFC', fontSize: '0.86rem' }}>₹{liveDcf.fairValue}</strong></span>
         </div>
@@ -1724,7 +1744,17 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                     </td>
                     {liveDcf.tgSteps.map(tg => {
                       const val = row[`tg_${tg}`];
-                      if (val == null) return <td key={tg} style={{ padding: '9px 12px', textAlign: 'right', color: '#64748B', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>—</td>;
+                      if (val == null) {
+                        return (
+                          <td
+                            key={tg}
+                            title="Mathematically undefined when WACC ≤ Terminal Growth Rate"
+                            style={{ padding: '9px 12px', textAlign: 'right', color: '#64748B', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'help' }}
+                          >
+                            —
+                          </td>
+                        );
+                      }
                       const diffPct = liveDcf.cmp > 0 ? ((val - liveDcf.cmp) / liveDcf.cmp) * 100 : 0;
                       const isSelectedCell = isSelectedWacc && Math.abs(tg - dcfTerminalGrowth) < 0.25;
 
@@ -1766,6 +1796,14 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       maxWidth: 1320, margin: '0 auto', color: '#F8FAFC',
       fontFamily: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     }}>
+      <style>{`
+        @media print {
+          .pro-sidebar, .pro-topbar, .ticker-tape, button { display: none !important; }
+          body { background: white !important; color: black !important; }
+          div { background: white !important; border-color: #ddd !important; }
+        }
+      `}</style>
+
       {/* ── Institutional Executive Cockpit Header ── */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
@@ -1867,7 +1905,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
           value={divYieldVal}
           unit="%"
           colorFn={v => v > 1.5 ? '#10B981' : '#F8FAFC'}
-          sub={divYieldVal ? `Payout: ${corpCal.dividend_payout_ratio || '—'}%` : 'Non-dividend / 0%'}
+          sub={Number(divYieldVal) > 0 ? `Payout: ${corpCal.dividend_payout_ratio || '—'}%` : 'Non-dividend / 0%'}
         />
       </div>
 
