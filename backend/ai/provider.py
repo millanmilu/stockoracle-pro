@@ -195,16 +195,20 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "logo": "⚡",
         "color": "#EC4899",
         "models": [
-            {"id": "llama-3.3-70b-versatile", "name": "Llama 3.3 70B", "recommended": True, "free": True},
-            {"id": "llama3-70b-8192",         "name": "Llama 3 70B",   "recommended": False, "free": True},
-            {"id": "llama3-8b-8192",          "name": "Llama 3 8B",    "recommended": False, "free": True},
-            {"id": "mixtral-8x7b-32768",      "name": "Mixtral 8x7B",  "recommended": False, "free": True},
+            {"id": "llama-3.3-70b-versatile",       "name": "Llama 3.3 70B Versatile",     "recommended": True, "free": True},
+            {"id": "deepseek-r1-distill-llama-70b", "name": "DeepSeek R1 Distill 70B",     "recommended": False, "free": True},
+            {"id": "llama-3.1-8b-instant",          "name": "Llama 3.1 8B Instant",        "recommended": False, "free": True},
+            {"id": "llama-3.1-70b-versatile",       "name": "Llama 3.1 70B Versatile",     "recommended": False, "free": True},
+            {"id": "mixtral-8x7b-32768",            "name": "Mixtral 8x7B (32k Context)",  "recommended": False, "free": True},
+            {"id": "gemma2-9b-it",                  "name": "Gemma 2 9B IT",               "recommended": False, "free": True},
+            {"id": "llama3-70b-8192",               "name": "Llama 3 70B (Legacy 8k)",     "recommended": False, "free": True},
+            {"id": "llama3-8b-8192",                "name": "Llama 3 8B (Legacy 8k)",      "recommended": False, "free": True},
         ],
         "default_model": "llama-3.3-70b-versatile",
         "key_regex": r"^gsk_[A-Za-z0-9_-]{30,}$",
         "free_tier": True,
         "rate_limit": "30 RPM / Free",
-        "speed": "Lightning Fast (~35ms)",
+        "speed": "Lightning Fast (~25ms)",
         "quality": "Very High",
         "pricing": "Free Beta",
         "signup_url": "https://console.groq.com/keys",
@@ -432,29 +436,46 @@ def _call_cohere_api(key: str, model_name: str, prompt: str, system_prompt: str,
 
 
 def _call_groq_api(key: str, model_name: str, prompt: str, system_prompt: str, json_mode: bool, max_tokens: int, temp: float) -> str:
-    """Calls Groq LPU API via OpenAI-compatible endpoint."""
+    """Calls Groq LPU API via OpenAI-compatible endpoint with automatic model fallback."""
     url = "https://api.groq.com/openai/v1/chat/completions"
     messages = []
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
     messages.append({"role": "user", "content": prompt})
 
-    payload = {
-        "model": model_name or "llama-3.3-70b-versatile",
-        "messages": messages,
-        "max_tokens": max_tokens,
-        "temperature": temp,
-    }
-    if json_mode:
-        payload["response_format"] = {"type": "json_object"}
+    candidate_models = []
+    if model_name:
+        candidate_models.append(model_name)
+    for m in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "deepseek-r1-distill-llama-70b", "mixtral-8x7b-32768", "llama3-70b-8192"]:
+        if m not in candidate_models:
+            candidate_models.append(m)
 
-    req = Request(url, data=json.dumps(payload).encode("utf-8"), headers={
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {key}"
-    })
-    with urlopen(req, timeout=20) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-        return data["choices"][0]["message"]["content"].strip()
+    last_exc = None
+    for cur_model in candidate_models:
+        payload = {
+            "model": cur_model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temp,
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+
+        try:
+            req = Request(url, data=json.dumps(payload).encode("utf-8"), headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}"
+            })
+            with urlopen(req, timeout=20) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data["choices"][0]["message"]["content"].strip()
+        except Exception as exc:
+            last_exc = exc
+            continue
+
+    if last_exc:
+        raise last_exc
+    return ""
 
 
 # ── Live Probe Testing ─────────────────────────────────────────────────────────
