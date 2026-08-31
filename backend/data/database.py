@@ -5,7 +5,7 @@ import sqlite3
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-from typing import Optional, Any
+from typing import Optional, Any, Dict, List, Tuple
 from backend.core.logging import get_logger
 
 logger = get_logger("stockoracle.db")
