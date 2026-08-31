@@ -88,12 +88,12 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "logo": "✨",
         "color": "#818CF8",
         "models": [
-            {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "recommended": True, "free": True},
+            {"id": "gemini-3.6-flash", "name": "Gemini 3.6 Flash", "recommended": True, "free": True},
             {"id": "gemini-1.5-flash", "name": "Gemini 1.5 Flash", "recommended": False, "free": True},
             {"id": "gemini-2.5-pro",   "name": "Gemini 2.5 Pro",   "recommended": False, "free": False},
             {"id": "gemini-pro",       "name": "Gemini 1.0 Pro",   "recommended": False, "free": True},
         ],
-        "default_model": "gemini-2.5-flash",
+        "default_model": "gemini-3.6-flash",
         "key_regex": r"^AIza[A-Za-z0-9_-]{35}$",
         "free_tier": True,
         "rate_limit": "15 RPM (Free)",
@@ -284,38 +284,56 @@ def get_active_provider_info() -> Tuple[str, str, str]:
         if key:
             return pid, key, model
 
-    return "gemini", "", "gemini-2.5-flash"
+    return "gemini", "", "gemini-3.6-flash"
 
 
 # ── Provider HTTP / SDK Dispatchers ───────────────────────────────────────────
 
 def _call_gemini_api(key: str, model_name: str, prompt: str, system_prompt: str, json_mode: bool, max_tokens: int, temp: float) -> str:
-    """Calls Google Gemini API via SDK or HTTP."""
-    try:
-        import google.generativeai as genai
-        genai.configure(api_key=key)
-        model = genai.GenerativeModel(
-            model_name=model_name or "gemini-2.5-flash",
-            system_instruction=system_prompt or "You are a senior quantitative financial analyst specializing in Indian equities.",
-        )
-        gen_config = {"max_output_tokens": max_tokens, "temperature": temp}
-        if json_mode:
-            gen_config["response_mime_type"] = "application/json"
-        response = model.generate_content(prompt, generation_config=gen_config)
-        return response.text.strip()
-    except Exception as sdk_err:
-        # Fallback to direct REST HTTP request
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name or 'gemini-2.5-flash'}:generateContent?key={key}"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temp}
-        }
-        if system_prompt:
-            payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
-        req = Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
-        with urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    """Calls Google Gemini API via SDK or HTTP with multi-model fallback."""
+    candidate_models = []
+    if model_name:
+        candidate_models.append(model_name)
+    for m in ["gemini-3.6-flash", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-pro"]:
+        if m not in candidate_models:
+            candidate_models.append(m)
+
+    last_exc = None
+    for cur_model in candidate_models:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel(
+                model_name=cur_model,
+                system_instruction=system_prompt or "You are a senior quantitative financial analyst specializing in Indian equities.",
+            )
+            gen_config = {"max_output_tokens": max_tokens, "temperature": temp}
+            if json_mode:
+                gen_config["response_mime_type"] = "application/json"
+            response = model.generate_content(prompt, generation_config=gen_config)
+            return response.text.strip()
+        except Exception as sdk_err:
+            last_exc = sdk_err
+            # Fallback to direct REST HTTP request for this candidate model
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{cur_model}:generateContent?key={key}"
+                payload = {
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temp}
+                }
+                if system_prompt:
+                    payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+                req = Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+                with urlopen(req, timeout=20) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            except Exception as http_err:
+                last_exc = http_err
+                continue
+
+    if last_exc:
+        raise last_exc
+    return ""
 
 
 def _call_openai_api(key: str, model_name: str, prompt: str, system_prompt: str, json_mode: bool, max_tokens: int, temp: float) -> str:
