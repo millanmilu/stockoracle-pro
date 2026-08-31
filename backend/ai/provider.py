@@ -110,9 +110,11 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "logo": "🧠",
         "color": "#10B981",
         "models": [
-            {"id": "gpt-4o-mini",  "name": "GPT-4o Mini",  "recommended": True, "free": False},
-            {"id": "gpt-4o",       "name": "GPT-4o",       "recommended": False, "free": False},
-            {"id": "gpt-3.5-turbo","name": "GPT-3.5 Turbo","recommended": False, "free": False},
+            {"id": "gpt-4o-mini",         "name": "GPT-4o Mini",              "recommended": True, "free": False},
+            {"id": "openai/gpt-oss-120b", "name": "GPT-OSS 120B (Open-MoE)",  "recommended": False, "free": True},
+            {"id": "gpt-4o",              "name": "GPT-4o Flagship",          "recommended": False, "free": False},
+            {"id": "o3-mini",             "name": "o3 Mini (Reasoning)",      "recommended": False, "free": False},
+            {"id": "gpt-3.5-turbo",       "name": "GPT-3.5 Turbo",            "recommended": False, "free": False},
         ],
         "default_model": "gpt-4o-mini",
         "key_regex": r"^sk-[A-Za-z0-9_-]{20,}$",
@@ -122,7 +124,7 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "quality": "Exceptional",
         "pricing": "$0.15 / 1M tokens",
         "signup_url": "https://platform.openai.com/api-keys",
-        "description": "Industry benchmark intelligence with precise JSON formatting.",
+        "description": "Industry benchmark intelligence with open MoE & reasoning models.",
     },
     "anthropic": {
         "id": "anthropic",
@@ -196,6 +198,7 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "color": "#EC4899",
         "models": [
             {"id": "llama-3.3-70b-versatile",       "name": "Llama 3.3 70B Versatile",     "recommended": True, "free": True},
+            {"id": "openai/gpt-oss-120b",           "name": "OpenAI GPT-OSS 120B (LPU)",   "recommended": False, "free": True},
             {"id": "deepseek-r1-distill-llama-70b", "name": "DeepSeek R1 Distill 70B",     "recommended": False, "free": True},
             {"id": "llama-3.1-8b-instant",          "name": "Llama 3.1 8B Instant",        "recommended": False, "free": True},
             {"id": "llama-3.1-70b-versatile",       "name": "Llama 3.1 70B Versatile",     "recommended": False, "free": True},

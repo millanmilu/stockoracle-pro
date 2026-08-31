@@ -118,9 +118,11 @@ const AI_PROVIDERS_META = [
     cost: '$0.15 / 1M Tokens',
     freeLimit: 'Pay-as-you-go',
     models: [
-      { id: 'gpt-4o-mini',   name: 'GPT-4o Mini',   recommended: true, free: false },
-      { id: 'gpt-4o',        name: 'GPT-4o Flagship', recommended: false, free: false },
-      { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo', recommended: false, free: false },
+      { id: 'gpt-4o-mini',         name: 'GPT-4o Mini',              recommended: true, free: false },
+      { id: 'openai/gpt-oss-120b', name: 'GPT-OSS 120B (Open-MoE)',  recommended: false, free: true },
+      { id: 'gpt-4o',              name: 'GPT-4o Flagship',          recommended: false, free: false },
+      { id: 'o3-mini',             name: 'o3 Mini (Reasoning)',      recommended: false, free: false },
+      { id: 'gpt-3.5-turbo',       name: 'GPT-3.5 Turbo',            recommended: false, free: false },
     ],
     signupUrl: 'https://platform.openai.com/api-keys',
   },
@@ -192,6 +194,7 @@ const AI_PROVIDERS_META = [
     freeLimit: '30 RPM Free',
     models: [
       { id: 'llama-3.3-70b-versatile',       name: 'Llama 3.3 70B Versatile',     recommended: true, free: true },
+      { id: 'openai/gpt-oss-120b',           name: 'OpenAI GPT-OSS 120B (LPU)',   recommended: false, free: true },
       { id: 'deepseek-r1-distill-llama-70b', name: 'DeepSeek R1 Distill 70B',     recommended: false, free: true },
       { id: 'llama-3.1-8b-instant',          name: 'Llama 3.1 8B Instant',        recommended: false, free: true },
       { id: 'llama-3.1-70b-versatile',       name: 'Llama 3.1 70B Versatile',     recommended: false, free: true },
