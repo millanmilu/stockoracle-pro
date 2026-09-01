@@ -609,3 +609,48 @@ def ask_ai(
         "AI engine not configured or all providers temporarily unavailable. "
         "Please configure your API key in Broker & AI Settings (supports Gemini, OpenAI, Claude, Mistral, Cohere, Groq)."
     )
+
+
+def extract_json_from_ai_response(raw_text: str) -> Optional[Dict[str, Any]]:
+    """
+    Safely extracts and parses JSON dictionary from LLM outputs.
+    Handles markdown code blocks (```json ... ```), introductory conversation text,
+    trailing comments, and whitespace issues.
+    """
+    if not raw_text or not isinstance(raw_text, str):
+        return None
+    s = raw_text.strip()
+
+    # 1. Check for markdown code fences
+    if "```" in s:
+        match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", s, re.IGNORECASE)
+        if match:
+            inner = match.group(1).strip()
+            try:
+                parsed = json.loads(inner)
+                if isinstance(parsed, dict):
+                    return parsed
+            except Exception:
+                pass
+
+    # 2. Search for outermost { ... }
+    start = s.find("{")
+    end = s.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = s[start:end + 1]
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+    # 3. Direct parse attempt
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    return None

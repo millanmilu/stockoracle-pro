@@ -8,6 +8,10 @@ export default function OptionsLabView({ initialTab = 'chain' }) {
   const selectedSymbol = useStore(s => s.selectedSymbol);
   const [activeSubTab, setActiveSubTab] = useState(initialTab);
 
+  React.useEffect(() => {
+    if (initialTab) setActiveSubTab(initialTab);
+  }, [initialTab]);
+
   const TABS = [
     { id: 'chain',    label: 'Live Options Chain',    icon: Layers,    desc: 'Calls, Puts, Greeks, PCR & Max Pain', color: '#10B981' },
     { id: 'strategy', label: 'Strategy Lab & Payoff', icon: GitCommit, desc: 'Multi-Leg Options Payoff Profiler',  color: '#F97316' },

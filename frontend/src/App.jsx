@@ -108,7 +108,7 @@ export default function App() {
       case 'Options Strategy Lab': return <Suspense fallback={<LoadingFallback />}><OptionsLabView initialTab="strategy" /></Suspense>;
       case 'News':              return <Suspense fallback={<LoadingFallback />}><MarketIntelligenceView initialTab="news" /></Suspense>;
       case 'Sentiment':         return <Suspense fallback={<LoadingFallback />}><MarketIntelligenceView initialTab="sentiment" /></Suspense>;
-      case 'Macro Data':        return <Suspense fallback={<LoadingFallback />}><MacroTerminalView /></Suspense>;
+      case 'Macro Data':        return <Suspense fallback={<LoadingFallback />}><MacroTerminalView initialTab="indicators" /></Suspense>;
 
       // Main Workspaces
       case 'Live Chart':        return <LiveChartView />;

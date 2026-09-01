@@ -9,10 +9,14 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend
 } from 'recharts';
 
-export default function MacroTerminalView() {
-  const [activeSubTab, setActiveSubTab] = useState('sovereign'); // 'sovereign' | 'indicators'
+export default function MacroTerminalView({ initialTab = 'sovereign' }) {
+  const [activeSubTab, setActiveSubTab] = useState(initialTab); // 'sovereign' | 'indicators'
   const [macroData, setMacroData] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (initialTab) setActiveSubTab(initialTab);
+  }, [initialTab]);
 
   const fetchMacro = async () => {
     setLoading(true);

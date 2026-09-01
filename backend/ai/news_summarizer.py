@@ -1,7 +1,7 @@
 import os
 import json
 import logging
-from backend.ai.provider import ask_ai
+from backend.ai.provider import ask_ai, extract_json_from_ai_response
 
 logger = logging.getLogger("stockoracle.ai.news")
 
@@ -56,14 +56,9 @@ Respond with exactly this JSON structure:
             max_tokens=350,
             temperature=0.2
         )
-        text = raw_res.strip()
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        result = json.loads(text)
+        result = extract_json_from_ai_response(raw_res) or {}
         for key in ("summary", "sentiment", "risks", "impact"):
-            if key not in result:
+            if key not in result or not result[key]:
                 result[key] = default[key]
         result["risks"] = result.get("risks", [])[:3]
         return result

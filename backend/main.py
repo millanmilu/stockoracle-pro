@@ -22,7 +22,7 @@ from backend.core.middleware import RequestIdMiddleware
 from backend.shared.config import settings
 from backend.shared.security import verify_api_key, get_current_user_id
 from backend.shared.database import init_database
-from backend.data.database import cleanup_old_tasks, save_live_tick, get_company_info, get_stale_company_info
+from backend.data.database import init_db, cleanup_old_tasks, save_live_tick, get_company_info, get_stale_company_info
 from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, ensure_session,
     get_session_status, get_token_info, smartApi, run_session_keepalive_loop
@@ -180,6 +180,7 @@ async def prefetch_all_tickers():
 async def lifespan(app: FastAPI):
     # Initialize unified database layer (SQLAlchemy 2.0 / PostgreSQL / TimescaleDB / SQLite)
     init_database()
+    init_db()
     cleanup_old_tasks(max_age_hours=48)
     ensure_session()
 

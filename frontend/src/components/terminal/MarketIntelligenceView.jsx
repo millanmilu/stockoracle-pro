@@ -8,6 +8,10 @@ export default function MarketIntelligenceView({ initialTab = 'news' }) {
   const selectedSymbol = useStore(s => s.selectedSymbol);
   const [activeSubTab, setActiveSubTab] = useState(initialTab);
 
+  React.useEffect(() => {
+    if (initialTab) setActiveSubTab(initialTab);
+  }, [initialTab]);
+
   const TABS = [
     { id: 'news',      label: 'Financial News Feed',          icon: Newspaper, desc: 'AI-Tagged Live Market Headlines',    color: '#818CF8' },
     { id: 'sentiment', label: 'Fear & Greed / Sentiment Radar',icon: Gauge,     desc: 'Market Psychology & Sector Breadth', color: '#10B981' },

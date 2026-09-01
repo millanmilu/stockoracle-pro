@@ -443,6 +443,7 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_broker_audit_created ON broker_audit_logs (created_at)")
 
         # Cleanup: purge any legacy intraday records that polluted the daily historical_prices table
+        cursor.execute("DELETE FROM historical_prices WHERE length(date) > 10")
         cursor.execute("DELETE FROM historical_prices WHERE length(date) != 10")
 
         conn.commit()

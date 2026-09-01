@@ -170,22 +170,30 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     setLoading(true);
     setError(null);
     try {
-      const [res1, res2] = await Promise.all([
+      const [res1, res2] = await Promise.allSettled([
         api.get(`/api/stock/${ticker}/fundamentals`),
         api.get(`/api/stock/${ticker}/financials`)
       ]);
-      setData(res1.data);
-      setDeepData(res2.data);
 
-      const histDcf = res2.data?.dcf_valuation;
-      if (histDcf?.assumed_growth_rate_pct != null) {
-        setDcfGrowthRate(histDcf.assumed_growth_rate_pct);
+      if (res1.status === 'fulfilled' && res1.value?.data) {
+        setData(res1.value.data);
       }
-      if (histDcf?.discount_rate_wacc_pct != null) {
-        setDcfWacc(histDcf.discount_rate_wacc_pct);
+      if (res2.status === 'fulfilled' && res2.value?.data) {
+        setDeepData(res2.value.data);
+        const histDcf = res2.value.data?.dcf_valuation;
+        if (histDcf?.assumed_growth_rate_pct != null) {
+          setDcfGrowthRate(histDcf.assumed_growth_rate_pct);
+        }
+        if (histDcf?.discount_rate_wacc_pct != null) {
+          setDcfWacc(histDcf.discount_rate_wacc_pct);
+        }
+        if (histDcf?.terminal_growth_rate_pct != null) {
+          setDcfTerminalGrowth(histDcf.terminal_growth_rate_pct);
+        }
       }
-      if (histDcf?.terminal_growth_rate_pct != null) {
-        setDcfTerminalGrowth(histDcf.terminal_growth_rate_pct);
+
+      if (res1.status === 'rejected' && res2.status === 'rejected') {
+        setError('Fundamental research data temporarily unavailable.');
       }
     } catch {
       setError('Fundamental research data temporarily unavailable.');

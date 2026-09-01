@@ -9,6 +9,10 @@ export default function TechnicalLabView({ initialTab = 'levels' }) {
   const selectedSymbol = useStore(s => s.selectedSymbol);
   const [activeSubTab, setActiveSubTab] = useState(initialTab);
 
+  React.useEffect(() => {
+    if (initialTab) setActiveSubTab(initialTab);
+  }, [initialTab]);
+
   const TABS = [
     { id: 'levels',     label: 'Levels & S/R Zones', icon: Target,   desc: 'Pivots, Fibonacci & Volume Profile', color: '#38BDF8' },
     { id: 'patterns',   label: 'Chart Patterns',     icon: Zap,      desc: 'Pattern Recognition & Confluence',   color: '#F59E0B' },

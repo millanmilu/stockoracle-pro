@@ -6,7 +6,7 @@ import {
   ExternalLink, Layers, CheckCircle2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import api from '../utils/api';
+import api, { getApiBase } from '../utils/api';
 
 /* ─── Inject spin keyframe once ─────────────────────────────────────────────── */
 if (typeof document !== 'undefined' && !document.getElementById('broker-spin-style')) {
@@ -27,7 +27,7 @@ if (typeof document !== 'undefined' && !document.getElementById('broker-spin-sty
 
 /* ─── Constants ──────────────────────────────────────────────────────────────── */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = getApiBase();
 
 const BROKERS = [
   {
