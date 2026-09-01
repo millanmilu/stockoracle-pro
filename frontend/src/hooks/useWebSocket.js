@@ -1,16 +1,5 @@
-import { useState, useEffect, useRef } from 'react'
-
-const getWsUrl = () => {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
-  if (typeof window !== 'undefined') {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    if (window.location.hostname.includes('amplifyapp.com')) {
-      return 'wss://stockoracle.duckdns.org/ws/prices';
-    }
-    return `${protocol}//${window.location.host}/ws/prices`;
-  }
-  return 'ws://localhost:8000/ws/prices';
-};
+import { useState, useEffect, useRef } from 'react';
+import { getWsUrl } from '../utils/api';
 
 export function useWebSocket(onMessage) {
   const wsRef = useRef(null)

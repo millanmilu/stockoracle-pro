@@ -5,7 +5,7 @@ Pydantic Settings model reading from .env and environment variables for Host, Op
 import os
 from typing import Optional, Dict
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import Field
+from pydantic import Field, model_validator
 
 
 class Settings(BaseSettings):
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # Security & Auth
     API_KEY: Optional[str] = Field(default=None, alias="API_KEY")
-    JWT_SECRET: str = "stockoracle-pro-secret-key-change-in-prod"
+    JWT_SECRET: Optional[str] = Field(default=None, alias="JWT_SECRET")
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
 
@@ -79,6 +79,19 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore"
     )
+
+    @model_validator(mode="after")
+    def validate_security(self):
+        if not self.JWT_SECRET:
+            env_val = os.environ.get("JWT_SECRET")
+            if env_val:
+                self.JWT_SECRET = env_val
+            elif self.is_production:
+                import secrets
+                self.JWT_SECRET = secrets.token_urlsafe(32)
+            else:
+                self.JWT_SECRET = "stockoracle-dev-secret-key-non-prod"
+        return self
 
     @property
     def is_sqlite(self) -> bool:

@@ -21,20 +21,9 @@ import { parseNum, toChartTime, addBusinessDays, POPULAR_STOCKS, INTERVALS, SIG,
 import { calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateMACD, calculateALMA, calculateKeyLevels, detectPatterns } from '../utils/chartIndicators';
 import SymbolSearchModal from './chart-tools/SymbolSearchModal';
 import { playAlertChime } from '../utils/soundChime';
+import { getWsUrl } from '../utils/api';
 
 /* ─── Constants ─────────────────────────────────────────────────────────────── */
-
-const getWsUrl = () => {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
-  if (typeof window !== 'undefined') {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    if (window.location.hostname.includes('amplifyapp.com')) {
-      return 'wss://stockoracle.duckdns.org/ws/prices';
-    }
-    return `${protocol}//${window.location.host}/ws/prices`;
-  }
-  return 'ws://localhost:8000/ws/prices';
-};
 
 
 
@@ -818,7 +807,7 @@ export default function LiveChartView() {
       ws.onmessage = e => {
         try {
           const { ticker, price, change_pct, is_live } = JSON.parse(e.data);
-          const isLiveTick = is_live !== false; // treat missing flag as live (legacy compat)
+          const isLiveTick = is_live === true; // strictly require confirmed live flag from server
           useStore.getState().setWsLiveData?.(isLiveTick);
 
           if (ticker === selectedSymbol) {

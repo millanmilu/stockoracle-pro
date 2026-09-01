@@ -8,7 +8,7 @@ import json
 import sqlite3
 import pyotp
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from backend.core.logging import get_logger
 from backend.data import fetcher as _fetcher
 from backend.data.database import get_db_connection
+from backend.shared.security import encrypt_value, decrypt_value
 
 logger = get_logger("stockoracle.broker")
 
@@ -95,8 +96,8 @@ def save_broker_to_db(broker_name: str, creds_dict: dict, is_active: bool = True
             if is_active:
                 conn.execute("UPDATE broker_accounts SET is_active = 0")
 
-            now_str = datetime.now().isoformat()
-            creds_str = json.dumps(creds_dict)
+            now_str = datetime.now(timezone.utc).isoformat()
+            creds_str = encrypt_value(json.dumps(creds_dict))
 
             # Insert or replace broker credentials
             conn.execute("""
@@ -108,7 +109,7 @@ def save_broker_to_db(broker_name: str, creds_dict: dict, is_active: bool = True
                     updated_at = excluded.updated_at
             """, (broker_name, 1 if is_active else 0, creds_str, now_str))
             conn.commit()
-            logger.info("Permanently stored %s credentials in database.", broker_name)
+            logger.info("Permanently stored %s credentials (encrypted) in database.", broker_name)
             return True
     except Exception as exc:
         logger.error("Failed saving broker %s to database: %s", broker_name, exc)
@@ -126,7 +127,8 @@ def get_all_brokers_from_db() -> Dict[str, dict]:
             """)
             for row in cursor.fetchall():
                 try:
-                    creds = json.loads(row["credentials_json"]) if row["credentials_json"] else {}
+                    decrypted_raw = decrypt_value(row["credentials_json"]) if row["credentials_json"] else ""
+                    creds = json.loads(decrypted_raw) if decrypted_raw else {}
                 except Exception:
                     creds = {}
                 result[row["broker"]] = {

@@ -57,10 +57,34 @@ export function calculateBollingerBands(candles, period = 20, stdDevMultiplier =
   const middle = [];
   const lower = [];
 
-  for (let i = period - 1; i < candles.length; i++) {
-    const slice = candles.slice(i - period + 1, i + 1);
-    const mean = slice.reduce((acc, c) => acc + Number(c.close || 0), 0) / period;
-    const variance = slice.reduce((acc, c) => acc + Math.pow(Number(c.close || 0) - mean, 2), 0) / period;
+  let sum = 0;
+  let sumSq = 0;
+
+  // Initialize initial window
+  for (let i = 0; i < period; i++) {
+    const val = Number(candles[i].close || 0);
+    sum += val;
+    sumSq += val * val;
+  }
+
+  const mean0 = sum / period;
+  const var0 = Math.max(0, (sumSq / period) - (mean0 * mean0));
+  const stdDev0 = Math.sqrt(var0);
+  const time0 = candles[period - 1].time;
+  middle.push({ time: time0, value: Number(mean0.toFixed(2)) });
+  upper.push({ time: time0, value: Number((mean0 + stdDev0 * stdDevMultiplier).toFixed(2)) });
+  lower.push({ time: time0, value: Number((mean0 - stdDev0 * stdDevMultiplier).toFixed(2)) });
+
+  // Slide window in O(1) per step
+  for (let i = period; i < candles.length; i++) {
+    const oldVal = Number(candles[i - period].close || 0);
+    const newVal = Number(candles[i].close || 0);
+
+    sum += newVal - oldVal;
+    sumSq += (newVal * newVal) - (oldVal * oldVal);
+
+    const mean = sum / period;
+    const variance = Math.max(0, (sumSq / period) - (mean * mean));
     const stdDev = Math.sqrt(variance);
 
     const time = candles[i].time;

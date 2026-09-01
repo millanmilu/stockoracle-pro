@@ -22,7 +22,10 @@ from backend.core.middleware import RequestIdMiddleware
 from backend.shared.config import settings
 from backend.shared.security import verify_api_key, get_current_user_id
 from backend.shared.database import init_database
-from backend.data.database import init_db, cleanup_old_tasks, save_live_tick, get_company_info, get_stale_company_info
+from backend.data.database import (
+    init_db, cleanup_old_tasks, save_live_tick, get_company_info,
+    get_stale_company_info, get_historical_prices
+)
 from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, ensure_session,
     get_session_status, get_token_info, smartApi, run_session_keepalive_loop
@@ -140,6 +143,15 @@ async def websocket_price_broadcast_loop():
                                 base_price = float(info["current_price"])
                                 prices_cache[t] = base_price
 
+                        # Invariant fallback: strictly fall back to verified historical close price
+                        if not base_price or base_price <= 0:
+                            hist = await asyncio.to_thread(get_historical_prices, t, 1)
+                            if hist:
+                                last_candle = hist[-1] if isinstance(hist, list) else None
+                                if last_candle and last_candle.get("close"):
+                                    base_price = float(last_candle["close"])
+                                    prices_cache[t] = base_price
+
                         if base_price and base_price > 0:
                             payload = {
                                 "ticker": t,
@@ -149,7 +161,7 @@ async def websocket_price_broadcast_loop():
                             }
                             await manager.broadcast(payload)
                             _fallback_last_sent[t] = now_ts
-                            logger.debug("Sent stale fallback price for %s: %.2f", t, base_price)
+                            logger.debug("Sent verified historical fallback price for %s: %.2f", t, base_price)
 
                     await asyncio.sleep(0.5)
 

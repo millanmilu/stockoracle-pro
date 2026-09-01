@@ -18,6 +18,18 @@ export const getApiBase = () => {
   return 'http://localhost:8000';
 };
 
+export const getWsUrl = () => {
+  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+  if (typeof window !== 'undefined') {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    if (window.location.hostname.includes('amplifyapp.com')) {
+      return 'wss://stockoracle.duckdns.org/ws/prices';
+    }
+    return `${protocol}//${window.location.host}/ws/prices`;
+  }
+  return 'ws://localhost:8000/ws/prices';
+};
+
 const API_BASE = getApiBase();
 const API_KEY  = import.meta.env.VITE_API_KEY  || '';
 

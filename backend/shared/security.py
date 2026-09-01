@@ -74,3 +74,50 @@ def get_current_user_id(request: Request) -> str:
     #     raise HTTPException(status_code=403, detail="User not authorized.")
 
     return _DEFAULT_USER
+
+
+# ── Vault Encryption / Decryption Utilities ───────────────────────────────────
+import base64
+import hashlib
+
+
+def _get_vault_key() -> bytes:
+    secret = (getattr(settings, "JWT_SECRET", None) or os.environ.get("JWT_SECRET") or "stockoracle_master_vault_key_2026").encode("utf-8")
+    salt = b"stockoracle_vault_salt_v1"
+    derived = hashlib.pbkdf2_hmac("sha256", secret, salt, 100000, dklen=32)
+    return base64.urlsafe_b64encode(derived)
+
+
+def encrypt_value(raw_val: str) -> str:
+    """Encrypts a string (such as credentials JSON or API keys) into encrypted ciphertext."""
+    if not raw_val:
+        return ""
+    try:
+        from cryptography.fernet import Fernet
+        f = Fernet(_get_vault_key())
+        return "ENC:" + f.encrypt(raw_val.strip().encode("utf-8")).decode("utf-8")
+    except Exception:
+        key_bytes = _get_vault_key()
+        raw_bytes = raw_val.strip().encode("utf-8")
+        xored = bytes(b ^ key_bytes[i % len(key_bytes)] for i, b in enumerate(raw_bytes))
+        return "OBF:" + base64.b64encode(xored).decode("utf-8")
+
+
+def decrypt_value(encrypted_val: str) -> str:
+    """Decrypts a string. Seamlessly handles ENC:, OBF:, or legacy unencrypted plaintext."""
+    if not encrypted_val:
+        return ""
+    try:
+        if encrypted_val.startswith("ENC:"):
+            from cryptography.fernet import Fernet
+            f = Fernet(_get_vault_key())
+            return f.decrypt(encrypted_val[4:].encode("utf-8")).decode("utf-8")
+        elif encrypted_val.startswith("OBF:"):
+            key_bytes = _get_vault_key()
+            xored = base64.b64decode(encrypted_val[4:].encode("utf-8"))
+            return bytes(b ^ key_bytes[i % len(key_bytes)] for i, b in enumerate(xored)).decode("utf-8")
+        # Legacy unencrypted plaintext fallback
+        return encrypted_val
+    except Exception as exc:
+        logger.warning("Failed decrypting value (returning raw fallback): %s", exc)
+        return encrypted_val

@@ -4,7 +4,8 @@ import json
 import sqlite3
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Optional, Any, Dict, List, Tuple
 from backend.core.logging import get_logger
 
@@ -481,8 +482,7 @@ def write_audit_log(
             conn.commit()
     except Exception as e:
         # Audit write must never crash the caller; log and continue
-        import logging
-        logging.getLogger("stockoracle.db").error("audit_log write failed: %s", e)
+        logger.error("audit_log write failed: %s", e)
 
 
 # ── Historical Prices ──────────────────────────────────────────────────────────
@@ -727,7 +727,7 @@ def get_all_stock_universe_records(limit: int = 1500) -> list[dict]:
 def save_live_tick(ticker: str, price: float, change_pct: float):
     """Saves a single live tick update to the database."""
     ticker = ticker.upper()
-    timestamp = datetime.now().isoformat()
+    timestamp = datetime.now(timezone.utc).isoformat()
     try:
         with get_db_connection() as conn:
             conn.execute(
@@ -932,7 +932,7 @@ def get_live_tick_ohlcv(ticker: str) -> Optional[dict]:
     or None if no ticks exist for today.
     """
     ticker = ticker.upper()
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
     try:
         with get_db_connection() as conn:
             df = pd.read_sql_query(
@@ -1578,14 +1578,18 @@ def upsert_screener_daily_metric(row_data: dict) -> None:
 
 def execute_screener_sql_query(
     where_clause: str = "1=1",
-    params: dict = None,
+    params: Any = None,
     sort_by: str = "market_cap_cr",
     sort_dir: str = "DESC",
     limit: int = 50,
     offset: int = 0
 ) -> dict:
     """Executes indexed SQL filter query against screener_daily_metrics table."""
-    params = params or {}
+    if params is None:
+        params = {} if ":" in where_clause else ()
+    elif isinstance(params, list):
+        params = tuple(params)
+
     allowed_sorts = {
         "market_cap_cr", "close_price", "change_1d_pct", "rsi_14", "pe_ratio",
         "pb_ratio", "roe_pct", "roce_pct", "debt_to_equity", "volume_ratio_20d",
@@ -1608,15 +1612,24 @@ def execute_screener_sql_query(
         WHERE {where_clause}
     """
 
-    with get_db_connection() as conn:
-        total = conn.execute(count_sql, params).fetchone()["total_count"]
-        rows = conn.execute(query_sql, params).fetchall()
+    try:
+        with get_db_connection() as conn:
+            total_row = conn.execute(count_sql, params).fetchone()
+            total = total_row["total_count"] if total_row else 0
+            rows = conn.execute(query_sql, params).fetchall()
 
-    return {
-        "total": total,
-        "count": len(rows),
-        "results": [dict(r) for r in rows],
-    }
+        return {
+            "total": total,
+            "count": len(rows),
+            "results": [dict(r) for r in rows],
+        }
+    except Exception as e:
+        logger.warning("execute_screener_sql_query error for where=%s: %s", where_clause, e)
+        return {
+            "total": 0,
+            "count": 0,
+            "results": [],
+        }
 
 
 def save_user_screen_query(
