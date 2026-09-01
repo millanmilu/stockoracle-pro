@@ -418,5 +418,40 @@ class BrokerAccount(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
+class AIProvider(Base):
+    """Configured AI LLM providers, encrypted API keys, and latency telemetry."""
+    __tablename__ = "ai_providers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    provider_name = Column(String(50), nullable=False, unique=True, index=True)
+    api_key_encrypted = Column(Text, nullable=False)
+    api_key_masked = Column(String(50), nullable=False)
+    selected_model = Column(String(100), nullable=False)
+    is_active = Column(Integer, nullable=False, default=0)
+    last_tested_at = Column(String(50), nullable=True)
+    last_test_status = Column(String(50), nullable=True, default="Not Tested")
+    total_requests = Column(Integer, nullable=False, default=0)
+    created_at = Column(String(50), default=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at = Column(String(50), default=lambda: datetime.now(timezone.utc).isoformat())
+
+
+class BrokerAuditLog(Base):
+    """Historical broker session and connection event journal."""
+    __tablename__ = "broker_audit_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    broker = Column(String(50), nullable=False, index=True)
+    event = Column(String(100), nullable=False)
+    status = Column(String(50), nullable=False)
+    details = Column(Text, nullable=True)
+    latency_ms = Column(Float, nullable=True)
+    created_at = Column(String(50), nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
+
+    __table_args__ = (
+        Index("idx_broker_audit_broker", "broker"),
+    )
+
+
+
 
 

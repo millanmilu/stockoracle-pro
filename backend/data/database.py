@@ -16,7 +16,27 @@ DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stockoracle.
 DATE_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
+from sqlalchemy import select, update, delete, func, text, or_, and_
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from backend.shared.database import engine, init_database, get_db_session
+from backend.shared.models import (
+    Base, HistoricalPrice, StockUniverse, LiveTick, IntradayCandle,
+    PortfolioPosition, SmartAlert, PaperAccount, PaperPosition, PaperOrder,
+    AuditLog, TaskStatus, ModelRegistry, SavedScan, Company,
+    FinancialStatement, FinancialRatio, ShareholdingSnapshot,
+    ScreenerDailyMetric, UserScreen, CompanyInfoCache, PredictionCache,
+    ScreenerResultCache, MonteCarloCache, BrokerAccount, AIProvider, BrokerAuditLog
+)
+
+CACHE_MODEL_MAP = {
+    "company_info": CompanyInfoCache,
+    "predictions": PredictionCache,
+    "monte_carlo": MonteCarloCache,
+    "screener_results": ScreenerResultCache,
+}
+
 
 
 def get_db_connection():
@@ -29,426 +49,17 @@ def get_db_connection():
 
 
 def init_db():
-    """Initializes the database schema and creates all tables if they do not exist."""
+    """Initializes the database schema and creates all tables via SQLAlchemy ORM."""
     logger.info("Initializing database with unified SQLAlchemy engine: %s", DB_PATH)
     init_database()
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
+    # Invariant: Auto-cleansing on init to purge legacy non-daily candle strings
+    try:
+        with get_db_session() as session:
+            session.execute(text("DELETE FROM historical_prices WHERE length(date) > 10 OR length(date) != 10"))
+    except Exception as e:
+        logger.debug("Historical prices auto-cleansing check notice: %s", e)
+    logger.info("Database initialization complete.")
 
-        # 1. Historical Prices Table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS historical_prices (
-                ticker  TEXT,
-                date    TEXT,
-                open    REAL,
-                high    REAL,
-                low     REAL,
-                close   REAL,
-                volume  INTEGER,
-                PRIMARY KEY (ticker, date)
-            )
-        """)
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date)"
-        )
-
-        # 1b. Searchable NSE universe, populated from Angel One ScripMaster.
-        # This is deliberately separate from historical prices: downloading two
-        # years for every NSE listing would be slow and exceed broker limits.
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS stock_universe (
-                ticker      TEXT PRIMARY KEY,
-                name        TEXT NOT NULL,
-                symbol      TEXT NOT NULL,
-                token       TEXT,
-                exchange    TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
-            )
-        """)
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_universe_name ON stock_universe (name)"
-        )
-
-        # 2. Live Ticks Table (WebSocket streaming records)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS live_ticks (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker     TEXT,
-                timestamp  TEXT,
-                price      REAL,
-                change_pct REAL
-            )
-        """)
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_ticks_ticker_time ON live_ticks (ticker, timestamp)"
-        )
-
-        # 3. Company Info Cache (LTP, 52w high/low, volume — refreshed by TTL)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS company_info (
-                ticker      TEXT PRIMARY KEY,
-                data_json   TEXT NOT NULL,
-                fetched_at  TEXT NOT NULL
-            )
-        """)
-
-        # 4. Predictions Cache (AI 7-day prediction results)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS predictions (
-                ticker      TEXT PRIMARY KEY,
-                data_json   TEXT NOT NULL,
-                fetched_at  TEXT NOT NULL
-            )
-        """)
-
-        # 5. Screener Results Cache (pre-computed screener list)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS screener_results (
-                id          INTEGER PRIMARY KEY CHECK (id = 1),
-                data_json   TEXT NOT NULL,
-                fetched_at  TEXT NOT NULL
-            )
-        """)
-
-        # 6. Monte Carlo Cache (GBM simulation results per ticker)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS monte_carlo (
-                ticker      TEXT PRIMARY KEY,
-                data_json   TEXT NOT NULL,
-                fetched_at  TEXT NOT NULL
-            )
-        """)
-
-        # 7. Training Task Status (persists background job state across restarts)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS task_status (
-                task_id     TEXT PRIMARY KEY,
-                ticker      TEXT NOT NULL,
-                status      TEXT NOT NULL DEFAULT 'queued',
-                progress    INTEGER NOT NULL DEFAULT 0,
-                mape        REAL,
-                error       TEXT,
-                created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL
-            )
-        """)
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_task_ticker ON task_status (ticker)"
-        )
-
-        # 8. Portfolio (user holdings with multi-user isolation)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS portfolio (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id     TEXT DEFAULT 'default_user',
-                ticker      TEXT NOT NULL,
-                shares      REAL NOT NULL,
-                buy_price   REAL NOT NULL,
-                added_at    TEXT DEFAULT (datetime('now'))
-            )
-        """)
-        # Auto-migrate user_id if missing
-        try:
-            p_cols = [c[1] for c in cursor.execute("PRAGMA table_info(portfolio)").fetchall()]
-            if "user_id" not in p_cols:
-                cursor.execute("ALTER TABLE portfolio ADD COLUMN user_id TEXT DEFAULT 'default_user'")
-        except Exception:
-            pass
-
-        # 10. Paper Trading Accounts (Virtual ₹10 Lakhs)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS paper_accounts (
-                user_id           TEXT PRIMARY KEY,
-                cash_balance      REAL NOT NULL DEFAULT 1000000.0,
-                starting_balance  REAL NOT NULL DEFAULT 1000000.0,
-                updated_at        TEXT NOT NULL
-            )
-        """)
-
-        # 11. Paper Trading Active Positions
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS paper_positions (
-                id             INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id        TEXT NOT NULL,
-                ticker         TEXT NOT NULL,
-                order_type     TEXT NOT NULL DEFAULT 'BUY',
-                shares         REAL NOT NULL,
-                avg_buy_price  REAL NOT NULL,
-                stop_loss      REAL,
-                target_price   REAL,
-                opened_at      TEXT NOT NULL
-            )
-        """)
-
-        # 12. Paper Trading Executed Orders & Journal
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS paper_orders (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id         TEXT NOT NULL,
-                ticker          TEXT NOT NULL,
-                order_type      TEXT NOT NULL,
-                action          TEXT NOT NULL,
-                shares          REAL NOT NULL,
-                executed_price  REAL NOT NULL,
-                realized_pnl    REAL DEFAULT 0.0,
-                status          TEXT NOT NULL DEFAULT 'EXECUTED',
-                executed_at     TEXT NOT NULL
-            )
-        """)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_paper_pos_user ON paper_positions (user_id)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_paper_ord_user ON paper_orders (user_id)")
-
-        # 12. Smart Alerts
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS smart_alerts (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id     TEXT    NOT NULL DEFAULT 'default_user',
-                ticker      TEXT    NOT NULL,
-                alert_type  TEXT    NOT NULL,
-                param_value TEXT,
-                created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-                triggered   INTEGER NOT NULL DEFAULT 0
-            )
-        """)
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_smart_alerts_ticker ON smart_alerts (ticker)"
-        )
-
-        # 13. Audit Log — immutable event trail (timestamps stored in UTC ISO-8601)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id     TEXT    NOT NULL DEFAULT 'default_user',
-                action      TEXT    NOT NULL,
-                entity      TEXT    NOT NULL,
-                entity_id   TEXT,
-                details     TEXT,
-                ts_utc      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-            )
-        """)
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log (user_id)"
-        )
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log (ts_utc)"
-        )
-
-        # 14. Saved Custom Screener Scans
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS saved_scans (
-                id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id      TEXT    NOT NULL DEFAULT 'default_user',
-                name         TEXT    NOT NULL,
-                description  TEXT,
-                filters_json TEXT    NOT NULL DEFAULT '{}',
-                created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-            )
-        """)
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_saved_scans_user ON saved_scans (user_id)"
-        )
-
-        # 15. Model Registry & Version Lineage
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS model_registry (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker        TEXT    NOT NULL,
-                model_type    TEXT    NOT NULL,
-                version       TEXT    NOT NULL,
-                artifact_path TEXT    NOT NULL,
-                mape          REAL,
-                rmse          REAL,
-                metrics_json  TEXT,
-                trained_at    TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-                is_active     INTEGER NOT NULL DEFAULT 1
-            )
-        """)
-        cursor.execute(
-            "CREATE INDEX IF NOT EXISTS idx_model_registry_ticker ON model_registry (ticker)"
-        )
-
-        # 16. Companies Metadata
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS companies (
-                ticker              TEXT PRIMARY KEY,
-                name                TEXT NOT NULL,
-                sector              TEXT,
-                industry            TEXT,
-                market_cap_category TEXT,
-                about_text          TEXT,
-                website_url         TEXT,
-                bse_code            TEXT,
-                nse_symbol          TEXT
-            )
-        """)
-
-        # 17. Financial Statements (Quarterly & Annual)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS financial_statements (
-                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker             TEXT NOT NULL,
-                period_type        TEXT NOT NULL,
-                period_label       TEXT NOT NULL,
-                revenue            REAL,
-                operating_profit   REAL,
-                opm_pct            REAL,
-                net_profit         REAL,
-                npm_pct            REAL,
-                eps                REAL,
-                balance_sheet_json TEXT,
-                cash_flow_json     TEXT
-            )
-        """)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_fin_stmt_ticker ON financial_statements (ticker, period_type)")
-
-        # 18. Financial Ratios
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS financial_ratios (
-                ticker          TEXT PRIMARY KEY,
-                pe_ratio        REAL,
-                pb_ratio        REAL,
-                roe_pct         REAL,
-                roce_pct        REAL,
-                debt_to_equity  REAL,
-                opm_pct         REAL,
-                npm_pct         REAL,
-                sales_growth_3y REAL,
-                profit_growth_3y REAL,
-                cagr_5y         REAL
-            )
-        """)
-
-        # 19. Shareholding Snapshots
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS shareholding_snapshots (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker        TEXT NOT NULL,
-                quarter_label TEXT NOT NULL,
-                promoter_pct  REAL,
-                fii_pct       REAL,
-                dii_pct       REAL,
-                public_pct    REAL,
-                others_pct    REAL
-            )
-        """)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_shareholding_ticker ON shareholding_snapshots (ticker)")
-
-        # 20. Screener Precomputed Daily Metrics Table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS screener_daily_metrics (
-                ticker                TEXT PRIMARY KEY,
-                name                  TEXT NOT NULL,
-                sector                TEXT,
-                industry              TEXT,
-                market_cap_cr         REAL,
-                market_cap_cat        TEXT,
-                close_price           REAL NOT NULL,
-                change_1d_pct         REAL,
-                change_1w_pct         REAL,
-                change_1m_pct         REAL,
-                change_1y_pct         REAL,
-                distance_52w_high_pct REAL,
-                distance_52w_low_pct  REAL,
-                rsi_14                REAL,
-                macd_signal           TEXT,
-                sma_20                REAL,
-                sma_50                REAL,
-                sma_200               REAL,
-                volume_ratio_20d      REAL,
-                pe_ratio              REAL,
-                pb_ratio              REAL,
-                roe_pct               REAL,
-                roce_pct              REAL,
-                debt_to_equity        REAL,
-                sales_growth_3y       REAL,
-                profit_growth_3y      REAL,
-                pcr                   REAL,
-                max_pain              REAL,
-                iv                    REAL,
-                ai_consensus_score    REAL,
-                ai_signal             TEXT,
-                ai_confidence_score   REAL,
-                updated_at            TEXT NOT NULL
-            )
-        """)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_sector ON screener_daily_metrics (sector)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_mcap ON screener_daily_metrics (market_cap_cr)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_pe ON screener_daily_metrics (pe_ratio)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_roce ON screener_daily_metrics (roce_pct)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_rsi ON screener_daily_metrics (rsi_14)")
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_sdm_ai_score ON screener_daily_metrics (ai_consensus_score)")
-
-        # 21. User Screens & Formula AST
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS user_screens (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id         TEXT NOT NULL DEFAULT 'default_user',
-                name            TEXT NOT NULL,
-                description     TEXT,
-                formula_query   TEXT,
-                filter_ast_json TEXT NOT NULL DEFAULT '{}',
-                universe        TEXT NOT NULL DEFAULT 'NIFTY_500',
-                sort_by         TEXT NOT NULL DEFAULT 'market_cap_cr',
-                sort_dir        TEXT NOT NULL DEFAULT 'DESC',
-                is_public       INTEGER NOT NULL DEFAULT 0,
-                share_token     TEXT UNIQUE,
-                created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-                updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-            )
-        """)
-        # 22. AI Providers Table (Multi-AI Engine)
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS ai_providers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                provider_name TEXT NOT NULL UNIQUE,
-                api_key_encrypted TEXT,
-                api_key_masked TEXT,
-                selected_model TEXT,
-                is_active INTEGER DEFAULT 0,
-                last_tested_at TEXT,
-                last_test_status TEXT,
-                total_requests INTEGER DEFAULT 0,
-                created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-                updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-            )
-        """)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_providers_active ON ai_providers (is_active)")
-
-        # 23. Broker Accounts Table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS broker_accounts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                broker TEXT NOT NULL UNIQUE,
-                is_active INTEGER NOT NULL DEFAULT 0,
-                credentials_json TEXT NOT NULL,
-                session_data_json TEXT,
-                last_verified_at TEXT,
-                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-                updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-            )
-        """)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_broker_accounts_active ON broker_accounts (is_active)")
-
-        # 24. Broker Audit Logs Table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS broker_audit_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                broker TEXT NOT NULL,
-                event TEXT NOT NULL,
-                status TEXT NOT NULL,
-                details TEXT,
-                latency_ms REAL,
-                created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-            )
-        """)
-        cursor.execute("CREATE INDEX IF NOT EXISTS idx_broker_audit_created ON broker_audit_logs (created_at)")
-
-        # Cleanup: purge any legacy intraday records that polluted the daily historical_prices table
-        cursor.execute("DELETE FROM historical_prices WHERE length(date) > 10")
-        cursor.execute("DELETE FROM historical_prices WHERE length(date) != 10")
-
-        conn.commit()
-    logger.info("SQLite database initialization complete.")
 
 
 def write_audit_log(
@@ -458,30 +69,20 @@ def write_audit_log(
     details: str = None,
     user_id: str = "default_user",
 ) -> None:
-    """
-    Appends one immutable row to the audit_log table.
-    Timestamps are stored as UTC ISO-8601 strings.
-    Call this on every portfolio add/remove, paper order, alert create/trigger/delete.
-
-    Args:
-        action:    Verb describing the change, e.g. 'ADD', 'REMOVE', 'TRIGGERED', 'RESET'.
-        entity:    Domain entity, e.g. 'portfolio', 'smart_alert', 'paper_order'.
-        entity_id: ID of the affected row (can be str representation of int PK).
-        details:   Optional JSON-serialisable string with extra context.
-        user_id:   Owning user.
-    """
+    """Appends one immutable row to the audit_log table via SQLAlchemy ORM."""
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        with get_db_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO audit_log (user_id, action, entity, entity_id, details, ts_utc)
-                VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-                """,
-                (user_id, action.upper(), entity, str(entity_id) if entity_id is not None else None, details),
+        with get_db_session() as session:
+            entry = AuditLog(
+                user_id=user_id,
+                action=action.upper(),
+                entity=entity,
+                entity_id=str(entity_id) if entity_id is not None else None,
+                details=details,
+                ts_utc=now_str,
             )
-            conn.commit()
+            session.add(entry)
     except Exception as e:
-        # Audit write must never crash the caller; log and continue
         logger.error("audit_log write failed: %s", e)
 
 
@@ -492,10 +93,10 @@ def clear_ticker_history(ticker: str):
     if not ticker:
         return
     ticker = ticker.upper()
-    with get_db_connection() as conn:
-        conn.execute("DELETE FROM historical_prices WHERE ticker = ?", (ticker,))
-        conn.commit()
+    with get_db_session() as session:
+        session.execute(delete(HistoricalPrice).where(HistoricalPrice.ticker == ticker))
     logger.info("Cleared old historical DB records for %s.", ticker)
+
 
 
 def _normalize_price(v):
@@ -575,15 +176,14 @@ def clean_paise_and_outliers(ticker: str = None):
 
 def save_historical_prices(ticker: str, df: pd.DataFrame):
     """
-    Saves a DataFrame of daily historical prices into the SQLite database.
-    Uses executemany (bulk insert) for fast writes with unit normalization.
+    Saves a DataFrame of daily historical prices into the database using SQLAlchemy 2.0 ORM.
     Strictly accepts only daily dates (YYYY-MM-DD) matching DATE_REGEX.
     """
     if df is None or df.empty:
         return
 
     ticker = ticker.upper()
-    rows = []
+    records = []
     for _, row in df.iterrows():
         try:
             raw_d = str(row["date"]).strip()
@@ -600,22 +200,52 @@ def save_historical_prices(ticker: str, df: pd.DataFrame):
 
             if not all([o_val, h_val, l_val, c_val]):
                 continue
-            rows.append((ticker, d_str, o_val, max(h_val, o_val, c_val), min(l_val, o_val, c_val), c_val, vol))
+            records.append({
+                "ticker": ticker,
+                "date": d_str,
+                "open": o_val,
+                "high": max(h_val, o_val, c_val),
+                "low": min(l_val, o_val, c_val),
+                "close": c_val,
+                "volume": vol,
+            })
         except Exception:
             continue
 
-    if not rows:
+    if not records:
         return
 
-    with get_db_connection() as conn:
-        conn.executemany(
-            """
-            INSERT OR REPLACE INTO historical_prices (ticker, date, open, high, low, close, volume)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            rows,
-        )
-        conn.commit()
+    with get_db_session() as session:
+        dialect = session.bind.dialect.name if session.bind else "sqlite"
+        if dialect == "sqlite":
+            stmt = sqlite_insert(HistoricalPrice).values(records)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["ticker", "date"],
+                set_={
+                    "open": stmt.excluded.open,
+                    "high": stmt.excluded.high,
+                    "low": stmt.excluded.low,
+                    "close": stmt.excluded.close,
+                    "volume": stmt.excluded.volume,
+                }
+            )
+            session.execute(stmt)
+        elif dialect == "postgresql":
+            stmt = pg_insert(HistoricalPrice).values(records)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["ticker", "date"],
+                set_={
+                    "open": stmt.excluded.open,
+                    "high": stmt.excluded.high,
+                    "low": stmt.excluded.low,
+                    "close": stmt.excluded.close,
+                    "volume": stmt.excluded.volume,
+                }
+            )
+            session.execute(stmt)
+        else:
+            for r in records:
+                session.merge(HistoricalPrice(**r))
 
 
 def get_historical_prices(ticker: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
@@ -627,181 +257,211 @@ def get_historical_prices(ticker: str, start_date: str, end_date: str) -> Option
     start_date = str(start_date)[:10]
     end_date = str(end_date)[:10]
 
-    query = """
-        SELECT date, open, high, low, close, volume
-        FROM historical_prices
-        WHERE ticker = ? AND length(date) = 10 AND date BETWEEN ? AND ?
-        ORDER BY date ASC
-    """
-    with get_db_connection() as conn:
-        df = pd.read_sql_query(query, conn, params=(ticker, start_date, end_date))
+    with get_db_session() as session:
+        stmt = select(
+            HistoricalPrice.date,
+            HistoricalPrice.open,
+            HistoricalPrice.high,
+            HistoricalPrice.low,
+            HistoricalPrice.close,
+            HistoricalPrice.volume
+        ).where(
+            HistoricalPrice.ticker == ticker,
+            func.length(HistoricalPrice.date) == 10,
+            HistoricalPrice.date >= start_date,
+            HistoricalPrice.date <= end_date
+        ).order_by(HistoricalPrice.date.asc())
+        rows = session.execute(stmt).all()
+        if not rows:
+            return None
+        return pd.DataFrame(
+            [{"date": r[0], "open": r[1], "high": r[2], "low": r[3], "close": r[4], "volume": r[5]} for r in rows]
+        )
 
-    return df if not df.empty else None
 
 
 def save_stock_universe(records: list[dict]):
-    """Persists the searchable NSE symbol master without fetching price history."""
+    """Persists the searchable NSE symbol master via SQLAlchemy ORM."""
     if not records:
         return
     now = datetime.now().isoformat()
     rows = [
-        (
-            item["ticker"], item["name"], item["symbol"],
-            item.get("token", ""), item.get("exchange", "NSE"), now,
-        )
+        {
+            "ticker": item["ticker"],
+            "name": item["name"],
+            "symbol": item["symbol"],
+            "token": item.get("token", ""),
+            "exchange": item.get("exchange", "NSE"),
+            "updated_at": now,
+        }
         for item in records
     ]
-    with get_db_connection() as conn:
-        conn.executemany(
-            """
-            INSERT INTO stock_universe (ticker, name, symbol, token, exchange, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(ticker) DO UPDATE SET
-                name=excluded.name, symbol=excluded.symbol, token=excluded.token,
-                exchange=excluded.exchange, updated_at=excluded.updated_at
-            """,
-            rows,
-        )
+    with get_db_session() as session:
+        dialect = session.bind.dialect.name if session.bind else "sqlite"
+        if dialect == "sqlite":
+            stmt = sqlite_insert(StockUniverse).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["ticker"],
+                set_={
+                    "name": stmt.excluded.name,
+                    "symbol": stmt.excluded.symbol,
+                    "token": stmt.excluded.token,
+                    "exchange": stmt.excluded.exchange,
+                    "updated_at": stmt.excluded.updated_at,
+                }
+            )
+            session.execute(stmt)
+        elif dialect == "postgresql":
+            stmt = pg_insert(StockUniverse).values(rows)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["ticker"],
+                set_={
+                    "name": stmt.excluded.name,
+                    "symbol": stmt.excluded.symbol,
+                    "token": stmt.excluded.token,
+                    "exchange": stmt.excluded.exchange,
+                    "updated_at": stmt.excluded.updated_at,
+                }
+            )
+            session.execute(stmt)
+        else:
+            for r in rows:
+                session.merge(StockUniverse(**r))
 
 
 def search_stock_universe(query: str, limit: int = 12) -> list[dict]:
     """Returns ticker/name matches from the locally stored NSE symbol master and screener universe."""
-    text = query.strip().upper()
-    if not text:
+    text_q = query.strip().upper()
+    if not text_q:
         return []
-    like = f"%{text}%"
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            """
+    like_q = f"%{text_q}%"
+    with get_db_session() as session:
+        stmt = text("""
             SELECT DISTINCT ticker, name, exchange
             FROM (
-                SELECT ticker, name, exchange FROM stock_universe WHERE ticker LIKE ? OR name LIKE ?
+                SELECT ticker, name, exchange FROM stock_universe WHERE ticker LIKE :like OR name LIKE :like
                 UNION
-                SELECT ticker, name, 'NSE' as exchange FROM screener_daily_metrics WHERE ticker LIKE ? OR name LIKE ?
+                SELECT ticker, name, 'NSE' as exchange FROM screener_daily_metrics WHERE ticker LIKE :like OR name LIKE :like
             )
             ORDER BY 
                 CASE 
-                    WHEN ticker = ? THEN 0 
-                    WHEN ticker LIKE ? THEN 1 
-                    WHEN name LIKE ? THEN 2
+                    WHEN ticker = :exact THEN 0 
+                    WHEN ticker LIKE :prefix THEN 1 
+                    WHEN name LIKE :prefix THEN 2
                     ELSE 3 
                 END, 
                 ticker ASC
-            LIMIT ?
-            """,
-            (like, like, like, like, text, f"{text}%", f"{text}%", max(1, min(limit, 30))),
-        ).fetchall()
-    return [dict(row) for row in rows]
+            LIMIT :lim
+        """)
+        rows = session.execute(stmt, {
+            "like": like_q,
+            "exact": text_q,
+            "prefix": f"{text_q}%",
+            "lim": max(1, min(limit, 30))
+        }).fetchall()
+        return [{"ticker": r[0], "name": r[1], "exchange": r[2]} for r in rows]
 
 
 def get_all_stock_universe_tickers(limit: int = 1500) -> list[str]:
     """Returns all NSE tickers stored in the stock_universe table."""
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT ticker FROM stock_universe
-            ORDER BY ticker ASC
-            LIMIT ?
-            """,
-            (limit,)
-        ).fetchall()
-    return [row["ticker"] for row in rows]
+    with get_db_session() as session:
+        stmt = select(StockUniverse.ticker).order_by(StockUniverse.ticker.asc()).limit(limit)
+        return list(session.execute(stmt).scalars().all())
 
 
 def get_all_stock_universe_records(limit: int = 1500) -> list[dict]:
     """Returns all NSE stock master records."""
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT ticker, name, exchange FROM stock_universe
-            ORDER BY ticker ASC
-            LIMIT ?
-            """,
-            (limit,)
-        ).fetchall()
-    return [dict(row) for row in rows]
+    with get_db_session() as session:
+        stmt = select(StockUniverse.ticker, StockUniverse.name, StockUniverse.exchange).order_by(StockUniverse.ticker.asc()).limit(limit)
+        rows = session.execute(stmt).all()
+        return [{"ticker": r[0], "name": r[1], "exchange": r[2]} for r in rows]
 
 
 # ── Live Ticks ─────────────────────────────────────────────────────────────────
 
 def save_live_tick(ticker: str, price: float, change_pct: float):
-    """Saves a single live tick update to the database."""
-    ticker = ticker.upper()
+    """Saves a single live tick update to the database using SQLAlchemy ORM."""
+    ticker_u = ticker.upper()
     timestamp = datetime.now(timezone.utc).isoformat()
     try:
-        with get_db_connection() as conn:
-            conn.execute(
-                "INSERT INTO live_ticks (ticker, timestamp, price, change_pct) VALUES (?, ?, ?, ?)",
-                (ticker, timestamp, price, change_pct),
-            )
-            conn.commit()
+        with get_db_session() as session:
+            session.add(LiveTick(
+                ticker=ticker_u,
+                timestamp=timestamp,
+                price=float(price),
+                change_pct=float(change_pct) if change_pct is not None else None,
+            ))
     except Exception as e:
-        logger.error("Error saving live tick for %s: %s", ticker, e, exc_info=True)
+        logger.error("Error saving live tick for %s: %s", ticker_u, e, exc_info=True)
+
 
 
 # ── Generic JSON Cache Helpers ─────────────────────────────────────────────────
 
 def _save_json(table: str, key_col: str, key_val: str, data: Any, ttl_minutes: int = 5):
-    """Saves any JSON-serialisable data into a cache table."""
+    """Saves any JSON-serialisable data into an ORM cache entity."""
     payload = json.dumps(data, default=str)
-    now = datetime.now().isoformat()
-    with get_db_connection() as conn:
-        if key_col == "id":
-            conn.execute(
-                f"INSERT OR REPLACE INTO {table} (id, data_json, fetched_at) VALUES (1, ?, ?)",
-                (payload, now),
-            )
+    now_str = datetime.now().isoformat()
+    model = CACHE_MODEL_MAP.get(table)
+    if not model:
+        return
+
+    with get_db_session() as session:
+        if table == "screener_results":
+            existing = session.get(ScreenerResultCache, 1)
+            if existing:
+                existing.data_json = payload
+                existing.fetched_at = now_str
+            else:
+                session.add(ScreenerResultCache(id=1, data_json=payload, fetched_at=now_str))
         else:
-            conn.execute(
-                f"INSERT OR REPLACE INTO {table} ({key_col}, data_json, fetched_at) VALUES (?, ?, ?)",
-                (key_val, payload, now),
-            )
-        conn.commit()
+            ticker_key = str(key_val).upper()
+            existing = session.get(model, ticker_key)
+            if existing:
+                existing.data_json = payload
+                existing.fetched_at = now_str
+            else:
+                session.add(model(ticker=ticker_key, data_json=payload, fetched_at=now_str))
 
 
 def _get_json(table: str, key_col: str, key_val: str, ttl_minutes: int = 5) -> Optional[Any]:
-    """
-    Returns cached JSON data if it exists and is within the TTL window.
-    Returns None if missing or expired.
-    """
+    """Returns cached JSON data if it exists and is within the TTL window."""
     expiry = (datetime.now() - timedelta(minutes=ttl_minutes)).isoformat()
+    model = CACHE_MODEL_MAP.get(table)
+    if not model:
+        return None
+
     try:
-        with get_db_connection() as conn:
-            if key_col == "id":
-                row = conn.execute(
-                    f"SELECT data_json, fetched_at FROM {table} WHERE id = 1 AND fetched_at > ?",
-                    (expiry,),
-                ).fetchone()
+        with get_db_session() as session:
+            if table == "screener_results":
+                row = session.get(ScreenerResultCache, 1)
             else:
-                row = conn.execute(
-                    f"SELECT data_json, fetched_at FROM {table} WHERE {key_col} = ? AND fetched_at > ?",
-                    (key_val, expiry),
-                ).fetchone()
-        if row:
-            return json.loads(row["data_json"])
+                row = session.get(model, str(key_val).upper())
+            if row and row.fetched_at and row.fetched_at > expiry:
+                return json.loads(row.data_json)
     except Exception as e:
         logger.warning("DB cache read error (%s): %s", table, e)
     return None
 
 
 def _get_stale_json(table: str, key_col: str, key_val: str) -> Optional[Any]:
-    """Returns cached data regardless of TTL (used as fallback when API is down)."""
+    """Returns cached data regardless of TTL (fallback when upstream is down)."""
+    model = CACHE_MODEL_MAP.get(table)
+    if not model:
+        return None
+
     try:
-        with get_db_connection() as conn:
-            if key_col == "id":
-                row = conn.execute(
-                    f"SELECT data_json FROM {table} WHERE id = 1"
-                ).fetchone()
+        with get_db_session() as session:
+            if table == "screener_results":
+                row = session.get(ScreenerResultCache, 1)
             else:
-                row = conn.execute(
-                    f"SELECT data_json FROM {table} WHERE {key_col} = ?",
-                    (key_val,),
-                ).fetchone()
-        if row:
-            return json.loads(row["data_json"])
+                row = session.get(model, str(key_val).upper())
+            if row and row.data_json:
+                return json.loads(row.data_json)
     except Exception as e:
         logger.error("DB stale-cache read error (%s): %s", table, e)
     return None
+
 
 
 # ── Company Info ───────────────────────────────────────────────────────────────
@@ -842,50 +502,62 @@ def get_screener_results(ttl_minutes: int = 5) -> Optional[list]:
 
 def save_task_status(task_id: str, ticker: str, status: str, progress: int,
                      mape: Optional[float] = None, error: Optional[str] = None):
-    """Creates or updates a training task record in the database."""
-    now = datetime.now().isoformat()
+    """Creates or updates a model training task registry record."""
+    now_str = datetime.now().isoformat()
     try:
-        with get_db_connection() as conn:
-            conn.execute(
-                """
-                INSERT INTO task_status (task_id, ticker, status, progress, mape, error, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(task_id) DO UPDATE SET
-                    status=excluded.status, progress=excluded.progress,
-                    mape=excluded.mape, error=excluded.error, updated_at=excluded.updated_at
-                """,
-                (task_id, ticker.upper(), status, progress, mape, error, now, now),
-            )
-            conn.commit()
+        with get_db_session() as session:
+            task = session.get(TaskStatus, task_id)
+            if task:
+                task.status = status
+                task.progress = progress
+                task.mape = mape
+                task.error = error
+                task.updated_at = now_str
+            else:
+                session.add(TaskStatus(
+                    task_id=task_id,
+                    ticker=ticker.upper(),
+                    status=status,
+                    progress=progress,
+                    mape=mape,
+                    error=error,
+                    created_at=now_str,
+                    updated_at=now_str,
+                ))
     except Exception as e:
         logger.error("Error saving task status for %s: %s", task_id, e)
 
 
 def get_task_status(task_id: str) -> Optional[dict]:
-    """Returns task status dict for the given task_id, or None if not found."""
+    """Returns task status dictionary for the given task_id."""
     try:
-        with get_db_connection() as conn:
-            row = conn.execute(
-                "SELECT task_id, ticker, status, progress, mape, error, created_at, updated_at "
-                "FROM task_status WHERE task_id = ?",
-                (task_id,),
-            ).fetchone()
-        if row:
-            return dict(row)
+        with get_db_session() as session:
+            task = session.get(TaskStatus, task_id)
+            if task:
+                return {
+                    "task_id": task.task_id,
+                    "ticker": task.ticker,
+                    "status": task.status,
+                    "progress": task.progress,
+                    "mape": task.mape,
+                    "error": task.error,
+                    "created_at": task.created_at,
+                    "updated_at": task.updated_at,
+                }
     except Exception as e:
         logger.error("Error reading task status for %s: %s", task_id, e)
     return None
 
 
 def cleanup_old_tasks(max_age_hours: int = 24):
-    """Deletes task records older than max_age_hours to keep the table small."""
+    """Deletes task records older than max_age_hours."""
     cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
     try:
-        with get_db_connection() as conn:
-            conn.execute("DELETE FROM task_status WHERE updated_at < ?", (cutoff,))
-            conn.commit()
+        with get_db_session() as session:
+            session.execute(delete(TaskStatus).where(TaskStatus.updated_at < cutoff))
     except Exception as e:
         logger.error("Error cleaning old tasks: %s", e)
+
 
 
 # ── Monte Carlo ────────────────────────────────────────────────────────────────
@@ -901,87 +573,95 @@ def get_monte_carlo_cached(ticker: str, ttl_minutes: int = 30) -> Optional[dict]
 # ── Live Tick Analytics ────────────────────────────────────────────────────────
 
 def get_recent_live_ticks(ticker: str, limit: int = 200) -> Optional[pd.DataFrame]:
-    """
-    Returns the most recent live tick records for a ticker as a DataFrame.
-    Columns: timestamp, price, change_pct
-    """
-    ticker = ticker.upper()
+    """Returns recent live tick records for a ticker as a DataFrame."""
+    ticker_u = ticker.upper()
     try:
-        with get_db_connection() as conn:
-            df = pd.read_sql_query(
-                """
-                SELECT timestamp, price, change_pct
-                FROM live_ticks
-                WHERE ticker = ?
-                ORDER BY timestamp DESC
-                LIMIT ?
-                """,
-                conn,
-                params=(ticker, limit),
-            )
-        return df if not df.empty else None
+        with get_db_session() as session:
+            stmt = select(LiveTick.timestamp, LiveTick.price, LiveTick.change_pct).where(
+                LiveTick.ticker == ticker_u
+            ).order_by(LiveTick.id.desc()).limit(limit)
+            rows = session.execute(stmt).all()
+            if not rows:
+                return None
+            return pd.DataFrame([{"timestamp": r[0], "price": r[1], "change_pct": r[2]} for r in rows])
     except Exception as e:
-        logger.error("Error reading live ticks for %s: %s", ticker, e)
+        logger.error("Error reading live ticks for %s: %s", ticker_u, e)
         return None
 
 
 def get_live_tick_ohlcv(ticker: str) -> Optional[dict]:
-    """
-    Aggregates today's live ticks into a single synthetic OHLCV row.
-    Returns a dict with keys: date, open, high, low, close, volume
-    or None if no ticks exist for today.
-    """
-    ticker = ticker.upper()
+    """Aggregates today's live ticks into a single synthetic OHLCV row."""
+    ticker_u = ticker.upper()
     today = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
     try:
-        with get_db_connection() as conn:
-            df = pd.read_sql_query(
-                """
-                SELECT price, timestamp
-                FROM live_ticks
-                WHERE ticker = ? AND timestamp >= ?
-                ORDER BY timestamp ASC
-                """,
-                conn,
-                params=(ticker, today),
-            )
-        if df.empty:
-            return None
-        return {
-            "date":   today,
-            "open":   float(df["price"].iloc[0]),
-            "high":   float(df["price"].max()),
-            "low":    float(df["price"].min()),
-            "close":  float(df["price"].iloc[-1]),
-            "volume": len(df),
-        }
+        with get_db_session() as session:
+            stmt = select(LiveTick.price, LiveTick.timestamp).where(
+                LiveTick.ticker == ticker_u,
+                LiveTick.timestamp >= today
+            ).order_by(LiveTick.id.asc())
+            rows = session.execute(stmt).all()
+            if not rows:
+                return None
+            prices = [float(r[0]) for r in rows]
+            return {
+                "date": today,
+                "open": prices[0],
+                "high": max(prices),
+                "low": min(prices),
+                "close": prices[-1],
+                "volume": len(prices),
+            }
     except Exception as e:
-        logger.error("Error building live OHLCV for %s: %s", ticker, e)
+        logger.error("Error building live OHLCV for %s: %s", ticker_u, e)
         return None
 
 
 def get_db_stats() -> dict:
-    """Returns a summary of all DB table sizes for the /api/db/status endpoint."""
+    """Returns a summary of DB table sizes and telemetry via SQLAlchemy 2.0 ORM."""
     stats = {}
-    tables = ["historical_prices", "stock_universe", "live_ticks", "company_info",
-              "predictions", "screener_results", "monte_carlo", "task_status"]
-    try:
-        with get_db_connection() as conn:
-            for table in tables:
-                count = conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-                stats[table] = count
-            # Per-ticker historical rows
-            ticker_rows = conn.execute(
-                "SELECT ticker, count(*) as rows, min(date), max(date) "
-                "FROM historical_prices GROUP BY ticker ORDER BY ticker"
-            ).fetchall()
+    with get_db_session() as session:
+        for name, model in [
+            ("historical_prices", HistoricalPrice),
+            ("stock_universe", StockUniverse),
+            ("live_ticks", LiveTick),
+            ("portfolio", PortfolioPosition),
+            ("smart_alerts", SmartAlert),
+            ("paper_accounts", PaperAccount),
+            ("paper_positions", PaperPosition),
+            ("paper_orders", PaperOrder),
+            ("task_status", TaskStatus),
+            ("saved_scans", SavedScan),
+            ("user_screens", UserScreen),
+            ("audit_log", AuditLog),
+            ("ai_providers", AIProvider),
+            ("broker_audit_logs", BrokerAuditLog),
+        ]:
+            try:
+                cnt = session.execute(select(func.count()).select_from(model)).scalar() or 0
+                stats[name] = cnt
+            except Exception:
+                stats[name] = 0
+
+        # Per-ticker historical summary
+        try:
+            stmt = select(
+                HistoricalPrice.ticker,
+                func.count().label("rows"),
+                func.min(HistoricalPrice.date).label("min_date"),
+                func.max(HistoricalPrice.date).label("max_date")
+            ).group_by(HistoricalPrice.ticker).order_by(HistoricalPrice.ticker.asc())
+            ticker_rows = session.execute(stmt).all()
             stats["historical_by_ticker"] = [
                 {"ticker": r[0], "rows": r[1], "from": r[2], "to": r[3]}
                 for r in ticker_rows
             ]
-    except Exception as e:
-        stats["error"] = str(e)
+        except Exception:
+            stats["historical_by_ticker"] = []
+
+    stats["db_path"] = DB_PATH
+    stats["engine"] = engine.url.drivername
     return stats
+
 
 
 # ── Portfolio Functions ────────────────────────────────────────────────────────
@@ -989,14 +669,19 @@ def get_db_stats() -> dict:
 # ── Portfolio Functions ────────────────────────────────────────────────────────
 
 def add_portfolio_position(ticker: str, shares: float, buy_price: float, user_id: str = "default_user") -> int:
-    """Add a portfolio position and return the new row id."""
-    with get_db_connection() as conn:
-        cursor = conn.execute(
-            "INSERT INTO portfolio (user_id, ticker, shares, buy_price) VALUES (?, ?, ?, ?)",
-            (user_id, ticker.upper(), shares, buy_price),
+    """Add a portfolio position via SQLAlchemy ORM and return the new row id."""
+    now_ts = datetime.now(timezone.utc).isoformat()
+    with get_db_session() as session:
+        pos = PortfolioPosition(
+            user_id=user_id,
+            ticker=ticker.upper(),
+            shares=float(shares),
+            buy_price=float(buy_price),
+            added_at=now_ts,
         )
-        conn.commit()
-        row_id = cursor.lastrowid
+        session.add(pos)
+        session.flush()
+        row_id = pos.id
     write_audit_log("ADD", "portfolio", entity_id=row_id,
                     details=f"ticker={ticker} shares={shares} buy_price={buy_price}",
                     user_id=user_id)
@@ -1005,34 +690,45 @@ def add_portfolio_position(ticker: str, shares: float, buy_price: float, user_id
 
 def get_portfolio(user_id: str = "default_user") -> list:
     """Return all portfolio positions for a user as a list of dicts."""
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            "SELECT id, user_id, ticker, shares, buy_price, added_at FROM portfolio WHERE user_id = ? ORDER BY added_at DESC",
-            (user_id,)
-        ).fetchall()
-    return [dict(r) for r in rows]
+    with get_db_session() as session:
+        stmt = select(PortfolioPosition).where(PortfolioPosition.user_id == user_id).order_by(PortfolioPosition.id.desc())
+        rows = session.execute(stmt).scalars().all()
+        return [{
+            "id": r.id,
+            "user_id": r.user_id,
+            "ticker": r.ticker,
+            "shares": r.shares,
+            "buy_price": r.buy_price,
+            "added_at": r.added_at,
+        } for r in rows]
 
 
 def remove_portfolio_position(position_id: int, user_id: str = "default_user"):
     """Delete a portfolio position by id and user_id."""
-    with get_db_connection() as conn:
-        conn.execute("DELETE FROM portfolio WHERE id = ? AND user_id = ?", (position_id, user_id))
-        conn.commit()
+    with get_db_session() as session:
+        session.execute(
+            delete(PortfolioPosition).where(PortfolioPosition.id == position_id, PortfolioPosition.user_id == user_id)
+        )
     write_audit_log("REMOVE", "portfolio", entity_id=position_id, user_id=user_id)
 
 
 # ── Smart Alert Functions ──────────────────────────────────────────────────────
 
 def add_smart_alert(ticker: str, alert_type: str, param_value: dict, user_id: str = "default_user") -> int:
-    """Add a smart alert and return the new row id."""
-    import json as _json
-    with get_db_connection() as conn:
-        cursor = conn.execute(
-            "INSERT INTO smart_alerts (user_id, ticker, alert_type, param_value) VALUES (?, ?, ?, ?)",
-            (user_id, ticker.upper(), alert_type, _json.dumps(param_value)),
+    """Add a smart alert via SQLAlchemy ORM and return the new row id."""
+    now_ts = datetime.now(timezone.utc).isoformat()
+    with get_db_session() as session:
+        alert = SmartAlert(
+            user_id=user_id,
+            ticker=ticker.upper(),
+            alert_type=alert_type,
+            param_value=json.dumps(param_value or {}),
+            triggered=0,
+            created_at=now_ts,
         )
-        conn.commit()
-        row_id = cursor.lastrowid
+        session.add(alert)
+        session.flush()
+        row_id = alert.id
     write_audit_log("ADD", "smart_alert", entity_id=row_id,
                     details=f"ticker={ticker} type={alert_type} params={param_value}",
                     user_id=user_id)
@@ -1041,42 +737,53 @@ def add_smart_alert(ticker: str, alert_type: str, param_value: dict, user_id: st
 
 def get_smart_alerts(user_id: str = "default_user") -> list:
     """Return all smart alerts for a user as a list of dicts (param_value parsed from JSON)."""
-    import json as _json
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            "SELECT id, user_id, ticker, alert_type, param_value, created_at, triggered FROM smart_alerts WHERE user_id = ? ORDER BY created_at DESC",
-            (user_id,)
-        ).fetchall()
-    result = []
-    for r in rows:
-        item = dict(r)
-        try:
-            item["param_value"] = _json.loads(item["param_value"] or "{}")
-        except Exception:
-            item["param_value"] = {}
-        result.append(item)
-    return result
+    with get_db_session() as session:
+        stmt = select(SmartAlert).where(SmartAlert.user_id == user_id).order_by(SmartAlert.id.desc())
+        rows = session.execute(stmt).scalars().all()
+        result = []
+        for r in rows:
+            try:
+                p_val = json.loads(r.param_value or "{}")
+            except Exception:
+                p_val = {}
+            result.append({
+                "id": r.id,
+                "user_id": r.user_id,
+                "ticker": r.ticker,
+                "alert_type": r.alert_type,
+                "param_value": p_val,
+                "created_at": r.created_at,
+                "triggered": r.triggered,
+            })
+        return result
 
 
 def remove_smart_alert(alert_id: int, user_id: str = "default_user"):
     """Delete a smart alert by id and user_id."""
-    with get_db_connection() as conn:
-        conn.execute("DELETE FROM smart_alerts WHERE id = ? AND user_id = ?", (alert_id, user_id))
-        conn.commit()
+    with get_db_session() as session:
+        session.execute(
+            delete(SmartAlert).where(SmartAlert.id == alert_id, SmartAlert.user_id == user_id)
+        )
     write_audit_log("REMOVE", "smart_alert", entity_id=alert_id, user_id=user_id)
 
 
 def mark_alert_triggered(alert_id: int):
-    """Mark a smart alert as triggered."""
-    with get_db_connection() as conn:
-        # Fetch user_id for audit
-        row = conn.execute("SELECT user_id, ticker, alert_type FROM smart_alerts WHERE id = ?", (alert_id,)).fetchone()
-        conn.execute("UPDATE smart_alerts SET triggered = 1 WHERE id = ?", (alert_id,))
-        conn.commit()
-    if row:
+    """Mark a smart alert as triggered and log audit event."""
+    user_id = "default_user"
+    ticker = ""
+    alert_type = ""
+    with get_db_session() as session:
+        alert = session.get(SmartAlert, alert_id)
+        if alert:
+            alert.triggered = 1
+            user_id = alert.user_id
+            ticker = alert.ticker
+            alert_type = alert.alert_type
+    if ticker:
         write_audit_log("TRIGGERED", "smart_alert", entity_id=alert_id,
-                        details=f"ticker={row['ticker']} type={row['alert_type']}",
-                        user_id=row["user_id"])
+                        details=f"ticker={ticker} type={alert_type}",
+                        user_id=user_id)
+
 
 
 # ── Paper Trading Functions (₹10 Lakh Virtual Funds) ──────────────────────────
@@ -1084,137 +791,149 @@ def mark_alert_triggered(alert_id: int):
 def get_paper_account(user_id: str = "default_user") -> dict:
     """Returns the paper trading account state, initializing with ₹1,000,000 if new."""
     now_str = datetime.now().isoformat()
-    with get_db_connection() as conn:
-        row = conn.execute("SELECT user_id, cash_balance, starting_balance, updated_at FROM paper_accounts WHERE user_id = ?", (user_id,)).fetchone()
-        if not row:
-            conn.execute(
-                "INSERT INTO paper_accounts (user_id, cash_balance, starting_balance, updated_at) VALUES (?, 1000000.0, 1000000.0, ?)",
-                (user_id, now_str)
+    with get_db_session() as session:
+        acc = session.get(PaperAccount, user_id)
+        if not acc:
+            acc = PaperAccount(
+                user_id=user_id,
+                cash_balance=1000000.0,
+                starting_balance=1000000.0,
+                updated_at=now_str
             )
-            conn.commit()
+            session.add(acc)
+            session.commit()
             return {"user_id": user_id, "cash_balance": 1000000.0, "starting_balance": 1000000.0, "updated_at": now_str}
-        return dict(row)
+        return {
+            "user_id": acc.user_id,
+            "cash_balance": acc.cash_balance,
+            "starting_balance": acc.starting_balance,
+            "updated_at": acc.updated_at
+        }
 
 
 def get_paper_positions(user_id: str = "default_user") -> list:
     """Returns active open paper trading positions enriched with live LTP, market value, and unrealized P&L."""
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            "SELECT id, user_id, ticker, order_type, shares, avg_buy_price, stop_loss, target_price, opened_at FROM paper_positions WHERE user_id = ? ORDER BY opened_at DESC",
-            (user_id,)
-        ).fetchall()
+    with get_db_session() as session:
+        stmt = select(PaperPosition).where(PaperPosition.user_id == user_id).order_by(PaperPosition.id.desc())
+        rows = session.execute(stmt).scalars().all()
+        positions = []
+        for r in rows:
+            p = {
+                "id": r.id,
+                "user_id": r.user_id,
+                "ticker": r.ticker,
+                "order_type": r.order_type,
+                "shares": r.shares,
+                "avg_buy_price": r.avg_buy_price,
+                "stop_loss": r.stop_loss,
+                "target_price": r.target_price,
+                "opened_at": r.opened_at,
+            }
+            ticker = p["ticker"]
+            shares = float(p["shares"])
+            buy_p = float(p["avg_buy_price"])
 
-    positions = []
-    for r in rows:
-        p = dict(r)
-        ticker = p["ticker"]
-        shares = float(p["shares"])
-        buy_p = float(p["avg_buy_price"])
-
-        # Fetch current price from cache or screener table
-        current_p = buy_p
-        sector = "Diversified"
-        try:
-            info = get_company_info(ticker)
-            if info and info.get("current_price") and float(info["current_price"]) > 0:
-                current_p = float(info["current_price"])
-            else:
-                with get_db_connection() as conn:
-                    scr_row = conn.execute(
-                        "SELECT close_price, sector FROM screener_daily_metrics WHERE ticker = ? LIMIT 1",
-                        (ticker,)
-                    ).fetchone()
-                    if scr_row and scr_row["close_price"]:
-                        current_p = float(scr_row["close_price"])
-                    if scr_row and scr_row["sector"]:
-                        sector = scr_row["sector"]
-        except Exception:
             current_p = buy_p
+            sector = "Diversified"
+            try:
+                info = get_company_info(ticker)
+                if info and info.get("current_price") and float(info["current_price"]) > 0:
+                    current_p = float(info["current_price"])
+                else:
+                    m = session.get(ScreenerDailyMetric, ticker)
+                    if m and m.close_price:
+                        current_p = float(m.close_price)
+                    if m and m.sector:
+                        sector = m.sector
+            except Exception:
+                current_p = buy_p
 
-        # Auto-trigger Stop Loss or Target if conditions are met
-        sl = float(p["stop_loss"]) if p.get("stop_loss") else None
-        tp = float(p["target_price"]) if p.get("target_price") else None
-        if sl and current_p <= sl and current_p > 0:
-            close_paper_position(p["id"], current_price=current_p, user_id=user_id, exit_reason="STOP_LOSS_HIT")
-            continue
-        if tp and current_p >= tp and current_p > 0:
-            close_paper_position(p["id"], current_price=current_p, user_id=user_id, exit_reason="TARGET_HIT")
-            continue
+            sl = float(p["stop_loss"]) if p.get("stop_loss") else None
+            tp = float(p["target_price"]) if p.get("target_price") else None
+            if sl and current_p <= sl and current_p > 0:
+                close_paper_position(p["id"], current_price=current_p, user_id=user_id, exit_reason="STOP_LOSS_HIT")
+                continue
+            if tp and current_p >= tp and current_p > 0:
+                close_paper_position(p["id"], current_price=current_p, user_id=user_id, exit_reason="TARGET_HIT")
+                continue
 
-        invested_val = round(shares * buy_p, 2)
-        market_val = round(shares * current_p, 2)
-        unrealized = round((current_p - buy_p) * shares, 2)
-        unrealized_pct = round(((current_p - buy_p) / max(0.01, buy_p)) * 100, 2)
+            invested_val = round(shares * buy_p, 2)
+            market_val = round(shares * current_p, 2)
+            unrealized = round((current_p - buy_p) * shares, 2)
+            unrealized_pct = round(((current_p - buy_p) / max(0.01, buy_p)) * 100, 2)
 
-        p["current_price"] = round(current_p, 2)
-        p["sector"] = sector
-        p["invested_value"] = invested_val
-        p["market_value"] = market_val
-        p["unrealized_pnl"] = unrealized
-        p["unrealized_pnl_pct"] = unrealized_pct
-        positions.append(p)
+            p["current_price"] = round(current_p, 2)
+            p["sector"] = sector
+            p["invested_value"] = invested_val
+            p["market_value"] = market_val
+            p["unrealized_pnl"] = unrealized
+            p["unrealized_pnl_pct"] = unrealized_pct
+            positions.append(p)
 
-    return positions
+        return positions
 
 
 def place_paper_order(ticker: str, order_type: str, action: str, shares: float, price: float, stop_loss: float = None, target_price: float = None, notes: str = None, user_id: str = "default_user") -> dict:
-    """
-    Executes a paper order atomically:
-    - Checks cash balance under transaction lock, debits cash, creates paper position.
-    - Records order in paper_orders journal and audit logs.
-    """
-    ticker = ticker.upper().strip()
-    action = action.upper().strip()
-    order_type = order_type.upper().strip()
-    total_cost = shares * price
+    """Executes a paper order atomically under transaction lock."""
+    ticker_u = ticker.upper().strip()
+    action_u = action.upper().strip()
+    order_type_u = order_type.upper().strip()
+    total_cost = float(shares) * float(price)
     now_str = datetime.now().isoformat()
 
-    if action != "BUY":
+    if action_u != "BUY":
         raise ValueError("Direct SELL without position not supported. Use sell_paper_position() to exit holdings.")
 
     if shares <= 0 or price <= 0:
         raise ValueError("Shares and price must be positive numbers.")
 
-    with get_db_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute("SELECT cash_balance FROM paper_accounts WHERE user_id = ?", (user_id,)).fetchone()
-        if not row:
-            conn.execute(
-                "INSERT OR IGNORE INTO paper_accounts (user_id, cash_balance, starting_balance, updated_at) VALUES (?, 1000000.0, 1000000.0, ?)",
-                (user_id, now_str)
-            )
-            row = conn.execute("SELECT cash_balance FROM paper_accounts WHERE user_id = ?", (user_id,)).fetchone()
+    with get_db_session() as session:
+        acc = session.get(PaperAccount, user_id)
+        if not acc:
+            acc = PaperAccount(user_id=user_id, cash_balance=1000000.0, starting_balance=1000000.0, updated_at=now_str)
+            session.add(acc)
+            session.flush()
 
-        cash_balance = float(row["cash_balance"])
-        if cash_balance < total_cost:
-            raise ValueError(f"Insufficient virtual cash balance. Needed ₹{total_cost:,.2f}, Available ₹{cash_balance:,.2f}")
+        if acc.cash_balance < total_cost:
+            raise ValueError(f"Insufficient virtual cash balance. Needed ₹{total_cost:,.2f}, Available ₹{acc.cash_balance:,.2f}")
 
-        new_cash = cash_balance - total_cost
-        conn.execute("UPDATE paper_accounts SET cash_balance = ?, updated_at = ? WHERE user_id = ?", (new_cash, now_str, user_id))
+        acc.cash_balance -= total_cost
+        acc.updated_at = now_str
+        new_cash = acc.cash_balance
 
-        cursor = conn.execute(
-            """
-            INSERT INTO paper_positions (user_id, ticker, order_type, shares, avg_buy_price, stop_loss, target_price, opened_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (user_id, ticker, order_type, shares, price, stop_loss, target_price, now_str)
+        pos = PaperPosition(
+            user_id=user_id,
+            ticker=ticker_u,
+            order_type=order_type_u,
+            shares=float(shares),
+            avg_buy_price=float(price),
+            stop_loss=float(stop_loss) if stop_loss else None,
+            target_price=float(target_price) if target_price else None,
+            opened_at=now_str,
         )
-        pos_id = cursor.lastrowid
+        session.add(pos)
+        session.flush()
+        pos_id = pos.id
 
-        order_note = notes or f"BUY {ticker} @ ₹{price:.2f}"
-        conn.execute(
-            """
-            INSERT INTO paper_orders (user_id, ticker, order_type, action, shares, executed_price, realized_pnl, status, executed_at)
-            VALUES (?, ?, ?, 'BUY', ?, ?, 0.0, ?, ?)
-            """,
-            (user_id, ticker, order_type, shares, price, order_note, now_str)
+        order_note = notes or f"BUY {ticker_u} @ ₹{price:.2f}"
+        order = PaperOrder(
+            user_id=user_id,
+            ticker=ticker_u,
+            order_type=order_type_u,
+            action="BUY",
+            shares=float(shares),
+            executed_price=float(price),
+            realized_pnl=0.0,
+            status=order_note,
+            executed_at=now_str,
         )
-        conn.commit()
+        session.add(order)
 
     write_audit_log("BUY", "paper_order", entity_id=pos_id,
-                    details=f"ticker={ticker} shares={shares} price={price} cost={total_cost:.2f}",
+                    details=f"ticker={ticker_u} shares={shares} price={price} cost={total_cost:.2f}",
                     user_id=user_id)
-    return {"status": "SUCCESS", "position_id": pos_id, "action": "BUY", "ticker": ticker, "shares": shares, "price": price, "remaining_cash": new_cash}
+    return {"status": "SUCCESS", "position_id": pos_id, "action": "BUY", "ticker": ticker_u, "shares": shares, "price": price, "remaining_cash": new_cash}
+
 
 
 def sell_paper_position(position_id: int, shares_to_sell: float, current_price: float, notes: str = None, user_id: str = "default_user") -> dict:
@@ -1223,52 +942,63 @@ def sell_paper_position(position_id: int, shares_to_sell: float, current_price: 
         raise ValueError("Shares to sell and current price must be greater than zero.")
 
     now_str = datetime.now().isoformat()
-    with get_db_connection() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        pos = conn.execute("SELECT id, user_id, ticker, order_type, shares, avg_buy_price FROM paper_positions WHERE id = ? AND user_id = ?", (position_id, user_id)).fetchone()
-        if not pos:
+    with get_db_session() as session:
+        pos = session.get(PaperPosition, position_id)
+        if not pos or pos.user_id != user_id:
             raise ValueError(f"Position #{position_id} not found.")
 
-        current_shares = float(pos["shares"])
+        ticker = pos.ticker
+        order_type = pos.order_type
+        current_shares = float(pos.shares)
         if shares_to_sell > current_shares:
             shares_to_sell = current_shares
 
-        buy_p = float(pos["avg_buy_price"])
+        buy_p = float(pos.avg_buy_price)
         pnl = (current_price - buy_p) * shares_to_sell
         proceeds = shares_to_sell * current_price
 
         # Update Account Cash
-        acc = conn.execute("SELECT cash_balance FROM paper_accounts WHERE user_id = ?", (user_id,)).fetchone()
-        current_cash = float(acc["cash_balance"]) if acc else 1000000.0
-        new_cash = current_cash + proceeds
-        conn.execute("UPDATE paper_accounts SET cash_balance = ?, updated_at = ? WHERE user_id = ?", (new_cash, now_str, user_id))
+        acc = session.get(PaperAccount, user_id)
+        if not acc:
+            acc = PaperAccount(user_id=user_id, cash_balance=1000000.0, starting_balance=1000000.0, updated_at=now_str)
+            session.add(acc)
+            session.flush()
+
+        acc.cash_balance += proceeds
+        acc.updated_at = now_str
+        new_cash = acc.cash_balance
 
         status_text = notes or ("CLOSED" if shares_to_sell >= current_shares else f"PARTIAL_SELL ({shares_to_sell}/{current_shares})")
 
         # Record Sell Order in Journal
-        conn.execute(
-            """
-            INSERT INTO paper_orders (user_id, ticker, order_type, action, shares, executed_price, realized_pnl, status, executed_at)
-            VALUES (?, ?, ?, 'SELL', ?, ?, ?, ?, ?)
-            """,
-            (user_id, pos["ticker"], pos["order_type"], shares_to_sell, current_price, pnl, status_text, now_str)
+        order = PaperOrder(
+            user_id=user_id,
+            ticker=ticker,
+            order_type=order_type,
+            action="SELL",
+            shares=float(shares_to_sell),
+            executed_price=float(current_price),
+            realized_pnl=float(pnl),
+            status=status_text,
+            executed_at=now_str,
         )
+        session.add(order)
 
         # Update or delete position
         remaining_shares = current_shares - shares_to_sell
         if remaining_shares > 0.0001:
-            conn.execute("UPDATE paper_positions SET shares = ? WHERE id = ?", (remaining_shares, position_id))
+            pos.shares = remaining_shares
         else:
-            conn.execute("DELETE FROM paper_positions WHERE id = ?", (position_id,))
-        conn.commit()
+            session.delete(pos)
+            remaining_shares = 0.0
 
     write_audit_log("SELL", "paper_order", entity_id=position_id,
-                    details=f"ticker={pos['ticker']} shares_sold={shares_to_sell} remaining={remaining_shares} exit_price={current_price} pnl={pnl:.2f}",
+                    details=f"ticker={ticker} shares_sold={shares_to_sell} remaining={remaining_shares} exit_price={current_price} pnl={pnl:.2f}",
                     user_id=user_id)
     return {
         "status": "SUCCESS",
         "position_id": position_id,
-        "ticker": pos["ticker"],
+        "ticker": ticker,
         "shares_sold": shares_to_sell,
         "remaining_shares": round(remaining_shares, 2),
         "exit_price": current_price,
@@ -1279,11 +1009,11 @@ def sell_paper_position(position_id: int, shares_to_sell: float, current_price: 
 
 def close_paper_position(position_id: int, current_price: float, user_id: str = "default_user", exit_reason: str = "MANUAL_CLOSE") -> dict:
     """Closes an open position fully at current live price and calculates realized P&L."""
-    with get_db_connection() as conn:
-        pos = conn.execute("SELECT shares FROM paper_positions WHERE id = ? AND user_id = ?", (position_id, user_id)).fetchone()
-        if not pos:
-            raise ValueError(f"Position #{position_id} not found.")
-        shares = float(pos["shares"])
+    with get_db_session() as session:
+        pos = session.get(PaperPosition, position_id)
+        if not pos or pos.user_id != user_id:
+            return {"status": "ERROR", "message": f"Position #{position_id} not found."}
+        shares = float(pos.shares)
 
     return sell_paper_position(
         position_id=position_id,
@@ -1296,12 +1026,21 @@ def close_paper_position(position_id: int, current_price: float, user_id: str = 
 
 def get_paper_trade_history(user_id: str = "default_user", limit: int = 100) -> list:
     """Returns past executed orders journal."""
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            "SELECT id, user_id, ticker, order_type, action, shares, executed_price, realized_pnl, status, executed_at FROM paper_orders WHERE user_id = ? ORDER BY executed_at DESC LIMIT ?",
-            (user_id, limit)
-        ).fetchall()
-    return [dict(r) for r in rows]
+    with get_db_session() as session:
+        stmt = select(PaperOrder).where(PaperOrder.user_id == user_id).order_by(PaperOrder.id.desc()).limit(limit)
+        rows = session.execute(stmt).scalars().all()
+        return [{
+            "id": r.id,
+            "user_id": r.user_id,
+            "ticker": r.ticker,
+            "order_type": r.order_type,
+            "action": r.action,
+            "shares": r.shares,
+            "executed_price": r.executed_price,
+            "realized_pnl": r.realized_pnl,
+            "status": r.status,
+            "executed_at": r.executed_at,
+        } for r in rows]
 
 
 def get_paper_analytics(user_id: str = "default_user") -> dict:
@@ -1378,63 +1117,67 @@ def get_paper_analytics(user_id: str = "default_user") -> dict:
 def reset_paper_account(user_id: str = "default_user") -> dict:
     """Resets paper trading account back to ₹1,000,000 and clears positions/orders."""
     now_str = datetime.now().isoformat()
-    with get_db_connection() as conn:
-        conn.execute("DELETE FROM paper_positions WHERE user_id = ?", (user_id,))
-        conn.execute("DELETE FROM paper_orders WHERE user_id = ?", (user_id,))
-        conn.execute("UPDATE paper_accounts SET cash_balance = 1000000.0, starting_balance = 1000000.0, updated_at = ? WHERE user_id = ?", (now_str, user_id))
-        conn.commit()
+    with get_db_session() as session:
+        session.execute(delete(PaperPosition).where(PaperPosition.user_id == user_id))
+        session.execute(delete(PaperOrder).where(PaperOrder.user_id == user_id))
+        acc = session.get(PaperAccount, user_id)
+        if acc:
+            acc.cash_balance = 1000000.0
+            acc.starting_balance = 1000000.0
+            acc.updated_at = now_str
+        else:
+            session.add(PaperAccount(user_id=user_id, cash_balance=1000000.0, starting_balance=1000000.0, updated_at=now_str))
     write_audit_log("RESET", "paper_account", details="reset to ₹10,00,000", user_id=user_id)
     return {"status": "RESET", "cash_balance": 1000000.0}
+
 
 
 # ── Saved Screener Scans Functions ───────────────────────────────────────────
 
 def add_saved_scan(name: str, filters: dict, description: str = None, user_id: str = "default_user") -> int:
-    """Saves a custom screener filter preset."""
-    import json as _json
-    with get_db_connection() as conn:
-        cursor = conn.execute(
-            """
-            INSERT INTO saved_scans (user_id, name, description, filters_json)
-            VALUES (?, ?, ?, ?)
-            """,
-            (user_id, name.strip(), description, _json.dumps(filters)),
+    """Saves user custom screener scan preset."""
+    now_str = datetime.now().isoformat()
+    with get_db_session() as session:
+        scan = SavedScan(
+            user_id=user_id,
+            name=name.strip(),
+            description=description,
+            filters_json=json.dumps(filters or {}),
+            created_at=now_str,
         )
-        conn.commit()
-        row_id = cursor.lastrowid
+        session.add(scan)
+        session.flush()
+        row_id = scan.id
     write_audit_log("CREATE", "saved_scan", entity_id=row_id, details=f"name={name}", user_id=user_id)
     return row_id
 
 
 def get_saved_scans(user_id: str = "default_user") -> list:
-    """Returns all saved screener scans for a user."""
-    import json as _json
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, user_id, name, description, filters_json, created_at
-            FROM saved_scans
-            WHERE user_id = ?
-            ORDER BY id DESC
-            """,
-            (user_id,),
-        ).fetchall()
-    result = []
-    for r in rows:
-        item = dict(r)
-        try:
-            item["filters"] = _json.loads(item["filters_json"] or "{}")
-        except Exception:
-            item["filters"] = {}
-        result.append(item)
-    return result
+    """Returns saved scans for a user."""
+    with get_db_session() as session:
+        stmt = select(SavedScan).where(SavedScan.user_id == user_id).order_by(SavedScan.id.desc())
+        rows = session.execute(stmt).scalars().all()
+        res = []
+        for r in rows:
+            try:
+                f_obj = json.loads(r.filters_json or "{}")
+            except Exception:
+                f_obj = {}
+            res.append({
+                "id": r.id,
+                "user_id": r.user_id,
+                "name": r.name,
+                "description": r.description,
+                "filters": f_obj,
+                "created_at": r.created_at,
+            })
+        return res
 
 
 def delete_saved_scan(scan_id: int, user_id: str = "default_user") -> bool:
-    """Deletes a saved screener scan by ID."""
-    with get_db_connection() as conn:
-        conn.execute("DELETE FROM saved_scans WHERE id = ? AND user_id = ?", (scan_id, user_id))
-        conn.commit()
+    """Deletes a saved scan."""
+    with get_db_session() as session:
+        session.execute(delete(SavedScan).where(SavedScan.id == scan_id, SavedScan.user_id == user_id))
     write_audit_log("DELETE", "saved_scan", entity_id=scan_id, user_id=user_id)
     return True
 
@@ -1446,134 +1189,130 @@ def register_model_version(
     mape: float = None, rmse: float = None, metrics: dict = None
 ) -> int:
     """Registers a newly trained ML model artifact and metrics lineage."""
-    import json as _json
     now_str = datetime.now().isoformat()
-    with get_db_connection() as conn:
-        # Mark previous versions as inactive for this ticker and model_type
-        conn.execute(
-            "UPDATE model_registry SET is_active = 0 WHERE ticker = ? AND model_type = ?",
-            (ticker.upper(), model_type)
+    ticker_u = ticker.upper()
+    with get_db_session() as session:
+        session.execute(
+            update(ModelRegistry).where(
+                ModelRegistry.ticker == ticker_u,
+                ModelRegistry.model_type == model_type
+            ).values(is_active=0)
         )
-        cursor = conn.execute(
-            """
-            INSERT INTO model_registry (ticker, model_type, version, artifact_path, mape, rmse, metrics_json, trained_at, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
-            """,
-            (ticker.upper(), model_type, version, artifact_path, mape, rmse, _json.dumps(metrics or {}), now_str)
+        reg = ModelRegistry(
+            ticker=ticker_u,
+            model_type=model_type,
+            version=version,
+            artifact_path=artifact_path,
+            mape=mape,
+            rmse=rmse,
+            metrics_json=json.dumps(metrics or {}),
+            trained_at=now_str,
+            is_active=1
         )
-        conn.commit()
-        row_id = cursor.lastrowid
-    write_audit_log("REGISTER", "model_version", entity_id=row_id, details=f"ticker={ticker} type={model_type} v={version} mape={mape}")
+        session.add(reg)
+        session.flush()
+        row_id = reg.id
+    write_audit_log("REGISTER", "model_version", entity_id=row_id, details=f"ticker={ticker_u} type={model_type} v={version} mape={mape}")
     return row_id
 
 
 def get_registered_models(ticker: str = None) -> list:
     """Returns registered model artifacts and accuracy metrics."""
-    import json as _json
-    with get_db_connection() as conn:
+    with get_db_session() as session:
+        stmt = select(ModelRegistry)
         if ticker:
-            rows = conn.execute(
-                "SELECT id, ticker, model_type, version, artifact_path, mape, rmse, metrics_json, trained_at, is_active "
-                "FROM model_registry WHERE ticker = ? ORDER BY id DESC",
-                (ticker.upper(),)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT id, ticker, model_type, version, artifact_path, mape, rmse, metrics_json, trained_at, is_active "
-                "FROM model_registry ORDER BY id DESC LIMIT 100"
-            ).fetchall()
+            stmt = stmt.where(ModelRegistry.ticker == ticker.upper())
+        stmt = stmt.order_by(ModelRegistry.id.desc()).limit(100)
+        rows = session.execute(stmt).scalars().all()
+        result = []
+        for r in rows:
+            try:
+                m_obj = json.loads(r.metrics_json or "{}")
+            except Exception:
+                m_obj = {}
+            result.append({
+                "id": r.id,
+                "ticker": r.ticker,
+                "model_type": r.model_type,
+                "version": r.version,
+                "artifact_path": r.artifact_path,
+                "mape": r.mape,
+                "rmse": r.rmse,
+                "metrics": m_obj,
+                "metrics_json": r.metrics_json,
+                "trained_at": r.trained_at,
+                "is_active": r.is_active,
+            })
+        return result
 
-    result = []
-    for r in rows:
-        item = dict(r)
-        try:
-            item["metrics"] = _json.loads(item["metrics_json"] or "{}")
-        except Exception:
-            item["metrics"] = {}
-        result.append(item)
-    return result
 
 
 # ── Screener Platform Database Operations ────────────────────────────────────
 
 def upsert_screener_daily_metric(row_data: dict) -> None:
-    """Inserts or updates precomputed daily metrics for a ticker."""
+    """Inserts or updates precomputed daily metrics for a ticker via SQLAlchemy ORM."""
     now_str = datetime.now().isoformat()
     ticker = str(row_data.get("ticker", "")).upper().strip()
     if not ticker:
         return
 
-    with get_db_connection() as conn:
-        conn.execute(
-            """
-            INSERT INTO screener_daily_metrics (
-                ticker, name, sector, industry, market_cap_cr, market_cap_cat,
-                close_price, change_1d_pct, change_1w_pct, change_1m_pct, change_1y_pct,
-                distance_52w_high_pct, distance_52w_low_pct, rsi_14, macd_signal,
-                sma_20, sma_50, sma_200, volume_ratio_20d, pe_ratio, pb_ratio,
-                roe_pct, roce_pct, debt_to_equity, sales_growth_3y, profit_growth_3y,
-                pcr, max_pain, iv, ai_consensus_score, ai_signal, ai_confidence_score, updated_at
-            ) VALUES (
-                :ticker, :name, :sector, :industry, :market_cap_cr, :market_cap_cat,
-                :close_price, :change_1d_pct, :change_1w_pct, :change_1m_pct, :change_1y_pct,
-                :distance_52w_high_pct, :distance_52w_low_pct, :rsi_14, :macd_signal,
-                :sma_20, :sma_50, :sma_200, :volume_ratio_20d, :pe_ratio, :pb_ratio,
-                :roe_pct, :roce_pct, :debt_to_equity, :sales_growth_3y, :profit_growth_3y,
-                :pcr, :max_pain, :iv, :ai_consensus_score, :ai_signal, :ai_confidence_score, :updated_at
+    metric_dict = {
+        "ticker": ticker,
+        "name": row_data.get("name", ticker),
+        "sector": row_data.get("sector"),
+        "industry": row_data.get("industry"),
+        "market_cap_cr": float(row_data.get("market_cap_cr", 10000.0) or 10000.0),
+        "market_cap_cat": str(row_data.get("market_cap_cat", "MID")),
+        "close_price": float(row_data.get("close_price", 100.0) or 100.0),
+        "change_1d_pct": float(row_data.get("change_1d_pct", 0.0) or 0.0),
+        "change_1w_pct": float(row_data.get("change_1w_pct", 0.0) or 0.0),
+        "change_1m_pct": float(row_data.get("change_1m_pct", 0.0) or 0.0),
+        "change_1y_pct": float(row_data.get("change_1y_pct", 0.0) or 0.0),
+        "distance_52w_high_pct": float(row_data.get("distance_52w_high_pct", -5.0) or -5.0),
+        "distance_52w_low_pct": float(row_data.get("distance_52w_low_pct", 25.0) or 25.0),
+        "rsi_14": float(row_data.get("rsi_14", 50.0) or 50.0),
+        "macd_signal": str(row_data.get("macd_signal", "BULLISH")),
+        "sma_20": float(row_data["sma_20"]) if row_data.get("sma_20") is not None else None,
+        "sma_50": float(row_data["sma_50"]) if row_data.get("sma_50") is not None else None,
+        "sma_200": float(row_data["sma_200"]) if row_data.get("sma_200") is not None else None,
+        "volume_ratio_20d": float(row_data.get("volume_ratio_20d", 1.0) or 1.0),
+        "pe_ratio": float(row_data["pe_ratio"]) if row_data.get("pe_ratio") is not None else None,
+        "pb_ratio": float(row_data["pb_ratio"]) if row_data.get("pb_ratio") is not None else None,
+        "roe_pct": float(row_data["roe_pct"]) if row_data.get("roe_pct") is not None else None,
+        "roce_pct": float(row_data["roce_pct"]) if row_data.get("roce_pct") is not None else None,
+        "debt_to_equity": float(row_data["debt_to_equity"]) if row_data.get("debt_to_equity") is not None else None,
+        "sales_growth_3y": float(row_data["sales_growth_3y"]) if row_data.get("sales_growth_3y") is not None else None,
+        "profit_growth_3y": float(row_data["profit_growth_3y"]) if row_data.get("profit_growth_3y") is not None else None,
+        "pcr": float(row_data["pcr"]) if row_data.get("pcr") is not None else None,
+        "max_pain": float(row_data["max_pain"]) if row_data.get("max_pain") is not None else None,
+        "iv": float(row_data["iv"]) if row_data.get("iv") is not None else None,
+        "ai_consensus_score": float(row_data.get("ai_consensus_score", 60.0) or 60.0),
+        "ai_signal": str(row_data.get("ai_signal", "BUY")),
+        "ai_confidence_score": float(row_data.get("ai_confidence_score", 75.0) or 75.0),
+        "updated_at": now_str,
+    }
+
+    with get_db_session() as session:
+        dialect = session.bind.dialect.name if session.bind else "sqlite"
+        if dialect == "sqlite":
+            stmt = sqlite_insert(ScreenerDailyMetric).values(metric_dict)
+            update_cols = {k: v for k, v in metric_dict.items() if k != "ticker"}
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["ticker"],
+                set_=update_cols
             )
-            ON CONFLICT(ticker) DO UPDATE SET
-                name=excluded.name, sector=excluded.sector, industry=excluded.industry,
-                market_cap_cr=excluded.market_cap_cr, market_cap_cat=excluded.market_cap_cat,
-                close_price=excluded.close_price, change_1d_pct=excluded.change_1d_pct,
-                change_1w_pct=excluded.change_1w_pct, change_1m_pct=excluded.change_1m_pct,
-                change_1y_pct=excluded.change_1y_pct, distance_52w_high_pct=excluded.distance_52w_high_pct,
-                distance_52w_low_pct=excluded.distance_52w_low_pct, rsi_14=excluded.rsi_14,
-                macd_signal=excluded.macd_signal, sma_20=excluded.sma_20, sma_50=excluded.sma_50,
-                sma_200=excluded.sma_200, volume_ratio_20d=excluded.volume_ratio_20d,
-                pe_ratio=excluded.pe_ratio, pb_ratio=excluded.pb_ratio, roe_pct=excluded.roe_pct,
-                roce_pct=excluded.roce_pct, debt_to_equity=excluded.debt_to_equity,
-                sales_growth_3y=excluded.sales_growth_3y, profit_growth_3y=excluded.profit_growth_3y,
-                pcr=excluded.pcr, max_pain=excluded.max_pain, iv=excluded.iv,
-                ai_consensus_score=excluded.ai_consensus_score, ai_signal=excluded.ai_signal,
-                ai_confidence_score=excluded.ai_confidence_score, updated_at=excluded.updated_at
-            """,
-            {
-                "ticker": ticker,
-                "name": row_data.get("name", ticker),
-                "sector": row_data.get("sector"),
-                "industry": row_data.get("industry"),
-                "market_cap_cr": row_data.get("market_cap_cr", 10000.0),
-                "market_cap_cat": row_data.get("market_cap_cat", "MID"),
-                "close_price": float(row_data.get("close_price", 100.0)),
-                "change_1d_pct": row_data.get("change_1d_pct", 0.0),
-                "change_1w_pct": row_data.get("change_1w_pct", 0.0),
-                "change_1m_pct": row_data.get("change_1m_pct", 0.0),
-                "change_1y_pct": row_data.get("change_1y_pct", 0.0),
-                "distance_52w_high_pct": row_data.get("distance_52w_high_pct", -5.0),
-                "distance_52w_low_pct": row_data.get("distance_52w_low_pct", 25.0),
-                "rsi_14": row_data.get("rsi_14", 50.0),
-                "macd_signal": row_data.get("macd_signal", "BULLISH"),
-                "sma_20": row_data.get("sma_20"),
-                "sma_50": row_data.get("sma_50"),
-                "sma_200": row_data.get("sma_200"),
-                "volume_ratio_20d": row_data.get("volume_ratio_20d", 1.0),
-                "pe_ratio": row_data.get("pe_ratio"),
-                "pb_ratio": row_data.get("pb_ratio"),
-                "roe_pct": row_data.get("roe_pct"),
-                "roce_pct": row_data.get("roce_pct"),
-                "debt_to_equity": row_data.get("debt_to_equity"),
-                "sales_growth_3y": row_data.get("sales_growth_3y"),
-                "profit_growth_3y": row_data.get("profit_growth_3y"),
-                "pcr": row_data.get("pcr"),
-                "max_pain": row_data.get("max_pain"),
-                "iv": row_data.get("iv"),
-                "ai_consensus_score": row_data.get("ai_consensus_score", 60.0),
-                "ai_signal": row_data.get("ai_signal", "BUY"),
-                "ai_confidence_score": row_data.get("ai_confidence_score", 75.0),
-                "updated_at": now_str,
-            }
-        )
-        conn.commit()
+            session.execute(stmt)
+        elif dialect == "postgresql":
+            stmt = pg_insert(ScreenerDailyMetric).values(metric_dict)
+            update_cols = {k: v for k, v in metric_dict.items() if k != "ticker"}
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["ticker"],
+                set_=update_cols
+            )
+            session.execute(stmt)
+        else:
+            session.merge(ScreenerDailyMetric(**metric_dict))
+
 
 
 def execute_screener_sql_query(
@@ -1645,26 +1384,27 @@ def save_user_screen_query(
 ) -> dict:
     """Saves a user custom multi-factor screen and creates a unique share token."""
     import uuid
-    import json as _json
     share_token = str(uuid.uuid4())[:12]
     now_str = datetime.now().isoformat()
 
-    with get_db_connection() as conn:
-        cursor = conn.execute(
-            """
-            INSERT INTO user_screens (
-                user_id, name, description, formula_query, filter_ast_json,
-                universe, sort_by, sort_dir, is_public, share_token, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                user_id, name.strip(), description, formula_query,
-                _json.dumps(filter_ast or {}), universe, sort_by, sort_dir,
-                1 if is_public else 0, share_token, now_str, now_str
-            )
+    with get_db_session() as session:
+        screen = UserScreen(
+            user_id=user_id,
+            name=name.strip(),
+            description=description,
+            formula_query=formula_query,
+            filter_ast_json=json.dumps(filter_ast or {}),
+            universe=universe,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            is_public=1 if is_public else 0,
+            share_token=share_token,
+            created_at=now_str,
+            updated_at=now_str,
         )
-        conn.commit()
-        row_id = cursor.lastrowid
+        session.add(screen)
+        session.flush()
+        row_id = screen.id
 
     write_audit_log("CREATE", "user_screen", entity_id=row_id, details=f"name={name}", user_id=user_id)
     return {
@@ -1678,61 +1418,69 @@ def save_user_screen_query(
 
 def get_user_screens_list(user_id: str = "default_user") -> list:
     """Returns saved screens for a user."""
-    import json as _json
-    with get_db_connection() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, user_id, name, description, formula_query, filter_ast_json,
-                   universe, sort_by, sort_dir, is_public, share_token, created_at, updated_at
-            FROM user_screens
-            WHERE user_id = ? OR is_public = 1
-            ORDER BY id DESC
-            """,
-            (user_id,)
-        ).fetchall()
-
-    res = []
-    for r in rows:
-        item = dict(r)
-        try:
-            item["filter_ast"] = _json.loads(item["filter_ast_json"] or "{}")
-        except Exception:
-            item["filter_ast"] = {}
-        res.append(item)
-    return res
+    with get_db_session() as session:
+        stmt = select(UserScreen).where(
+            or_(UserScreen.user_id == user_id, UserScreen.is_public == 1)
+        ).order_by(UserScreen.id.desc())
+        rows = session.execute(stmt).scalars().all()
+        res = []
+        for r in rows:
+            try:
+                f_obj = json.loads(r.filter_ast_json or "{}")
+            except Exception:
+                f_obj = {}
+            res.append({
+                "id": r.id,
+                "user_id": r.user_id,
+                "name": r.name,
+                "description": r.description,
+                "formula_query": r.formula_query,
+                "filter_ast": f_obj,
+                "universe": r.universe,
+                "sort_by": r.sort_by,
+                "sort_dir": r.sort_dir,
+                "is_public": r.is_public,
+                "share_token": r.share_token,
+                "created_at": r.created_at,
+                "updated_at": r.updated_at,
+            })
+        return res
 
 
 def get_user_screen_by_share_token(token: str) -> Optional[dict]:
     """Retrieves public screen by share token."""
-    import json as _json
-    with get_db_connection() as conn:
-        row = conn.execute(
-            """
-            SELECT id, user_id, name, description, formula_query, filter_ast_json,
-                   universe, sort_by, sort_dir, is_public, share_token, created_at
-            FROM user_screens
-            WHERE share_token = ?
-            """,
-            (token,)
-        ).fetchone()
-
-    if not row:
-        return None
-    item = dict(row)
-    try:
-        item["filter_ast"] = _json.loads(item["filter_ast_json"] or "{}")
-    except Exception:
-        item["filter_ast"] = {}
-    return item
+    with get_db_session() as session:
+        stmt = select(UserScreen).where(UserScreen.share_token == token)
+        row = session.execute(stmt).scalar_one_or_none()
+        if not row:
+            return None
+        try:
+            f_obj = json.loads(row.filter_ast_json or "{}")
+        except Exception:
+            f_obj = {}
+        return {
+            "id": row.id,
+            "user_id": row.user_id,
+            "name": row.name,
+            "description": row.description,
+            "formula_query": row.formula_query,
+            "filter_ast": f_obj,
+            "universe": row.universe,
+            "sort_by": row.sort_by,
+            "sort_dir": row.sort_dir,
+            "is_public": row.is_public,
+            "share_token": row.share_token,
+            "created_at": row.created_at,
+        }
 
 
 def delete_user_screen_query(screen_id: int, user_id: str = "default_user") -> bool:
     """Deletes a saved user screen."""
-    with get_db_connection() as conn:
-        conn.execute("DELETE FROM user_screens WHERE id = ? AND user_id = ?", (screen_id, user_id))
-        conn.commit()
+    with get_db_session() as session:
+        session.execute(delete(UserScreen).where(UserScreen.id == screen_id, UserScreen.user_id == user_id))
     write_audit_log("DELETE", "user_screen", entity_id=screen_id, user_id=user_id)
     return True
+
 
 
 # ── AI Providers Storage & Metrics Helpers ─────────────────────────────────────
@@ -1745,31 +1493,37 @@ def save_ai_provider_to_db(
     is_active: bool = False,
     last_test_status: str = "Configured",
 ) -> bool:
-    """Saves or updates an AI provider in SQLite."""
+    """Saves or updates an AI provider in database via SQLAlchemy ORM."""
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        with get_db_connection() as conn:
+        with get_db_session() as session:
             if is_active:
-                conn.execute("UPDATE ai_providers SET is_active = 0")
-            conn.execute("""
-                INSERT INTO ai_providers (
-                    provider_name, api_key_encrypted, api_key_masked,
-                    selected_model, is_active, last_tested_at, last_test_status, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'), ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-                ON CONFLICT(provider_name) DO UPDATE SET
-                    api_key_encrypted = excluded.api_key_encrypted,
-                    api_key_masked = excluded.api_key_masked,
-                    selected_model = excluded.selected_model,
-                    is_active = excluded.is_active,
-                    last_tested_at = excluded.last_tested_at,
-                    last_test_status = excluded.last_test_status,
-                    updated_at = excluded.updated_at
-            """, (
-                provider_name, api_key_encrypted, api_key_masked,
-                selected_model, 1 if is_active else 0, last_test_status
-            ))
-            conn.commit()
-            return True
+                session.execute(update(AIProvider).values(is_active=0))
+            provider = session.execute(
+                select(AIProvider).where(AIProvider.provider_name == provider_name)
+            ).scalar_one_or_none()
+            if provider:
+                provider.api_key_encrypted = api_key_encrypted
+                provider.api_key_masked = api_key_masked
+                provider.selected_model = selected_model
+                provider.is_active = 1 if is_active else 0
+                provider.last_tested_at = now_str
+                provider.last_test_status = last_test_status
+                provider.updated_at = now_str
+            else:
+                session.add(AIProvider(
+                    provider_name=provider_name,
+                    api_key_encrypted=api_key_encrypted,
+                    api_key_masked=api_key_masked,
+                    selected_model=selected_model,
+                    is_active=1 if is_active else 0,
+                    last_tested_at=now_str,
+                    last_test_status=last_test_status,
+                    total_requests=0,
+                    created_at=now_str,
+                    updated_at=now_str,
+                ))
+        return True
     except Exception as exc:
         logger.error("Failed saving AI provider %s: %s", provider_name, exc)
         return False
@@ -1779,26 +1533,21 @@ def get_all_ai_providers_from_db() -> Dict[str, dict]:
     """Returns all AI providers configured in the database."""
     result = {}
     try:
-        with get_db_connection() as conn:
-            cursor = conn.execute("""
-                SELECT id, provider_name, api_key_encrypted, api_key_masked,
-                       selected_model, is_active, last_tested_at, last_test_status,
-                       total_requests, created_at, updated_at
-                FROM ai_providers
-            """)
-            for row in cursor.fetchall():
-                result[row["provider_name"]] = {
-                    "id": row["id"],
-                    "provider_name": row["provider_name"],
-                    "api_key_encrypted": row["api_key_encrypted"],
-                    "api_key_masked": row["api_key_masked"],
-                    "selected_model": row["selected_model"],
-                    "is_active": bool(row["is_active"]),
-                    "last_tested_at": row["last_tested_at"],
-                    "last_test_status": row["last_test_status"],
-                    "total_requests": row["total_requests"] or 0,
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
+        with get_db_session() as session:
+            rows = session.execute(select(AIProvider)).scalars().all()
+            for r in rows:
+                result[r.provider_name] = {
+                    "id": r.id,
+                    "provider_name": r.provider_name,
+                    "api_key_encrypted": r.api_key_encrypted,
+                    "api_key_masked": r.api_key_masked,
+                    "selected_model": r.selected_model,
+                    "is_active": bool(r.is_active),
+                    "last_tested_at": r.last_tested_at,
+                    "last_test_status": r.last_test_status,
+                    "total_requests": r.total_requests or 0,
+                    "created_at": r.created_at,
+                    "updated_at": r.updated_at,
                 }
     except Exception as exc:
         logger.warning("Could not read ai_providers table: %s", exc)
@@ -1808,17 +1557,21 @@ def get_all_ai_providers_from_db() -> Dict[str, dict]:
 def get_active_ai_provider_from_db() -> Optional[dict]:
     """Returns the currently active AI provider record."""
     try:
-        with get_db_connection() as conn:
-            row = conn.execute("""
-                SELECT id, provider_name, api_key_encrypted, api_key_masked,
-                       selected_model, is_active, last_tested_at, last_test_status,
-                       total_requests, updated_at
-                FROM ai_providers
-                WHERE is_active = 1
-                LIMIT 1
-            """).fetchone()
-            if row:
-                return dict(row)
+        with get_db_session() as session:
+            r = session.execute(select(AIProvider).where(AIProvider.is_active == 1).limit(1)).scalar_one_or_none()
+            if r:
+                return {
+                    "id": r.id,
+                    "provider_name": r.provider_name,
+                    "api_key_encrypted": r.api_key_encrypted,
+                    "api_key_masked": r.api_key_masked,
+                    "selected_model": r.selected_model,
+                    "is_active": bool(r.is_active),
+                    "last_tested_at": r.last_tested_at,
+                    "last_test_status": r.last_test_status,
+                    "total_requests": r.total_requests or 0,
+                    "updated_at": r.updated_at,
+                }
     except Exception as exc:
         logger.warning("Failed reading active AI provider: %s", exc)
     return None
@@ -1826,15 +1579,16 @@ def get_active_ai_provider_from_db() -> Optional[dict]:
 
 def activate_ai_provider_in_db(provider_name: str) -> bool:
     """Sets the designated provider as active and deactivates others."""
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        with get_db_connection() as conn:
-            conn.execute("UPDATE ai_providers SET is_active = 0")
-            conn.execute(
-                "UPDATE ai_providers SET is_active = 1, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now') WHERE provider_name = ?",
-                (provider_name,)
+        with get_db_session() as session:
+            session.execute(update(AIProvider).values(is_active=0))
+            session.execute(
+                update(AIProvider).where(AIProvider.provider_name == provider_name).values(
+                    is_active=1, updated_at=now_str
+                )
             )
-            conn.commit()
-            return True
+        return True
     except Exception as exc:
         logger.error("Failed activating AI provider %s: %s", provider_name, exc)
         return False
@@ -1843,10 +1597,9 @@ def activate_ai_provider_in_db(provider_name: str) -> bool:
 def delete_ai_provider_from_db(provider_name: str) -> bool:
     """Removes an AI provider from database."""
     try:
-        with get_db_connection() as conn:
-            conn.execute("DELETE FROM ai_providers WHERE provider_name = ?", (provider_name,))
-            conn.commit()
-            return True
+        with get_db_session() as session:
+            session.execute(delete(AIProvider).where(AIProvider.provider_name == provider_name))
+        return True
     except Exception as exc:
         logger.error("Failed deleting AI provider %s: %s", provider_name, exc)
         return False
@@ -1854,17 +1607,17 @@ def delete_ai_provider_from_db(provider_name: str) -> bool:
 
 def update_ai_provider_test_status(provider_name: str, status: str, latency_ms: Optional[float] = None) -> bool:
     """Updates last test timestamp and status string."""
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        with get_db_connection() as conn:
-            conn.execute("""
-                UPDATE ai_providers
-                SET last_tested_at = strftime('%Y-%m-%dT%H:%M:%SZ','now'),
-                    last_test_status = ?,
-                    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-                WHERE provider_name = ?
-            """, (status, provider_name))
-            conn.commit()
-            return True
+        with get_db_session() as session:
+            session.execute(
+                update(AIProvider).where(AIProvider.provider_name == provider_name).values(
+                    last_tested_at=now_str,
+                    last_test_status=status,
+                    updated_at=now_str,
+                )
+            )
+        return True
     except Exception as exc:
         logger.warning("Failed updating test status for %s: %s", provider_name, exc)
         return False
@@ -1872,20 +1625,18 @@ def update_ai_provider_test_status(provider_name: str, status: str, latency_ms: 
 
 def increment_ai_provider_requests(provider_name: str) -> None:
     """Increments total requests counter for an AI provider."""
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        with get_db_connection() as conn:
-            conn.execute("""
-                UPDATE ai_providers
-                SET total_requests = COALESCE(total_requests, 0) + 1,
-                    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ','now')
-                WHERE provider_name = ?
-            """, (provider_name,))
-            conn.commit()
+        with get_db_session() as session:
+            session.execute(
+                update(AIProvider).where(AIProvider.provider_name == provider_name).values(
+                    total_requests=func.coalesce(AIProvider.total_requests, 0) + 1,
+                    updated_at=now_str,
+                )
+            )
     except Exception:
         pass
 
-
-# ── Broker Audit Logs Helpers ──────────────────────────────────────────────────
 
 def save_broker_audit_log(
     broker: str,
@@ -1895,13 +1646,17 @@ def save_broker_audit_log(
     latency_ms: Optional[float] = None
 ) -> None:
     """Records a broker session or connection event in broker_audit_logs."""
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        with get_db_connection() as conn:
-            conn.execute("""
-                INSERT INTO broker_audit_logs (broker, event, status, details, latency_ms, created_at)
-                VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-            """, (broker, event, status, details, latency_ms))
-            conn.commit()
+        with get_db_session() as session:
+            session.add(BrokerAuditLog(
+                broker=broker,
+                event=event,
+                status=status,
+                details=details,
+                latency_ms=latency_ms,
+                created_at=now_str,
+            ))
     except Exception as exc:
         logger.warning("Failed writing broker audit log: %s", exc)
 
@@ -1909,17 +1664,22 @@ def save_broker_audit_log(
 def get_recent_broker_audit_logs(limit: int = 10) -> list:
     """Returns the most recent broker connection attempts and session events."""
     try:
-        with get_db_connection() as conn:
-            cursor = conn.execute("""
-                SELECT id, broker, event, status, details, latency_ms, created_at
-                FROM broker_audit_logs
-                ORDER BY id DESC
-                LIMIT ?
-            """, (limit,))
-            return [dict(row) for row in cursor.fetchall()]
+        with get_db_session() as session:
+            stmt = select(BrokerAuditLog).order_by(BrokerAuditLog.id.desc()).limit(limit)
+            rows = session.execute(stmt).scalars().all()
+            return [{
+                "id": r.id,
+                "broker": r.broker,
+                "event": r.event,
+                "status": r.status,
+                "details": r.details,
+                "latency_ms": r.latency_ms,
+                "created_at": r.created_at,
+            } for r in rows]
     except Exception as exc:
         logger.warning("Failed retrieving broker audit logs: %s", exc)
         return []
+
 
 
 
