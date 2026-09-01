@@ -171,7 +171,7 @@ export function calculateMACD(candles, fastPeriod = 12, slowPeriod = 26, signalP
     }
   });
 
-  return { macd, signal, histogram };
+  return { macd, signal, histogram, hist: histogram };
 }
 
 export function calculateALMA(candles, windowSize = 9, offset = 0.85, sigma = 6) {
@@ -242,9 +242,9 @@ export function calculateKeyLevels(candles, lookback = 50) {
 
   const mid = (highest + lowest) / 2;
   return [
-    { label: 'Resistance (High)', price: Number(highest.toFixed(2)), color: '#EF5350' },
-    { label: 'Equilibrium (Mid)', price: Number(mid.toFixed(2)), color: '#F59E0B' },
-    { label: 'Support (Low)', price: Number(lowest.toFixed(2)), color: '#10B981' },
+    { label: 'Resistance (High)', title: 'Resistance', price: Number(highest.toFixed(2)), color: '#EF5350' },
+    { label: 'Equilibrium (Mid)', title: 'Equilibrium', price: Number(mid.toFixed(2)), color: '#F59E0B' },
+    { label: 'Support (Low)', title: 'Support', price: Number(lowest.toFixed(2)), color: '#10B981' },
   ];
 }
 

@@ -296,8 +296,10 @@ export default function LiveChartView() {
   const smaRef         = useRef(null);
   const emaRef         = useRef(null);
   const bbUpperRef     = useRef(null);
+  const bbMiddleRef    = useRef(null);
   const bbLowerRef     = useRef(null);
   const rsiRef         = useRef(null);
+  const rsiPriceLinesRef = useRef([]);
   const rsiLine70Ref   = useRef(null);
   const rsiLine30Ref   = useRef(null);
   const macdRef        = useRef(null);
@@ -440,48 +442,55 @@ export default function LiveChartView() {
     const alma = chart.addLineSeries({ color: '#FACC15', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
     almaRef.current = alma;
 
-    const bbUpper = chart.addLineSeries({ color: '#E040FB', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
+    const bbUpper = chart.addLineSeries({ color: '#E040FB', lineWidth: 1.2, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     bbUpperRef.current = bbUpper;
 
-    const bbLower = chart.addLineSeries({ color: '#E040FB', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
+    const bbMiddle = chart.addLineSeries({ color: 'rgba(245, 158, 11, 0.85)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
+    bbMiddleRef.current = bbMiddle;
+
+    const bbLower = chart.addLineSeries({ color: '#E040FB', lineWidth: 1.2, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     bbLowerRef.current = bbLower;
 
-    // RSI Sub-chart (overlay scale with scaleMargins)
+    // RSI Sub-chart with dedicated independent price scale
+    chart.priceScale('rsi-scale').applyOptions({
+      scaleMargins: { top: 0.78, bottom: 0.02 },
+      autoScale: true,
+    });
     const rsi = chart.addLineSeries({
       color: '#F43F5E', lineWidth: 1.5,
-      priceScaleId: '',
-      scaleMargins: { top: 0.82, bottom: 0 },
+      priceScaleId: 'rsi-scale',
       priceLineVisible: false, lastValueVisible: true,
     });
     rsiRef.current = rsi;
 
-    const rsi70 = chart.addLineSeries({ color: 'rgba(239,83,80,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: '', scaleMargins: { top: 0.82, bottom: 0 }, priceLineVisible: false, lastValueVisible: false });
+    const rsi70 = chart.addLineSeries({ color: 'rgba(239,83,80,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: 'rsi-scale', priceLineVisible: false, lastValueVisible: false });
     rsiLine70Ref.current = rsi70;
 
-    const rsi30 = chart.addLineSeries({ color: 'rgba(38,166,154,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: '', scaleMargins: { top: 0.82, bottom: 0 }, priceLineVisible: false, lastValueVisible: false });
+    const rsi30 = chart.addLineSeries({ color: 'rgba(38,166,154,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: 'rsi-scale', priceLineVisible: false, lastValueVisible: false });
     rsiLine30Ref.current = rsi30;
 
-    // MACD Sub-chart (overlay scale with scaleMargins)
+    // MACD Sub-chart with dedicated independent price scale & price format for negative hist bars
+    chart.priceScale('macd-scale').applyOptions({
+      scaleMargins: { top: 0.78, bottom: 0.02 },
+      autoScale: true,
+    });
     const macd = chart.addLineSeries({
       color: '#38BDF8', lineWidth: 1.5,
-      priceScaleId: '',
-      scaleMargins: { top: 0.85, bottom: 0 },
+      priceScaleId: 'macd-scale',
       priceLineVisible: false, lastValueVisible: false,
     });
     macdRef.current = macd;
 
     const macdSignal = chart.addLineSeries({
       color: '#F97316', lineWidth: 1.5,
-      priceScaleId: '',
-      scaleMargins: { top: 0.85, bottom: 0 },
+      priceScaleId: 'macd-scale',
       priceLineVisible: false, lastValueVisible: false,
     });
     macdSignalRef.current = macdSignal;
 
     const macdHist = chart.addHistogramSeries({
-      priceFormat: { type: 'volume' },
-      priceScaleId: '',
-      scaleMargins: { top: 0.85, bottom: 0 },
+      priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+      priceScaleId: 'macd-scale',
       priceLineVisible: false, lastValueVisible: false,
     });
     macdHistRef.current = macdHist;
@@ -558,8 +567,10 @@ export default function LiveChartView() {
       emaRef.current = null;
       almaRef.current = null;
       bbUpperRef.current = null;
+      bbMiddleRef.current = null;
       bbLowerRef.current = null;
       rsiRef.current = null;
+      rsiPriceLinesRef.current = [];
       rsiLine70Ref.current = null;
       rsiLine30Ref.current = null;
       macdRef.current = null;
@@ -991,17 +1002,22 @@ export default function LiveChartView() {
       try { emaRef.current.setData(calculateEMA(activeCandles, 20)); } catch {}
     } else { try { emaRef.current?.setData([]); } catch {} }
 
-    if (showBB && bbUpperRef.current && bbLowerRef.current && activeCandles.length > 20) {
-      const { upper, lower } = calculateBollingerBands(activeCandles, 20, 2);
+    if (showBB && bbUpperRef.current && bbLowerRef.current && bbMiddleRef.current && activeCandles.length > 20) {
+      const { upper, middle, lower } = calculateBollingerBands(activeCandles, 20, 2);
       try {
         bbUpperRef.current.setData(upper);
+        bbMiddleRef.current.setData(middle);
         bbLowerRef.current.setData(lower);
       } catch {}
     } else {
-      try { bbUpperRef.current?.setData([]); bbLowerRef.current?.setData([]); } catch {}
+      try {
+        bbUpperRef.current?.setData([]);
+        bbMiddleRef.current?.setData([]);
+        bbLowerRef.current?.setData([]);
+      } catch {}
     }
 
-    // RSI Sub-chart
+    // RSI Sub-chart with Persistent 70 / 50 / 30 Benchmark Reference Lines
     let currentRSI = null;
     if (showRSI && rsiRef.current && activeCandles.length > 14) {
       const rsiVals = calculateRSI(activeCandles, 14);
@@ -1009,32 +1025,46 @@ export default function LiveChartView() {
         rsiRef.current.setData(rsiVals);
         if (rsiVals.length > 0) {
           currentRSI = rsiVals[rsiVals.length - 1].value;
-          const t1 = rsiVals[0].time;
-          const t2 = rsiVals[rsiVals.length - 1].time;
-          rsiLine70Ref.current?.setData([{ time: t1, value: 70 }, { time: t2, value: 70 }]);
-          rsiLine30Ref.current?.setData([{ time: t1, value: 30 }, { time: t2, value: 30 }]);
+          // Create persistent infinite price lines on RSI series if not created yet
+          if (!rsiPriceLinesRef.current || rsiPriceLinesRef.current.length === 0) {
+            const l70 = rsiRef.current.createPriceLine({
+              price: 70, color: 'rgba(239, 83, 80, 0.45)', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '70 OB'
+            });
+            const l50 = rsiRef.current.createPriceLine({
+              price: 50, color: 'rgba(255, 255, 255, 0.2)', lineWidth: 1, lineStyle: LineStyle.Dotted, axisLabelVisible: false
+            });
+            const l30 = rsiRef.current.createPriceLine({
+              price: 30, color: 'rgba(16, 185, 129, 0.45)', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: '30 OS'
+            });
+            rsiPriceLinesRef.current = [l70, l50, l30];
+          }
         }
       } catch {}
     } else {
       try {
         rsiRef.current?.setData([]);
-        rsiLine70Ref.current?.setData([]);
-        rsiLine30Ref.current?.setData([]);
+        if (rsiPriceLinesRef.current && rsiPriceLinesRef.current.length > 0) {
+          rsiPriceLinesRef.current.forEach(line => {
+            try { rsiRef.current?.removePriceLine(line); } catch {}
+          });
+          rsiPriceLinesRef.current = [];
+        }
       } catch {}
     }
 
-    // 9. MACD Sub-chart
+    // 9. MACD Sub-chart (MACD Line, Signal Line, and Positive/Negative Colored Histogram)
     let currentMACD = null;
     if (showMACD && macdRef.current && macdSignalRef.current && macdHistRef.current && activeCandles.length > 35) {
       const macdData = calculateMACD(activeCandles, 12, 26, 9);
       try {
-        macdRef.current.setData(macdData.macd);
-        macdSignalRef.current.setData(macdData.signal);
-        macdHistRef.current.setData(macdData.hist);
-        if (macdData.hist.length > 0) {
-          const lastHist = macdData.hist[macdData.hist.length - 1];
-          const lastMacd = macdData.macd[macdData.macd.length - 1];
-          const lastSig  = macdData.signal[macdData.signal.length - 1];
+        const histArr = macdData.hist || macdData.histogram || [];
+        macdRef.current.setData(macdData.macd || []);
+        macdSignalRef.current.setData(macdData.signal || []);
+        macdHistRef.current.setData(histArr);
+        if (histArr.length > 0) {
+          const lastHist = histArr[histArr.length - 1];
+          const lastMacd = (macdData.macd || [])[macdData.macd.length - 1];
+          const lastSig  = (macdData.signal || [])[macdData.signal.length - 1];
           currentMACD = { hist: lastHist?.value || 0, macd: lastMacd?.value || 0, signal: lastSig?.value || 0 };
         }
       } catch {}
@@ -1075,7 +1105,7 @@ export default function LiveChartView() {
             lineWidth: 1,
             lineStyle: LineStyle.Dashed,
             axisLabelVisible: true,
-            title: lvl.title,
+            title: lvl.title || lvl.label,
           });
           keyLevelLinesRef.current.push(pLine);
         } catch {}
@@ -1098,6 +1128,7 @@ export default function LiveChartView() {
       ema: emaCalculated.length > 0 ? emaCalculated[emaCalculated.length - 1].value : null,
       bb: bbCalculated && bbCalculated.upper.length > 0 ? {
         upper: bbCalculated.upper[bbCalculated.upper.length - 1].value,
+        middle: bbCalculated.middle ? bbCalculated.middle[bbCalculated.middle.length - 1]?.value : null,
         lower: bbCalculated.lower[bbCalculated.lower.length - 1].value,
       } : null,
       rsi: currentRSI,
@@ -1330,6 +1361,47 @@ export default function LiveChartView() {
 
       if (activeCandleRef.current) {
         candleRef.current.update(activeCandleRef.current);
+
+        // Real-time dynamic indicator line updates with incoming live tick
+        if (rawHistory && rawHistory.length >= 20) {
+          const liveT = activeCandleRef.current.time;
+          const liveC = Number(activeCandleRef.current.close);
+
+          // Real-time SMA (20) update
+          if (showSMA && smaRef.current) {
+            const slice19 = rawHistory.slice(-19);
+            const sum20 = slice19.reduce((acc, b) => acc + Number(b.close || 0), 0) + liveC;
+            try { smaRef.current.update({ time: liveT, value: Number((sum20 / 20).toFixed(2)) }); } catch {}
+          }
+
+          // Real-time EMA (20) update
+          if (showEMA && emaRef.current) {
+            const k = 2 / 21;
+            const prevSlice = rawHistory.slice(0, -1);
+            if (prevSlice.length >= 20) {
+              const prevEmas = calculateEMA(prevSlice, 20);
+              if (prevEmas.length > 0) {
+                const lastEmaVal = prevEmas[prevEmas.length - 1].value;
+                const liveEma = Number((liveC * k + lastEmaVal * (1 - k)).toFixed(2));
+                try { emaRef.current.update({ time: liveT, value: liveEma }); } catch {}
+              }
+            }
+          }
+
+          // Real-time Bollinger Bands update
+          if (showBB && bbUpperRef.current && bbLowerRef.current && bbMiddleRef.current) {
+            const slice19 = rawHistory.slice(-19);
+            const closes = slice19.map(b => Number(b.close || 0)).concat([liveC]);
+            const mean = closes.reduce((a, b) => a + b, 0) / 20;
+            const variance = closes.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / 20;
+            const stdDev = Math.sqrt(variance);
+            try {
+              bbUpperRef.current.update({ time: liveT, value: Number((mean + stdDev * 2).toFixed(2)) });
+              bbMiddleRef.current.update({ time: liveT, value: Number(mean.toFixed(2)) });
+              bbLowerRef.current.update({ time: liveT, value: Number((mean - stdDev * 2).toFixed(2)) });
+            } catch {}
+          }
+        }
       }
     } catch (err) {
       console.error('Error updating live candle:', err);
@@ -1348,7 +1420,7 @@ export default function LiveChartView() {
       axisLabelTextColor  : '#fff',
       title               : 'LIVE',
     });
-  }, [livePrice, interval, isDaily, selectedSymbol]);
+  }, [livePrice, interval, isDaily, selectedSymbol, showSMA, showEMA, showBB]);
 
   /* ── 4. Bar Replay Auto-Play Loop ────────────────────────── */
   useEffect(() => {
