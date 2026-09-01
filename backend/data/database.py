@@ -399,7 +399,15 @@ def save_live_tick(ticker: str, price: float, change_pct: float):
 # ── Generic JSON Cache Helpers ─────────────────────────────────────────────────
 
 def _save_json(table: str, key_col: str, key_val: str, data: Any, ttl_minutes: int = 5):
-    """Saves any JSON-serialisable data into an ORM cache entity."""
+    """Saves any JSON-serialisable data into L1 Redis cache and L2 ORM entity."""
+    ticker_key = str(key_val).upper()
+    cache_k = f"{table}:{ticker_key}"
+    try:
+        from backend.data.redis_cache import cache_set
+        cache_set(cache_k, data, ttl_seconds=int(ttl_minutes * 60))
+    except Exception:
+        pass
+
     payload = json.dumps(data, default=str)
     now_str = datetime.now().isoformat()
     model = CACHE_MODEL_MAP.get(table)
@@ -415,7 +423,6 @@ def _save_json(table: str, key_col: str, key_val: str, data: Any, ttl_minutes: i
             else:
                 session.add(ScreenerResultCache(id=1, data_json=payload, fetched_at=now_str))
         else:
-            ticker_key = str(key_val).upper()
             existing = session.get(model, ticker_key)
             if existing:
                 existing.data_json = payload
@@ -425,7 +432,17 @@ def _save_json(table: str, key_col: str, key_val: str, data: Any, ttl_minutes: i
 
 
 def _get_json(table: str, key_col: str, key_val: str, ttl_minutes: int = 5) -> Optional[Any]:
-    """Returns cached JSON data if it exists and is within the TTL window."""
+    """Returns cached JSON data from L1 Redis cache or L2 ORM table if within TTL."""
+    ticker_key = str(key_val).upper()
+    cache_k = f"{table}:{ticker_key}"
+    try:
+        from backend.data.redis_cache import cache_get
+        cached_val = cache_get(cache_k)
+        if cached_val is not None:
+            return cached_val
+    except Exception:
+        pass
+
     expiry = (datetime.now() - timedelta(minutes=ttl_minutes)).isoformat()
     model = CACHE_MODEL_MAP.get(table)
     if not model:
@@ -436,12 +453,19 @@ def _get_json(table: str, key_col: str, key_val: str, ttl_minutes: int = 5) -> O
             if table == "screener_results":
                 row = session.get(ScreenerResultCache, 1)
             else:
-                row = session.get(model, str(key_val).upper())
+                row = session.get(model, ticker_key)
             if row and row.fetched_at and row.fetched_at > expiry:
-                return json.loads(row.data_json)
+                val = json.loads(row.data_json)
+                try:
+                    from backend.data.redis_cache import cache_set
+                    cache_set(cache_k, val, ttl_seconds=int(ttl_minutes * 60))
+                except Exception:
+                    pass
+                return val
     except Exception as e:
         logger.warning("DB cache read error (%s): %s", table, e)
     return None
+
 
 
 def _get_stale_json(table: str, key_col: str, key_val: str) -> Optional[Any]:
