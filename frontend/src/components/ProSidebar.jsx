@@ -48,10 +48,9 @@ export default function ProSidebar({ collapsed, onToggleCollapse }) {
     {
       title: 'INTELLIGENCE & MACRO',
       items: [
-        { label: 'Market Intelligence', icon: <Newspaper size={16} />, view: 'Market Intelligence', badge: { text: 'NEWS/PULSE', color: '#818CF8' } },
+        { label: 'Market Intelligence', icon: <Newspaper size={16} />, view: 'Market Intelligence', badge: { text: 'NEWS/TA', color: '#818CF8' } },
         { label: 'Macro Terminal', icon: <Globe size={16} />, view: 'Macro Terminal', badge: { text: 'YIELDS', color: '#34D399' } },
         { label: 'Sector Rotation', icon: <Compass size={16} />, view: 'Sector Rotation', badge: { text: 'RRG', color: '#06B6D4' } },
-        { label: 'Sentiment TA', icon: <Activity size={16} />, view: 'Sentiment TA', badge: { text: 'GAUGE', color: '#10B981' } },
       ]
     },
     {
@@ -77,7 +76,7 @@ export default function ProSidebar({ collapsed, onToggleCollapse }) {
               const isActive = activeView === item.view || 
                 (item.view === 'Technical Lab' && ['Patterns', 'Levels', 'Volatility'].includes(activeView)) ||
                 (item.view === 'Options Lab' && ['Options Chain', 'Options Strategy Lab'].includes(activeView)) ||
-                (item.view === 'Market Intelligence' && ['News', 'Sentiment'].includes(activeView)) ||
+                (item.view === 'Market Intelligence' && ['News', 'Sentiment', 'Sentiment TA'].includes(activeView)) ||
                 (item.view === 'Broker Settings' && activeView === 'AI Providers');
 
               return (

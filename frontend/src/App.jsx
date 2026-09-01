@@ -125,7 +125,7 @@ export default function App() {
       case 'Monte Carlo':       return <Suspense fallback={<LoadingFallback />}><MonteCarlo ticker={selectedSymbol} /></Suspense>;
       case 'Backtest':          return <Suspense fallback={<LoadingFallback />}><BacktestPanel ticker={selectedSymbol} /></Suspense>;
       case 'Price Alerts':      return <Suspense fallback={<LoadingFallback />}><PriceAlerts /></Suspense>;
-      case 'Sentiment TA':      return <Suspense fallback={<LoadingFallback />}><SentimentTAView ticker={selectedSymbol} /></Suspense>;
+      case 'Sentiment TA':      return <Suspense fallback={<LoadingFallback />}><MarketIntelligenceView initialTab="sentiment-ta" /></Suspense>;
       case 'Adv. Screener':     return <Suspense fallback={<LoadingFallback />}><AdvancedScreener /></Suspense>;
       case 'Heatmap':           return <Suspense fallback={<LoadingFallback />}><MarketHeatmap /></Suspense>;
       case 'Supply Chain':      return <Suspense fallback={<LoadingFallback />}><SupplyChainPanel /></Suspense>;

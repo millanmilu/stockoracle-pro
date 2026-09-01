@@ -103,33 +103,26 @@ def search_stocks(query: str, limit: int = 12):
 
 
 @router.get("/stock/{ticker}/news")
-def get_stock_news(ticker: str, limit: int = 8):
-    """Returns recent public news headlines without requiring paid news API."""
-    t = ticker.upper().strip()
-    token = get_token_info(t)
-    company = token.get("name", t) if token else t
-    url = f"https://news.google.com/rss/search?q={quote_plus(company + ' stock NSE')}&hl=en-IN&gl=IN&ceid=IN:en"
-    try:
-        request = UrllibRequest(url, headers={"User-Agent": "StockOracle/2.0"})
-        with urlopen(request, timeout=8) as response:
-            root = ET.fromstring(response.read())
-        items = []
-        for item in root.findall("./channel/item")[:max(1, min(limit, 15))]:
-            title = item.findtext("title", "")
-            link = item.findtext("link", "")
-            pub_date = item.findtext("pubDate", "")
-            source = item.findtext("source", "Google News")
-            if title:
-                items.append({
-                    "title": title,
-                    "url": link,
-                    "published_at": pub_date,
-                    "source": source,
-                })
-        return items
-    except Exception as exc:
-        logger.warning("Error fetching news for %s: %s", t, exc)
-        return []
+def get_stock_news(
+    ticker: str,
+    limit: int = Query(15, ge=1, le=50),
+    source: Optional[str] = Query(None, description="Filter by publisher (e.g. Economic Times, Moneycontrol, LiveMint, Yahoo Finance, Google News)"),
+    sentiment: Optional[str] = Query(None, description="Filter by sentiment (Bullish, Bearish, Neutral)")
+):
+    """Returns multi-source real-time Indian stock market news aggregated across top financial publications."""
+    from backend.data.news_multi_source import get_multi_source_news
+    return get_multi_source_news(ticker=ticker, limit=limit, source_filter=source, sentiment_filter=sentiment)
+
+
+@router.get("/market/news")
+def get_general_market_news(
+    limit: int = Query(15, ge=1, le=50),
+    source: Optional[str] = Query(None, description="Filter by publisher"),
+    sentiment: Optional[str] = Query(None, description="Filter by sentiment")
+):
+    """Returns broad Indian stock market & NSE headline news across multiple premier sources."""
+    from backend.data.news_multi_source import get_multi_source_news
+    return get_multi_source_news(ticker=None, limit=limit, source_filter=source, sentiment_filter=sentiment)
 
 
 @router.get("/market/heatmap")

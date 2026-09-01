@@ -2,19 +2,36 @@ import React, { useState } from 'react';
 import useStore from '../../store/useStore';
 import NewsPanel from '../NewsPanel';
 import SentimentDashboard from '../SentimentDashboard';
-import { Newspaper, Gauge, Globe, Sparkles } from 'lucide-react';
+import SentimentTAView from '../SentimentTAView';
+import { Newspaper, Gauge, Globe, Sparkles, Activity } from 'lucide-react';
 
 export default function MarketIntelligenceView({ initialTab = 'news' }) {
   const selectedSymbol = useStore(s => s.selectedSymbol);
-  const [activeSubTab, setActiveSubTab] = useState(initialTab);
+  
+  // Normalize initialTab key
+  const normalizedInitialTab = (initialTab === 'sentiment-ta' || initialTab === 'Sentiment TA')
+    ? 'sentiment-ta'
+    : (initialTab === 'sentiment' || initialTab === 'Sentiment')
+    ? 'sentiment'
+    : 'news';
+
+  const [activeSubTab, setActiveSubTab] = useState(normalizedInitialTab);
 
   React.useEffect(() => {
-    if (initialTab) setActiveSubTab(initialTab);
+    if (initialTab) {
+      const norm = (initialTab === 'sentiment-ta' || initialTab === 'Sentiment TA')
+        ? 'sentiment-ta'
+        : (initialTab === 'sentiment' || initialTab === 'Sentiment')
+        ? 'sentiment'
+        : 'news';
+      setActiveSubTab(norm);
+    }
   }, [initialTab]);
 
   const TABS = [
-    { id: 'news',      label: 'Financial News Feed',          icon: Newspaper, desc: 'AI-Tagged Live Market Headlines',    color: '#818CF8' },
-    { id: 'sentiment', label: 'Fear & Greed / Sentiment Radar',icon: Gauge,     desc: 'Market Psychology & Sector Breadth', color: '#10B981' },
+    { id: 'news',         label: 'Live Multi-Source News',      icon: Newspaper, desc: 'Real-Time Headlines Across Top Sources',     color: '#818CF8' },
+    { id: 'sentiment',    label: 'Fear & Greed Radar',          icon: Gauge,     desc: 'Market Psychology & Sector Breadth',         color: '#10B981' },
+    { id: 'sentiment-ta', label: 'Sentiment TA & Divergence',   icon: Activity,  desc: 'Price Action vs Sentiment Momentum Analysis',color: '#F59E0B' },
   ];
 
   return (
@@ -38,14 +55,14 @@ export default function MarketIntelligenceView({ initialTab = 'news' }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#F8FAFC', letterSpacing: '-0.01em' }}>
-                Market Intelligence Hub
+                Market Intelligence & Sentiment Cockpit — <span style={{ color: '#818CF8' }}>{selectedSymbol}</span>
               </h2>
               <span style={{ fontSize: '0.62rem', background: 'rgba(129, 140, 248, 0.15)', color: '#818CF8', padding: '2px 7px', borderRadius: 4, fontWeight: 700, border: '1px solid rgba(129, 140, 248, 0.3)' }}>
-                LIVE PULSE
+                MULTI-SOURCE LIVE
               </span>
             </div>
             <p style={{ margin: '2px 0 0 0', fontSize: '0.72rem', color: '#94A3B8' }}>
-              Real-time Indian financial news sentiment extraction, Fear & Greed index gauges, and sector market psychology radar.
+              Real-time Indian financial news aggregation, Fear & Greed index gauges, and algorithmic Sentiment Technical Analysis (Divergence & Momentum).
             </p>
           </div>
         </div>
@@ -86,6 +103,7 @@ export default function MarketIntelligenceView({ initialTab = 'news' }) {
       <div style={{ width: '100%' }}>
         {activeSubTab === 'news' && <NewsPanel ticker={selectedSymbol} />}
         {activeSubTab === 'sentiment' && <SentimentDashboard />}
+        {activeSubTab === 'sentiment-ta' && <SentimentTAView ticker={selectedSymbol} />}
       </div>
 
     </div>

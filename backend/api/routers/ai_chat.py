@@ -92,25 +92,18 @@ async def ai_chat_endpoint(req: ChatRequest):
 
 @router.get("/stock/{ticker}/news-summary")
 async def get_news_summary_endpoint(ticker: str):
-    """Summarizes recent headlines using Gemini LLM into structured sentiment, risks, and impact."""
+    """Summarizes multi-source financial headlines using AI into structured sentiment, risks, and impact."""
     t = ticker.upper().strip()
-    token = get_token_info(t)
-    company = token.get("name", t) if token else t
+    loop = asyncio.get_event_loop()
     headlines = []
     try:
-        url = f"https://news.google.com/rss/search?q={quote_plus(company + ' stock NSE')}&hl=en-IN&gl=IN&ceid=IN:en"
-        request = UrllibRequest(url, headers={"User-Agent": "StockOracle/2.0"})
-        with urlopen(request, timeout=5) as response:
-            root = ET.fromstring(response.read())
-        for item in root.findall("./channel/item")[:8]:
-            title = item.findtext("title", "")
-            if title:
-                headlines.append(title)
+        from backend.data.news_multi_source import get_multi_source_news
+        news_res = await loop.run_in_executor(None, lambda: get_multi_source_news(ticker=t, limit=10))
+        headlines = [item["title"] for item in news_res.get("items", []) if item.get("title")]
     except Exception as exc:
         logger.warning("News fetch error for %s: %s", t, exc)
 
     from backend.ai.news_summarizer import summarize_news
-    loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: summarize_news(t, headlines))
 
 
