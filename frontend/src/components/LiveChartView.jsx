@@ -468,7 +468,6 @@ export default function LiveChartView() {
     // Candlesticks
     const candle = chart.addCandlestickSeries(CANDLE_STYLE);
     candleRef.current = candle;
-
     // Volume Sub-chart (overlay scale with scaleMargins)
     const volume = chart.addHistogramSeries({
       priceFormat: { type: 'volume' },
@@ -509,7 +508,8 @@ export default function LiveChartView() {
       color: '#F43F5E', lineWidth: 1.5,
       priceScaleId: '',
       scaleMargins: { top: 0.82, bottom: 0 },
-      priceLineVisible: false, lastValueVisible: true,
+      priceLineVisible: false,
+      lastValueVisible: true,
     });
     rsiRef.current = rsi;
 
@@ -524,7 +524,8 @@ export default function LiveChartView() {
       color: '#38BDF8', lineWidth: 1.5,
       priceScaleId: '',
       scaleMargins: { top: 0.85, bottom: 0 },
-      priceLineVisible: false, lastValueVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
     macdRef.current = macd;
 
@@ -532,7 +533,8 @@ export default function LiveChartView() {
       color: '#F97316', lineWidth: 1.5,
       priceScaleId: '',
       scaleMargins: { top: 0.85, bottom: 0 },
-      priceLineVisible: false, lastValueVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
     macdSignalRef.current = macdSignal;
 
@@ -540,7 +542,8 @@ export default function LiveChartView() {
       priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
       priceScaleId: '',
       scaleMargins: { top: 0.85, bottom: 0 },
-      priceLineVisible: false, lastValueVisible: false,
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
     macdHistRef.current = macdHist;
 
@@ -653,6 +656,8 @@ export default function LiveChartView() {
       return () => clearTimeout(timer);
     }
   }, [chartEngine]);
+
+
 
   /* ── Backtest Fetch + Chart Markers ──────────────────────────── */
 
@@ -887,8 +892,10 @@ export default function LiveChartView() {
               };
             }
 
-            // Always update the displayed price number
-            setLivePrice(price);
+            // Update live price during active live market sessions
+            if (isLiveTick) {
+              setLivePrice(price);
+            }
             setLiveChange(change_pct);
 
             // Block chart candle updates for stale fallback prices —
@@ -1500,17 +1507,21 @@ export default function LiveChartView() {
 
     if (livePriceLineRef.current) {
       try { candleRef.current.removePriceLine(livePriceLineRef.current); } catch {}
+      livePriceLineRef.current = null;
     }
-    livePriceLineRef.current = candleRef.current.createPriceLine({
-      price               : livePrice,
-      color               : (liveChange ?? 0) >= 0 ? '#26A69A' : '#EF5350',
-      lineWidth           : 1,
-      lineStyle           : LineStyle.Dashed,
-      axisLabelVisible    : true,
-      axisLabelColor      : (liveChange ?? 0) >= 0 ? '#26A69A' : '#EF5350',
-      axisLabelTextColor  : '#fff',
-      title               : 'LIVE',
-    });
+    const displayPrice = (wsLiveData && livePrice != null) ? livePrice : (lastCandleClose != null ? lastCandleClose : livePrice);
+    if (displayPrice != null) {
+      livePriceLineRef.current = candleRef.current.createPriceLine({
+        price               : displayPrice,
+        color               : (liveChange ?? 0) >= 0 ? '#26A69A' : '#EF5350',
+        lineWidth           : 1,
+        lineStyle           : LineStyle.Dashed,
+        axisLabelVisible    : true,
+        axisLabelColor      : (liveChange ?? 0) >= 0 ? '#26A69A' : '#EF5350',
+        axisLabelTextColor  : '#fff',
+        title               : wsLiveData ? 'LIVE' : 'CLOSE',
+      });
+    }
   }, [livePrice, interval, isDaily, selectedSymbol, showSMA, showEMA, showBB, indicatorParams]);
 
   /* ── 4. Bar Replay Auto-Play Loop ────────────────────────── */
@@ -1608,8 +1619,8 @@ export default function LiveChartView() {
 
   /* ── Derived Header & Stats values ────────────────────────── */
 
-  const lastCandleClose = Array.isArray(rawHistory) && rawHistory.length ? rawHistory[rawHistory.length - 1]?.close : null;
-  const curPrice  = livePrice ?? lastCandleClose ?? prediction?.current_price;
+  const lastCandleClose = Array.isArray(rawHistory) && rawHistory.length ? parseNum(rawHistory[rawHistory.length - 1]?.close) : null;
+  const curPrice  = (wsLiveData && livePrice != null ? livePrice : null) ?? (lastCandleClose != null ? lastCandleClose : livePrice) ?? prediction?.current_price;
   const changeUp  = (liveChange ?? 0) >= 0;
   const sig       = prediction?.signal;
   const sigMeta   = SIG[sig] ?? SIG.hold;

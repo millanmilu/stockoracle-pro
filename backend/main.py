@@ -89,6 +89,7 @@ async def websocket_price_broadcast_loop():
     # Tracks last time a fallback (stale) price was sent per ticker — throttle to 1/30s
     _fallback_last_sent: Dict[str, float] = {}
     import time as _time
+    from backend.data.market_calendar import is_market_open
 
     while True:
         try:
@@ -116,6 +117,7 @@ async def websocket_price_broadcast_loop():
                                     day_low = float(data_obj.get("low", 0.0))
 
                                     if ltp > 0:
+                                        market_live = is_market_open()
                                         change_pct = ((ltp - prev_close) / prev_close) if prev_close > 0 else 0.0
                                         prices_cache[t] = ltp
                                         payload = {
@@ -126,7 +128,7 @@ async def websocket_price_broadcast_loop():
                                             "low": round(day_low, 2) if day_low > 0 else round(ltp, 2),
                                             "close": round(prev_close, 2) if prev_close > 0 else round(ltp, 2),
                                             "change_pct": round(change_pct * 100, 3),
-                                            "is_live": True,
+                                            "is_live": market_live,
                                         }
                                         save_live_tick(t, round(ltp, 2), round(change_pct * 100, 3))
                                         await manager.broadcast(payload)
