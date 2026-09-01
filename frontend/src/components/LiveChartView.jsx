@@ -13,6 +13,7 @@ import toast from 'react-hot-toast';
 import MultiChartGrid from './MultiChartGrid';
 import DrawingTools from './chart-tools/DrawingTools';
 import TradingViewAdvancedChart from './chart-tools/TradingViewAdvancedChart';
+import TradingViewMultiGrid from './chart-tools/TradingViewMultiGrid';
 import IndicatorsModal from './IndicatorsModal';
 import ChartSettingsModal from './ChartSettingsModal';
 import AIPatternRecognition from './chart-tools/AIPatternRecognition';
@@ -2093,7 +2094,16 @@ export default function LiveChartView() {
       {/* ── Main Chart Body: Multi-Chart Grid OR Single Chart Workstation (Fills Available Height) ── */}
       {chartLayout !== '1x1' ? (
         <div style={{ flex: 1, minHeight: 0, height: '100%', width: '100%', overflow: 'hidden' }}>
-          <MultiChartGrid layout={chartLayout} onLayoutChange={setChartLayout} />
+          {chartEngine === 'tradingview' ? (
+            <TradingViewMultiGrid
+              layout={chartLayout}
+              onLayoutChange={setChartLayout}
+              activeInterval={interval}
+              onIntervalChange={handleIntervalChange}
+            />
+          ) : (
+            <MultiChartGrid layout={chartLayout} onLayoutChange={setChartLayout} />
+          )}
         </div>
       ) : (
         <div style={{ flex: 1, minHeight: 0, height: '100%', width: '100%', position: 'relative', overflow: 'hidden' }}>
@@ -2110,7 +2120,8 @@ export default function LiveChartView() {
             <TradingViewAdvancedChart
               symbol={selectedSymbol}
               interval={interval}
-              onOpenSettings={() => setShowChartSettingsModal(true)}
+              onIntervalChange={handleIntervalChange}
+              showTimeframeBar={true}
             />
           </div>
 
