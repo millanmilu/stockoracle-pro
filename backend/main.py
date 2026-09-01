@@ -108,14 +108,23 @@ async def websocket_price_broadcast_loop():
                             if tok:
                                 ltp_resp = await asyncio.to_thread(smartApi.ltpData, tok["exch_seg"], tok["symbol"], tok["token"])
                                 if ltp_resp and ltp_resp.get("status") and ltp_resp.get("data"):
-                                    ltp = float(ltp_resp["data"].get("ltp", 0.0))
-                                    prev_close = float(ltp_resp["data"].get("close", 0.0))
+                                    data_obj = ltp_resp["data"]
+                                    ltp = float(data_obj.get("ltp", 0.0))
+                                    prev_close = float(data_obj.get("close", 0.0))
+                                    day_open = float(data_obj.get("open", 0.0))
+                                    day_high = float(data_obj.get("high", 0.0))
+                                    day_low = float(data_obj.get("low", 0.0))
+
                                     if ltp > 0:
                                         change_pct = ((ltp - prev_close) / prev_close) if prev_close > 0 else 0.0
                                         prices_cache[t] = ltp
                                         payload = {
                                             "ticker": t,
                                             "price": round(ltp, 2),
+                                            "open": round(day_open, 2) if day_open > 0 else round(ltp, 2),
+                                            "high": round(day_high, 2) if day_high > 0 else round(ltp, 2),
+                                            "low": round(day_low, 2) if day_low > 0 else round(ltp, 2),
+                                            "close": round(prev_close, 2) if prev_close > 0 else round(ltp, 2),
                                             "change_pct": round(change_pct * 100, 3),
                                             "is_live": True,
                                         }
@@ -135,12 +144,19 @@ async def websocket_price_broadcast_loop():
                             continue
 
                         base_price = prices_cache.get(t)
+                        base_open = 0.0
+                        base_high = 0.0
+                        base_low = 0.0
+
                         if not base_price:
                             info = await asyncio.to_thread(get_company_info, t)
                             if not info:
                                 info = await asyncio.to_thread(get_stale_company_info, t)
                             if info and info.get("current_price"):
                                 base_price = float(info["current_price"])
+                                base_open = float(info.get("open", base_price) or base_price)
+                                base_high = float(info.get("day_high", base_price) or base_price)
+                                base_low = float(info.get("day_low", base_price) or base_price)
                                 prices_cache[t] = base_price
 
                         # Invariant fallback: strictly fall back to verified historical close price
@@ -150,12 +166,18 @@ async def websocket_price_broadcast_loop():
                                 last_candle = hist[-1] if isinstance(hist, list) else None
                                 if last_candle and last_candle.get("close"):
                                     base_price = float(last_candle["close"])
+                                    base_open = float(last_candle.get("open", base_price))
+                                    base_high = float(last_candle.get("high", base_price))
+                                    base_low = float(last_candle.get("low", base_price))
                                     prices_cache[t] = base_price
 
                         if base_price and base_price > 0:
                             payload = {
                                 "ticker": t,
                                 "price": round(base_price, 2),
+                                "open": round(base_open, 2) if base_open > 0 else round(base_price, 2),
+                                "high": round(base_high, 2) if base_high > 0 else round(base_price, 2),
+                                "low": round(base_low, 2) if base_low > 0 else round(base_price, 2),
                                 "change_pct": 0.0,
                                 "is_live": False,
                             }

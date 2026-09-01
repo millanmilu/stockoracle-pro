@@ -11,9 +11,22 @@ export function parseNum(val) {
 }
 
 export function toChartTime(dateStr, isIntraday) {
-  const normalized = String(dateStr).replace(' ', 'T');
-  if (!isIntraday) return normalized.substring(0, 10);
-  const ms = new Date(normalized).getTime();
+  if (!dateStr) return null;
+  const str = String(dateStr).trim();
+  if (!isIntraday) return str.substring(0, 10);
+
+  // If already a numeric unix timestamp (seconds or milliseconds)
+  if (typeof dateStr === 'number') {
+    return dateStr > 1000000000000 ? Math.floor(dateStr / 1000) : Math.floor(dateStr);
+  }
+
+  let normalized = str.replace(' ', 'T');
+  // Indian market equity intraday timestamps without offset are strictly in IST (+05:30)
+  if (!normalized.includes('+') && !normalized.includes('Z') && !normalized.endsWith('-00:00')) {
+    normalized = `${normalized}+05:30`;
+  }
+
+  const ms = Date.parse(normalized);
   if (isNaN(ms)) return null;
   return Math.floor(ms / 1000);
 }

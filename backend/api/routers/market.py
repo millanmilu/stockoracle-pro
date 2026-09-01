@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, get_session_status,
-    search_nse_stocks, get_token_info
+    search_nse_stocks, get_token_info, get_combined_stock_data
 )
 from backend.analysis.indicators import enrich_stock_dataframe
 
@@ -61,7 +61,10 @@ def get_stock_history(ticker: str, timeframe: str = "5Y", interval: str = "1d"):
             detail=f"Invalid interval '{interval}'. Valid: 1m, 5m, 15m, 1h, 1d.",
         )
 
-    df = fetch_stock_data(t, period=period, interval=iv)
+    if iv == "1d":
+        df = get_combined_stock_data(t, period=period)
+    else:
+        df = fetch_stock_data(t, period=period, interval=iv)
     if df is None or df.empty:
         if not get_session_status():
             raise HTTPException(status_code=503, detail="Angel One API unavailable. Try again shortly.")

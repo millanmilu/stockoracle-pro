@@ -112,6 +112,7 @@ function BacktestOverlayPanel({ symbol, showBacktest, setShowBacktest, backtestD
 export default function LiveChartView() {
   const selectedSymbol = useStore(s => s.selectedSymbol);
   const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
+  const wsLiveData = useStore(s => s.wsLiveData);
   const { fetchHistory, fetchPredict, searchStock, searchStocks, fetchBacktest } = useStock();
 
   const [interval,    setInterval]    = useState('1d');
@@ -312,6 +313,7 @@ export default function LiveChartView() {
   const lowerLineRef   = useRef(null);
   const livePriceLineRef = useRef(null);
   const activeCandleRef  = useRef(null);
+  const sessionOHLCRef   = useRef(null);
   const hudRef           = useRef(null);
 
   // Chart 2 (Comparison) Refs
@@ -327,6 +329,7 @@ export default function LiveChartView() {
   const handleIntervalChange = useCallback((iv) => {
     setInterval(iv);
     activeCandleRef.current = null;
+    sessionOHLCRef.current = null;
     // Reset zoom when changing interval for smooth transition
     setTimeout(() => {
       if (chartRef.current) {
@@ -806,11 +809,21 @@ export default function LiveChartView() {
 
       ws.onmessage = e => {
         try {
-          const { ticker, price, change_pct, is_live } = JSON.parse(e.data);
+          const data = JSON.parse(e.data);
+          const { ticker, price, change_pct, is_live, open: dayOpen, high: dayHigh, low: dayLow } = data;
           const isLiveTick = is_live === true; // strictly require confirmed live flag from server
           useStore.getState().setWsLiveData?.(isLiveTick);
 
           if (ticker === selectedSymbol) {
+            // Anchor session OHLC if provided by server feed
+            if (dayOpen > 0 || dayHigh > 0 || dayLow > 0) {
+              sessionOHLCRef.current = {
+                open: dayOpen > 0 ? Number(dayOpen) : null,
+                high: dayHigh > 0 ? Number(dayHigh) : null,
+                low: dayLow > 0 ? Number(dayLow) : null,
+              };
+            }
+
             // Always update the displayed price number
             setLivePrice(price);
             setLiveChange(change_pct);
@@ -1197,18 +1210,57 @@ export default function LiveChartView() {
     }
 
     try {
-      if (isDaily) {
-        const now = new Date();
-        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        const lastDateStr = String(last.date).substring(0, 10);
+      // Calculate current IST date & time strictly (UTC + 5:30)
+      const nowUtc = Date.now();
+      const istOffsetMs = 5.5 * 3600 * 1000;
+      const istDate = new Date(nowUtc + istOffsetMs);
+      const istDay = istDate.getUTCDay(); // 0 = Sunday, 6 = Saturday
+      const istHour = istDate.getUTCHours();
+      const istMin = istDate.getUTCMinutes();
+      const isMarketHours = istDay >= 1 && istDay <= 5 && 
+        ((istHour > 9 || (istHour === 9 && istMin >= 15)) && (istHour < 15 || (istHour === 15 && istMin <= 30)));
+      const todayStr = istDate.toISOString().substring(0, 10);
+      const lastDateStr = String(last.date).substring(0, 10);
 
-        const targetTime = todayStr >= lastDateStr ? todayStr : lastDateStr;
+      const serverOpen = sessionOHLCRef.current?.open;
+      const serverHigh = sessionOHLCRef.current?.high;
+      const serverLow  = sessionOHLCRef.current?.low;
+
+      if (isDaily) {
+        // SAFEGUARD: Only create a new today bar if today is a weekday during/after market hours,
+        // or if today's bar already exists in history. Never generate artificial weekend bars.
+        const isTodayHistorical = (todayStr === lastDateStr);
+        const shouldHaveTodayBar = isTodayHistorical || (istDay >= 1 && istDay <= 5 && (istHour >= 9));
+
+        if (!shouldHaveTodayBar) {
+          // Off-market/weekend fallback: update price line but do NOT append fake date bars
+          if (activeCandleRef.current && activeCandleRef.current.time === lastDateStr) {
+            activeCandleRef.current = {
+              ...activeCandleRef.current,
+              close: livePrice,
+            };
+            candleRef.current.update(activeCandleRef.current);
+          }
+          return;
+        }
+
+        const targetTime = isTodayHistorical ? lastDateStr : todayStr;
         const isNewBar = !activeCandleRef.current || activeCandleRef.current.time !== targetTime;
 
         if (isNewBar) {
-          const initialOpen = targetTime === lastDateStr ? Number(last.open) : livePrice;
-          const initialHigh = targetTime === lastDateStr ? Math.max(Number(last.high), livePrice) : livePrice;
-          const initialLow  = targetTime === lastDateStr ? Math.min(Number(last.low),  livePrice) : livePrice;
+          const histMatch = isTodayHistorical ? last : null;
+          const initialOpen = serverOpen || (histMatch ? Number(histMatch.open) : livePrice);
+          const initialHigh = Math.max(
+            serverHigh || initialOpen,
+            histMatch ? Number(histMatch.high) : initialOpen,
+            livePrice
+          );
+          const initialLow = Math.min(
+            serverLow || initialOpen,
+            histMatch ? Number(histMatch.low) : initialOpen,
+            livePrice
+          );
+
           activeCandleRef.current = {
             time  : targetTime,
             open  : initialOpen,
@@ -1217,28 +1269,48 @@ export default function LiveChartView() {
             close : livePrice,
           };
         } else {
+          // Existing bar: update wicks with server-confirmed session bounds and live price
+          const currentOpen = activeCandleRef.current.open || serverOpen || livePrice;
+          const currentHigh = Math.max(
+            activeCandleRef.current.high,
+            serverHigh || currentOpen,
+            livePrice
+          );
+          const currentLow = Math.min(
+            activeCandleRef.current.low,
+            serverLow || currentOpen,
+            livePrice
+          );
+
           activeCandleRef.current = {
             ...activeCandleRef.current,
-            high  : Math.max(activeCandleRef.current.high, livePrice),
-            low   : Math.min(activeCandleRef.current.low,  livePrice),
+            open  : currentOpen,
+            high  : currentHigh,
+            low   : currentLow,
             close : livePrice,
           };
         }
       } else {
-        // Intraday bucketing
+        // Intraday bucketing with strict IST alignment
         const intervalSecondsMap = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600 };
         const bucketSize = intervalSecondsMap[interval] || 300;
         const currentSec = Math.floor(Date.now() / 1000);
         const currentBucket = Math.floor(currentSec / bucketSize) * bucketSize;
         const lastBarSec = toChartTime(last.date, true) || currentBucket;
 
+        // Skip appending disconnected off-market intraday bars hours after close
+        if (!isMarketHours && currentBucket > lastBarSec + bucketSize * 2) {
+          return;
+        }
+
         const targetSec = currentBucket >= lastBarSec ? currentBucket : lastBarSec;
         const isNewBar = !activeCandleRef.current || activeCandleRef.current.time !== targetSec;
 
         if (isNewBar) {
-          const initialOpen = targetSec === lastBarSec ? Number(last.open) : livePrice;
-          const initialHigh = targetSec === lastBarSec ? Math.max(Number(last.high), livePrice) : livePrice;
-          const initialLow  = targetSec === lastBarSec ? Math.min(Number(last.low),  livePrice) : livePrice;
+          const isLastMatch = targetSec === lastBarSec;
+          const initialOpen = isLastMatch ? Number(last.open) : livePrice;
+          const initialHigh = isLastMatch ? Math.max(Number(last.high), livePrice) : livePrice;
+          const initialLow  = isLastMatch ? Math.min(Number(last.low),  livePrice) : livePrice;
           activeCandleRef.current = {
             time  : targetSec,
             open  : initialOpen,
@@ -2420,8 +2492,33 @@ export default function LiveChartView() {
             height: 26,
             flexShrink: 0,
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <span style={{
+                fontSize: '0.62rem',
+                fontWeight: 800,
+                padding: '1px 6px',
+                borderRadius: 4,
+                background: wsLiveData ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.1)',
+                color: wsLiveData ? '#10B981' : '#94A3B8',
+                border: `1px solid ${wsLiveData ? 'rgba(16, 185, 129, 0.3)' : 'rgba(148, 163, 184, 0.2)'}`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4
+              }}>
+                <span style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  backgroundColor: wsLiveData ? '#10B981' : '#64748B',
+                  boxShadow: wsLiveData ? '0 0 6px #10B981' : 'none'
+                }} />
+                {wsLiveData ? 'LIVE NSE' : 'EOD SYNC'}
+              </span>
+
               <span>LTP: <strong style={{ color: '#FFF', fontFamily: 'JetBrains Mono, monospace' }}>{curPrice ? `₹${curPrice.toFixed(2)}` : '—'}</strong></span>
+              <span>O: <strong style={{ color: '#CBD5E1', fontFamily: 'JetBrains Mono, monospace' }}>{activeCandleRef.current?.open ? `₹${Number(activeCandleRef.current.open).toFixed(2)}` : '—'}</strong></span>
+              <span>H: <strong style={{ color: '#10B981', fontFamily: 'JetBrains Mono, monospace' }}>{activeCandleRef.current?.high ? `₹${Number(activeCandleRef.current.high).toFixed(2)}` : '—'}</strong></span>
+              <span>L: <strong style={{ color: '#EF5350', fontFamily: 'JetBrains Mono, monospace' }}>{activeCandleRef.current?.low ? `₹${Number(activeCandleRef.current.low).toFixed(2)}` : '—'}</strong></span>
               <span>7D Target: <strong style={{ color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>{prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toFixed(2)}` : '—'}</strong></span>
               <span>Return: <strong style={{ color: (prediction?.predicted_return_7d || 0) >= 0 ? '#10B981' : '#EF5350' }}>{prediction?.predicted_return_7d != null ? `${prediction.predicted_return_7d >= 0 ? '+' : ''}${(prediction.predicted_return_7d * 100).toFixed(2)}%` : '—'}</strong></span>
               <span>Signal: <strong style={{ color: sigMeta.color }}>{predLoading ? 'Loading…' : sigMeta.label}</strong></span>
