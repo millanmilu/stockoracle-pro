@@ -87,7 +87,7 @@ function NetworkGraph({ center, upstream, downstream, onNodeClick }) {
 
   return (
     <div style={{ width: '100%', overflowX: 'auto' }}>
-      <svg width={W} height={H} style={{ display: 'block', margin: '0 auto' }}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', margin: '0 auto', maxWidth: '100%', height: 'auto' }}>
         {/* Background */}
         <defs>
           <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">

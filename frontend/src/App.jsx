@@ -38,6 +38,9 @@ const OptionsStrategyLabView = lazy(() => import('./components/terminal/OptionsS
 const MacroTerminalView = lazy(() => import('./components/terminal/MacroTerminalView'));
 const QuantRiskCockpit = lazy(() => import('./components/terminal/QuantRiskCockpit'));
 const MultiTileWorkspace = lazy(() => import('./components/terminal/MultiTileWorkspace'));
+const TechnicalLabView = lazy(() => import('./components/terminal/TechnicalLabView'));
+const OptionsLabView = lazy(() => import('./components/terminal/OptionsLabView'));
+const MarketIntelligenceView = lazy(() => import('./components/terminal/MarketIntelligenceView'));
 const SentimentTAView = lazy(() => import('./components/SentimentTAView'));
 const BrokerSettingsView = lazy(() => import('./components/BrokerSettingsView'));
 
@@ -93,35 +96,41 @@ export default function App() {
 
   const renderView = () => {
     switch (activeView) {
+      case 'Technical Lab':     return <Suspense fallback={<LoadingFallback />}><TechnicalLabView /></Suspense>;
+      case 'Options Lab':       return <Suspense fallback={<LoadingFallback />}><OptionsLabView /></Suspense>;
+      case 'Market Intelligence': return <Suspense fallback={<LoadingFallback />}><MarketIntelligenceView /></Suspense>;
+
+      // Aliases & Sub-View Routing for Unified Workspaces
+      case 'Patterns':          return <Suspense fallback={<LoadingFallback />}><TechnicalLabView initialTab="patterns" /></Suspense>;
+      case 'Levels':            return <Suspense fallback={<LoadingFallback />}><TechnicalLabView initialTab="levels" /></Suspense>;
+      case 'Volatility':        return <Suspense fallback={<LoadingFallback />}><TechnicalLabView initialTab="volatility" /></Suspense>;
+      case 'Options Chain':     return <Suspense fallback={<LoadingFallback />}><OptionsLabView initialTab="chain" /></Suspense>;
+      case 'Options Strategy Lab': return <Suspense fallback={<LoadingFallback />}><OptionsLabView initialTab="strategy" /></Suspense>;
+      case 'News':              return <Suspense fallback={<LoadingFallback />}><MarketIntelligenceView initialTab="news" /></Suspense>;
+      case 'Sentiment':         return <Suspense fallback={<LoadingFallback />}><MarketIntelligenceView initialTab="sentiment" /></Suspense>;
+      case 'Macro Data':        return <Suspense fallback={<LoadingFallback />}><MacroTerminalView /></Suspense>;
+
+      // Main Workspaces
       case 'Live Chart':        return <LiveChartView />;
       case 'Multi-Tile':        return <Suspense fallback={<LoadingFallback />}><MultiTileWorkspace /></Suspense>;
       case 'Chart Grid':        return <Suspense fallback={<LoadingFallback />}><MultiChartGrid /></Suspense>;
       case 'Dashboard':         return <Dashboard />;
       case 'Valuation':         return <Suspense fallback={<LoadingFallback />}><ValuationTerminalView ticker={selectedSymbol} /></Suspense>;
       case 'Sector Rotation':   return <Suspense fallback={<LoadingFallback />}><RRGRotationView /></Suspense>;
-      case 'Options Strategy Lab': return <Suspense fallback={<LoadingFallback />}><OptionsStrategyLabView ticker={selectedSymbol} /></Suspense>;
       case 'Macro Terminal':    return <Suspense fallback={<LoadingFallback />}><MacroTerminalView /></Suspense>;
       case 'Quant Risk Cockpit': return <Suspense fallback={<LoadingFallback />}><QuantRiskCockpit /></Suspense>;
       case 'Paper Trading':     return <Suspense fallback={<LoadingFallback />}><PaperTradingView /></Suspense>;
       case 'AI Prediction':     return <Suspense fallback={<LoadingFallback />}><AIPredictionView /></Suspense>;
       case 'AI Chat':           return <Suspense fallback={<LoadingFallback />}><AIChatPanel ticker={selectedSymbol} /></Suspense>;
-      case 'News':              return <Suspense fallback={<LoadingFallback />}><NewsPanel ticker={selectedSymbol} /></Suspense>;
-      case 'Patterns':          return <Suspense fallback={<LoadingFallback />}><PatternsPanel ticker={selectedSymbol} /></Suspense>;
-      case 'Levels':            return <Suspense fallback={<LoadingFallback />}><LevelsPanel ticker={selectedSymbol} /></Suspense>;
-      case 'Volatility':        return <Suspense fallback={<LoadingFallback />}><VolatilityPanel ticker={selectedSymbol} /></Suspense>;
       case 'Monte Carlo':       return <Suspense fallback={<LoadingFallback />}><MonteCarlo ticker={selectedSymbol} /></Suspense>;
       case 'Backtest':          return <Suspense fallback={<LoadingFallback />}><BacktestPanel ticker={selectedSymbol} /></Suspense>;
       case 'Price Alerts':      return <Suspense fallback={<LoadingFallback />}><PriceAlerts /></Suspense>;
-      case 'Sentiment':         return <Suspense fallback={<LoadingFallback />}><SentimentDashboard /></Suspense>;
       case 'Sentiment TA':      return <Suspense fallback={<LoadingFallback />}><SentimentTAView ticker={selectedSymbol} /></Suspense>;
       case 'Adv. Screener':     return <Suspense fallback={<LoadingFallback />}><AdvancedScreener /></Suspense>;
-
       case 'Heatmap':           return <Suspense fallback={<LoadingFallback />}><MarketHeatmap /></Suspense>;
-      case 'Macro Data':        return <Suspense fallback={<LoadingFallback />}><MacroPanel /></Suspense>;
       case 'Supply Chain':      return <Suspense fallback={<LoadingFallback />}><SupplyChainPanel /></Suspense>;
       case 'Fundamentals':
       case 'Earnings':          return <Suspense fallback={<LoadingFallback />}><FundamentalsPanel ticker={selectedSymbol} /></Suspense>;
-      case 'Options Chain':     return <Suspense fallback={<LoadingFallback />}><OptionsChainView ticker={selectedSymbol} /></Suspense>;
       case 'Broker Settings':   return <Suspense fallback={<LoadingFallback />}><BrokerSettingsView initialTab="broker" /></Suspense>;
       case 'AI Providers':      return <Suspense fallback={<LoadingFallback />}><BrokerSettingsView initialTab="ai" /></Suspense>;
       default:                  return <LiveChartView />;

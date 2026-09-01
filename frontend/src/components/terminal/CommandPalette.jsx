@@ -2,20 +2,24 @@ import React, { useState, useEffect, useRef } from 'react';
 import useStore from '../../store/useStore';
 import {
   Terminal, Search, CandlestickChart, BookOpen, Layers,
-  Activity, SlidersHorizontal, Dices, Globe, Wallet, Grid3X3
+  Activity, SlidersHorizontal, Dices, Globe, Wallet, Grid3X3,
+  Target, Newspaper
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const COMMANDS = [
-  { cmd: '/chart', desc: 'Open Pro Live Chart for ticker', view: 'Live Chart', icon: CandlestickChart },
-  { cmd: '/tile', desc: 'Open Bloomberg 4-Tile Split Workspace', view: 'Multi-Tile', icon: Grid3X3 },
-  { cmd: '/val', desc: 'Open DCF Intrinsic Valuation Model', view: 'Valuation', icon: BookOpen },
-  { cmd: '/rrg', desc: 'Open Relative Rotation Graphs (Sector Flow)', view: 'Sector Rotation', icon: Activity },
-  { cmd: '/strat', desc: 'Open Options Strategy Lab & Payoff', view: 'Options Strategy Lab', icon: Layers },
-  { cmd: '/macro', desc: 'Open Sovereign Yields & Macro Hub', view: 'Macro Terminal', icon: Globe },
-  { cmd: '/risk', desc: 'Open Quant Portfolio Risk & VaR Cockpit', view: 'Quant Risk Cockpit', icon: Activity },
-  { cmd: '/screen', desc: 'Open Multi-Factor Stock Screener', view: 'Adv. Screener', icon: SlidersHorizontal },
-  { cmd: '/paper', desc: 'Open Paper Trading 2.0 Terminal', view: 'Paper Trading', icon: Wallet },
+  { cmd: '/chart',   desc: 'Open Pro Live Candlestick Chart for ticker', view: 'Live Chart', icon: CandlestickChart },
+  { cmd: '/tech',    desc: 'Open Technical Lab (Levels, S/R, Patterns, Volatility)', view: 'Technical Lab', icon: Target },
+  { cmd: '/options', desc: 'Open Options & Derivatives Lab (Chain & Payoff)', view: 'Options Lab', icon: Layers },
+  { cmd: '/intel',   desc: 'Open Market Intelligence (News Feed & Fear/Greed)', view: 'Market Intelligence', icon: Newspaper },
+  { cmd: '/fund',    desc: 'Open Financial Statements & Fundamental Analysis', view: 'Fundamentals', icon: BookOpen },
+  { cmd: '/tile',    desc: 'Open Bloomberg 4-Tile Split Workspace', view: 'Multi-Tile', icon: Grid3X3 },
+  { cmd: '/macro',   desc: 'Open Sovereign Yields & Macroeconomic Hub', view: 'Macro Terminal', icon: Globe },
+  { cmd: '/val',     desc: 'Open DCF Intrinsic Valuation Model', view: 'Valuation', icon: BookOpen },
+  { cmd: '/rrg',     desc: 'Open Relative Rotation Graphs (Sector Flow)', view: 'Sector Rotation', icon: Activity },
+  { cmd: '/risk',    desc: 'Open Quant Portfolio Risk & VaR Cockpit', view: 'Quant Risk Cockpit', icon: Activity },
+  { cmd: '/screen',  desc: 'Open Multi-Factor Stock Screener', view: 'Adv. Screener', icon: SlidersHorizontal },
+  { cmd: '/paper',   desc: 'Open Paper Trading 2.0 Terminal', view: 'Paper Trading', icon: Wallet },
 ];
 
 export default function CommandPalette({ isOpen, onClose }) {

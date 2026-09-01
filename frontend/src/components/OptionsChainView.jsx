@@ -71,14 +71,18 @@ export default function OptionsChainView({ ticker: propTicker }) {
   };
 
   const underlying = data?.underlying_value;
-  const maxOI = Math.max(...chain.map(c => Math.max(c.call_oi, c.put_oi)), 1);
+  const maxOI = React.useMemo(() => {
+    if (!chain || chain.length === 0) return 1;
+    const values = chain.map(c => Math.max(Number(c?.call_oi) || 0, Number(c?.put_oi) || 0));
+    return Math.max(...values, 1);
+  }, [chain]);
 
-  // ATM = closest strike to underlying
-  const atmStrike = chain.length && underlying
-    ? chain.reduce((prev, curr) =>
-        Math.abs(curr.strike_price - underlying) < Math.abs(prev.strike_price - underlying) ? curr : prev
-      ).strike_price
-    : null;
+  const atmStrike = React.useMemo(() => {
+    if (!underlying || !chain.length) return null;
+    return chain.reduce((prev, curr) =>
+      Math.abs(curr.strike_price - underlying) < Math.abs(prev.strike_price - underlying) ? curr : prev
+    )?.strike_price;
+  }, [underlying, chain]);
 
   const fmt = (n, dec = 0) => n != null ? n.toLocaleString("en-IN", { maximumFractionDigits: dec }) : "—";
 
@@ -137,6 +141,16 @@ export default function OptionsChainView({ ticker: propTicker }) {
           <div style={{ width: 24, height: 24, borderRadius: "50%", border: "2px solid #6366F1", borderTopColor: "transparent", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
           <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
           Loading options chain…
+        </div>
+      )}
+
+      {!loading && (!chain || chain.length === 0) && !error && (
+        <div style={{ textAlign: "center", color: "#94A3B8", padding: 40, background: "rgba(15,23,42,0.6)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.06)" }}>
+          <Layers size={32} color="#6366F1" style={{ margin: "0 auto 10px" }} />
+          <div style={{ fontWeight: 700, fontSize: "0.95rem", color: "#F1F5F9" }}>No Active Derivatives Contracts for {ticker}</div>
+          <div style={{ fontSize: "0.75rem", color: "#64748B", marginTop: 4 }}>
+            This asset may not be listed in the NSE Equity Derivatives (F&O) segment. Switch to a liquid F&O underlying such as NIFTY, BANKNIFTY, RELIANCE, TCS, or HDFCBANK.
+          </div>
         </div>
       )}
 
