@@ -262,31 +262,252 @@ export function detectPatterns(candles) {
     const c1Open = Number(c1.open);
     const c2Close = Number(c2.close);
     const c2Open = Number(c2.open);
+    const c2High = Number(c2.high);
+    const c2Low = Number(c2.low);
+
     const c3Close = Number(c3.close);
     const c3Open = Number(c3.open);
+    const c3High = Number(c3.high);
+    const c3Low = Number(c3.low);
 
-    // Bullish Engulfing
-    if (c2Close < c2Open && c3Close > c3Open && c3Open < c2Close && c3Close > c2Open) {
+    const body3 = Math.abs(c3Close - c3Open);
+    const range3 = c3High - c3Low || 0.01;
+    const upperShadow3 = c3High - Math.max(c3Close, c3Open);
+    const lowerShadow3 = Math.min(c3Close, c3Open) - c3Low;
+
+    const body2 = Math.abs(c2Close - c2Open);
+    const range2 = c2High - c2Low || 0.01;
+
+    // 1. Bullish Engulfing
+    if (c2Close < c2Open && c3Close > c3Open && c3Open <= c2Close && c3Close >= c2Open) {
       markers.push({
         time: c3.time,
         position: 'belowBar',
         color: '#10B981',
         shape: 'arrowUp',
-        text: 'Engulfing',
+        text: 'Bullish Engulfing',
       });
+      continue;
     }
 
-    // Bearish Engulfing
-    if (c2Close > c2Open && c3Close < c3Open && c3Open > c2Close && c3Close < c2Open) {
+    // 2. Bearish Engulfing
+    if (c2Close > c2Open && c3Close < c3Open && c3Open >= c2Close && c3Close <= c2Open) {
       markers.push({
         time: c3.time,
         position: 'aboveBar',
         color: '#EF5350',
         shape: 'arrowDown',
-        text: 'Engulfing',
+        text: 'Bearish Engulfing',
+      });
+      continue;
+    }
+
+    // 3. Morning Star (3-Bar Bullish Reversal)
+    if (c1Close < c1Open && body2 < range2 * 0.35 && c3Close > c3Open && c3Close > (c1Open + c1Close) / 2) {
+      markers.push({
+        time: c3.time,
+        position: 'belowBar',
+        color: '#F59E0B',
+        shape: 'arrowUp',
+        text: 'Morning Star',
+      });
+      continue;
+    }
+
+    // 4. Evening Star (3-Bar Bearish Reversal)
+    if (c1Close > c1Open && body2 < range2 * 0.35 && c3Close < c3Open && c3Close < (c1Open + c1Close) / 2) {
+      markers.push({
+        time: c3.time,
+        position: 'aboveBar',
+        color: '#A855F7',
+        shape: 'arrowDown',
+        text: 'Evening Star',
+      });
+      continue;
+    }
+
+    // 5. Bullish Harami (Inside bar after down candle)
+    if (c2Close < c2Open && c3Close > c3Open && c3Open >= c2Close && c3Close <= c2Open) {
+      markers.push({
+        time: c3.time,
+        position: 'belowBar',
+        color: '#06B6D4',
+        shape: 'arrowUp',
+        text: 'Bullish Harami',
+      });
+      continue;
+    }
+
+    // 6. Bearish Harami (Inside bar after up candle)
+    if (c2Close > c2Open && c3Close < c3Open && c3Open <= c2Close && c3Close >= c2Open) {
+      markers.push({
+        time: c3.time,
+        position: 'aboveBar',
+        color: '#F97316',
+        shape: 'arrowDown',
+        text: 'Bearish Harami',
+      });
+      continue;
+    }
+
+    // 7. Hammer (Long lower shadow, small body at top, after downward move)
+    if (lowerShadow3 >= 2 * body3 && upperShadow3 <= body3 * 0.25 && c2Close < c1Close) {
+      markers.push({
+        time: c3.time,
+        position: 'belowBar',
+        color: '#22C55E',
+        shape: 'arrowUp',
+        text: 'Hammer',
+      });
+      continue;
+    }
+
+    // 8. Inverted Hammer (Long upper shadow, small body at bottom)
+    if (upperShadow3 >= 2 * body3 && lowerShadow3 <= body3 * 0.25 && c2Close < c1Close) {
+      markers.push({
+        time: c3.time,
+        position: 'belowBar',
+        color: '#34D399',
+        shape: 'arrowUp',
+        text: 'Inverted Hammer',
+      });
+      continue;
+    }
+
+    // 9. Shooting Star (Long upper shadow at peak of upward move)
+    if (upperShadow3 >= 2 * body3 && lowerShadow3 <= body3 * 0.25 && c2Close > c1Close) {
+      markers.push({
+        time: c3.time,
+        position: 'aboveBar',
+        color: '#E11D48',
+        shape: 'arrowDown',
+        text: 'Shooting Star',
+      });
+      continue;
+    }
+
+    // 10. Hanging Man (Long lower shadow at peak of upward move)
+    if (lowerShadow3 >= 2 * body3 && upperShadow3 <= body3 * 0.25 && c2Close > c1Close) {
+      markers.push({
+        time: c3.time,
+        position: 'aboveBar',
+        color: '#FB7185',
+        shape: 'arrowDown',
+        text: 'Hanging Man',
+      });
+      continue;
+    }
+
+    // 11. Dragonfly Doji (No body, long lower shadow)
+    if (body3 <= range3 * 0.08 && lowerShadow3 >= range3 * 0.65) {
+      markers.push({
+        time: c3.time,
+        position: 'belowBar',
+        color: '#38BDF8',
+        shape: 'circle',
+        text: 'Dragonfly Doji',
+      });
+      continue;
+    }
+
+    // 12. Gravestone Doji (No body, long upper shadow)
+    if (body3 <= range3 * 0.08 && upperShadow3 >= range3 * 0.65) {
+      markers.push({
+        time: c3.time,
+        position: 'aboveBar',
+        color: '#FB923C',
+        shape: 'circle',
+        text: 'Gravestone Doji',
+      });
+      continue;
+    }
+
+    // 13. Standard Doji (Body <= 10% of total range)
+    if (body3 <= range3 * 0.10) {
+      markers.push({
+        time: c3.time,
+        position: c3Close >= c2Close ? 'belowBar' : 'aboveBar',
+        color: '#CBD5E1',
+        shape: 'circle',
+        text: 'Doji',
       });
     }
   }
 
-  return markers.slice(-15);
+  // Return last 25 patterns for high-clarity on chart without cluttering
+  return markers.slice(-25);
+}
+
+export function calculateVWAP(candles) {
+  if (!candles || candles.length === 0) return [];
+  const result = [];
+  let cumVol = 0;
+  let cumVolPrice = 0;
+
+  for (let i = 0; i < candles.length; i++) {
+    const c = candles[i];
+    const vol = Number(c.volume || 1);
+    const typPrice = (Number(c.high) + Number(c.low) + Number(c.close)) / 3;
+    cumVol += vol;
+    cumVolPrice += typPrice * vol;
+    result.push({
+      time: c.time,
+      value: Number((cumVolPrice / (cumVol || 1)).toFixed(2)),
+    });
+  }
+  return result;
+}
+
+export function calculateSupertrend(candles, period = 10, multiplier = 3) {
+  if (!candles || candles.length < period) return [];
+  const tr = [];
+  for (let i = 0; i < candles.length; i++) {
+    if (i === 0) {
+      tr.push(Number(candles[i].high) - Number(candles[i].low));
+    } else {
+      const h = Number(candles[i].high);
+      const l = Number(candles[i].low);
+      const prevC = Number(candles[i - 1].close);
+      tr.push(Math.max(h - l, Math.abs(h - prevC), Math.abs(l - prevC)));
+    }
+  }
+
+  let sumTr = 0;
+  for (let i = 0; i < period; i++) sumTr += tr[i];
+  const atr = [sumTr / period];
+  for (let i = period; i < candles.length; i++) {
+    const val = (atr[atr.length - 1] * (period - 1) + tr[i]) / period;
+    atr.push(val);
+  }
+
+  const result = [];
+  let trend = 1;
+  let upperBand = 0;
+  let lowerBand = 0;
+
+  for (let i = period - 1; i < candles.length; i++) {
+    const c = candles[i];
+    const curAtr = atr[i - (period - 1)];
+    const hl2 = (Number(c.high) + Number(c.low)) / 2;
+
+    let basicUpper = hl2 + multiplier * curAtr;
+    let basicLower = hl2 - multiplier * curAtr;
+
+    const prevClose = i > 0 ? Number(candles[i - 1].close) : Number(c.close);
+
+    if (basicUpper < upperBand || prevClose > upperBand) upperBand = basicUpper;
+    if (basicLower > lowerBand || prevClose < lowerBand) lowerBand = basicLower;
+
+    if (trend === 1 && Number(c.close) < lowerBand) {
+      trend = -1;
+    } else if (trend === -1 && Number(c.close) > upperBand) {
+      trend = 1;
+    }
+
+    result.push({
+      time: c.time,
+      value: Number((trend === 1 ? lowerBand : upperBand).toFixed(2)),
+    });
+  }
+  return result;
 }

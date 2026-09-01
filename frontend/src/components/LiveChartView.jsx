@@ -14,11 +14,12 @@ import MultiChartGrid from './MultiChartGrid';
 import DrawingTools from './chart-tools/DrawingTools';
 import TradingViewAdvancedChart from './chart-tools/TradingViewAdvancedChart';
 import IndicatorsModal from './IndicatorsModal';
+import IndicatorSettingsModal from './IndicatorSettingsModal';
 import ChartSettingsModal from './ChartSettingsModal';
 import AIPatternRecognition from './chart-tools/AIPatternRecognition';
 import TrustBadge from './TrustBadge';
 import { parseNum, toChartTime, addBusinessDays, POPULAR_STOCKS, INTERVALS, SIG, CHART_OPTIONS, CANDLE_STYLE } from '../utils/chartHelpers';
-import { calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateMACD, calculateALMA, calculateKeyLevels, detectPatterns } from '../utils/chartIndicators';
+import { calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateMACD, calculateALMA, calculateKeyLevels, detectPatterns, calculateVWAP, calculateSupertrend } from '../utils/chartIndicators';
 import SymbolSearchModal from './chart-tools/SymbolSearchModal';
 import { playAlertChime } from '../utils/soundChime';
 import { getWsUrl } from '../utils/api';
@@ -142,17 +143,49 @@ export default function LiveChartView() {
   const [showIndicatorsModal, setShowIndicatorsModal] = useState(false);
   const [showChartSettingsModal, setShowChartSettingsModal] = useState(false);
   const [showBottomStats, setShowBottomStats] = useState(false); // Collapsed by default to maximize chart height
-  const [showIndicatorDropdown, setShowIndicatorDropdown] = useState(false);
-  const [showVolume,    setShowVolume]    = useState(false);
-  const [showSMA,       setShowSMA]       = useState(false);
-  const [showEMA,       setShowEMA]       = useState(false);
-  const [showBB,        setShowBB]        = useState(false);
-  const [showRSI,       setShowRSI]       = useState(false);
-  const [showMACD,      setShowMACD]      = useState(false);
-  const [showALMA,      setShowALMA]      = useState(false);
-  const [showKeyLevels, setShowKeyLevels] = useState(false);
-  const [showPatterns,  setShowPatterns]  = useState(false);
-  const [showAICone,    setShowAICone]    = useState(true);
+  const [showVolume,       setShowVolume]       = useState(false);
+  const [showVWAP,         setShowVWAP]         = useState(false);
+  const [showSupertrend,   setShowSupertrend]   = useState(false);
+  const [showSMA,          setShowSMA]          = useState(false);
+  const [showEMA,          setShowEMA]          = useState(false);
+  const [showBB,           setShowBB]           = useState(false);
+  const [showRSI,          setShowRSI]          = useState(false);
+  const [showMACD,         setShowMACD]         = useState(false);
+  const [showALMA,         setShowALMA]         = useState(false);
+  const [showKeyLevels,    setShowKeyLevels]    = useState(false);
+  const [showPatterns,     setShowPatterns]     = useState(false);
+  const [showAICone,       setShowAICone]       = useState(true);
+  const [showIndicatorSettingsModal, setShowIndicatorSettingsModal] = useState(false);
+
+  // Customizable Indicator Parameters
+  const [indicatorParams, setIndicatorParams] = useState({
+    smaPeriod: 20,
+    emaPeriod: 20,
+    bbPeriod: 20,
+    bbStdDev: 2,
+    rsiPeriod: 14,
+    macdFast: 12,
+    macdSlow: 26,
+    macdSignal: 9,
+  });
+
+  const handleUpdateParams = useCallback((newVals) => {
+    setIndicatorParams(prev => ({ ...prev, ...newVals }));
+  }, []);
+
+  const handleResetDefaults = useCallback(() => {
+    setIndicatorParams({
+      smaPeriod: 20,
+      emaPeriod: 20,
+      bbPeriod: 20,
+      bbStdDev: 2,
+      rsiPeriod: 14,
+      macdFast: 12,
+      macdSlow: 26,
+      macdSignal: 9,
+    });
+    toast.success('Indicator parameters reset to default values');
+  }, []);
   
   // Historical Bar Replay Simulator (Practice Mode)
   const [isReplayMode, setIsReplayMode] = useState(false);
@@ -184,6 +217,8 @@ export default function LiveChartView() {
     rsi: null,
     macd: null,
     alma: null,
+    vwap: null,
+    supertrend: null,
     volume: null,
   });
 
@@ -207,6 +242,8 @@ export default function LiveChartView() {
   // Indicators Map & Toggle Handler
   const activeIndicatorsMap = useMemo(() => ({
     vol_24h: showVolume,
+    vwap: showVWAP,
+    supertrend: showSupertrend,
     sma_20: showSMA,
     ema_20: showEMA,
     boll: showBB,
@@ -216,13 +253,19 @@ export default function LiveChartView() {
     auto_key_levels: showKeyLevels,
     ai_patterns: showPatterns || (showAdvancedPanel && advancedPanelTab === 'patterns'),
     backtester: showAdvancedPanel && advancedPanelTab === 'backtest',
-  }), [showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, showAdvancedPanel, advancedPanelTab]);
+  }), [showVolume, showVWAP, showSupertrend, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, showAdvancedPanel, advancedPanelTab]);
 
   const handleToggleIndicator = useCallback((id) => {
     switch (id) {
       case 'vol_24h':
       case 'volume':
         setShowVolume(prev => !prev);
+        break;
+      case 'vwap':
+        setShowVWAP(prev => !prev);
+        break;
+      case 'supertrend':
+        setShowSupertrend(prev => !prev);
         break;
       case 'sma_20':
         setShowSMA(prev => !prev);
@@ -306,6 +349,8 @@ export default function LiveChartView() {
   const macdSignalRef  = useRef(null);
   const macdHistRef    = useRef(null);
   const almaRef        = useRef(null);
+  const vwapRef        = useRef(null);
+  const supertrendRef  = useRef(null);
   const keyLevelLinesRef = useRef([]);
   const alertLinesRef  = useRef([]);
   const lastTriggeredMap = useRef(new Set());
@@ -424,15 +469,20 @@ export default function LiveChartView() {
     const candle = chart.addCandlestickSeries(CANDLE_STYLE);
     candleRef.current = candle;
 
-    // Volume Sub-chart (overlay scale with scaleMargins)
+    // Volume Sub-chart with dedicated independent price scale
+    chart.priceScale('volume-scale').applyOptions({
+      scaleMargins: { top: 0.82, bottom: 0.01 },
+      autoScale: true,
+    });
     const volume = chart.addHistogramSeries({
       priceFormat: { type: 'volume' },
-      priceScaleId: '',
-      scaleMargins: { top: 0.8, bottom: 0 },
+      priceScaleId: 'volume-scale',
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
     volumeRef.current = volume;
 
-    // SMA, EMA, BB, ALMA
+    // SMA, EMA, BB, ALMA, VWAP, Supertrend
     const sma = chart.addLineSeries({ color: '#00E5FF', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
     smaRef.current = sma;
 
@@ -441,6 +491,12 @@ export default function LiveChartView() {
 
     const alma = chart.addLineSeries({ color: '#FACC15', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
     almaRef.current = alma;
+
+    const vwap = chart.addLineSeries({ color: '#06B6D4', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
+    vwapRef.current = vwap;
+
+    const supertrend = chart.addLineSeries({ color: '#10B981', lineWidth: 1.5, priceLineVisible: false, lastValueVisible: false });
+    supertrendRef.current = supertrend;
 
     const bbUpper = chart.addLineSeries({ color: '#E040FB', lineWidth: 1.2, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     bbUpperRef.current = bbUpper;
@@ -563,6 +619,8 @@ export default function LiveChartView() {
       chartRef.current = null;
       candleRef.current = null;
       volumeRef.current = null;
+      vwapRef.current = null;
+      supertrendRef.current = null;
       smaRef.current = null;
       emaRef.current = null;
       almaRef.current = null;
@@ -586,6 +644,48 @@ export default function LiveChartView() {
       backtestEquityRef.current = null;
     };
   }, []);
+
+  /* ── Dynamic Stacked Sub-Chart Scale Margins (No Overlap) ─── */
+  useEffect(() => {
+    if (!chartRef.current || !candleRef.current) return;
+    const chart = chartRef.current;
+    const candle = candleRef.current;
+
+    const activeSubPanes = [
+      showRSI ? 'rsi' : null,
+      showMACD ? 'macd' : null,
+      showVolume ? 'vol' : null,
+    ].filter(Boolean);
+
+    const subCount = activeSubPanes.length;
+
+    if (subCount === 0) {
+      // 100% full vertical height for main candlesticks
+      try { candle.priceScale().applyOptions({ scaleMargins: { top: 0.04, bottom: 0.04 } }); } catch {}
+      return;
+    }
+
+    // Dynamic vertical band allocation: each sub-chart gets its own clean horizontal band
+    const totalSubHeight = Math.min(0.44, subCount * 0.15);
+    const candleBottom = Number((totalSubHeight + 0.04).toFixed(3));
+    try { candle.priceScale().applyOptions({ scaleMargins: { top: 0.04, bottom: candleBottom } }); } catch {}
+
+    const singlePaneHeight = totalSubHeight / subCount;
+    activeSubPanes.forEach((paneId, idx) => {
+      const bottomMargin = Number(((subCount - 1 - idx) * singlePaneHeight).toFixed(3));
+      const topMargin = Number((1 - (bottomMargin + singlePaneHeight) + 0.015).toFixed(3));
+
+      const margins = { top: Math.max(0.05, topMargin), bottom: Math.max(0.01, bottomMargin) };
+
+      if (paneId === 'rsi') {
+        try { chart.priceScale('rsi-scale').applyOptions({ scaleMargins: margins }); } catch {}
+      } else if (paneId === 'macd') {
+        try { chart.priceScale('macd-scale').applyOptions({ scaleMargins: margins }); } catch {}
+      } else if (paneId === 'vol') {
+        try { chart.priceScale('volume-scale').applyOptions({ scaleMargins: margins }); } catch {}
+      }
+    });
+  }, [showVolume, showRSI, showMACD]);
 
   /* ── Auto Resize & Re-fit on Engine Switch ────────────────── */
   useEffect(() => {
@@ -993,17 +1093,21 @@ export default function LiveChartView() {
       try { volumeRef.current?.setData([]); } catch {}
     }
 
-    // 3. Technical Indicators (SMA, EMA, BB)
-    if (showSMA && smaRef.current && activeCandles.length > 20) {
-      try { smaRef.current.setData(calculateSMA(activeCandles, 20)); } catch {}
+    // 3. Technical Indicators (SMA, EMA, BB, VWAP, Supertrend)
+    const smaLen = indicatorParams.smaPeriod || 20;
+    if (showSMA && smaRef.current && activeCandles.length >= smaLen) {
+      try { smaRef.current.setData(calculateSMA(activeCandles, smaLen)); } catch {}
     } else { try { smaRef.current?.setData([]); } catch {} }
 
-    if (showEMA && emaRef.current && activeCandles.length > 20) {
-      try { emaRef.current.setData(calculateEMA(activeCandles, 20)); } catch {}
+    const emaLen = indicatorParams.emaPeriod || 20;
+    if (showEMA && emaRef.current && activeCandles.length >= emaLen) {
+      try { emaRef.current.setData(calculateEMA(activeCandles, emaLen)); } catch {}
     } else { try { emaRef.current?.setData([]); } catch {} }
 
-    if (showBB && bbUpperRef.current && bbLowerRef.current && bbMiddleRef.current && activeCandles.length > 20) {
-      const { upper, middle, lower } = calculateBollingerBands(activeCandles, 20, 2);
+    const bbLen = indicatorParams.bbPeriod || 20;
+    const bbMult = indicatorParams.bbStdDev || 2;
+    if (showBB && bbUpperRef.current && bbLowerRef.current && bbMiddleRef.current && activeCandles.length >= bbLen) {
+      const { upper, middle, lower } = calculateBollingerBands(activeCandles, bbLen, bbMult);
       try {
         bbUpperRef.current.setData(upper);
         bbMiddleRef.current.setData(middle);
@@ -1017,10 +1121,35 @@ export default function LiveChartView() {
       } catch {}
     }
 
+    // VWAP Overlay
+    let currentVWAP = null;
+    if (showVWAP && vwapRef.current && activeCandles.length > 5) {
+      const vwapVals = calculateVWAP(activeCandles);
+      try {
+        vwapRef.current.setData(vwapVals);
+        if (vwapVals.length > 0) currentVWAP = vwapVals[vwapVals.length - 1].value;
+      } catch {}
+    } else {
+      try { vwapRef.current?.setData([]); } catch {}
+    }
+
+    // Supertrend Overlay
+    let currentSupertrend = null;
+    if (showSupertrend && supertrendRef.current && activeCandles.length > 10) {
+      const stVals = calculateSupertrend(activeCandles, 10, 3);
+      try {
+        supertrendRef.current.setData(stVals);
+        if (stVals.length > 0) currentSupertrend = stVals[stVals.length - 1].value;
+      } catch {}
+    } else {
+      try { supertrendRef.current?.setData([]); } catch {}
+    }
+
     // RSI Sub-chart with Persistent 70 / 50 / 30 Benchmark Reference Lines
     let currentRSI = null;
-    if (showRSI && rsiRef.current && activeCandles.length > 14) {
-      const rsiVals = calculateRSI(activeCandles, 14);
+    const rsiLen = indicatorParams.rsiPeriod || 14;
+    if (showRSI && rsiRef.current && activeCandles.length >= rsiLen) {
+      const rsiVals = calculateRSI(activeCandles, rsiLen);
       try {
         rsiRef.current.setData(rsiVals);
         if (rsiVals.length > 0) {
@@ -1054,8 +1183,11 @@ export default function LiveChartView() {
 
     // 9. MACD Sub-chart (MACD Line, Signal Line, and Positive/Negative Colored Histogram)
     let currentMACD = null;
-    if (showMACD && macdRef.current && macdSignalRef.current && macdHistRef.current && activeCandles.length > 35) {
-      const macdData = calculateMACD(activeCandles, 12, 26, 9);
+    const mFast = indicatorParams.macdFast || 12;
+    const mSlow = indicatorParams.macdSlow || 26;
+    const mSig  = indicatorParams.macdSignal || 9;
+    if (showMACD && macdRef.current && macdSignalRef.current && macdHistRef.current && activeCandles.length > mSlow) {
+      const macdData = calculateMACD(activeCandles, mFast, mSlow, mSig);
       try {
         const histArr = macdData.hist || macdData.histogram || [];
         macdRef.current.setData(macdData.macd || []);
@@ -1119,9 +1251,9 @@ export default function LiveChartView() {
 
     // Update real-time indicator legend values
     const lastCandle = activeCandles[activeCandles.length - 1];
-    const smaCalculated = showSMA && activeCandles.length > 20 ? calculateSMA(activeCandles, 20) : [];
-    const emaCalculated = showEMA && activeCandles.length > 20 ? calculateEMA(activeCandles, 20) : [];
-    const bbCalculated  = showBB && activeCandles.length > 20 ? calculateBollingerBands(activeCandles, 20, 2) : null;
+    const smaCalculated = showSMA && activeCandles.length >= smaLen ? calculateSMA(activeCandles, smaLen) : [];
+    const emaCalculated = showEMA && activeCandles.length >= emaLen ? calculateEMA(activeCandles, emaLen) : [];
+    const bbCalculated  = showBB && activeCandles.length >= bbLen ? calculateBollingerBands(activeCandles, bbLen, bbMult) : null;
 
     setIndicatorValues({
       sma: smaCalculated.length > 0 ? smaCalculated[smaCalculated.length - 1].value : null,
@@ -1134,6 +1266,8 @@ export default function LiveChartView() {
       rsi: currentRSI,
       macd: currentMACD,
       alma: currentALMA,
+      vwap: currentVWAP,
+      supertrend: currentSupertrend,
       volume: lastCandle ? Number(rawHistory[rawHistory.length - 1]?.volume || 0) : null,
     });
 
@@ -1195,7 +1329,7 @@ export default function LiveChartView() {
       } catch {}
     }, 50);
     return () => clearTimeout(timer);
-  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, isReplayMode, replayIndex]);
+  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showVWAP, showSupertrend, showKeyLevels, showPatterns, indicatorParams, isReplayMode, replayIndex]);
 
   /* ── Secondary Comparison Chart Data Binding ───────────────── */
 
@@ -1363,23 +1497,28 @@ export default function LiveChartView() {
         candleRef.current.update(activeCandleRef.current);
 
         // Real-time dynamic indicator line updates with incoming live tick
-        if (rawHistory && rawHistory.length >= 20) {
+        const sP = indicatorParams.smaPeriod || 20;
+        const eP = indicatorParams.emaPeriod || 20;
+        const bbP = indicatorParams.bbPeriod || 20;
+        const bbM = indicatorParams.bbStdDev || 2;
+
+        if (rawHistory && rawHistory.length >= 10) {
           const liveT = activeCandleRef.current.time;
           const liveC = Number(activeCandleRef.current.close);
 
-          // Real-time SMA (20) update
-          if (showSMA && smaRef.current) {
-            const slice19 = rawHistory.slice(-19);
-            const sum20 = slice19.reduce((acc, b) => acc + Number(b.close || 0), 0) + liveC;
-            try { smaRef.current.update({ time: liveT, value: Number((sum20 / 20).toFixed(2)) }); } catch {}
+          // Real-time SMA update
+          if (showSMA && smaRef.current && rawHistory.length >= sP) {
+            const sliceSma = rawHistory.slice(-(sP - 1));
+            const sumSma = sliceSma.reduce((acc, b) => acc + Number(b.close || 0), 0) + liveC;
+            try { smaRef.current.update({ time: liveT, value: Number((sumSma / sP).toFixed(2)) }); } catch {}
           }
 
-          // Real-time EMA (20) update
-          if (showEMA && emaRef.current) {
-            const k = 2 / 21;
+          // Real-time EMA update
+          if (showEMA && emaRef.current && rawHistory.length >= eP) {
+            const k = 2 / (eP + 1);
             const prevSlice = rawHistory.slice(0, -1);
-            if (prevSlice.length >= 20) {
-              const prevEmas = calculateEMA(prevSlice, 20);
+            if (prevSlice.length >= eP) {
+              const prevEmas = calculateEMA(prevSlice, eP);
               if (prevEmas.length > 0) {
                 const lastEmaVal = prevEmas[prevEmas.length - 1].value;
                 const liveEma = Number((liveC * k + lastEmaVal * (1 - k)).toFixed(2));
@@ -1389,16 +1528,16 @@ export default function LiveChartView() {
           }
 
           // Real-time Bollinger Bands update
-          if (showBB && bbUpperRef.current && bbLowerRef.current && bbMiddleRef.current) {
-            const slice19 = rawHistory.slice(-19);
-            const closes = slice19.map(b => Number(b.close || 0)).concat([liveC]);
-            const mean = closes.reduce((a, b) => a + b, 0) / 20;
-            const variance = closes.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / 20;
+          if (showBB && bbUpperRef.current && bbLowerRef.current && bbMiddleRef.current && rawHistory.length >= bbP) {
+            const sliceBb = rawHistory.slice(-(bbP - 1));
+            const closes = sliceBb.map(b => Number(b.close || 0)).concat([liveC]);
+            const mean = closes.reduce((a, b) => a + b, 0) / bbP;
+            const variance = closes.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / bbP;
             const stdDev = Math.sqrt(variance);
             try {
-              bbUpperRef.current.update({ time: liveT, value: Number((mean + stdDev * 2).toFixed(2)) });
+              bbUpperRef.current.update({ time: liveT, value: Number((mean + stdDev * bbM).toFixed(2)) });
               bbMiddleRef.current.update({ time: liveT, value: Number(mean.toFixed(2)) });
-              bbLowerRef.current.update({ time: liveT, value: Number((mean - stdDev * 2).toFixed(2)) });
+              bbLowerRef.current.update({ time: liveT, value: Number((mean - stdDev * bbM).toFixed(2)) });
             } catch {}
           }
         }
@@ -1420,7 +1559,7 @@ export default function LiveChartView() {
       axisLabelTextColor  : '#fff',
       title               : 'LIVE',
     });
-  }, [livePrice, interval, isDaily, selectedSymbol, showSMA, showEMA, showBB]);
+  }, [livePrice, interval, isDaily, selectedSymbol, showSMA, showEMA, showBB, indicatorParams]);
 
   /* ── 4. Bar Replay Auto-Play Loop ────────────────────────── */
   useEffect(() => {
@@ -1957,6 +2096,25 @@ export default function LiveChartView() {
             )}
           </button>
 
+          {/* Indicator Parameters Settings Button */}
+          <button
+            onClick={() => setShowIndicatorSettingsModal(true)}
+            title="Configure Indicator Periods & Inputs (SMA, EMA, BB, RSI, MACD)"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '4px 7px',
+              borderRadius: 5,
+              border: showIndicatorSettingsModal ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.08)',
+              background: showIndicatorSettingsModal ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
+              color: '#818CF8',
+              cursor: 'pointer',
+            }}
+          >
+            <Sliders size={13} />
+          </button>
+
           {/* Auto-Drawing AI Overlays (S/R, Pivots, Fibs) */}
           <button
             onClick={() => {
@@ -2309,6 +2467,73 @@ export default function LiveChartView() {
                       pointerEvents: 'none',
                     }}
                   />
+
+                  {/* ── On-Chart Active Indicator Value Readouts (TradingView Style) ── */}
+                  <div style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: 5,
+                    alignItems: 'center',
+                    fontSize: 10,
+                    fontFamily: 'JetBrains Mono, monospace',
+                  }}>
+                    {showSMA && indicatorValues.sma != null && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(0,229,255,0.12)', border: '1px solid rgba(0,229,255,0.3)', padding: '1px 6px', borderRadius: 3, color: '#00E5FF' }}>
+                        <span style={{ fontWeight: 800 }}>SMA {indicatorParams.smaPeriod}:</span>
+                        <span style={{ color: '#FFF' }}>₹{indicatorValues.sma.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {showEMA && indicatorValues.ema != null && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(255,145,0,0.12)', border: '1px solid rgba(255,145,0,0.3)', padding: '1px 6px', borderRadius: 3, color: '#FF9100' }}>
+                        <span style={{ fontWeight: 800 }}>EMA {indicatorParams.emaPeriod}:</span>
+                        <span style={{ color: '#FFF' }}>₹{indicatorValues.ema.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {showBB && indicatorValues.bb && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(224,64,251,0.12)', border: '1px solid rgba(224,64,251,0.3)', padding: '1px 6px', borderRadius: 3, color: '#E040FB' }}>
+                        <span style={{ fontWeight: 800 }}>BB ({indicatorParams.bbPeriod}, {indicatorParams.bbStdDev}):</span>
+                        <span style={{ color: '#E040FB' }}>U ₹{indicatorValues.bb.upper?.toFixed(2)}</span>
+                        <span style={{ color: '#F59E0B' }}>M ₹{indicatorValues.bb.middle?.toFixed(2)}</span>
+                        <span style={{ color: '#E040FB' }}>L ₹{indicatorValues.bb.lower?.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {showVWAP && indicatorValues.vwap != null && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(6,182,212,0.12)', border: '1px solid rgba(6,182,212,0.3)', padding: '1px 6px', borderRadius: 3, color: '#06B6D4' }}>
+                        <span style={{ fontWeight: 800 }}>VWAP:</span>
+                        <span style={{ color: '#FFF' }}>₹{indicatorValues.vwap.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {showSupertrend && indicatorValues.supertrend != null && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', padding: '1px 6px', borderRadius: 3, color: '#10B981' }}>
+                        <span style={{ fontWeight: 800 }}>Supertrend:</span>
+                        <span style={{ color: '#FFF' }}>₹{indicatorValues.supertrend.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {showALMA && indicatorValues.alma != null && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.3)', padding: '1px 6px', borderRadius: 3, color: '#FACC15' }}>
+                        <span style={{ fontWeight: 800 }}>ALMA:</span>
+                        <span style={{ color: '#FFF' }}>₹{indicatorValues.alma.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {showRSI && indicatorValues.rsi != null && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(244,63,94,0.12)', border: '1px solid rgba(244,63,94,0.3)', padding: '1px 6px', borderRadius: 3, color: '#F43F5E' }}>
+                        <span style={{ fontWeight: 800 }}>RSI ({indicatorParams.rsiPeriod}):</span>
+                        <span style={{ color: indicatorValues.rsi >= 70 ? '#EF5350' : indicatorValues.rsi <= 30 ? '#10B981' : '#FFF', fontWeight: 800 }}>
+                          {indicatorValues.rsi.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                    {showMACD && indicatorValues.macd && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', padding: '1px 6px', borderRadius: 3, color: '#38BDF8' }}>
+                        <span style={{ fontWeight: 800 }}>MACD ({indicatorParams.macdFast},{indicatorParams.macdSlow},{indicatorParams.macdSignal}):</span>
+                        <span>M: {indicatorValues.macd.macd?.toFixed(2)}</span>
+                        <span style={{ color: '#F97316' }}>S: {indicatorValues.macd.signal?.toFixed(2)}</span>
+                        <span style={{ color: (indicatorValues.macd.hist || 0) >= 0 ? '#10B981' : '#EF5350', fontWeight: 800 }}>
+                          H: {(indicatorValues.macd.hist || 0) >= 0 ? '+' : ''}{indicatorValues.macd.hist?.toFixed(2)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {loading && (
@@ -2645,6 +2870,15 @@ export default function LiveChartView() {
         onClose={() => setShowIndicatorsModal(false)}
         activeIndicators={activeIndicatorsMap}
         onToggleIndicator={handleToggleIndicator}
+      />
+
+      {/* ── Indicator Custom Inputs & Parameters Settings Modal ── */}
+      <IndicatorSettingsModal
+        isOpen={showIndicatorSettingsModal}
+        onClose={() => setShowIndicatorSettingsModal(false)}
+        params={indicatorParams}
+        onUpdateParams={handleUpdateParams}
+        onResetDefaults={handleResetDefaults}
       />
 
       {/* ── TradingView Chart Settings Modal ── */}
