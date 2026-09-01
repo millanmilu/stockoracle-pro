@@ -469,14 +469,11 @@ export default function LiveChartView() {
     const candle = chart.addCandlestickSeries(CANDLE_STYLE);
     candleRef.current = candle;
 
-    // Volume Sub-chart with dedicated independent price scale
-    chart.priceScale('volume-scale').applyOptions({
-      scaleMargins: { top: 0.82, bottom: 0.01 },
-      autoScale: true,
-    });
+    // Volume Sub-chart (overlay scale with scaleMargins)
     const volume = chart.addHistogramSeries({
       priceFormat: { type: 'volume' },
-      priceScaleId: 'volume-scale',
+      priceScaleId: '',
+      scaleMargins: { top: 0.8, bottom: 0 },
       priceLineVisible: false,
       lastValueVisible: false,
     });
@@ -507,46 +504,42 @@ export default function LiveChartView() {
     const bbLower = chart.addLineSeries({ color: '#E040FB', lineWidth: 1.2, lineStyle: LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false });
     bbLowerRef.current = bbLower;
 
-    // RSI Sub-chart with dedicated independent price scale
-    chart.priceScale('rsi-scale').applyOptions({
-      scaleMargins: { top: 0.78, bottom: 0.02 },
-      autoScale: true,
-    });
+    // RSI Sub-chart (overlay scale with scaleMargins)
     const rsi = chart.addLineSeries({
       color: '#F43F5E', lineWidth: 1.5,
-      priceScaleId: 'rsi-scale',
+      priceScaleId: '',
+      scaleMargins: { top: 0.82, bottom: 0 },
       priceLineVisible: false, lastValueVisible: true,
     });
     rsiRef.current = rsi;
 
-    const rsi70 = chart.addLineSeries({ color: 'rgba(239,83,80,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: 'rsi-scale', priceLineVisible: false, lastValueVisible: false });
+    const rsi70 = chart.addLineSeries({ color: 'rgba(239,83,80,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: '', scaleMargins: { top: 0.82, bottom: 0 }, priceLineVisible: false, lastValueVisible: false });
     rsiLine70Ref.current = rsi70;
 
-    const rsi30 = chart.addLineSeries({ color: 'rgba(38,166,154,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: 'rsi-scale', priceLineVisible: false, lastValueVisible: false });
+    const rsi30 = chart.addLineSeries({ color: 'rgba(38,166,154,0.6)', lineWidth: 1, lineStyle: LineStyle.Dotted, priceScaleId: '', scaleMargins: { top: 0.82, bottom: 0 }, priceLineVisible: false, lastValueVisible: false });
     rsiLine30Ref.current = rsi30;
 
-    // MACD Sub-chart with dedicated independent price scale & price format for negative hist bars
-    chart.priceScale('macd-scale').applyOptions({
-      scaleMargins: { top: 0.78, bottom: 0.02 },
-      autoScale: true,
-    });
+    // MACD Sub-chart (overlay scale with scaleMargins)
     const macd = chart.addLineSeries({
       color: '#38BDF8', lineWidth: 1.5,
-      priceScaleId: 'macd-scale',
+      priceScaleId: '',
+      scaleMargins: { top: 0.85, bottom: 0 },
       priceLineVisible: false, lastValueVisible: false,
     });
     macdRef.current = macd;
 
     const macdSignal = chart.addLineSeries({
       color: '#F97316', lineWidth: 1.5,
-      priceScaleId: 'macd-scale',
+      priceScaleId: '',
+      scaleMargins: { top: 0.85, bottom: 0 },
       priceLineVisible: false, lastValueVisible: false,
     });
     macdSignalRef.current = macdSignal;
 
     const macdHist = chart.addHistogramSeries({
       priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
-      priceScaleId: 'macd-scale',
+      priceScaleId: '',
+      scaleMargins: { top: 0.85, bottom: 0 },
       priceLineVisible: false, lastValueVisible: false,
     });
     macdHistRef.current = macdHist;
@@ -645,47 +638,6 @@ export default function LiveChartView() {
     };
   }, []);
 
-  /* ── Dynamic Stacked Sub-Chart Scale Margins (No Overlap) ─── */
-  useEffect(() => {
-    if (!chartRef.current || !candleRef.current) return;
-    const chart = chartRef.current;
-    const candle = candleRef.current;
-
-    const activeSubPanes = [
-      showRSI ? 'rsi' : null,
-      showMACD ? 'macd' : null,
-      showVolume ? 'vol' : null,
-    ].filter(Boolean);
-
-    const subCount = activeSubPanes.length;
-
-    if (subCount === 0) {
-      // 100% full vertical height for main candlesticks
-      try { candle.priceScale().applyOptions({ scaleMargins: { top: 0.04, bottom: 0.04 } }); } catch {}
-      return;
-    }
-
-    // Dynamic vertical band allocation: each sub-chart gets its own clean horizontal band
-    const totalSubHeight = Math.min(0.44, subCount * 0.15);
-    const candleBottom = Number((totalSubHeight + 0.04).toFixed(3));
-    try { candle.priceScale().applyOptions({ scaleMargins: { top: 0.04, bottom: candleBottom } }); } catch {}
-
-    const singlePaneHeight = totalSubHeight / subCount;
-    activeSubPanes.forEach((paneId, idx) => {
-      const bottomMargin = Number(((subCount - 1 - idx) * singlePaneHeight).toFixed(3));
-      const topMargin = Number((1 - (bottomMargin + singlePaneHeight) + 0.015).toFixed(3));
-
-      const margins = { top: Math.max(0.05, topMargin), bottom: Math.max(0.01, bottomMargin) };
-
-      if (paneId === 'rsi') {
-        try { chart.priceScale('rsi-scale').applyOptions({ scaleMargins: margins }); } catch {}
-      } else if (paneId === 'macd') {
-        try { chart.priceScale('macd-scale').applyOptions({ scaleMargins: margins }); } catch {}
-      } else if (paneId === 'vol') {
-        try { chart.priceScale('volume-scale').applyOptions({ scaleMargins: margins }); } catch {}
-      }
-    });
-  }, [showVolume, showRSI, showMACD]);
 
   /* ── Auto Resize & Re-fit on Engine Switch ────────────────── */
   useEffect(() => {
