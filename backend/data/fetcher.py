@@ -27,8 +27,9 @@ from backend.data.database import (
     save_historical_prices, get_historical_prices,
     save_company_info, get_company_info, get_stale_company_info,
     get_live_tick_ohlcv, save_stock_universe, search_stock_universe,
-    get_db_connection
+    get_stock_universe_token, get_db_connection
 )
+
 
 # ── API & Authentication Setup ──
 ANGEL_API_KEY     = os.getenv("ANGEL_API_KEY",     "").strip()
@@ -351,22 +352,13 @@ def get_token_info(ticker: str) -> Optional[dict]:
     key = t if t.endswith("-EQ") else f"{t}-EQ"
     info = _scrip_map.get(key) or _scrip_map.get(t) or _scrip_map.get(t.removesuffix("-EQ"))
     if not info:
-        # Check SQLite stock_universe table
+        # Check stock_universe table via ORM
         try:
-            with get_db_connection() as conn:
-                row = conn.execute(
-                    "SELECT ticker, name, symbol, token, exchange FROM stock_universe WHERE ticker = ? OR symbol = ? LIMIT 1",
-                    (t, key)
-                ).fetchone()
-                if row:
-                    info = {
-                        "symbol": row["symbol"],
-                        "token": row["token"],
-                        "exch_seg": row["exchange"],
-                        "name": row["name"]
-                    }
-                    _scrip_map[key] = info
-                    _scrip_map[t] = info
+            db_row = get_stock_universe_token(t)
+            if db_row:
+                info = db_row
+                _scrip_map[key] = info
+                _scrip_map[t] = info
         except Exception:
             pass
 
@@ -374,6 +366,7 @@ def get_token_info(ticker: str) -> Optional[dict]:
         _load_scrip_master(force=True)
         info = _scrip_map.get(key) or _scrip_map.get(t)
     return info
+
 
 
 def search_nse_stocks(query: str, limit: int = 12) -> list[dict]:
