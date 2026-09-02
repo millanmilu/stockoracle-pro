@@ -583,56 +583,52 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
                 _set_cached(cache_key, final_df)
                 return final_df
 
-    # 4. Fallback: If Angel One API unavailable / missing data, use Yahoo Finance
-    try:
-        import yfinance as yf
-        YF_ALIAS_MAP = {
-            "HUL": "HINDUNILVR.NS",
-            "M&M": "M&M.NS",
-            "TATAMTRDVR": "TATAMOTORS-DVR.NS",
-            "TATAMOTORS": "TATAMOTORS.NS",
-            "NIFTY50": "^NSEI",
-            "NIFTY": "^NSEI",
-            "NIFTY 50": "^NSEI",
-            "SENSEX": "^BSESN",
-            "BANKNIFTY": "^NSEBANK",
-            "BANK NIFTY": "^NSEBANK",
-            "INDIAVIX": "^INDIAVIX",
-            "INDIA VIX": "^INDIAVIX",
-            "USDINR": "USDINR=X",
-            "USD / INR": "USDINR=X",
-            "BRENT CRUDE": "BZ=F",
-        }
-        yf_ticker = YF_ALIAS_MAP.get(ticker, f"{ticker}.NS" if not ticker.endswith(".NS") else ticker)
-        yf_interval = interval.lower() if is_intraday else "1d"
-        yf_period = "5d" if is_intraday else ("1y" if period.upper() in ["1Y", "370D", "200D", "6M"] else ("5y" if period.upper() == "5Y" else "6mo"))
+    # 4. Fallback: If Angel One API unavailable / missing data, use Yahoo Finance for daily candles
+    if not is_intraday:
         try:
-            yf_data = yf.download(yf_ticker, period=yf_period, interval=yf_interval, progress=False, auto_adjust=False)
-            if yf_data is not None and not yf_data.empty:
-                yf_df = yf_data.reset_index()
-                if isinstance(yf_df.columns, pd.MultiIndex):
-                    yf_df.columns = [c[0].lower() for c in yf_df.columns]
-                else:
-                    yf_df.columns = [str(c).lower() for c in yf_df.columns]
+            import yfinance as yf
+            YF_ALIAS_MAP = {
+                "HUL": "HINDUNILVR.NS",
+                "M&M": "M&M.NS",
+                "TATAMTRDVR": "TATAMOTORS-DVR.NS",
+                "TATAMOTORS": "TATAMOTORS.NS",
+                "NIFTY50": "^NSEI",
+                "NIFTY": "^NSEI",
+                "NIFTY 50": "^NSEI",
+                "SENSEX": "^BSESN",
+                "BANKNIFTY": "^NSEBANK",
+                "BANK NIFTY": "^NSEBANK",
+                "INDIAVIX": "^INDIAVIX",
+                "INDIA VIX": "^INDIAVIX",
+                "USDINR": "USDINR=X",
+                "USD / INR": "USDINR=X",
+                "BRENT CRUDE": "BZ=F",
+            }
+            yf_ticker = YF_ALIAS_MAP.get(ticker, f"{ticker}.NS" if not ticker.endswith(".NS") else ticker)
+            yf_period = "1y" if period.upper() in ["1Y", "370D", "200D", "6M"] else ("5y" if period.upper() == "5Y" else "6mo")
+            try:
+                yf_data = yf.download(yf_ticker, period=yf_period, interval="1d", progress=False, auto_adjust=False)
+                if yf_data is not None and not yf_data.empty:
+                    yf_df = yf_data.reset_index()
+                    if isinstance(yf_df.columns, pd.MultiIndex):
+                        yf_df.columns = [c[0].lower() for c in yf_df.columns]
+                    else:
+                        yf_df.columns = [str(c).lower() for c in yf_df.columns]
 
-                date_col = "date" if "date" in yf_df.columns else "datetime"
-                yf_df = yf_df.rename(columns={date_col: "date"})
-                if is_intraday:
-                    yf_df["date"] = pd.to_datetime(yf_df["date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
-                else:
+                    date_col = "date" if "date" in yf_df.columns else "datetime"
+                    yf_df = yf_df.rename(columns={date_col: "date"})
                     yf_df["date"] = pd.to_datetime(yf_df["date"]).dt.strftime("%Y-%m-%d")
-                    save_historical_prices(ticker, yf_df)
-
-                yf_df = yf_df[["date", "open", "high", "low", "close", "volume"]].dropna()
-                if not yf_df.empty and len(yf_df) >= 5:
-                    yf_df.attrs["data_source"] = "yahoo_finance"
-                    _set_cached(cache_key, yf_df)
-                    logger.info("Fallback: Loaded %d Yahoo Finance (%s) records for %s.", len(yf_df), yf_interval, ticker)
-                    return yf_df
+                    yf_df = yf_df[["date", "open", "high", "low", "close", "volume"]].dropna()
+                    if not yf_df.empty and len(yf_df) >= 5:
+                        save_historical_prices(ticker, yf_df)
+                        yf_df.attrs["data_source"] = "yahoo_finance"
+                        _set_cached(cache_key, yf_df)
+                        logger.info("Fallback: Stored %d Yahoo Finance records in SQLite for %s.", len(yf_df), ticker)
+                        return yf_df
+            except Exception as e:
+                logger.debug("YF download attempt failed for %s: %s", yf_ticker, e)
         except Exception as e:
-            logger.debug("YF download attempt failed for %s: %s", yf_ticker, e)
-    except Exception as e:
-        logger.warning("Yahoo Finance fallback failed for %s: %s", ticker, e)
+            logger.warning("Yahoo Finance fallback failed for %s: %s", ticker, e)
 
     # 5. Check if local database has any partial records
     if db_df is not None and not db_df.empty and len(db_df) >= 5:
