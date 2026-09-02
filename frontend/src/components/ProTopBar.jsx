@@ -95,7 +95,10 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
   };
 
   const handleSelectResult = (ticker) => {
-    useStore.getState().setSelectedSymbol(ticker);
+    if (!ticker) return;
+    const clean = String(ticker).toUpperCase().trim();
+    useStore.getState().setSelectedSymbol(clean);
+    useStore.getState().setActiveView?.('Live Chart');
     setQuery('');
     setResults([]);
   };

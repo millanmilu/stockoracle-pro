@@ -66,8 +66,7 @@ export default function App() {
   const activeView = useStore(s => s.activeView);
   const trainingStatus = useStore(s => s.trainingStatus);
   const selectedSymbol = useStore(s => s.selectedSymbol);
-  const theme = useStore(s => s.theme);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1024);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showKeymapModal, setShowKeymapModal] = useState(false);

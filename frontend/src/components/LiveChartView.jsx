@@ -598,6 +598,9 @@ export default function LiveChartView() {
           roAnimFrame = requestAnimationFrame(() => {
             if (chartRef.current) {
               chartRef.current.applyOptions({ width, height });
+              if (!isReplayMode) {
+                chartRef.current.timeScale().fitContent();
+              }
             }
           });
         }
@@ -1309,15 +1312,19 @@ export default function LiveChartView() {
     const timer = setTimeout(() => {
       try {
         if (chartRef.current && activeCandles.length > 0) {
-          const total = activeCandles.length;
-          const visibleCount = Math.min(total, 120);
-          chartRef.current.timeScale().setVisibleLogicalRange({
-            from: total - visibleCount,
-            to: total + 3,
-          });
+          if (isReplayMode) {
+            const total = activeCandles.length;
+            const visibleCount = Math.min(total, 80);
+            chartRef.current.timeScale().setVisibleLogicalRange({
+              from: Math.max(0, total - visibleCount),
+              to: total + 3,
+            });
+          } else {
+            chartRef.current.timeScale().fitContent();
+          }
         }
       } catch {}
-    }, 50);
+    }, 60);
     return () => clearTimeout(timer);
   }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showVWAP, showSupertrend, showKeyLevels, showPatterns, indicatorParams, isReplayMode, replayIndex]);
 
