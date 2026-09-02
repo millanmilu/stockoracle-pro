@@ -123,6 +123,7 @@ export default function LiveChartView() {
   const [livePrice,   setLivePrice]   = useState(null);
   const [liveChange,  setLiveChange]  = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [wsIsLive, setWsIsLive] = useState(false);
   const [loading,     setLoading]     = useState(true);
   const [predLoading, setPredLoading] = useState(true);
   const [dataSource,  setDataSource]  = useState('unknown');
@@ -898,6 +899,7 @@ export default function LiveChartView() {
           // Server flag may be wrong due to UTC vs IST timezone bug on AWS EC2.
           const isLiveTick = is_live === true || clientMarketOpen;
           useStore.getState().setWsLiveData?.(isLiveTick);
+          setWsIsLive(isLiveTick);
 
           if (ticker === selectedSymbol) {
             // Anchor session OHLC if provided by server feed
@@ -909,18 +911,11 @@ export default function LiveChartView() {
               };
             }
 
-            // Update live price during active live market sessions
-            if (isLiveTick) {
-              setLivePrice(price);
-            }
+            // Always update live price — stale prices still form candles
+            setLivePrice(price);
             setLiveChange(change_pct);
 
-            // Block chart candle updates for stale fallback prices —
-            // the candle stays at last historical close, which is more accurate
-            if (!isLiveTick) {
-              console.debug(`[WS] Stale fallback price for ${ticker}: ${price} (is_live=false, market closed) — skipping candle update`);
-              return;
-            }
+
 
 
             // Real-time Canvas Price Alert Trigger & Chime
@@ -996,7 +991,10 @@ export default function LiveChartView() {
     }
 
     const intraday = !isDaily;
-    activeCandleRef.current = null;
+    // NOTE: activeCandleRef is intentionally NOT reset here.
+    // It is only reset in handleIntervalChange() and when selectedSymbol changes.
+    // Resetting it here wipes the live candle every time rawHistory refetches (prediction update, etc.)
+
 
     // 1. Build Candles with IQR Outlier Filtering & High/Low validity safety
     const validRaw = rawHistory.filter(d => d && d.date && !isNaN(parseNum(d.close)) && parseNum(d.close) > 0);
@@ -2524,7 +2522,93 @@ export default function LiveChartView() {
                   </div>
                 )}
 
+                {/* ── Feed Status Badge (top-right of chart) ── */}
+                {!loading && (() => {
+                  // Compute client-side IST market hours for badge
+                  const nowUt = Date.now();
+                  const istOff = 5.5 * 3600 * 1000;
+                  const istD = new Date(nowUt + istOff);
+                  const iDay = istD.getUTCDay();
+                  const iHr  = istD.getUTCHours();
+                  const iMin = istD.getUTCMinutes();
+                  const clientOpen = iDay >= 1 && iDay <= 5 &&
+                    ((iHr > 9) || (iHr === 9 && iMin >= 15)) &&
+                    ((iHr < 15) || (iHr === 15 && iMin <= 30));
+
+                  let label, dotColor, bgColor, borderColor, titleText;
+                  if (!wsConnected) {
+                    label = 'DISCONNECTED'; dotColor = '#EF4444'; bgColor = 'rgba(239,68,68,0.12)'; borderColor = 'rgba(239,68,68,0.35)';
+                    titleText = 'WebSocket disconnected — attempting to reconnect';
+                  } else if (!clientOpen) {
+                    label = 'MARKET CLOSED'; dotColor = '#64748B'; bgColor = 'rgba(100,116,139,0.12)'; borderColor = 'rgba(100,116,139,0.3)';
+                    titleText = 'NSE market is closed (9:15–15:30 IST weekdays). Showing last close price.';
+                  } else if (wsIsLive) {
+                    label = 'LIVE'; dotColor = '#10B981'; bgColor = 'rgba(16,185,129,0.12)'; borderColor = 'rgba(16,185,129,0.3)';
+                    titleText = 'Live NSE price feed via Angel One — candles updating in real-time';
+                  } else {
+                    label = 'CACHED'; dotColor = '#F59E0B'; bgColor = 'rgba(245,158,11,0.12)'; borderColor = 'rgba(245,158,11,0.3)';
+                    titleText = 'Angel One API unavailable — showing cached/delayed price data';
+                  }
+                  return (
+                    <div
+                      title={titleText}
+                      style={{
+                        position: 'absolute', top: 10, right: 10, zIndex: 20,
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        padding: '3px 8px', borderRadius: 4,
+                        background: bgColor, border: `1px solid ${borderColor}`,
+                        fontSize: '0.68rem', fontWeight: 800,
+                        fontFamily: 'JetBrains Mono, monospace',
+                        color: dotColor, pointerEvents: 'auto', cursor: 'help',
+                        userSelect: 'none',
+                      }}
+                    >
+                      <span style={{
+                        width: 6, height: 6, borderRadius: '50%',
+                        backgroundColor: dotColor,
+                        boxShadow: wsConnected && wsIsLive ? `0 0 6px ${dotColor}` : 'none',
+                        animation: wsConnected && wsIsLive ? 'livePulse 1.5s ease-in-out infinite' : 'none',
+                        flexShrink: 0,
+                      }} />
+                      {label}
+                    </div>
+                  );
+                })()}
+
+                {/* ── Stale Data Warning Banner ── */}
+                {!loading && wsConnected && wsIsLive === false && (() => {
+                  const nowUt = Date.now();
+                  const istOff = 5.5 * 3600 * 1000;
+                  const istD = new Date(nowUt + istOff);
+                  const iDay = istD.getUTCDay();
+                  const iHr  = istD.getUTCHours();
+                  const iMin = istD.getUTCMinutes();
+                  const clientOpen = iDay >= 1 && iDay <= 5 &&
+                    ((iHr > 9) || (iHr === 9 && iMin >= 15)) &&
+                    ((iHr < 15) || (iHr === 15 && iMin <= 30));
+                  if (!clientOpen) return null; // Only show during market hours
+                  return (
+                    <div style={{
+                      position: 'absolute', bottom: 36, left: 0, right: 0,
+                      zIndex: 15, display: 'flex', justifyContent: 'center',
+                      pointerEvents: 'none',
+                    }}>
+                      <div style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 6,
+                        padding: '5px 14px', borderRadius: 6,
+                        background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)',
+                        fontSize: '0.7rem', fontWeight: 700, color: '#F59E0B',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
+                        backdropFilter: 'blur(6px)',
+                      }}>
+                        ⚠️ Angel One API unavailable — chart showing cached/delayed data. Candles will resume when connection restores.
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div ref={containerRef} style={{ width:'100%', height:'100%' }} />
+
               </div>
               
               {/* ── Right Docked Pro Indicator Panel (AI Patterns, Backtest) ── */}
