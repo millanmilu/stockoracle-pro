@@ -1698,8 +1698,9 @@ export default function LiveChartView() {
             <button
               onClick={() => {
                 setShowSymbolModal(!showSymbolModal);
-                setShowIndicatorDropdown(false);
+                setShowIndicatorsModal(false);
               }}
+
               style={{
                 display: 'flex',
                 alignItems: 'center',
