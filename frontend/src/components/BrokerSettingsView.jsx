@@ -294,6 +294,8 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
   const [persistToDisk, setPersistToDisk] = useState(true);
   const [brokerLatency, setBrokerLatency] = useState(null);
   const [auditLogs, setAuditLogs] = useState([]);
+  const [savedAccounts, setSavedAccounts] = useState({});
+  const [isConnecting, setIsConnecting] = useState(false);
   
   // ── Multi-AI Providers State ──
   const [selectedAiProvider, setSelectedAiProvider] = useState('gemini');
@@ -327,6 +329,7 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
       if (resAccounts.ok) {
         const accData = await resAccounts.json();
         if (accData && accData.accounts) {
+          setSavedAccounts(accData.accounts);
           setConfigs(prev => {
             const next = { ...prev };
             Object.entries(accData.accounts).forEach(([bId, bVal]) => {
@@ -342,6 +345,7 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
           });
         }
       }
+
 
       if (resLogs.ok) {
         const logData = await resLogs.json();
@@ -560,6 +564,35 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
       toast.error('Network error');
     }
   };
+
+  /* 1-Click Quick Connect Using Stored Credentials (No form typing needed) */
+  const handleQuickConnect = async (brokerId = selectedBroker) => {
+    setIsConnecting(true);
+    setStatuses(s => ({ ...s, [brokerId]: 'applying' }));
+    try {
+      const res = await fetch(`${API_BASE}/api/broker/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ broker: brokerId }),
+      });
+      const data = await res.json();
+      setStatuses(s => ({ ...s, [brokerId]: data.success ? 'connected' : 'failed' }));
+      setMessages(m => ({ ...m, [brokerId]: data.message }));
+      if (data.success) {
+        toast.success(data.message || 'Connected successfully!');
+        fetchStatus();
+      } else {
+        toast.error(data.message || 'Connection failed.');
+      }
+    } catch {
+      setStatuses(s => ({ ...s, [brokerId]: 'failed' }));
+      setMessages(m => ({ ...m, [brokerId]: 'Network error while connecting broker.' }));
+      toast.error('Network error connecting broker.');
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
 
   /* BUG #7 (HIGH): Clear deletes from backend DB and memory */
   const handleClear = async () => {
@@ -1224,7 +1257,8 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
               {BROKERS.map(b => {
                 const isSel = selectedBroker === b.id;
                 const isAct = liveStatus?.active_broker === b.id;
-                const st = statuses[b.id] || (isAct && liveStatus?.session_active ? 'connected' : (b.supported ? 'untested' : 'coming-soon'));
+                const hasSaved = savedAccounts[b.id]?.has_credentials;
+                const st = statuses[b.id] || (isAct && liveStatus?.session_active ? 'connected' : (hasSaved ? 'saved' : (b.supported ? 'untested' : 'coming-soon')));
 
                 return (
                   <div
@@ -1241,7 +1275,14 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                       <span style={{ fontSize: '1.2rem' }}>{b.logo}</span>
                       <div>
-                        <div style={{ fontSize: '0.8rem', fontWeight: 700, color: isSel ? '#FFFFFF' : '#E2E8F0' }}>{b.name}</div>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 700, color: isSel ? '#FFFFFF' : '#E2E8F0', display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <span>{b.name}</span>
+                          {hasSaved && (
+                            <span title="Encrypted credentials stored on server" style={{ fontSize: '0.58rem', background: 'rgba(16,185,129,0.2)', color: '#10B981', padding: '0 4px', borderRadius: 3, fontWeight: 800 }}>
+                              STORED
+                            </span>
+                          )}
+                        </div>
                         <div style={{ fontSize: '0.65rem', color: '#64748B' }}>{b.subtitle}</div>
                       </div>
                     </div>
@@ -1249,6 +1290,7 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
                   </div>
                 );
               })}
+
 
               <div style={{ marginTop: 'auto', paddingTop: 12, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
                 <button
@@ -1288,6 +1330,59 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
                 <StatusBadge status={currentStatus} />
               </div>
 
+              {/* Stored Credentials Profile Card & 1-Click Connect Banner */}
+              {savedAccounts[selectedBroker]?.has_credentials && (
+                <div style={{
+                  background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.12), rgba(99, 102, 241, 0.08))',
+                  border: '1px solid rgba(16, 185, 129, 0.35)',
+                  borderRadius: 10,
+                  padding: '12px 16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: 12,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{
+                      width: 32, height: 32, borderRadius: 8,
+                      background: 'rgba(16, 185, 129, 0.2)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: '#10B981', border: '1px solid rgba(16, 185, 129, 0.4)'
+                    }}>
+                      <CheckCircle2 size={18} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 800, color: '#F1F5F9', display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>Saved Profile Ready</span>
+                        <span style={{ fontSize: '0.65rem', background: 'rgba(16, 185, 129, 0.2)', color: '#10B981', padding: '1px 6px', borderRadius: 4, fontWeight: 700 }}>
+                          SECURE VAULT
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: '#94A3B8', marginTop: 2 }}>
+                        Credentials permanently encrypted in server database. You do not need to re-type them.
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleQuickConnect(selectedBroker)}
+                    disabled={isConnecting}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '7px 16px', borderRadius: 8, border: 'none',
+                      background: 'linear-gradient(135deg, #10B981, #059669)',
+                      color: '#FFFFFF', fontSize: '0.78rem', fontWeight: 800,
+                      cursor: 'pointer', boxShadow: '0 2px 10px rgba(16, 185, 129, 0.35)',
+                    }}
+                  >
+                    <Zap size={14} className={isConnecting ? 'broker-spin' : ''} />
+                    {isConnecting ? 'Connecting…' : '⚡ 1-Click Connect'}
+                  </button>
+                </div>
+              )}
+
               {/* Form Fields */}
               <div>
                 {broker?.fields.map(f => (
@@ -1304,8 +1399,8 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
               {currentMsg && (
                 <div style={{
                   padding: '9px 12px', borderRadius: 8, fontSize: '0.75rem',
-                  background: currentStatus === 'connected' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-                  border: `1px solid ${currentStatus === 'connected' ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                  background: currentStatus === 'connected' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+                  border: `1px solid ${currentStatus === 'connected' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
                   color: currentStatus === 'connected' ? '#34D399' : '#F87171',
                   display: 'flex', alignItems: 'center', gap: 8,
                 }}>
@@ -1314,7 +1409,7 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
                 </div>
               )}
 
-              {/* BUG #8 (MEDIUM): Accurate Disk vs DB Checkbox Label */}
+              {/* Accurate Disk vs DB Checkbox Label */}
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: 'rgba(255,255,255,0.02)', padding: '10px 12px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.06)' }}>
                 <input
                   type="checkbox"
@@ -1324,7 +1419,7 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
                   style={{ marginTop: 2, accentColor: '#6366F1', cursor: 'pointer' }}
                 />
                 <label htmlFor="persist-env" style={{ fontSize: '0.73rem', color: '#CBD5E1', cursor: 'pointer', lineHeight: 1.4 }}>
-                  <b>Save to Disk (.env file):</b> Also write credentials to server <code>.env</code> file for survival across server reboots. Credentials are encrypted and saved to SQLite database regardless.
+                  <b>Save to Disk (.env file):</b> Also write credentials to server <code>backend/.env</code> for survival across server reboots. Credentials are encrypted and saved to PostgreSQL/database regardless.
                 </label>
               </div>
 
@@ -1358,6 +1453,23 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
                   <Shield size={13} /> Save to Server (DB)
                 </button>
 
+                {savedAccounts[selectedBroker]?.has_credentials && (
+                  <button
+                    type="button"
+                    onClick={() => handleQuickConnect(selectedBroker)}
+                    disabled={isConnecting}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '8px 18px', borderRadius: 8, border: '1px solid #10B981',
+                      background: 'rgba(16, 185, 129, 0.15)', color: '#10B981',
+                      fontSize: '0.78rem', fontWeight: 800, cursor: 'pointer'
+                    }}
+                  >
+                    <Zap size={14} className={isConnecting ? 'broker-spin' : ''} />
+                    {isConnecting ? 'Connecting…' : 'Connect Stored Credentials'}
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={handleApply}
@@ -1371,7 +1483,7 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
                   }}
                 >
                   <Zap size={14} />
-                  {currentStatus === 'applying' ? 'Activating Feed…' : 'Apply as Active Broker'}
+                  {currentStatus === 'applying' ? 'Activating Feed…' : 'Save & Apply Active'}
                 </button>
 
                 <button
@@ -1387,6 +1499,7 @@ export default function BrokerSettingsView({ initialTab = 'broker' }) {
                   <Trash2 size={13} /> Clear
                 </button>
               </div>
+
 
             </div>
           </div>

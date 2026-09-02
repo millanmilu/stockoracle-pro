@@ -15,7 +15,13 @@ from pydantic import BaseModel
 
 from backend.core.logging import get_logger
 from backend.data import fetcher as _fetcher
-from backend.data.database import get_db_connection
+from backend.data.database import (
+    get_db_connection,
+    save_broker_account_orm,
+    get_all_broker_accounts_orm,
+    get_broker_account_orm,
+    delete_broker_account_orm,
+)
 from backend.shared.security import encrypt_value, decrypt_value
 
 logger = get_logger("stockoracle.broker")
@@ -68,79 +74,25 @@ class BrokerApplyRequest(BaseModel):
     persist_to_disk: bool = True
 
 
+class BrokerConnectRequest(BaseModel):
+    broker: str  # "angel_one" | "zerodha" | "upstox" | "fyers"
+
+
 class BrokerClearRequest(BaseModel):
     broker: str  # "angel_one" | "zerodha" | "upstox" | "fyers"
+
 
 
 # ── Database Helpers ───────────────────────────────────────────────────────────
 
 def save_broker_to_db(broker_name: str, creds_dict: dict, is_active: bool = True) -> bool:
-    """Permanently saves or updates broker credentials in the broker_accounts table."""
-    try:
-        with get_db_connection() as conn:
-            # 1. Ensure table exists
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS broker_accounts (
-                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                    broker            TEXT NOT NULL UNIQUE,
-                    is_active         INTEGER NOT NULL DEFAULT 0,
-                    credentials_json  TEXT NOT NULL,
-                    session_data_json TEXT,
-                    last_verified_at  TEXT,
-                    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
-                    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
-                )
-            """)
-            
-            # If activating this broker, deactivate others
-            if is_active:
-                conn.execute("UPDATE broker_accounts SET is_active = 0")
-
-            now_str = datetime.now(timezone.utc).isoformat()
-            creds_str = encrypt_value(json.dumps(creds_dict))
-
-            # Insert or replace broker credentials
-            conn.execute("""
-                INSERT INTO broker_accounts (broker, is_active, credentials_json, updated_at)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(broker) DO UPDATE SET
-                    is_active = excluded.is_active,
-                    credentials_json = excluded.credentials_json,
-                    updated_at = excluded.updated_at
-            """, (broker_name, 1 if is_active else 0, creds_str, now_str))
-            conn.commit()
-            logger.info("Permanently stored %s credentials (encrypted) in database.", broker_name)
-            return True
-    except Exception as exc:
-        logger.error("Failed saving broker %s to database: %s", broker_name, exc)
-        return False
+    """Permanently saves or updates broker credentials in the broker_accounts table (ORM + PostgreSQL/SQLite)."""
+    return save_broker_account_orm(broker_name, creds_dict, is_active=is_active)
 
 
 def get_all_brokers_from_db() -> Dict[str, dict]:
-    """Retrieves all saved broker accounts from the database."""
-    result = {}
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.execute("""
-                SELECT broker, is_active, credentials_json, last_verified_at, updated_at
-                FROM broker_accounts
-            """)
-            for row in cursor.fetchall():
-                try:
-                    decrypted_raw = decrypt_value(row["credentials_json"]) if row["credentials_json"] else ""
-                    creds = json.loads(decrypted_raw) if decrypted_raw else {}
-                except Exception:
-                    creds = {}
-                result[row["broker"]] = {
-                    "broker": row["broker"],
-                    "is_active": bool(row["is_active"]),
-                    "credentials": creds,
-                    "last_verified_at": row["last_verified_at"],
-                    "updated_at": row["updated_at"],
-                }
-    except Exception as exc:
-        logger.warning("Could not read broker_accounts table: %s", exc)
-    return result
+    """Retrieves all saved broker accounts from the database (ORM + PostgreSQL/SQLite)."""
+    return get_all_broker_accounts_orm()
 
 
 def _persist_credentials_to_env(broker: str, creds_dict: dict) -> bool:
@@ -148,6 +100,7 @@ def _persist_credentials_to_env(broker: str, creds_dict: dict) -> bool:
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     target_paths = [
         os.path.join(base_dir, ".env"),
+        os.path.join(base_dir, "backend", ".env"),
         os.path.join(os.path.dirname(base_dir), ".env"),
     ]
 
@@ -213,6 +166,7 @@ def _persist_credentials_to_env(broker: str, creds_dict: dict) -> bool:
             logger.error("Failed writing to %s: %s", env_file, exc)
 
     return updated_any
+
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -527,17 +481,101 @@ def apply_broker_credentials(req: BrokerApplyRequest):
     raise HTTPException(status_code=400, detail=f"Unsupported broker '{broker}'.")
 
 
+@router.post("/connect")
+def connect_saved_broker_endpoint(req: BrokerConnectRequest):
+    """
+    Connects/activates a broker using its already stored encrypted credentials from DB or .env.
+    Allows 1-click connection without re-entering form fields.
+    """
+    from backend.data.database import save_broker_audit_log, get_broker_account_orm, save_broker_account_orm
+    broker = req.broker.lower().strip()
+
+    # Load stored credentials
+    acc = get_broker_account_orm(broker)
+    creds_dict = acc.get("credentials", {}) if acc else {}
+
+    # If missing from DB, check in-memory or .env fallback
+    if not creds_dict and broker == "angel_one":
+        k = (os.environ.get("ANGEL_API_KEY") or "").strip()
+        c = (os.environ.get("ANGEL_CLIENT_ID") or "").strip()
+        p = (os.environ.get("ANGEL_PASSWORD") or "").strip()
+        t = (os.environ.get("ANGEL_TOTP_SECRET") or "").strip()
+        if all([k, c, p, t]):
+            creds_dict = {"api_key": k, "client_id": c, "password": p, "totp_secret": t}
+            save_broker_account_orm("angel_one", creds_dict, is_active=True)
+
+    if not creds_dict:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No saved credentials found for {broker.replace('_', ' ').title()}. Please enter and save your credentials first."
+        )
+
+    if broker == "angel_one":
+        for field in ["api_key", "client_id", "password", "totp_secret"]:
+            if not creds_dict.get(field):
+                raise HTTPException(status_code=422, detail=f"Incomplete saved credentials: {field} is missing.")
+
+        # Update environment & fetcher globals
+        os.environ["ANGEL_API_KEY"]     = creds_dict["api_key"]
+        os.environ["ANGEL_CLIENT_ID"]   = creds_dict["client_id"]
+        os.environ["ANGEL_PASSWORD"]    = creds_dict["password"]
+        os.environ["ANGEL_TOTP_SECRET"] = creds_dict["totp_secret"]
+
+        _fetcher.ANGEL_API_KEY     = creds_dict["api_key"]
+        _fetcher.ANGEL_CLIENT_ID   = creds_dict["client_id"]
+        _fetcher.ANGEL_PASSWORD    = creds_dict["password"]
+        _fetcher.ANGEL_TOTP_SECRET = creds_dict["totp_secret"]
+
+        save_broker_to_db("angel_one", creds_dict, is_active=True)
+
+        try:
+            from SmartApi import SmartConnect
+            _fetcher.smartApi = SmartConnect(api_key=creds_dict["api_key"])
+        except Exception as exc:
+            logger.warning("SmartConnect reinit warning: %s", exc)
+
+        _fetcher.reset_session()
+        success = _fetcher.ensure_session()
+
+        if success:
+            logger.info("Angel One broker connected via 1-click connect from stored credentials.")
+            save_broker_audit_log("angel_one", "CONNECT", "ACTIVE", f"Client {creds_dict['client_id']} connected")
+            return {
+                "success": True,
+                "message": f"Connected to Angel One successfully! Live session active for client {creds_dict['client_id']}.",
+                "session_active": True,
+            }
+        else:
+            err = _fetcher.get_session_details().get("last_auth_error") or "Authentication failed"
+            save_broker_audit_log("angel_one", "CONNECT", "AUTH_FAILED", err)
+            return {
+                "success": False,
+                "message": f"Login failed with saved credentials: {err}",
+                "session_active": False,
+            }
+
+    elif broker in ["zerodha", "upstox", "fyers"]:
+        save_broker_to_db(broker, creds_dict, is_active=True)
+        save_broker_audit_log(broker, "CONNECT", "ACTIVE", f"{broker} set as active broker")
+        return {
+            "success": True,
+            "message": f"{broker.capitalize()} set as active broker from saved credentials.",
+            "session_active": True,
+        }
+
+    raise HTTPException(status_code=400, detail=f"Unsupported broker '{broker}'.")
+
+
 @router.post("/clear")
+
 def clear_broker_credentials_endpoint(req: BrokerClearRequest):
     """
     Clears credentials for a broker from database and active memory.
     """
-    from backend.data.database import save_broker_audit_log
+    from backend.data.database import save_broker_audit_log, delete_broker_account_orm
     broker = req.broker.lower().strip()
     try:
-        with get_db_connection() as conn:
-            conn.execute("DELETE FROM broker_accounts WHERE broker = ?", (broker,))
-            conn.commit()
+        delete_broker_account_orm(broker)
 
         if broker == "angel_one":
             for k in ["ANGEL_API_KEY", "ANGEL_CLIENT_ID", "ANGEL_PASSWORD", "ANGEL_TOTP_SECRET"]:

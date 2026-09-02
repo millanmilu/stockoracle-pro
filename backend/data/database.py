@@ -58,7 +58,27 @@ def init_db():
             session.execute(text("DELETE FROM historical_prices WHERE length(date) > 10 OR length(date) != 10"))
     except Exception as e:
         logger.debug("Historical prices auto-cleansing check notice: %s", e)
+
+    # Auto-seed broker_accounts from existing .env credentials if table is currently empty
+    try:
+        existing_brokers = get_all_broker_accounts_orm()
+        angel_key = (os.environ.get("ANGEL_API_KEY") or "").strip()
+        angel_client = (os.environ.get("ANGEL_CLIENT_ID") or "").strip()
+        angel_pass = (os.environ.get("ANGEL_PASSWORD") or "").strip()
+        angel_totp = (os.environ.get("ANGEL_TOTP_SECRET") or "").strip()
+        if "angel_one" not in existing_brokers and all([angel_key, angel_client, angel_pass, angel_totp]):
+            save_broker_account_orm("angel_one", {
+                "api_key": angel_key,
+                "client_id": angel_client,
+                "password": angel_pass,
+                "totp_secret": angel_totp,
+            }, is_active=True)
+            logger.info("Auto-seeded active Angel One credentials from .env into broker_accounts table.")
+    except Exception as e:
+        logger.debug("Broker auto-seed notice: %s", e)
+
     logger.info("Database initialization complete.")
+
 
 
 
@@ -1703,6 +1723,97 @@ def get_recent_broker_audit_logs(limit: int = 10) -> list:
     except Exception as exc:
         logger.warning("Failed retrieving broker audit logs: %s", exc)
         return []
+
+
+def save_broker_account_orm(broker_name: str, credentials_dict: dict, is_active: bool = True) -> bool:
+    """Permanently saves or updates broker credentials via SQLAlchemy 2.0 ORM with encryption."""
+    from backend.shared.security import encrypt_value
+    now_dt = datetime.now(timezone.utc)
+    creds_encrypted = encrypt_value(json.dumps(credentials_dict))
+    try:
+        with get_db_session() as session:
+            if is_active:
+                session.execute(update(BrokerAccount).values(is_active=False))
+            
+            existing = session.query(BrokerAccount).filter(BrokerAccount.broker == broker_name).first()
+            if existing:
+                existing.credentials_json = creds_encrypted
+                existing.is_active = is_active
+                existing.updated_at = now_dt
+            else:
+                new_acc = BrokerAccount(
+                    broker=broker_name,
+                    is_active=is_active,
+                    credentials_json=creds_encrypted,
+                    created_at=now_dt,
+                    updated_at=now_dt,
+                )
+                session.add(new_acc)
+        return True
+    except Exception as exc:
+        logger.error("Failed saving broker account %s via ORM: %s", broker_name, exc)
+        return False
+
+
+def get_all_broker_accounts_orm() -> Dict[str, dict]:
+    """Retrieves all configured broker accounts via SQLAlchemy ORM with automatic decryption."""
+    from backend.shared.security import decrypt_value
+    result = {}
+    try:
+        with get_db_session() as session:
+            rows = session.query(BrokerAccount).all()
+            for r in rows:
+                try:
+                    decrypted_raw = decrypt_value(r.credentials_json) if r.credentials_json else ""
+                    creds = json.loads(decrypted_raw) if decrypted_raw else {}
+                except Exception:
+                    creds = {}
+                result[r.broker] = {
+                    "broker": r.broker,
+                    "is_active": bool(r.is_active),
+                    "credentials": creds,
+                    "last_verified_at": r.last_verified_at,
+                    "updated_at": r.updated_at.isoformat() if hasattr(r.updated_at, "isoformat") else str(r.updated_at),
+                }
+    except Exception as exc:
+        logger.warning("Failed reading broker accounts via ORM: %s", exc)
+    return result
+
+
+def get_broker_account_orm(broker_name: str) -> Optional[dict]:
+    """Retrieves a single broker account by name via SQLAlchemy ORM with decryption."""
+    from backend.shared.security import decrypt_value
+    try:
+        with get_db_session() as session:
+            r = session.query(BrokerAccount).filter(BrokerAccount.broker == broker_name).first()
+            if r:
+                try:
+                    decrypted_raw = decrypt_value(r.credentials_json) if r.credentials_json else ""
+                    creds = json.loads(decrypted_raw) if decrypted_raw else {}
+                except Exception:
+                    creds = {}
+                return {
+                    "broker": r.broker,
+                    "is_active": bool(r.is_active),
+                    "credentials": creds,
+                    "last_verified_at": r.last_verified_at,
+                    "updated_at": r.updated_at.isoformat() if hasattr(r.updated_at, "isoformat") else str(r.updated_at),
+                }
+    except Exception as exc:
+        logger.warning("Failed reading broker account %s via ORM: %s", broker_name, exc)
+    return None
+
+
+def delete_broker_account_orm(broker_name: str) -> bool:
+    """Deletes a broker account from the database via SQLAlchemy ORM."""
+    try:
+        with get_db_session() as session:
+            session.execute(delete(BrokerAccount).where(BrokerAccount.broker == broker_name))
+        return True
+    except Exception as exc:
+        logger.error("Failed deleting broker account %s via ORM: %s", broker_name, exc)
+        return False
+
 
 
 

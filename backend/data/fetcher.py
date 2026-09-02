@@ -83,36 +83,32 @@ def reset_session():
 
 
 def _load_broker_from_database() -> bool:
-    """Loads active broker credentials permanently stored in the broker_accounts table."""
+    """Loads active broker credentials permanently stored in the broker_accounts table (via ORM)."""
     global ANGEL_API_KEY, ANGEL_CLIENT_ID, ANGEL_PASSWORD, ANGEL_TOTP_SECRET, smartApi
     try:
-        from backend.data.database import get_db_connection
-        with get_db_connection() as conn:
-            row = conn.execute("""
-                SELECT credentials_json FROM broker_accounts
-                WHERE broker = 'angel_one' AND is_active = 1
-                LIMIT 1
-            """).fetchone()
-            if row and row["credentials_json"]:
-                creds = json.loads(row["credentials_json"])
-                ANGEL_API_KEY = creds.get("api_key", "").strip()
-                ANGEL_CLIENT_ID = creds.get("client_id", "").strip()
-                ANGEL_PASSWORD = creds.get("password", "").strip()
-                ANGEL_TOTP_SECRET = creds.get("totp_secret", "").strip()
+        from backend.data.database import get_broker_account_orm
+        acc = get_broker_account_orm("angel_one")
+        if acc and acc.get("is_active") and acc.get("credentials"):
+            creds = acc["credentials"]
+            ANGEL_API_KEY = creds.get("api_key", "").strip()
+            ANGEL_CLIENT_ID = creds.get("client_id", "").strip()
+            ANGEL_PASSWORD = creds.get("password", "").strip()
+            ANGEL_TOTP_SECRET = creds.get("totp_secret", "").strip()
 
-                os.environ["ANGEL_API_KEY"] = ANGEL_API_KEY
-                os.environ["ANGEL_CLIENT_ID"] = ANGEL_CLIENT_ID
-                os.environ["ANGEL_PASSWORD"] = ANGEL_PASSWORD
-                os.environ["ANGEL_TOTP_SECRET"] = ANGEL_TOTP_SECRET
+            os.environ["ANGEL_API_KEY"] = ANGEL_API_KEY
+            os.environ["ANGEL_CLIENT_ID"] = ANGEL_CLIENT_ID
+            os.environ["ANGEL_PASSWORD"] = ANGEL_PASSWORD
+            os.environ["ANGEL_TOTP_SECRET"] = ANGEL_TOTP_SECRET
 
-                if not smartApi and ANGEL_API_KEY:
-                    from SmartApi import SmartConnect
-                    smartApi = SmartConnect(api_key=ANGEL_API_KEY)
-                logger.info("Loaded active Angel One credentials from database broker_accounts.")
-                return True
+            if not smartApi and ANGEL_API_KEY:
+                from SmartApi import SmartConnect
+                smartApi = SmartConnect(api_key=ANGEL_API_KEY)
+            logger.info("Loaded active Angel One credentials from database broker_accounts via ORM.")
+            return True
     except Exception as exc:
         logger.debug("Could not load broker credentials from DB: %s", exc)
     return False
+
 
 
 def ensure_session() -> bool:
