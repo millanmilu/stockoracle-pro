@@ -1369,19 +1369,18 @@ export default function LiveChartView() {
   /* ── Real-time Price Update ───────────────────────────────── */
 
   useEffect(() => {
-    if (!candleRef.current || !rawHistory || !Array.isArray(rawHistory) || !rawHistory.length) return;
+    if (!candleRef.current || !rawHistory || !Array.isArray(rawHistory) || !rawHistory.length || livePrice == null) return;
+    const numLivePrice = Number(livePrice);
+    if (isNaN(numLivePrice) || numLivePrice <= 0) return;
 
     const last = rawHistory[rawHistory.length - 1];
     if (!last || last.close == null) return;
     const lastClose = parseNum(last.close);
 
-    const effectivePrice = livePrice != null ? livePrice : lastClose;
-    if (effectivePrice == null || isNaN(effectivePrice)) return;
-
     // Sanity check: ignore out-of-range live ticks (> 20% deviation from recent reference)
     const refPrice = activeCandleRef.current?.close || lastClose;
-    if (refPrice > 0 && Math.abs(effectivePrice - refPrice) / refPrice > 0.20) {
-      console.warn(`⚠️ [LiveTick] Dropping anomalous live price tick ${effectivePrice} for ${selectedSymbol} (ref: ${refPrice})`);
+    if (refPrice > 0 && Math.abs(numLivePrice - refPrice) / refPrice > 0.20) {
+      console.warn(`⚠️ [LiveTick] Dropping anomalous live price tick ${numLivePrice} for ${selectedSymbol} (ref: ${refPrice})`);
       return;
     }
 
@@ -1413,9 +1412,9 @@ export default function LiveChartView() {
           if (activeCandleRef.current && activeCandleRef.current.time === lastDateStr) {
             activeCandleRef.current = {
               ...activeCandleRef.current,
-              close: livePrice,
+              close: numLivePrice,
             };
-            candleRef.current.update(activeCandleRef.current);
+            try { candleRef.current.update(activeCandleRef.current); } catch {}
           }
           return;
         }
@@ -1425,16 +1424,16 @@ export default function LiveChartView() {
 
         if (isNewBar) {
           const histMatch = isTodayHistorical ? last : null;
-          const initialOpen = serverOpen || (histMatch ? Number(histMatch.open) : livePrice);
+          const initialOpen = serverOpen || (histMatch ? Number(histMatch.open) : numLivePrice);
           const initialHigh = Math.max(
             serverHigh || initialOpen,
             histMatch ? Number(histMatch.high) : initialOpen,
-            livePrice
+            numLivePrice
           );
           const initialLow = Math.min(
             serverLow || initialOpen,
             histMatch ? Number(histMatch.low) : initialOpen,
-            livePrice
+            numLivePrice
           );
 
           activeCandleRef.current = {
@@ -1442,20 +1441,20 @@ export default function LiveChartView() {
             open  : initialOpen,
             high  : initialHigh,
             low   : initialLow,
-            close : livePrice,
+            close : numLivePrice,
           };
         } else {
           // Existing bar: update wicks with server-confirmed session bounds and live price
-          const currentOpen = activeCandleRef.current.open || serverOpen || livePrice;
+          const currentOpen = activeCandleRef.current.open || serverOpen || numLivePrice;
           const currentHigh = Math.max(
             activeCandleRef.current.high,
             serverHigh || currentOpen,
-            livePrice
+            numLivePrice
           );
           const currentLow = Math.min(
             activeCandleRef.current.low,
             serverLow || currentOpen,
-            livePrice
+            numLivePrice
           );
 
           activeCandleRef.current = {
@@ -1463,7 +1462,7 @@ export default function LiveChartView() {
             open  : currentOpen,
             high  : currentHigh,
             low   : currentLow,
-            close : livePrice,
+            close : numLivePrice,
           };
         }
       } else {
@@ -1484,28 +1483,33 @@ export default function LiveChartView() {
 
         if (isNewBar) {
           const isLastMatch = targetSec === lastBarSec;
-          const initialOpen = isLastMatch ? Number(last.open) : livePrice;
-          const initialHigh = isLastMatch ? Math.max(Number(last.high), livePrice) : livePrice;
-          const initialLow  = isLastMatch ? Math.min(Number(last.low),  livePrice) : livePrice;
+          const initialOpen = isLastMatch ? Number(last.open) : numLivePrice;
+          const initialHigh = isLastMatch ? Math.max(Number(last.high), numLivePrice) : numLivePrice;
+          const initialLow  = isLastMatch ? Math.min(Number(last.low),  numLivePrice) : numLivePrice;
           activeCandleRef.current = {
             time  : targetSec,
             open  : initialOpen,
             high  : initialHigh,
             low   : initialLow,
-            close : livePrice,
+            close : numLivePrice,
           };
         } else {
           activeCandleRef.current = {
             ...activeCandleRef.current,
-            high  : Math.max(activeCandleRef.current.high, livePrice),
-            low   : Math.min(activeCandleRef.current.low,  livePrice),
-            close : livePrice,
+            high  : Math.max(activeCandleRef.current.high, numLivePrice),
+            low   : Math.min(activeCandleRef.current.low,  numLivePrice),
+            close : numLivePrice,
           };
         }
       }
 
-      if (activeCandleRef.current) {
-        candleRef.current.update(activeCandleRef.current);
+      if (
+        activeCandleRef.current &&
+        activeCandleRef.current.time != null &&
+        typeof activeCandleRef.current.open === 'number' && !isNaN(activeCandleRef.current.open) &&
+        typeof activeCandleRef.current.close === 'number' && !isNaN(activeCandleRef.current.close)
+      ) {
+        try { candleRef.current.update(activeCandleRef.current); } catch {}
 
         // Real-time dynamic indicator line updates with incoming live tick
         const sP = indicatorParams.smaPeriod || 20;
@@ -1561,18 +1565,20 @@ export default function LiveChartView() {
       try { candleRef.current.removePriceLine(livePriceLineRef.current); } catch {}
       livePriceLineRef.current = null;
     }
-    const displayPrice = (wsLiveData && livePrice != null) ? livePrice : (lastCandleClose != null ? lastCandleClose : livePrice);
-    if (displayPrice != null) {
-      livePriceLineRef.current = candleRef.current.createPriceLine({
-        price               : displayPrice,
-        color               : (liveChange ?? 0) >= 0 ? '#26A69A' : '#EF5350',
-        lineWidth           : 1,
-        lineStyle           : LineStyle.Dashed,
-        axisLabelVisible    : true,
-        axisLabelColor      : (liveChange ?? 0) >= 0 ? '#26A69A' : '#EF5350',
-        axisLabelTextColor  : '#fff',
-        title               : wsLiveData ? 'LIVE' : 'CLOSE',
-      });
+    const displayPrice = numLivePrice;
+    if (typeof displayPrice === 'number' && !isNaN(displayPrice) && displayPrice > 0) {
+      try {
+        livePriceLineRef.current = candleRef.current.createPriceLine({
+          price               : displayPrice,
+          color               : (liveChange ?? 0) >= 0 ? '#26A69A' : '#EF5350',
+          lineWidth           : 1,
+          lineStyle           : LineStyle.Dashed,
+          axisLabelVisible    : true,
+          axisLabelColor      : (liveChange ?? 0) >= 0 ? '#26A69A' : '#EF5350',
+          axisLabelTextColor  : '#fff',
+          title               : wsLiveData ? 'LIVE' : 'CLOSE',
+        });
+      } catch {}
     }
   }, [livePrice, interval, isDaily, selectedSymbol, showSMA, showEMA, showBB, indicatorParams, rawHistory]);
 
