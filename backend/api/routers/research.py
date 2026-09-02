@@ -361,12 +361,15 @@ def execute_screener_query_endpoint(req: ScreenerQueryRequest):
     Sub-50ms query latency.
     """
     from backend.research.screener_dsl import parse_screener_query
-    from backend.data.database import execute_screener_sql_query, get_db_connection
+    from backend.data.database import execute_screener_sql_query
+    from backend.shared.database import get_db_session
+    from backend.shared.models import ScreenerDailyMetric
     from backend.data.seed_screener_metrics import seed_screener_metrics_table
+    from sqlalchemy import func, select
 
     # Auto-seed if empty
-    with get_db_connection() as conn:
-        count = conn.execute("SELECT COUNT(*) as c FROM screener_daily_metrics").fetchone()["c"]
+    with get_db_session() as session:
+        count = session.scalar(select(func.count()).select_from(ScreenerDailyMetric)) or 0
         if count == 0:
             seed_screener_metrics_table()
 

@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 
 from backend.data.fetcher import fetch_stock_data, fetch_company_info
-from backend.data.database import upsert_screener_daily_metric, get_db_connection
+from backend.data.database import upsert_screener_daily_metric
 from backend.data.seed_screener_metrics import MASTER_NSE_UNIVERSE
 from backend.analysis.indicators import calculate_rsi, calculate_sma
 

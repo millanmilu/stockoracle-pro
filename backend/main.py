@@ -6,7 +6,9 @@ import os
 import json
 import asyncio
 import logging
+import pandas as pd
 from contextlib import asynccontextmanager, suppress
+
 from typing import Dict, Any, List, Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Security, HTTPException
@@ -163,15 +165,25 @@ async def websocket_price_broadcast_loop():
 
                         # Invariant fallback: strictly fall back to verified historical close price
                         if not base_price or base_price <= 0:
-                            hist = await asyncio.to_thread(get_historical_prices, t, 1)
-                            if hist:
-                                last_candle = hist[-1] if isinstance(hist, list) else None
-                                if last_candle and last_candle.get("close"):
-                                    base_price = float(last_candle["close"])
-                                    base_open = float(last_candle.get("open", base_price))
-                                    base_high = float(last_candle.get("high", base_price))
-                                    base_low = float(last_candle.get("low", base_price))
-                                    prices_cache[t] = base_price
+                            hist = await asyncio.to_thread(get_historical_prices, t)
+                            if hist is not None and not (isinstance(hist, pd.DataFrame) and hist.empty):
+                                if isinstance(hist, pd.DataFrame):
+                                    last_row = hist.iloc[-1]
+                                    close_val = float(last_row.get("close", 0) or 0)
+                                    if close_val > 0:
+                                        base_price = close_val
+                                        base_open = float(last_row.get("open", base_price) or base_price)
+                                        base_high = float(last_row.get("high", base_price) or base_price)
+                                        base_low = float(last_row.get("low", base_price) or base_price)
+                                        prices_cache[t] = base_price
+                                elif isinstance(hist, list) and len(hist) > 0:
+                                    last_candle = hist[-1]
+                                    if isinstance(last_candle, dict) and last_candle.get("close"):
+                                        base_price = float(last_candle["close"])
+                                        base_open = float(last_candle.get("open", base_price) or base_price)
+                                        base_high = float(last_candle.get("day_high", last_candle.get("high", base_price)) or base_price)
+                                        base_low = float(last_candle.get("day_low", last_candle.get("low", base_price)) or base_price)
+                                        prices_cache[t] = base_price
 
                         if base_price and base_price > 0:
                             payload = {

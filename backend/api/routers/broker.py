@@ -16,7 +16,6 @@ from pydantic import BaseModel
 from backend.core.logging import get_logger
 from backend.data import fetcher as _fetcher
 from backend.data.database import (
-    get_db_connection,
     save_broker_account_orm,
     get_all_broker_accounts_orm,
     get_broker_account_orm,

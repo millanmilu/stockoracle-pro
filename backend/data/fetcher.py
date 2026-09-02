@@ -23,12 +23,14 @@ else:
     load_dotenv()
 
 from SmartApi import SmartConnect
+from backend.data.market_calendar import is_trading_day
 from backend.data.database import (
     save_historical_prices, get_historical_prices,
     save_company_info, get_company_info, get_stale_company_info,
     get_live_tick_ohlcv, save_stock_universe, search_stock_universe,
-    get_stock_universe_token, get_db_connection
+    get_stock_universe_token
 )
+
 
 
 # ── API & Authentication Setup ──
@@ -455,7 +457,7 @@ def _synthesize_fallback_candles(ticker: str, target_price: float = 1000.0, high
             "volume": vol
         })
     df = pd.DataFrame(records)
-    save_historical_prices(ticker, df)
+    df.attrs["data_source"] = "synthesized"
     return df
 
 
@@ -511,14 +513,12 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
 
     def _expected_latest_trading_day() -> str:
         now = datetime.now(_IST)
-        if now.weekday() == 5:
+        if now.hour < 9 or (now.hour == 9 and now.minute < 15):
             target = now - timedelta(days=1)
-        elif now.weekday() == 6:
-            target = now - timedelta(days=2)
-        elif now.hour < 9 or (now.hour == 9 and now.minute < 15):
-            target = now - timedelta(days=(3 if now.weekday() == 0 else 1))
         else:
             target = now
+        while not is_trading_day(target):
+            target = target - timedelta(days=1)
         return target.strftime("%Y-%m-%d")
 
     # 2. Check SQLite local database (ONLY FOR DAILY INTERVAL '1d')
@@ -607,7 +607,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
             yf_ticker = YF_ALIAS_MAP.get(ticker, f"{ticker}.NS" if not ticker.endswith(".NS") else ticker)
             yf_period = "1y" if period.upper() in ["1Y", "370D", "200D", "6M"] else ("5y" if period.upper() == "5Y" else "6mo")
             try:
-                yf_data = yf.download(yf_ticker, period=yf_period, interval="1d", progress=False, auto_adjust=True)
+                yf_data = yf.download(yf_ticker, period=yf_period, interval="1d", progress=False, auto_adjust=False)
                 if yf_data is not None and not yf_data.empty:
                     yf_df = yf_data.reset_index()
                     if isinstance(yf_df.columns, pd.MultiIndex):
@@ -621,6 +621,7 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
                     yf_df = yf_df[["date", "open", "high", "low", "close", "volume"]].dropna()
                     if not yf_df.empty and len(yf_df) >= 5:
                         save_historical_prices(ticker, yf_df)
+                        yf_df.attrs["data_source"] = "yahoo_finance"
                         _set_cached(cache_key, yf_df)
                         logger.info("Fallback: Stored %d Yahoo Finance records in SQLite for %s.", len(yf_df), ticker)
                         return yf_df
@@ -703,34 +704,47 @@ def fetch_company_info(ticker: str) -> Optional[dict]:
             day_low       = float(ltp_data.get("low",   0.0))
             prev_close    = float(ltp_data.get("close", 0.0))
 
-    # 2. Check SQLite Historical Prices table for latest close and 52W High/Low
+    # 2. Check Historical Prices table for latest close and 52W High/Low via ORM
     try:
-        with get_db_connection() as conn:
-            # 52-week range from SQLite
+        from backend.shared.database import get_db_session
+        from backend.shared.models import HistoricalPrice
+        from sqlalchemy import func, select
+        with get_db_session() as session:
+            # 52-week range
             from_52w = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
-            row_52w = conn.execute(
-                "SELECT MAX(high) as max_h, MIN(low) as min_l FROM historical_prices WHERE ticker = ? AND date >= ?",
-                (ticker, from_52w)
-            ).fetchone()
-            if row_52w and row_52w["max_h"]:
-                fifty_two_week_high = float(row_52w["max_h"])
-                fifty_two_week_low  = float(row_52w["min_l"])
+            stmt_52w = select(
+                func.max(HistoricalPrice.high),
+                func.min(HistoricalPrice.low)
+            ).where(
+                HistoricalPrice.ticker == ticker,
+                HistoricalPrice.date >= from_52w
+            )
+            row_52w = session.execute(stmt_52w).first()
+            if row_52w and row_52w[0] is not None:
+                fifty_two_week_high = float(row_52w[0])
+                fifty_two_week_low  = float(row_52w[1])
 
             # If current price still 0, get latest close from DB
             if current_price == 0.0:
-                last_row = conn.execute(
-                    "SELECT close, open, high, low, volume FROM historical_prices WHERE ticker = ? ORDER BY date DESC LIMIT 1",
-                    (ticker,)
-                ).fetchone()
-                if last_row:
-                    current_price = float(last_row["close"])
-                    prev_close = float(last_row["close"])
-                    day_high = float(last_row["high"])
-                    day_low = float(last_row["low"])
-                    open_price = float(last_row["open"])
-                    volume = int(last_row["volume"] or 0)
-    except Exception:
-        pass
+                stmt_last = select(
+                    HistoricalPrice.close,
+                    HistoricalPrice.open,
+                    HistoricalPrice.high,
+                    HistoricalPrice.low,
+                    HistoricalPrice.volume
+                ).where(
+                    HistoricalPrice.ticker == ticker
+                ).order_by(HistoricalPrice.date.desc()).limit(1)
+                last_row = session.execute(stmt_last).first()
+                if last_row and last_row[0] is not None:
+                    current_price = float(last_row[0])
+                    prev_close = float(last_row[0])
+                    open_price = float(last_row[1] or last_row[0])
+                    day_high = float(last_row[2] or last_row[0])
+                    day_low = float(last_row[3] or last_row[0])
+                    volume = int(last_row[4] or 0)
+    except Exception as e:
+        logger.debug("Error reading fallback company info from ORM for %s: %s", ticker, e)
 
     # 3. If still missing, check stale company info
     if current_price == 0.0:
@@ -814,7 +828,7 @@ def get_combined_stock_data(ticker: str, period: str = "2Y") -> Optional[pd.Data
 
     # Step 2: Check live ticks only on trading days (IST)
     now = datetime.now(_IST)
-    if now.weekday() >= 5:  # Saturday = 5, Sunday = 6
+    if not is_trading_day(now):
         return df
 
     today_candle = get_live_tick_ohlcv(ticker)

@@ -7,7 +7,9 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
-from backend.data.database import get_db_connection
+from backend.shared.database import get_db_session
+from backend.shared.models import ScreenerDailyMetric
+from sqlalchemy import select
 
 logger = logging.getLogger("StockOracle.Analysis.Heatmap")
 
@@ -73,26 +75,31 @@ def compute_market_heatmap_data(
 
     valid_tickers = INDEX_CONSTITUENTS.get(universe_clean)
 
-    with get_db_connection() as conn:
+    with get_db_session() as session:
+        stmt = select(ScreenerDailyMetric)
         if valid_tickers:
-            placeholders = ",".join(["?"] * len(valid_tickers))
-            rows = conn.execute(
-                f"""
-                SELECT * FROM screener_daily_metrics
-                WHERE ticker IN ({placeholders})
-                ORDER BY market_cap_cr DESC
-                """,
-                valid_tickers
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT * FROM screener_daily_metrics
-                ORDER BY market_cap_cr DESC
-                """
-            ).fetchall()
-
-    stock_list = [dict(r) for r in rows]
+            stmt = stmt.where(ScreenerDailyMetric.ticker.in_(valid_tickers))
+        stmt = stmt.order_by(ScreenerDailyMetric.market_cap_cr.desc())
+        metric_objs = session.scalars(stmt).all()
+        stock_list = [{
+            "ticker": m.ticker,
+            "company_name": m.company_name,
+            "sector": m.sector,
+            "close_price": m.close_price,
+            "change_pct_1d": m.change_pct_1d,
+            "market_cap_cr": m.market_cap_cr,
+            "pe_ratio": m.pe_ratio,
+            "pb_ratio": m.pb_ratio,
+            "dividend_yield": m.dividend_yield,
+            "rsi_14": m.rsi_14,
+            "sma_20": m.sma_20,
+            "sma_50": m.sma_50,
+            "sma_200": m.sma_200,
+            "volume_vs_avg_pct": m.volume_vs_avg_pct,
+            "macd_signal_cross": m.macd_signal_cross,
+            "distance_52w_high_pct": m.distance_52w_high_pct,
+            "distance_52w_low_pct": m.distance_52w_low_pct,
+        } for m in metric_objs]
 
     # If database is empty, return structured fallback
     if not stock_list:

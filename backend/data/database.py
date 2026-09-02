@@ -40,7 +40,7 @@ CACHE_MODEL_MAP = {
 
 
 def get_db_connection():
-    """Returns a high-concurrency SQLite connection with sqlite3.Row factory and WAL mode."""
+    """[DEPRECATED] Returns a legacy SQLite connection. Use `get_db_session()` for unified PostgreSQL/SQLite ORM queries."""
     conn = sqlite3.connect(DB_PATH, timeout=20.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
@@ -124,9 +124,6 @@ def _normalize_price(v):
         val = float(v)
         if np.isnan(val) or val <= 0:
             return None
-        # Normalization heuristic: convert paise (> 100,000 for non-MRF stocks) to rupees
-        if val > 200000:
-            return round(val / 100.0, 2)
         return round(val, 2)
     except Exception:
         return None
@@ -163,35 +160,41 @@ def validate_and_sanitize_candles(df: pd.DataFrame) -> pd.DataFrame:
 
 def clean_paise_and_outliers(ticker: str = None):
     """
-    Scans historical_prices table in SQLite, auto-corrects paise-to-rupee unit mismatches
-    (close > 50 * median), and deletes corrupt/non-positive price rows.
+    Scans historical_prices table, auto-corrects paise-to-rupee unit mismatches
+    (close > 50 * median), and deletes corrupt/non-positive price rows via SQLAlchemy ORM.
     """
-    with get_db_connection() as conn:
-        query = "SELECT rowid, ticker, close FROM historical_prices"
-        params = []
-        if ticker:
-            query += " WHERE ticker = ?"
-            params.append(ticker.upper())
+    try:
+        with get_db_session() as session:
+            stmt = select(HistoricalPrice.id, HistoricalPrice.ticker, HistoricalPrice.close)
+            if ticker:
+                stmt = stmt.where(HistoricalPrice.ticker == ticker.upper())
+            rows = session.execute(stmt).all()
+            if not rows:
+                return
 
-        df = pd.read_sql_query(query, conn, params=params)
-        if df.empty:
-            return
+            df = pd.DataFrame([{"id": r[0], "ticker": r[1], "close": float(r[2])} for r in rows])
+            if df.empty:
+                return
 
-        for t, group in df.groupby("ticker"):
-            median_val = group["close"].median()
-            if not median_val or median_val <= 0:
-                continue
+            for t, group in df.groupby("ticker"):
+                median_val = group["close"].median()
+                if not median_val or median_val <= 0:
+                    continue
 
-            # Identify candidates (> 50x median, likely paise mismatch)
-            paise_candidates = group[group["close"] > median_val * 50]
-            if not paise_candidates.empty:
-                for rid, old_val in zip(paise_candidates["rowid"], paise_candidates["close"]):
-                    conn.execute("UPDATE historical_prices SET open = open/100.0, high = high/100.0, low = low/100.0, close = close/100.0 WHERE rowid = ?", (rid,))
-                logger.info("Normalized %d paise records to rupees for %s.", len(paise_candidates), t)
+                # Identify candidates (> 50x median, likely paise mismatch)
+                paise_candidates = group[group["close"] > median_val * 50]
+                if not paise_candidates.empty:
+                    for cid in paise_candidates["id"]:
+                        session.execute(
+                            text("UPDATE historical_prices SET open = open/100.0, high = high/100.0, low = low/100.0, close = close/100.0 WHERE id = :id"),
+                            {"id": cid}
+                        )
+                    logger.info("Normalized %d paise records to rupees for %s.", len(paise_candidates), t)
 
-        # Delete invalid <= 0 rows
-        conn.execute("DELETE FROM historical_prices WHERE close <= 0 OR high <= 0 OR open <= 0 OR low <= 0 OR length(date) != 10")
-        conn.commit()
+            # Delete invalid <= 0 rows or corrupt non-10-char dates
+            session.execute(text("DELETE FROM historical_prices WHERE close <= 0 OR high <= 0 OR open <= 0 OR low <= 0 OR length(date) != 10"))
+    except Exception as e:
+        logger.error("Error in clean_paise_and_outliers: %s", e)
 
 
 def save_historical_prices(ticker: str, df: pd.DataFrame):
@@ -732,21 +735,30 @@ def get_recent_live_ticks(ticker: str, limit: int = 200) -> Optional[pd.DataFram
 
 
 def get_live_tick_ohlcv(ticker: str) -> Optional[dict]:
-    """Aggregates today's live ticks into a single synthetic OHLCV row."""
+    """Aggregates today's live ticks into a single synthetic OHLCV row with exact IST-to-UTC boundaries."""
     ticker_u = ticker.upper()
-    today = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
+    now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+    today_str = now_ist.strftime("%Y-%m-%d")
+
+    # Calculate exact UTC bounds for the entire IST calendar day
+    start_ist = now_ist.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_ist = now_ist.replace(hour=23, minute=59, second=59, microsecond=999999)
+    start_utc_iso = start_ist.astimezone(timezone.utc).isoformat()
+    end_utc_iso = end_ist.astimezone(timezone.utc).isoformat()
+
     try:
         with get_db_session() as session:
             stmt = select(LiveTick.price, LiveTick.timestamp).where(
                 LiveTick.ticker == ticker_u,
-                LiveTick.timestamp >= today
+                LiveTick.timestamp >= start_utc_iso,
+                LiveTick.timestamp <= end_utc_iso
             ).order_by(LiveTick.id.asc())
             rows = session.execute(stmt).all()
             if not rows:
                 return None
             prices = [float(r[0]) for r in rows]
             return {
-                "date": today,
+                "date": today_str,
                 "open": prices[0],
                 "high": max(prices),
                 "low": min(prices),
@@ -756,6 +768,20 @@ def get_live_tick_ohlcv(ticker: str) -> Optional[dict]:
     except Exception as e:
         logger.error("Error building live OHLCV for %s: %s", ticker_u, e)
         return None
+
+
+def purge_old_live_ticks(days: int = 3) -> int:
+    """Removes live ticks older than `days` to keep database storage bounded."""
+    cutoff_utc = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        with get_db_session() as session:
+            from sqlalchemy import delete
+            stmt = delete(LiveTick).where(LiveTick.timestamp < cutoff_utc)
+            result = session.execute(stmt)
+            return result.rowcount
+    except Exception as e:
+        logger.error("Error purging old live ticks: %s", e)
+        return 0
 
 
 def get_db_stats() -> dict:
@@ -1479,30 +1505,39 @@ def execute_screener_sql_query(
     safe_sort = sort_by if sort_by in allowed_sorts else "market_cap_cr"
     safe_dir = "ASC" if str(sort_dir).upper() == "ASC" else "DESC"
 
-    query_sql = f"""
-        SELECT *
-        FROM screener_daily_metrics
-        WHERE {where_clause}
-        ORDER BY {safe_sort} {safe_dir} NULLS LAST
-        LIMIT {max(1, min(limit, 2000))} OFFSET {max(0, offset)}
-    """
-
-    count_sql = f"""
-        SELECT COUNT(*) as total_count
-        FROM screener_daily_metrics
-        WHERE {where_clause}
-    """
-
     try:
-        with get_db_connection() as conn:
-            total_row = conn.execute(count_sql, params).fetchone()
-            total = total_row["total_count"] if total_row else 0
-            rows = conn.execute(query_sql, params).fetchall()
+        # Convert positional ? placeholders to named :p0, :p1 for SQLAlchemy portability across SQLite & PostgreSQL
+        named_where = where_clause
+        bind_params = {}
+        if params:
+            for i, p in enumerate(params):
+                named_where = named_where.replace("?", f":p{i}", 1)
+                bind_params[f"p{i}"] = p
+
+        query_sql = f"""
+            SELECT *
+            FROM screener_daily_metrics
+            WHERE {named_where}
+            ORDER BY {safe_sort} {safe_dir}
+            LIMIT {max(1, min(limit, 2000))} OFFSET {max(0, offset)}
+        """
+
+        count_sql = f"""
+            SELECT COUNT(*) as total_count
+            FROM screener_daily_metrics
+            WHERE {named_where}
+        """
+
+        with get_db_session() as session:
+            total_res = session.execute(text(count_sql), bind_params).first()
+            total = int(total_res[0]) if total_res and total_res[0] is not None else 0
+            rows = session.execute(text(query_sql), bind_params).mappings().all()
+            results = [dict(r) for r in rows]
 
         return {
             "total": total,
-            "count": len(rows),
-            "results": [dict(r) for r in rows],
+            "count": len(results),
+            "results": results,
         }
     except Exception as e:
         logger.warning("execute_screener_sql_query error for where=%s: %s", where_clause, e)

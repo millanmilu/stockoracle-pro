@@ -137,10 +137,13 @@ def is_genuine_equity(ticker: str) -> bool:
 
 def clean_and_reseed_screener():
     """Cleans screener_daily_metrics and reseeds with authentic master universe + real equities."""
+    from backend.shared.database import get_db_session
+    from backend.shared.models import ScreenerDailyMetric, StockUniverse
+    from sqlalchemy import select, delete, func
+
     print("🧹 Cleaning screener_daily_metrics table...")
-    with get_db_connection() as conn:
-        conn.execute("DELETE FROM screener_daily_metrics")
-        conn.commit()
+    with get_db_session() as session:
+        session.execute(delete(ScreenerDailyMetric))
 
     print("🚀 Seeding master curated stocks (NIFTY 50 & liquid leaders)...")
     seen_tickers = set()
@@ -148,34 +151,35 @@ def clean_and_reseed_screener():
         t = s["ticker"].upper().strip()
         upsert_screener_daily_metric(s)
         seen_tickers.add(t)
-    
+
     print(f"✅ Seeded {len(seen_tickers)} curated master stocks.")
 
-    with get_db_connection() as conn:
-        rows = conn.execute("SELECT ticker, name FROM stock_universe WHERE exchange = 'NSE'").fetchall()
-    
+    with get_db_session() as session:
+        stmt = select(StockUniverse.ticker, StockUniverse.name).where(StockUniverse.exchange == "NSE")
+        rows = session.execute(stmt).all()
+
     print(f"📦 Found {len(rows)} raw tickers in stock_universe table.")
 
     added = 0
     for r in rows:
-        ticker = str(r["ticker"]).strip().upper()
-        name = str(r["name"] or ticker).strip()
+        ticker = str(r[0]).strip().upper()
+        name = str(r[1] or ticker).strip()
 
         # Clean symbol
         t_clean = ticker.replace("-EQ", "").replace("-BE", "").replace("-SM", "").strip()
-        
+
         # Skip if already processed, in master universe, or is not genuine equity
         if t_clean in seen_tickers or not is_genuine_equity(t_clean):
             continue
-        
+
         seen_tickers.add(t_clean)
         metrics = generate_stock_metrics(t_clean, name)
         upsert_screener_daily_metric(metrics)
         added += 1
 
-    with get_db_connection() as conn:
-        total = conn.execute("SELECT COUNT(*) as c FROM screener_daily_metrics").fetchone()["c"]
-    
+    with get_db_session() as session:
+        total = session.scalar(select(func.count()).select_from(ScreenerDailyMetric)) or 0
+
     print(f"🎉 Successfully seeded {total} total clean equity stocks into screener_daily_metrics! (Added {added} secondary symbols)")
 
 
