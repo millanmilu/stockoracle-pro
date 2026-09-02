@@ -383,6 +383,9 @@ POPULAR_NSE_FALLBACKS = [
 ]
 
 
+POPULAR_NAME_MAP = {item["ticker"]: item["name"] for item in POPULAR_NSE_FALLBACKS}
+
+
 def search_stock_universe(query: str, limit: int = 12) -> list[dict]:
     """Returns ticker/name matches from the locally stored NSE symbol master and screener universe."""
     text_q = query.strip().upper()
@@ -400,9 +403,11 @@ def search_stock_universe(query: str, limit: int = 12) -> list[dict]:
                     SELECT ticker, name, exchange,
                         MIN(CASE 
                             WHEN UPPER(ticker) = :exact THEN 0 
-                            WHEN UPPER(ticker) LIKE :prefix THEN 1 
-                            WHEN UPPER(name) LIKE :prefix THEN 2
-                            ELSE 3 
+                            WHEN UPPER(ticker) LIKE :prefix AND UPPER(ticker) NOT LIKE '%-%' THEN 1 
+                            WHEN UPPER(ticker) LIKE :prefix THEN 2
+                            WHEN UPPER(name) LIKE :prefix THEN 3
+                            WHEN UPPER(ticker) NOT LIKE '%-%' THEN 4
+                            ELSE 5 
                         END) AS rank_score
                     FROM (
                         SELECT ticker, COALESCE(name, ticker) as name, COALESCE(exchange, 'NSE') as exchange 
@@ -426,7 +431,14 @@ def search_stock_universe(query: str, limit: int = 12) -> list[dict]:
             }).fetchall()
 
             if rows:
-                return [{"ticker": r[0], "name": r[1] or r[0], "exchange": r[2] or "NSE"} for r in rows]
+                results = []
+                for r in rows:
+                    t = r[0]
+                    n = r[1] or t
+                    if (not n or n == t) and t in POPULAR_NAME_MAP:
+                        n = POPULAR_NAME_MAP[t]
+                    results.append({"ticker": t, "name": n, "exchange": r[2] or "NSE"})
+                return results
     except Exception as exc:
         logger.warning("Error searching stock universe in database: %s", exc)
 
@@ -438,6 +450,7 @@ def search_stock_universe(query: str, limit: int = 12) -> list[dict]:
             if len(matches) >= lim:
                 break
     return matches
+
 
 
 
