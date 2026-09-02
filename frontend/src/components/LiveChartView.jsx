@@ -120,8 +120,19 @@ export default function LiveChartView() {
   const [timeframe,   setTimeframe]   = useState('5Y');
   const [rawHistory,  setRawHistory]  = useState(null);
   const [prediction,  setPrediction]  = useState(null);
-  const [livePrice,   setLivePrice]   = useState(null);
-  const [liveChange,  setLiveChange]  = useState(null);
+  const storeLive = useStore(s => s.livePrices?.[selectedSymbol]);
+  const [localLivePrice, setLocalLivePrice] = useState(null);
+  const [localLiveChange, setLocalLiveChange] = useState(null);
+
+  const livePrice = storeLive?.price ?? localLivePrice;
+  const liveChange = storeLive?.change_pct ?? localLiveChange;
+
+  const setLivePrice = useCallback((p) => {
+    setLocalLivePrice(p);
+  }, []);
+  const setLiveChange = useCallback((c) => {
+    setLocalLiveChange(c);
+  }, []);
   const [wsConnected, setWsConnected] = useState(false);
   const [wsIsLive, setWsIsLive] = useState(false);
   const [loading,     setLoading]     = useState(true);
@@ -808,6 +819,13 @@ export default function LiveChartView() {
     // Preserve old data while new data loads to prevent chart flickering/empty state
     activeCandleRef.current = null;
     sessionOHLCRef.current = null;
+
+    // Immediate store check to preload live price without waiting for first WS tick
+    const storedLive = useStore.getState().livePrices?.[selectedSymbol];
+    if (storedLive && storedLive.price > 0) {
+      setLocalLivePrice(storedLive.price);
+      setLocalLiveChange(storedLive.change_pct);
+    }
 
     console.log('[LiveChart] Fetching history for:', selectedSymbol, interval, timeframe);
     fetchHistory(selectedSymbol, interval, timeframe).then(result => {
