@@ -271,14 +271,12 @@ def save_historical_prices(ticker: str, df: pd.DataFrame):
                 session.merge(HistoricalPrice(**r))
 
 
-def get_historical_prices(ticker: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+def get_historical_prices(ticker: str, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Optional[pd.DataFrame]:
     """
-    Fetches historical daily price records for a ticker within a date range.
+    Fetches historical daily price records for a ticker within an optional date range.
     Returns a Pandas DataFrame, or None if no records exist.
     """
-    ticker = ticker.upper()
-    start_date = str(start_date)[:10]
-    end_date = str(end_date)[:10]
+    ticker = ticker.upper().strip()
 
     with get_db_session() as session:
         stmt = select(
@@ -290,15 +288,19 @@ def get_historical_prices(ticker: str, start_date: str, end_date: str) -> Option
             HistoricalPrice.volume
         ).where(
             HistoricalPrice.ticker == ticker,
-            func.length(HistoricalPrice.date) == 10,
-            HistoricalPrice.date >= start_date,
-            HistoricalPrice.date <= end_date
-        ).order_by(HistoricalPrice.date.asc())
+            func.length(HistoricalPrice.date) == 10
+        )
+        if start_date:
+            stmt = stmt.where(HistoricalPrice.date >= str(start_date)[:10])
+        if end_date:
+            stmt = stmt.where(HistoricalPrice.date <= str(end_date)[:10])
+
+        stmt = stmt.order_by(HistoricalPrice.date.asc())
         rows = session.execute(stmt).all()
         if not rows:
             return None
         return pd.DataFrame(
-            [{"date": r[0], "open": r[1], "high": r[2], "low": r[3], "close": r[4], "volume": r[5]} for r in rows]
+            [{"date": r[0], "open": float(r[1]), "high": float(r[2]), "low": float(r[3]), "close": float(r[4]), "volume": int(r[5] or 0)} for r in rows]
         )
 
 
