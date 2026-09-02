@@ -914,8 +914,9 @@ export default function LiveChartView() {
           useStore.getState().setWsLiveData?.(isLiveTick);
           setWsIsLive(isLiveTick);
 
-          // Use selectedSymbolRef to prevent stale closures
-          if (ticker === selectedSymbolRef.current) {
+          // Always read fresh active symbol directly from store & ref to eliminate any closure issue
+          const currentSym = useStore.getState().selectedSymbol || selectedSymbolRef.current;
+          if (ticker === currentSym) {
             console.log('[WS] Received price for active symbol:', ticker, price);
             // Anchor session OHLC if provided by server feed
             if (dayOpen > 0 || dayHigh > 0 || dayLow > 0) {
@@ -935,7 +936,7 @@ export default function LiveChartView() {
             setPriceAlerts(prevAlerts => {
               let changed = false;
               const updated = prevAlerts.map(alert => {
-                if (alert.ticker === selectedSymbolRef.current && !alert.triggered) {
+                if (alert.ticker === currentSym && !alert.triggered) {
                   const target = Number(alert.price);
                   const isHit = Math.abs(price - target) <= Math.max(0.5, target * 0.002) || 
                                 (alert.direction === 'above' && price >= target) ||
@@ -944,7 +945,7 @@ export default function LiveChartView() {
                     lastTriggeredMap.current.add(alert.id);
                     changed = true;
                     playAlertChime();
-                    toast.success(`🔔 PRICE ALERT TRIGGERED: ${selectedSymbolRef.current} reached ₹${price.toFixed(2)} (Target ₹${target})`, {
+                    toast.success(`🔔 PRICE ALERT TRIGGERED: ${currentSym} reached ₹${price.toFixed(2)} (Target ₹${target})`, {
                       duration: 6000,
                       icon: '🚨',
                     });
