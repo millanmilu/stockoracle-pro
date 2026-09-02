@@ -1572,6 +1572,7 @@ export default function LiveChartView() {
         axisLabelTextColor  : '#fff',
         title               : wsLiveData ? 'LIVE' : 'CLOSE',
       });
+    }
   }, [livePrice, interval, isDaily, selectedSymbol, showSMA, showEMA, showBB, indicatorParams, rawHistory]);
 
   // Debug log symbol, history, and live price changes
