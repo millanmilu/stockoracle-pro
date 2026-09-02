@@ -4,6 +4,15 @@ Tracks NSE trading sessions, market timings, and official exchange holidays.
 """
 from datetime import datetime, time, date
 from typing import Tuple
+from zoneinfo import ZoneInfo
+
+_IST = ZoneInfo("Asia/Kolkata")
+
+
+def _now_ist() -> datetime:
+    """Returns current datetime in IST (Asia/Kolkata) regardless of server timezone."""
+    return datetime.now(_IST)
+
 
 # Official NSE Equity Holidays (2025 - 2026)
 NSE_HOLIDAYS = {
@@ -47,9 +56,13 @@ MARKET_POST_CLOSE     = time(16, 0)
 
 
 def is_trading_day(dt: datetime = None) -> bool:
-    """Returns True if the given date is an active NSE trading day (weekday and not an exchange holiday)."""
+    """Returns True if the given date is an active NSE trading day (weekday and not an exchange holiday).
+    Always evaluates in IST regardless of server timezone."""
     if dt is None:
-        dt = datetime.now()
+        dt = _now_ist()
+    elif dt.tzinfo is None:
+        # naive datetime passed in — assume IST
+        dt = dt.replace(tzinfo=_IST)
     d = dt.date()
     # Check weekend (Saturday = 5, Sunday = 6)
     if dt.weekday() >= 5:
@@ -61,9 +74,12 @@ def is_trading_day(dt: datetime = None) -> bool:
 
 
 def is_market_open(dt: datetime = None) -> bool:
-    """Returns True if the normal continuous trading session (09:15 to 15:30 IST) is currently live."""
+    """Returns True if the normal continuous trading session (09:15 to 15:30 IST) is currently live.
+    Always evaluates in IST regardless of server timezone."""
     if dt is None:
-        dt = datetime.now()
+        dt = _now_ist()
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_IST)
     if not is_trading_day(dt):
         return False
     t = dt.time()
@@ -72,14 +88,16 @@ def is_market_open(dt: datetime = None) -> bool:
 
 def get_market_session_phase(dt: datetime = None) -> str:
     """
-    Returns the current session phase:
+    Returns the current session phase (always evaluated in IST):
       - 'PRE_MARKET'  (09:00 - 09:15)
       - 'LIVE'        (09:15 - 15:30)
       - 'POST_MARKET' (15:30 - 16:00)
       - 'CLOSED'      (After hours / Weekend / Holiday)
     """
     if dt is None:
-        dt = datetime.now()
+        dt = _now_ist()
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_IST)
     if not is_trading_day(dt):
         return "CLOSED"
     t = dt.time()
@@ -94,9 +112,12 @@ def get_market_session_phase(dt: datetime = None) -> str:
 
 
 def get_price_freshness(dt: datetime = None) -> dict:
-    """Returns structured price metadata including freshness, session, and as_of timestamp."""
+    """Returns structured price metadata including freshness, session, and as_of timestamp.
+    Always evaluates in IST regardless of server timezone."""
     if dt is None:
-        dt = datetime.now()
+        dt = _now_ist()
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_IST)
     phase = get_market_session_phase(dt)
     freshness = "REALTIME" if phase == "LIVE" else ("DELAYED" if phase in ["PRE_MARKET", "POST_MARKET"] else "CACHED_EOD")
     return {
@@ -105,3 +126,4 @@ def get_price_freshness(dt: datetime = None) -> dict:
         "is_trading_day": is_trading_day(dt),
         "as_of":         dt.isoformat()
     }
+

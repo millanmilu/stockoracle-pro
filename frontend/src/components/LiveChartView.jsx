@@ -879,7 +879,24 @@ export default function LiveChartView() {
         try {
           const data = JSON.parse(e.data);
           const { ticker, price, change_pct, is_live, open: dayOpen, high: dayHigh, low: dayLow } = data;
-          const isLiveTick = is_live === true; // strictly require confirmed live flag from server
+
+          // Client-side IST market hours check — independent of server is_live flag.
+          // Protects against server timezone misconfiguration (e.g. UTC vs IST mismatch on AWS).
+          const nowUtc = Date.now();
+          const istOffsetMs = 5.5 * 3600 * 1000;
+          const istDate = new Date(nowUtc + istOffsetMs);
+          const istDay  = istDate.getUTCDay();   // 0=Sun, 6=Sat
+          const istHour = istDate.getUTCHours();
+          const istMin  = istDate.getUTCMinutes();
+          const clientMarketOpen = (
+            istDay >= 1 && istDay <= 5 &&
+            ((istHour > 9) || (istHour === 9 && istMin >= 15)) &&
+            ((istHour < 15) || (istHour === 15 && istMin <= 30))
+          );
+
+          // Accept is_live from server OR client-side IST check (whichever is more permissive).
+          // Server flag may be wrong due to UTC vs IST timezone bug on AWS EC2.
+          const isLiveTick = is_live === true || clientMarketOpen;
           useStore.getState().setWsLiveData?.(isLiveTick);
 
           if (ticker === selectedSymbol) {
@@ -901,9 +918,10 @@ export default function LiveChartView() {
             // Block chart candle updates for stale fallback prices —
             // the candle stays at last historical close, which is more accurate
             if (!isLiveTick) {
-              console.debug(`[WS] Stale fallback price for ${ticker}: ${price} (is_live=false) — skipping candle update`);
+              console.debug(`[WS] Stale fallback price for ${ticker}: ${price} (is_live=false, market closed) — skipping candle update`);
               return;
             }
+
 
             // Real-time Canvas Price Alert Trigger & Chime
             setPriceAlerts(prevAlerts => {
