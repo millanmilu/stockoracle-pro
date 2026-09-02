@@ -370,6 +370,11 @@ export default function LiveChartView() {
   const candleRef2     = useRef(null);
 
   const wsRef          = useRef(null);
+  const selectedSymbolRef = useRef(selectedSymbol);
+  useEffect(() => {
+    selectedSymbolRef.current = selectedSymbol;
+  }, [selectedSymbol]);
+
   const isDaily = interval === '1d';
 
   /* ── Interval Handler ─────────────────────────────────────── */
@@ -797,31 +802,29 @@ export default function LiveChartView() {
   /* ── Primary Data Fetch ──────────────────────────────────── */
 
   useEffect(() => {
+    if (!selectedSymbol) return;
     setLoading(true);
     setPredLoading(true);
-    setRawHistory(null);
-    setPrediction(null);
-    setLivePrice(null);
-    setLiveChange(null);
+    // Preserve old data while new data loads to prevent chart flickering/empty state
     activeCandleRef.current = null;
     sessionOHLCRef.current = null;
 
+    console.log('[LiveChart] Fetching history for:', selectedSymbol, interval, timeframe);
     fetchHistory(selectedSymbol, interval, timeframe).then(result => {
+      console.log('[API] History loaded for', selectedSymbol, ':', result?.candles?.length, 'candles');
       setRawHistory(result?.candles ?? []);
       if (result?.dataSource) setDataSource(result.dataSource);
       setLoading(false);
-      setTimeout(() => {
-        if (chartRef.current && !isReplayMode) {
-          chartRef.current.timeScale().fitContent();
-        }
-      }, 100);
+    }).catch(err => {
+      console.error('[API] History fetch failed:', err);
+      setLoading(false);
     });
 
     if (isDaily) {
       fetchPredict(selectedSymbol).then(pred => {
         setPrediction(pred);
         setPredLoading(false);
-      });
+      }).catch(() => setPredLoading(false));
     } else {
       setPrediction(null);
       setPredLoading(false);
@@ -859,12 +862,13 @@ export default function LiveChartView() {
         setWsConnected(true);
         useStore.getState().setWsConnected?.(true);
         retryDelay = 1000;
-        const subs = [selectedSymbol];
+        const subs = [selectedSymbolRef.current];
         if (isSplitView && compareSymbol) {
           subs.push(compareSymbol);
         }
         try {
           ws.send(JSON.stringify({ subscribe: subs }));
+          console.log('[WS] Connected & Subscribed to:', subs);
         } catch {}
       };
 
@@ -910,7 +914,9 @@ export default function LiveChartView() {
           useStore.getState().setWsLiveData?.(isLiveTick);
           setWsIsLive(isLiveTick);
 
-          if (ticker === selectedSymbol) {
+          // Use selectedSymbolRef to prevent stale closures
+          if (ticker === selectedSymbolRef.current) {
+            console.log('[WS] Received price for active symbol:', ticker, price);
             // Anchor session OHLC if provided by server feed
             if (dayOpen > 0 || dayHigh > 0 || dayLow > 0) {
               sessionOHLCRef.current = {
@@ -923,15 +929,13 @@ export default function LiveChartView() {
             // Always update live price — stale prices still form candles
             setLivePrice(price);
             setLiveChange(change_pct);
-
-
-
+            useStore.getState().setLivePrice?.(ticker, { price, change_pct });
 
             // Real-time Canvas Price Alert Trigger & Chime
             setPriceAlerts(prevAlerts => {
               let changed = false;
               const updated = prevAlerts.map(alert => {
-                if (alert.ticker === selectedSymbol && !alert.triggered) {
+                if (alert.ticker === selectedSymbolRef.current && !alert.triggered) {
                   const target = Number(alert.price);
                   const isHit = Math.abs(price - target) <= Math.max(0.5, target * 0.002) || 
                                 (alert.direction === 'above' && price >= target) ||
@@ -940,7 +944,7 @@ export default function LiveChartView() {
                     lastTriggeredMap.current.add(alert.id);
                     changed = true;
                     playAlertChime();
-                    toast.success(`🔔 PRICE ALERT TRIGGERED: ${selectedSymbol} reached ₹${price.toFixed(2)} (Target ₹${target})`, {
+                    toast.success(`🔔 PRICE ALERT TRIGGERED: ${selectedSymbolRef.current} reached ₹${price.toFixed(2)} (Target ₹${target})`, {
                       duration: 6000,
                       icon: '🚨',
                     });
@@ -974,7 +978,22 @@ export default function LiveChartView() {
       setWsConnected(false);
       useStore.getState().setWsConnected?.(false);
     };
-  }, [selectedSymbol, targetAlertPrice, compareSymbol, isSplitView]);
+  }, []); // Persistent connection on mount
+
+  // Dedicated Re-subscribe on Symbol or Split-view Change
+  useEffect(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    const subs = [selectedSymbol];
+    if (isSplitView && compareSymbol) {
+      subs.push(compareSymbol);
+    }
+    try {
+      wsRef.current.send(JSON.stringify({ subscribe: subs }));
+      console.log('[WS] Re-subscribed on symbol change:', subs);
+    } catch (e) {
+      console.error('[WS] Subscribe failed:', e);
+    }
+  }, [selectedSymbol, compareSymbol, isSplitView, wsConnected]);
 
   /* ── Primary Chart Data Binding & Pattern Markers ─────────── */
 
@@ -1349,16 +1368,19 @@ export default function LiveChartView() {
   /* ── Real-time Price Update ───────────────────────────────── */
 
   useEffect(() => {
-    if (!candleRef.current || !rawHistory || !Array.isArray(rawHistory) || !rawHistory.length || livePrice == null) return;
+    if (!candleRef.current || !rawHistory || !Array.isArray(rawHistory) || !rawHistory.length) return;
 
     const last = rawHistory[rawHistory.length - 1];
     if (!last || last.close == null) return;
     const lastClose = parseNum(last.close);
 
+    const effectivePrice = livePrice != null ? livePrice : lastClose;
+    if (effectivePrice == null || isNaN(effectivePrice)) return;
+
     // Sanity check: ignore out-of-range live ticks (> 20% deviation from recent reference)
     const refPrice = activeCandleRef.current?.close || lastClose;
-    if (refPrice > 0 && Math.abs(livePrice - refPrice) / refPrice > 0.20) {
-      console.warn(`⚠️ [LiveTick] Dropping anomalous live price tick ${livePrice} for ${selectedSymbol} (ref: ${refPrice})`);
+    if (refPrice > 0 && Math.abs(effectivePrice - refPrice) / refPrice > 0.20) {
+      console.warn(`⚠️ [LiveTick] Dropping anomalous live price tick ${effectivePrice} for ${selectedSymbol} (ref: ${refPrice})`);
       return;
     }
 
@@ -1550,8 +1572,12 @@ export default function LiveChartView() {
         axisLabelTextColor  : '#fff',
         title               : wsLiveData ? 'LIVE' : 'CLOSE',
       });
-    }
-  }, [livePrice, interval, isDaily, selectedSymbol, showSMA, showEMA, showBB, indicatorParams]);
+  }, [livePrice, interval, isDaily, selectedSymbol, showSMA, showEMA, showBB, indicatorParams, rawHistory]);
+
+  // Debug log symbol, history, and live price changes
+  useEffect(() => {
+    console.log('[LiveChart] Symbol state:', selectedSymbol, 'History count:', rawHistory?.length, 'LivePrice:', livePrice);
+  }, [selectedSymbol, rawHistory?.length, livePrice]);
 
   /* ── 4. Bar Replay Auto-Play Loop ────────────────────────── */
   useEffect(() => {
