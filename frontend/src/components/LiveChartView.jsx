@@ -1045,15 +1045,23 @@ export default function LiveChartView() {
           from: Math.max(0, total - visibleCount),
           to: total + 3,
         });
-      } else if (!isReplayMode) {
-        // Layout calculations in Lightweight Charts require asynchronous tick before fitContent
+      } else if (!isReplayMode && chartRef.current) {
+        chartRef.current.timeScale().fitContent();
         requestAnimationFrame(() => {
-          setTimeout(() => {
-            if (chartRef.current && !isReplayMode) {
-              chartRef.current.timeScale().fitContent();
-            }
-          }, 60);
+          if (chartRef.current && !isReplayMode) {
+            chartRef.current.timeScale().fitContent();
+          }
         });
+        setTimeout(() => {
+          if (chartRef.current && !isReplayMode) {
+            chartRef.current.timeScale().fitContent();
+          }
+        }, 150);
+        setTimeout(() => {
+          if (chartRef.current && !isReplayMode) {
+            chartRef.current.timeScale().fitContent();
+          }
+        }, 400);
       }
     } catch (e) {
       console.error('Error binding candle data:', e);
@@ -1309,24 +1317,7 @@ export default function LiveChartView() {
       } catch {}
     }
 
-    const timer = setTimeout(() => {
-      try {
-        if (chartRef.current && activeCandles.length > 0) {
-          if (isReplayMode) {
-            const total = activeCandles.length;
-            const visibleCount = Math.min(total, 80);
-            chartRef.current.timeScale().setVisibleLogicalRange({
-              from: Math.max(0, total - visibleCount),
-              to: total + 3,
-            });
-          } else {
-            chartRef.current.timeScale().fitContent();
-          }
-        }
-      } catch {}
-    }, 60);
-    return () => clearTimeout(timer);
-  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showVWAP, showSupertrend, showKeyLevels, showPatterns, indicatorParams, isReplayMode, replayIndex]);
+  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showVWAP, showSupertrend, showKeyLevels, showPatterns, indicatorParams, isReplayMode, replayIndex, chartReady]);
 
   /* ── Secondary Comparison Chart Data Binding ───────────────── */
 
