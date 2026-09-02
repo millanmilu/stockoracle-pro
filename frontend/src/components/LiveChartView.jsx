@@ -801,11 +801,17 @@ export default function LiveChartView() {
     setLivePrice(null);
     setLiveChange(null);
     activeCandleRef.current = null;
+    sessionOHLCRef.current = null;
 
     fetchHistory(selectedSymbol, interval, timeframe).then(result => {
       setRawHistory(result?.candles ?? []);
       if (result?.dataSource) setDataSource(result.dataSource);
       setLoading(false);
+      setTimeout(() => {
+        if (chartRef.current && !isReplayMode) {
+          chartRef.current.timeScale().fitContent();
+        }
+      }, 100);
     });
 
     if (isDaily) {
@@ -1037,9 +1043,18 @@ export default function LiveChartView() {
           to: total + 3,
         });
       } else if (!isReplayMode) {
-        chartRef.current?.timeScale().fitContent();
+        // Layout calculations in Lightweight Charts require asynchronous tick before fitContent
+        requestAnimationFrame(() => {
+          setTimeout(() => {
+            if (chartRef.current && !isReplayMode) {
+              chartRef.current.timeScale().fitContent();
+            }
+          }, 60);
+        });
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error('Error binding candle data:', e);
+    }
 
     // Pattern Badges Overlay
     if (showPatterns) {
@@ -1587,6 +1602,21 @@ export default function LiveChartView() {
 
   /* ── Header Handlers ──────────────────────────────────────── */
 
+  const handleSelectSymbol = useCallback((ticker) => {
+    if (!ticker) return;
+    const clean = ticker.toUpperCase().trim();
+    activeCandleRef.current = null;
+    sessionOHLCRef.current = null;
+    setSelectedSymbol(clean);
+    setShowSymbolModal(false);
+    setSymbolModalFilter('');
+    setTimeout(() => {
+      if (chartRef.current && !isReplayMode) {
+        chartRef.current.timeScale().fitContent();
+      }
+    }, 120);
+  }, [setSelectedSymbol, isReplayMode]);
+
   const handleSearchSubmit = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -1594,7 +1624,7 @@ export default function LiveChartView() {
     const res = await searchStock(searchQuery.trim());
     setIsSearching(false);
     if (res?.ticker) {
-      setSelectedSymbol(res.ticker);
+      handleSelectSymbol(res.ticker);
       setSearchQuery('');
       toast.success(`Loaded ${res.ticker}`);
     } else {
@@ -1761,13 +1791,9 @@ export default function LiveChartView() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         if (searchResults.length > 0) {
-                          setSelectedSymbol(searchResults[0].ticker.toUpperCase());
-                          setShowSymbolModal(false);
-                          setSymbolModalFilter('');
+                          handleSelectSymbol(searchResults[0].ticker);
                         } else if (symbolModalFilter.trim()) {
-                          setSelectedSymbol(symbolModalFilter.trim().toUpperCase());
-                          setShowSymbolModal(false);
-                          setSymbolModalFilter('');
+                          handleSelectSymbol(symbolModalFilter.trim());
                         }
                       }
                     }}
@@ -1798,11 +1824,7 @@ export default function LiveChartView() {
                     searchResults.map((item) => (
                       <div
                         key={item.ticker}
-                        onClick={() => {
-                          setSelectedSymbol(item.ticker.toUpperCase());
-                          setShowSymbolModal(false);
-                          setSymbolModalFilter('');
-                        }}
+                        onClick={() => handleSelectSymbol(item.ticker)}
                         style={{
                           padding: '8px 10px',
                           borderRadius: 6,
@@ -1843,11 +1865,7 @@ export default function LiveChartView() {
                         .map((sym) => (
                           <div
                             key={sym}
-                            onClick={() => {
-                              setSelectedSymbol(sym);
-                              setShowSymbolModal(false);
-                              setSymbolModalFilter('');
-                            }}
+                            onClick={() => handleSelectSymbol(sym)}
                             style={{
                               padding: '7px 10px',
                               borderRadius: 4,
