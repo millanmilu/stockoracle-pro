@@ -116,8 +116,8 @@ export default function LiveChartView() {
   const wsLiveData = useStore(s => s.wsLiveData);
   const { fetchHistory, fetchPredict, searchStock, searchStocks, fetchBacktest } = useStock();
 
-  const [interval,    setInterval]    = useState('1d');
-  const [timeframe,   setTimeframe]   = useState('5Y');
+  const [interval,    setInterval]    = useState('5m');
+  const [timeframe,   setTimeframe]   = useState('5D');
   const [rawHistory,  setRawHistory]  = useState(null);
   const [prediction,  setPrediction]  = useState(null);
   const [livePrice,   setLivePrice]   = useState(null);
@@ -1607,6 +1607,8 @@ export default function LiveChartView() {
     const clean = ticker.toUpperCase().trim();
     activeCandleRef.current = null;
     sessionOHLCRef.current = null;
+    setInterval('5m');
+    setTimeframe('5D');
     setSelectedSymbol(clean);
     setShowSymbolModal(false);
     setSymbolModalFilter('');
