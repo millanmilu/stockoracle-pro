@@ -816,9 +816,11 @@ export default function LiveChartView() {
     if (!selectedSymbol) return;
     setLoading(true);
     setPredLoading(true);
-    // Preserve old data while new data loads to prevent chart flickering/empty state
+    // Clear old candles immediately on symbol change to prevent stale/single-candle ghost
     activeCandleRef.current = null;
     sessionOHLCRef.current = null;
+    setRawHistory(null);
+    setPrediction(null);
 
     // Immediate store check to preload live price without waiting for first WS tick
     const storedLive = useStore.getState().livePrices?.[selectedSymbol];
@@ -829,7 +831,11 @@ export default function LiveChartView() {
 
     console.log('[LiveChart] Fetching history for:', selectedSymbol, interval, timeframe);
     fetchHistory(selectedSymbol, interval, timeframe).then(result => {
-      console.log('[API] History loaded for', selectedSymbol, ':', result?.candles?.length, 'candles');
+      const candleCount = result?.candles?.length ?? 0;
+      console.log(`[API] History loaded for ${selectedSymbol}: ${candleCount} candles (source: ${result?.dataSource ?? '?'})`);
+      if (candleCount <= 1) {
+        console.warn(`[API] ⚠️ Only ${candleCount} candle(s) returned for ${selectedSymbol}. Backend may lack historical data.`);
+      }
       setRawHistory(result?.candles ?? []);
       if (result?.dataSource) setDataSource(result.dataSource);
       setLoading(false);
@@ -2585,8 +2591,9 @@ export default function LiveChartView() {
                 </div>
 
                 {loading && (
-                  <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(9,12,24,0.75)', zIndex:10 }}>
-                    <div style={{ width:38, height:38, borderRadius:'50%', border:'3px solid rgba(168,85,247,0.15)', borderTopColor:'#A855F7', animation:'spin 0.75s linear infinite' }} />
+                  <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#070A14', zIndex:25, gap: 12 }}>
+                    <div style={{ width:38, height:38, borderRadius:'50%', border:'3px solid rgba(168,85,247,0.2)', borderTopColor:'#A855F7', animation:'spin 0.75s linear infinite' }} />
+                    <span style={{ fontSize: '0.78rem', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>Loading {selectedSymbol} candles…</span>
                     <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
                   </div>
                 )}
