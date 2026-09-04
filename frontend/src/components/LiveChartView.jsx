@@ -18,7 +18,7 @@ import IndicatorSettingsModal from './IndicatorSettingsModal';
 import ChartSettingsModal from './ChartSettingsModal';
 import AIPatternRecognition from './chart-tools/AIPatternRecognition';
 import TrustBadge from './TrustBadge';
-import { parseNum, toChartTime, addBusinessDays, POPULAR_STOCKS, INTERVALS, SIG, CHART_OPTIONS, CANDLE_STYLE } from '../utils/chartHelpers';
+import { parseNum, toChartTime, addBusinessDays, getSessionBucketStart, POPULAR_STOCKS, INTERVALS, SIG, CHART_OPTIONS, CANDLE_STYLE } from '../utils/chartHelpers';
 import { calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateMACD, calculateALMA, calculateKeyLevels, detectPatterns, calculateVWAP, calculateSupertrend } from '../utils/chartIndicators';
 import SymbolSearchModal from './chart-tools/SymbolSearchModal';
 import { playAlertChime } from '../utils/soundChime';
@@ -121,6 +121,9 @@ export default function LiveChartView() {
   const [rawHistory,  setRawHistory]  = useState(null);
   const [prediction,  setPrediction]  = useState(null);
   const storeLive = useStore(s => s.livePrices?.[selectedSymbol]);
+  // Live tick for the comparison chart (split view). The WS handler stores every subscribed
+  // ticker, so the compare symbol carries its own price / session OHLC / liveness flag.
+  const compareLive = useStore(s => (isSplitView ? s.livePrices?.[compareSymbol] : null));
   const [localLivePrice, setLocalLivePrice] = useState(null);
   const [localLiveChange, setLocalLiveChange] = useState(null);
 
@@ -375,12 +378,22 @@ export default function LiveChartView() {
   const livePriceLineRef = useRef(null);
   const activeCandleRef  = useRef(null);
   const sessionOHLCRef   = useRef(null);
+  // True only when the MOST RECENT tick for the active symbol carried is_live === true.
+  // Used to gate daily "today" bar creation so cached/fallback ticks never fabricate bars.
+  const lastTickLiveRef  = useRef(false);
+  // Monotonic request counters: a slow/stale history response must never overwrite the
+  // chart of a newer request (rapid symbol/interval switching returns out of order).
+  const historyReqSeqRef = useRef(0);
+  const compareHistoryReqSeqRef = useRef(0);
   const hudRef           = useRef(null);
 
   // Chart 2 (Comparison) Refs
   const containerRef2  = useRef(null);
   const chartRef2      = useRef(null);
   const candleRef2     = useRef(null);
+  // Signature of the last bound dataset head — lets the bind effect fit zoom only on
+  // real data changes (symbol/interval/first rows), not on every live tick merge.
+  const compareChartHeadRef = useRef(null);
 
   const wsRef          = useRef(null);
   const selectedSymbolRef = useRef(selectedSymbol);
@@ -396,12 +409,19 @@ export default function LiveChartView() {
     setInterval(iv);
     activeCandleRef.current = null;
     sessionOHLCRef.current = null;
-    // Reset zoom when changing interval for smooth transition
-    setTimeout(() => {
-      if (chartRef.current) {
-        chartRef.current.timeScale().fitContent();
-      }
-    }, 100);
+    lastTickLiveRef.current = false;
+    setLocalLivePrice(null);
+    setLocalLiveChange(null);
+    if (chartRef.current) {
+      try {
+        chartRef.current.applyOptions({
+          timeScale: {
+            timeVisible: iv !== '1d',
+            secondsVisible: false,
+          }
+        });
+      } catch {}
+    }
   }, []);
 
   /* ── Interactive Keymap & Hotkeys Listener ──────────────────── */
@@ -616,9 +636,6 @@ export default function LiveChartView() {
           roAnimFrame = requestAnimationFrame(() => {
             if (chartRef.current) {
               chartRef.current.applyOptions({ width, height });
-              if (!isReplayMode) {
-                chartRef.current.timeScale().fitContent();
-              }
             }
           });
         }
@@ -822,18 +839,20 @@ export default function LiveChartView() {
     // Clear old candles immediately on symbol change to prevent stale/single-candle ghost
     activeCandleRef.current = null;
     sessionOHLCRef.current = null;
+    lastTickLiveRef.current = false;
     setRawHistory(null);
     setPrediction(null);
 
-    // Immediate store check to preload live price without waiting for first WS tick
+    // Preload live price from store if available for the new symbol, otherwise clear to prevent cross-symbol price contamination
     const storedLive = useStore.getState().livePrices?.[selectedSymbol];
-    if (storedLive && storedLive.price > 0) {
-      setLocalLivePrice(storedLive.price);
-      setLocalLiveChange(storedLive.change_pct);
-    }
+    setLocalLivePrice(storedLive && storedLive.price > 0 ? storedLive.price : null);
+    setLocalLiveChange(storedLive && storedLive.price > 0 ? storedLive.change_pct : null);
 
     console.log('[LiveChart] Fetching history for:', selectedSymbol, interval, timeframe);
+    const seq = ++historyReqSeqRef.current;
     fetchHistory(selectedSymbol, interval, timeframe).then(result => {
+      // Drop stale responses — a newer symbol/interval request superseded this one
+      if (seq !== historyReqSeqRef.current) return;
       const candleCount = result?.candles?.length ?? 0;
       console.log(`[API] History loaded for ${selectedSymbol}: ${candleCount} candles (source: ${result?.dataSource ?? '?'})`);
       if (candleCount === 0) {
@@ -846,6 +865,7 @@ export default function LiveChartView() {
       if (result?.dataSource) setDataSource(result.dataSource);
       setLoading(false);
     }).catch(err => {
+      if (seq !== historyReqSeqRef.current) return;
       console.error('[API] History fetch failed:', err);
       const errMsg = err?.response?.data?.detail || err?.message || 'Failed to load chart data';
       setHistoryFetchError(`Chart data could not be loaded: ${errMsg}. Check backend connection.`);
@@ -855,22 +875,37 @@ export default function LiveChartView() {
 
     if (isDaily) {
       fetchPredict(selectedSymbol).then(pred => {
+        // Ignore predictions for a symbol the user already navigated away from
+        if (seq !== historyReqSeqRef.current) return;
         setPrediction(pred);
         setPredLoading(false);
-      }).catch(() => setPredLoading(false));
+      }).catch(() => {
+        if (seq !== historyReqSeqRef.current) return;
+        setPredLoading(false);
+      });
     } else {
       setPrediction(null);
       setPredLoading(false);
     }
+
+    // Invalidate any in-flight request when params change again or on unmount
+    return () => { historyReqSeqRef.current += 1; };
   }, [selectedSymbol, interval, timeframe]);
 
   /* ── Comparison Stock Data Fetch ──────────────────────────── */
 
   useEffect(() => {
+    // Clear immediately so a stale dataset never mixes with the new symbol's live ticks.
+    // The bind effect keeps prior candles visible until fresh rows arrive (like the main chart).
+    setRawHistoryCompare(null);
     if (!isSplitView) return;
+    const seq = ++compareHistoryReqSeqRef.current;
     fetchHistory(compareSymbol, interval, timeframe).then(result => {
+      // Drop stale responses — comparison symbol/interval changed meanwhile
+      if (seq !== compareHistoryReqSeqRef.current) return;
       setRawHistoryCompare(result?.candles ?? []);
     });
+    return () => { compareHistoryReqSeqRef.current += 1; };
   }, [isSplitView, compareSymbol, interval, timeframe]);
 
   /* ── WebSocket Feed with Auto-Reconnect & Heartbeat ─────────── */
@@ -909,6 +944,7 @@ export default function LiveChartView() {
         if (unmounted) return;
         setWsConnected(false);
         setWsIsLive(false);
+        lastTickLiveRef.current = false;
         useStore.getState().setWsConnected?.(false);
         useStore.getState().setWsLiveData?.(false);
         reconnectTimeout = setTimeout(() => {
@@ -921,6 +957,7 @@ export default function LiveChartView() {
         if (unmounted) return;
         setWsConnected(false);
         setWsIsLive(false);
+        lastTickLiveRef.current = false;
         useStore.getState().setWsConnected?.(false);
         try { ws.close(); } catch {}
       };
@@ -930,29 +967,28 @@ export default function LiveChartView() {
           const data = JSON.parse(e.data);
           const { ticker, price, change_pct, is_live, open: dayOpen, high: dayHigh, low: dayLow } = data;
 
-          // Client-side IST market hours check — independent of server is_live flag.
-          // Protects against server timezone misconfiguration (e.g. UTC vs IST mismatch on AWS).
-          const nowUtc = Date.now();
-          const istOffsetMs = 5.5 * 3600 * 1000;
-          const istDate = new Date(nowUtc + istOffsetMs);
-          const istDay  = istDate.getUTCDay();   // 0=Sun, 6=Sat
-          const istHour = istDate.getUTCHours();
-          const istMin  = istDate.getUTCMinutes();
-          const clientMarketOpen = (
-            istDay >= 1 && istDay <= 5 &&
-            ((istHour > 9) || (istHour === 9 && istMin >= 15)) &&
-            ((istHour < 15) || (istHour === 15 && istMin <= 30))
-          );
-
-          // Accept is_live from server OR client-side IST check (whichever is more permissive).
-          // Server flag may be wrong due to UTC vs IST timezone bug on AWS EC2.
-          const isLiveTick = is_live === true || clientMarketOpen;
+          // LIVE only when the server confirms a real-time feed (is_live: true).
+          // Fallback ticks (Angel One session down, market closed/holiday, stale DB price)
+          // carry is_live: false and must never be labeled live. The market-hours check is
+          // done server-side in strict IST (backend/data/market_calendar.py), so the server
+          // flag is authoritative — do NOT OR it with a client clock check here.
+          const isLiveTick = is_live === true;
           useStore.getState().setWsLiveData?.(isLiveTick);
           setWsIsLive(isLiveTick);
+
+          // Persist every subscribed ticker's tick — the comparison chart (split view)
+          // consumes its own symbol's entry for live candle updates.
+          useStore.getState().setLivePrice?.(ticker, {
+            price, change_pct,
+            is_live: isLiveTick,
+            open: dayOpen, high: dayHigh, low: dayLow,
+          });
 
           // Always read fresh active symbol directly from store & ref to eliminate any closure issue
           const currentSym = useStore.getState().selectedSymbol || selectedSymbolRef.current;
           if (ticker === currentSym) {
+            // Record whether THIS tick is confirmed live (gates daily bar creation below)
+            lastTickLiveRef.current = isLiveTick;
             // Anchor session OHLC if provided by server feed
             if (dayOpen > 0 || dayHigh > 0 || dayLow > 0) {
               sessionOHLCRef.current = {
@@ -965,7 +1001,6 @@ export default function LiveChartView() {
             // Always update live price — stale prices still form candles
             setLivePrice(price);
             setLiveChange(change_pct);
-            useStore.getState().setLivePrice?.(ticker, { price, change_pct });
 
             // Real-time Canvas Price Alert Trigger & Chime
             setPriceAlerts(prevAlerts => {
@@ -1013,6 +1048,7 @@ export default function LiveChartView() {
       }
       setWsConnected(false);
       setWsIsLive(false);
+      lastTickLiveRef.current = false;
       useStore.getState().setWsConnected?.(false);
       useStore.getState().setWsLiveData?.(false);
     };
@@ -1105,23 +1141,13 @@ export default function LiveChartView() {
           from: Math.max(0, total - visibleCount),
           to: total + 3,
         });
-      } else if (!isReplayMode && chartRef.current) {
-        chartRef.current.timeScale().fitContent();
-        requestAnimationFrame(() => {
-          if (chartRef.current && !isReplayMode) {
-            chartRef.current.timeScale().fitContent();
-          }
+      } else if (!isReplayMode && chartRef.current && activeCandles.length > 0) {
+        const total = activeCandles.length;
+        const visibleCount = Math.min(total, intraday ? 80 : 90);
+        chartRef.current.timeScale().setVisibleLogicalRange({
+          from: Math.max(0, total - visibleCount),
+          to: total + (isDaily ? 8 : 4),
         });
-        setTimeout(() => {
-          if (chartRef.current && !isReplayMode) {
-            chartRef.current.timeScale().fitContent();
-          }
-        }, 150);
-        setTimeout(() => {
-          if (chartRef.current && !isReplayMode) {
-            chartRef.current.timeScale().fitContent();
-          }
-        }, 400);
       }
     } catch (e) {
       console.error('Error binding candle data:', e);
@@ -1402,9 +1428,129 @@ export default function LiveChartView() {
     candles2.forEach(c => seen2.set(c.time, c));
     try {
       candleRef2.current.setData(Array.from(seen2.values()));
-      chartRef2.current?.timeScale().fitContent();
+      // Fit zoom only when the dataset head actually changed (symbol/interval/first rows) —
+      // NOT on every live tick merge, which would yank the user's zoom/pan position around.
+      const lastCandle = candles2[candles2.length - 1];
+      const headSig = `${candles2.length}:${lastCandle ? lastCandle.time : ''}`;
+      if (compareChartHeadRef.current !== headSig) {
+        compareChartHeadRef.current = headSig;
+        chartRef2.current?.timeScale().fitContent();
+      }
     } catch {}
   }, [isSplitView, rawHistoryCompare, interval]);
+
+  /* ── Comparison Chart Real-time Candle Updates (split view) ── */
+
+  useEffect(() => {
+    if (!isSplitView || !compareLive || !rawHistoryCompare?.length || !candleRef2.current) return;
+    const numLivePrice = Number(compareLive.price);
+    if (isNaN(numLivePrice) || numLivePrice <= 0) return;
+
+    const last = rawHistoryCompare[rawHistoryCompare.length - 1];
+    if (!last || last.close == null) return;
+    const lastClose = parseNum(last.close);
+
+    // Same out-of-range guard as the main chart (>20% deviation from reference price)
+    if (lastClose > 0 && Math.abs(numLivePrice - lastClose) / lastClose > 0.20) return;
+
+    const tickIsLive = compareLive.is_live === true;
+    const sessionOpen = Number(compareLive.open);
+    const sessionHigh = Number(compareLive.high);
+    const sessionLow  = Number(compareLive.low);
+
+    // IST wall clock (UTC + 5:30), same conventions as the primary chart
+    const istDate = new Date(Date.now() + 5.5 * 3600 * 1000);
+    const istDay = istDate.getUTCDay();
+    const istHour = istDate.getUTCHours();
+    const istMin = istDate.getUTCMinutes();
+    const isMarketHours = istDay >= 1 && istDay <= 5 &&
+      ((istHour > 9 || (istHour === 9 && istMin >= 15)) && (istHour < 15 || (istHour === 15 && istMin <= 30)));
+    const todayStr = istDate.toISOString().substring(0, 10);
+
+    const lowsFrom = (vals) => { const v = vals.filter(x => x > 0); return v.length ? Math.min(...v) : numLivePrice; };
+    let nextRow = null;
+    let append = false;
+
+    if (isDaily) {
+      const lastDateStr = String(last.date).substring(0, 10);
+      const isTodayHistorical = todayStr === lastDateStr;
+      // Mirror the primary chart: cached/fallback ticks never fabricate a new "today" bar
+      if (!isTodayHistorical && !(isMarketHours && tickIsLive)) return;
+
+      if (isTodayHistorical) {
+        nextRow = {
+          ...last,
+          high: Math.max(Number(last.high) || 0, sessionHigh, numLivePrice),
+          low : lowsFrom([Number(last.low), sessionLow, numLivePrice]),
+          close: numLivePrice,
+        };
+      } else {
+        // Brand-new session bar — open anchored by the server session open, else the tick price
+        const open = sessionOpen > 0 ? sessionOpen : numLivePrice;
+        nextRow = {
+          date: todayStr,
+          open,
+          high: Math.max(sessionHigh, open, numLivePrice),
+          low : lowsFrom([sessionLow, open, numLivePrice]),
+          close: numLivePrice,
+          volume: 0,
+        };
+        append = true;
+      }
+    } else {
+      // Intraday: session-anchored buckets identical to the primary chart's live logic
+      const bucketSize = ({ '1m': 60, '5m': 300, '15m': 900, '1h': 3600 })[interval] || 300;
+      const currentBucket = getSessionBucketStart(interval, Date.now());
+      const lastBarSec = toChartTime(last.date, true) || currentBucket;
+
+      // Skip disconnected off-market ticks several buckets after the session's last bar
+      if (!isMarketHours && currentBucket > lastBarSec + bucketSize * 2) return;
+
+      if (currentBucket >= lastBarSec) {
+        if (currentBucket === lastBarSec) {
+          nextRow = {
+            ...last,
+            high: Math.max(Number(last.high) || 0, numLivePrice),
+            low : lowsFrom([Number(last.low), numLivePrice]),
+            close: numLivePrice,
+          };
+        } else {
+          // New bucket bar — only a CONFIRMED LIVE tick may open it (cached ticks after the
+          // close would otherwise mint ghost hourly bars at session end)
+          if (!tickIsLive) return;
+          // New bucket bar (same IST-labeled format the backend rows use)
+          const barDate = new Date((currentBucket + 5.5 * 3600) * 1000).toISOString().substring(0, 19).replace('T', ' ');
+          nextRow = {
+            date: barDate,
+            open: numLivePrice, high: numLivePrice, low: numLivePrice, close: numLivePrice,
+            volume: 0,
+          };
+          append = true;
+        }
+      } else {
+        // History head is slightly ahead of the clock — merge into the last row anyway
+        nextRow = {
+          ...last,
+          high: Math.max(Number(last.high) || 0, numLivePrice),
+          low : lowsFrom([Number(last.low), numLivePrice]),
+          close: numLivePrice,
+        };
+      }
+    }
+
+    if (!nextRow) return;
+    // Loop protection: skip when this tick produced no net change (the state update below
+    // re-runs this effect without a new tick; identical values must not re-trigger setState)
+    if (!append && String(nextRow.date) === String(last.date) &&
+        Number(nextRow.open) === Number(last.open) &&
+        Number(nextRow.high) === Number(last.high) &&
+        Number(nextRow.low) === Number(last.low) &&
+        Number(nextRow.close) === Number(last.close)) return;
+
+    setRawHistoryCompare(append
+      ? [...rawHistoryCompare, nextRow]
+      : [...rawHistoryCompare.slice(0, -1), nextRow]);
+  }, [isSplitView, compareSymbol, interval, isDaily, rawHistoryCompare, compareLive]);
 
   /* ── Real-time Price Update ───────────────────────────────── */
 
@@ -1442,10 +1588,13 @@ export default function LiveChartView() {
       const serverLow  = sessionOHLCRef.current?.low;
 
       if (isDaily) {
-        // SAFEGUARD: Only create a new today bar if today is a weekday during/after market hours,
-        // or if today's bar already exists in history. Never generate artificial weekend bars.
+        // SAFEGUARD: A brand-new "today" bar may only be opened by a CONFIRMED LIVE tick
+        // (is_live: true from server) arriving during market hours. Cached/fallback ticks —
+        // broker session down, market closed, trading holiday, pre-open auction — must never
+        // fabricate a bar for a session that has no real data. If today's bar is already in
+        // history (isTodayHistorical), any tick may still update that existing real bar.
         const isTodayHistorical = (todayStr === lastDateStr);
-        const shouldHaveTodayBar = isTodayHistorical || (istDay >= 1 && istDay <= 5 && (istHour >= 9));
+        const shouldHaveTodayBar = isTodayHistorical || (isMarketHours && lastTickLiveRef.current === true);
 
         if (!shouldHaveTodayBar) {
           // Off-market/weekend fallback: update price line but do NOT append fake date bars
@@ -1462,59 +1611,76 @@ export default function LiveChartView() {
         const targetTime = isTodayHistorical ? lastDateStr : todayStr;
         const isNewBar = !activeCandleRef.current || activeCandleRef.current.time !== targetTime;
 
+        const histMatch = isTodayHistorical ? last : null;
         if (isNewBar) {
-          const histMatch = isTodayHistorical ? last : null;
-          const initialOpen = serverOpen || (histMatch ? Number(histMatch.open) : numLivePrice);
+          // Open is anchored by: authoritative historical bar open > server session open > current live price
+          const initialOpen = (histMatch && Number(histMatch.open) > 0)
+            ? Number(histMatch.open)
+            : (serverOpen && serverOpen > 0 ? serverOpen : numLivePrice);
+
           const initialHigh = Math.max(
-            serverHigh || initialOpen,
-            histMatch ? Number(histMatch.high) : initialOpen,
+            histMatch && Number(histMatch.high) > 0 ? Number(histMatch.high) : 0,
+            serverHigh && serverHigh > 0 ? serverHigh : 0,
+            initialOpen,
             numLivePrice
           );
-          const initialLow = Math.min(
-            serverLow || initialOpen,
-            histMatch ? Number(histMatch.low) : initialOpen,
+
+          const candidateLows = [
+            histMatch && Number(histMatch.low) > 0 ? Number(histMatch.low) : null,
+            serverLow && serverLow > 0 ? serverLow : null,
+            initialOpen,
             numLivePrice
-          );
+          ].filter(v => v != null && v > 0);
+          const initialLow = candidateLows.length > 0 ? Math.min(...candidateLows) : numLivePrice;
 
           activeCandleRef.current = {
             time  : targetTime,
             open  : initialOpen,
-            high  : initialHigh,
-            low   : initialLow,
+            high  : Math.max(initialHigh, initialOpen, numLivePrice),
+            low   : Math.min(initialLow, initialOpen, numLivePrice),
             close : numLivePrice,
           };
         } else {
-          // Existing bar: update wicks with server-confirmed session bounds and live price
-          const currentOpen = activeCandleRef.current.open || serverOpen || numLivePrice;
+          // Existing bar: Open is permanent! Never overwrite it with fluctuating live ticks
+          const currentOpen = activeCandleRef.current.open || (histMatch && Number(histMatch.open) > 0 ? Number(histMatch.open) : numLivePrice);
           const currentHigh = Math.max(
             activeCandleRef.current.high,
-            serverHigh || currentOpen,
+            histMatch && Number(histMatch.high) > 0 ? Number(histMatch.high) : 0,
+            serverHigh && serverHigh > 0 ? serverHigh : 0,
             numLivePrice
           );
-          const currentLow = Math.min(
+          const candidateLows = [
             activeCandleRef.current.low,
-            serverLow || currentOpen,
+            histMatch && Number(histMatch.low) > 0 ? Number(histMatch.low) : null,
+            serverLow && serverLow > 0 ? serverLow : null,
             numLivePrice
-          );
+          ].filter(v => v != null && v > 0);
+          const currentLow = candidateLows.length > 0 ? Math.min(...candidateLows) : numLivePrice;
 
           activeCandleRef.current = {
-            ...activeCandleRef.current,
+            time  : targetTime,
             open  : currentOpen,
-            high  : currentHigh,
-            low   : currentLow,
+            high  : Math.max(currentHigh, currentOpen, numLivePrice),
+            low   : Math.min(currentLow, currentOpen, numLivePrice),
             close : numLivePrice,
           };
         }
       } else {
-        // Intraday bucketing with strict IST alignment
-        const intervalSecondsMap = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600 };
-        const bucketSize = intervalSecondsMap[interval] || 300;
-        const currentSec = Math.floor(Date.now() / 1000);
-        const currentBucket = Math.floor(currentSec / bucketSize) * bucketSize;
+        // Intraday bucketing anchored to the NSE session grid (bars start 09:15 IST daily)
+        // — naive epoch-hour floors put 1h boundaries at IST :30, but history bars are labeled
+        // 09:15/10:15/…, which spawned duplicate ghost bars at session end.
+        const bucketSize = ({ '1m': 60, '5m': 300, '15m': 900, '1h': 3600 })[interval] || 300;
+        const currentBucket = getSessionBucketStart(interval, Date.now());
         const lastBarSec = toChartTime(last.date, true) || currentBucket;
 
         // Skip appending disconnected off-market intraday bars hours after close
         if (!isMarketHours && currentBucket > lastBarSec + bucketSize * 2) {
+          return;
+        }
+
+        // A brand-new bucket bar may only be opened by a CONFIRMED LIVE tick — cached ticks
+        // after the close must not keep minting ghost bars (mirrors the daily live guard).
+        if (currentBucket > lastBarSec && !lastTickLiveRef.current) {
           return;
         }
 
@@ -1523,21 +1689,23 @@ export default function LiveChartView() {
 
         if (isNewBar) {
           const isLastMatch = targetSec === lastBarSec;
-          const initialOpen = isLastMatch ? Number(last.open) : numLivePrice;
-          const initialHigh = isLastMatch ? Math.max(Number(last.high), numLivePrice) : numLivePrice;
-          const initialLow  = isLastMatch ? Math.min(Number(last.low),  numLivePrice) : numLivePrice;
+          const initialOpen = isLastMatch && Number(last.open) > 0 ? Number(last.open) : numLivePrice;
+          const initialHigh = isLastMatch && Number(last.high) > 0 ? Math.max(Number(last.high), initialOpen, numLivePrice) : numLivePrice;
+          const initialLow  = isLastMatch && Number(last.low) > 0 ? Math.min(Number(last.low), initialOpen, numLivePrice) : numLivePrice;
           activeCandleRef.current = {
             time  : targetSec,
             open  : initialOpen,
-            high  : initialHigh,
-            low   : initialLow,
+            high  : Math.max(initialHigh, initialOpen, numLivePrice),
+            low   : Math.min(initialLow, initialOpen, numLivePrice),
             close : numLivePrice,
           };
         } else {
+          const currentOpen = activeCandleRef.current.open || numLivePrice;
           activeCandleRef.current = {
             ...activeCandleRef.current,
-            high  : Math.max(activeCandleRef.current.high, numLivePrice),
-            low   : Math.min(activeCandleRef.current.low,  numLivePrice),
+            open  : currentOpen,
+            high  : Math.max(activeCandleRef.current.high, currentOpen, numLivePrice),
+            low   : Math.min(activeCandleRef.current.low, currentOpen, numLivePrice),
             close : numLivePrice,
           };
         }
@@ -1546,9 +1714,15 @@ export default function LiveChartView() {
       if (
         activeCandleRef.current &&
         activeCandleRef.current.time != null &&
-        typeof activeCandleRef.current.open === 'number' && !isNaN(activeCandleRef.current.open) &&
-        typeof activeCandleRef.current.close === 'number' && !isNaN(activeCandleRef.current.close)
+        typeof activeCandleRef.current.open === 'number' && !isNaN(activeCandleRef.current.open) && activeCandleRef.current.open > 0 &&
+        typeof activeCandleRef.current.high === 'number' && !isNaN(activeCandleRef.current.high) && activeCandleRef.current.high > 0 &&
+        typeof activeCandleRef.current.low === 'number' && !isNaN(activeCandleRef.current.low) && activeCandleRef.current.low > 0 &&
+        typeof activeCandleRef.current.close === 'number' && !isNaN(activeCandleRef.current.close) && activeCandleRef.current.close > 0
       ) {
+        // Enforce strict OHLC consistency invariant required by lightweight-charts
+        activeCandleRef.current.high = Math.max(activeCandleRef.current.high, activeCandleRef.current.open, activeCandleRef.current.close);
+        activeCandleRef.current.low = Math.min(activeCandleRef.current.low, activeCandleRef.current.open, activeCandleRef.current.close);
+
         try { candleRef.current.update(activeCandleRef.current); } catch {}
 
         // Real-time dynamic indicator line updates with incoming live tick
@@ -1622,11 +1796,6 @@ export default function LiveChartView() {
     }
   }, [livePrice, interval, isDaily, selectedSymbol, showSMA, showEMA, showBB, indicatorParams, rawHistory]);
 
-  // Debug log symbol, history, and live price changes
-  useEffect(() => {
-    console.log('[LiveChart] Symbol state:', selectedSymbol, 'History count:', rawHistory?.length, 'LivePrice:', livePrice);
-  }, [selectedSymbol, rawHistory?.length, livePrice]);
-
   /* ── 4. Bar Replay Auto-Play Loop ────────────────────────── */
   useEffect(() => {
     if (!isReplayMode || !isReplayPlaying || !rawHistory || rawHistory.length < 5) return;
@@ -1679,6 +1848,7 @@ export default function LiveChartView() {
     const clean = ticker.toUpperCase().trim();
     activeCandleRef.current = null;
     sessionOHLCRef.current = null;
+    lastTickLiveRef.current = false;
     setSelectedSymbol(clean);
     setShowSymbolModal(false);
     setSymbolModalFilter('');
@@ -1744,6 +1914,26 @@ export default function LiveChartView() {
   const sigMeta   = SIG[sig] ?? SIG.hold;
   const score     = prediction?.ai_confidence_score ?? 0;
   const scoreColor = score >= 70 ? '#26A69A' : score >= 50 ? '#F59E0B' : '#EF5350';
+
+  /* ── Comparison chart (split view) live header values ─────── */
+  const compareLastRow  = Array.isArray(rawHistoryCompare) && rawHistoryCompare.length ? rawHistoryCompare[rawHistoryCompare.length - 1] : null;
+  const comparePrevRow  = Array.isArray(rawHistoryCompare) && rawHistoryCompare.length > 1 ? rawHistoryCompare[rawHistoryCompare.length - 2] : null;
+  const compareHistClose = compareLastRow ? parseNum(compareLastRow.close) : null;
+  const compareHistPrev  = comparePrevRow ? parseNum(comparePrevRow.close) : null;
+  const compareTickPrice = compareLive ? Number(compareLive.price) : NaN;
+  const compareHasTick   = !isNaN(compareTickPrice) && compareTickPrice > 0;
+  const compareIsLiveTick = compareHasTick && compareLive?.is_live === true;
+  // Show the live tick only when the server confirms it is live — never present a cached /
+  // stale price as the current price (mirrors the main chart header behaviour).
+  const compareDisplayPrice = compareIsLiveTick
+    ? compareTickPrice
+    : (compareHistClose ?? (compareHasTick ? compareTickPrice : null));
+  const compareChangePct = compareIsLiveTick && compareLive?.change_pct != null
+    ? Number(compareLive.change_pct)
+    : (compareDisplayPrice != null && compareHistPrev != null && compareHistPrev > 0
+        ? ((compareDisplayPrice - compareHistPrev) / compareHistPrev) * 100
+        : null);
+  const compareChangeUp = (compareChangePct ?? 0) >= 0;
 
   return (
     <div ref={cardContainerRef} style={{
@@ -2658,11 +2848,14 @@ export default function LiveChartView() {
                         onClick={() => {
                           setHistoryFetchError(null);
                           setLoading(true);
+                          const seq = ++historyReqSeqRef.current;
                           fetchHistory(selectedSymbol, interval, timeframe).then(result => {
+                            if (seq !== historyReqSeqRef.current) return;
                             setRawHistory(result?.candles ?? []);
                             if (!result?.candles?.length) setHistoryFetchError('Still no data. Check backend & Angel One session.');
                             setLoading(false);
                           }).catch(err => {
+                            if (seq !== historyReqSeqRef.current) return;
                             setHistoryFetchError(`Retry failed: ${err?.message || 'Unknown error'}`);
                             setRawHistory([]);
                             setLoading(false);
@@ -2673,7 +2866,19 @@ export default function LiveChartView() {
                         🔄 Retry
                       </button>
                       <button
-                        onClick={() => { setHistoryFetchError(null); setLoading(true); fetchHistory(selectedSymbol, '1d', '1Y').then(r => { setRawHistory(r?.candles ?? []); setLoading(false); }).catch(() => setLoading(false)); }}
+                        onClick={() => {
+                          setHistoryFetchError(null);
+                          setLoading(true);
+                          const seq = ++historyReqSeqRef.current;
+                          fetchHistory(selectedSymbol, '1d', '1Y').then(r => {
+                            if (seq !== historyReqSeqRef.current) return;
+                            setRawHistory(r?.candles ?? []);
+                            setLoading(false);
+                          }).catch(() => {
+                            if (seq !== historyReqSeqRef.current) return;
+                            setLoading(false);
+                          });
+                        }}
                         style={{ padding: '7px 18px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.1)', color: '#818CF8', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
                       >
                         Try 1Y Data
@@ -2857,17 +3062,54 @@ export default function LiveChartView() {
                 borderRadius:18, overflow:'hidden',
                 position:'relative',
               }}>
-                <div style={{ display:'flex', gap:8, padding:'10px 16px', fontSize:'0.75rem', color:'#60A5FA', fontWeight:700, alignItems:'center', borderBottom:'1px solid rgba(255,255,255,0.03)' }}>
-                  <span>COMPARISON CHART:</span>
-                  <select
-                    value={compareSymbol}
-                    onChange={e => setCompareSymbol(e.target.value)}
-                    style={{ background:'#090C18', color:'#60A5FA', border:'1px solid rgba(59,130,246,0.3)', borderRadius:6, padding:'2px 8px', fontSize:'0.75rem', outline:'none', fontWeight:700 }}
-                  >
-                    {POPULAR_STOCKS.map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, padding:'8px 14px', borderBottom:'1px solid rgba(255,255,255,0.03)' }}>
+                  <div style={{ display:'flex', gap:8, alignItems:'center', fontSize:'0.75rem', color:'#60A5FA', fontWeight:700, minWidth:0 }}>
+                    <span style={{ whiteSpace:'nowrap' }}>COMPARISON CHART:</span>
+                    <select
+                      value={compareSymbol}
+                      onChange={e => setCompareSymbol(e.target.value)}
+                      style={{ background:'#090C18', color:'#60A5FA', border:'1px solid rgba(59,130,246,0.3)', borderRadius:6, padding:'2px 8px', fontSize:'0.75rem', outline:'none', fontWeight:700 }}
+                    >
+                      {POPULAR_STOCKS.map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Live price / change / feed status for the comparison symbol */}
+                  <div style={{ display:'flex', gap:10, alignItems:'center', fontFamily:'JetBrains Mono, monospace', fontSize:'0.74rem', whiteSpace:'nowrap' }}>
+                    <span style={{ color: compareChangeUp ? '#10B981' : '#EF5350', fontWeight:800 }}>
+                      {compareDisplayPrice != null && !isNaN(compareDisplayPrice) ? `₹${compareDisplayPrice.toFixed(2)}` : '—'}
+                    </span>
+                    <span style={{ color: compareChangeUp ? '#10B981' : '#EF5350', fontWeight:700 }}>
+                      {compareChangePct != null && !isNaN(compareChangePct) ? `${compareChangeUp ? '+' : ''}${compareChangePct.toFixed(2)}%` : ''}
+                    </span>
+                    {(() => {
+                      let label = '…', dot = '#64748B', bgc = 'transparent', brd = 'transparent', glow = false, tip = 'Waiting for the first price tick for this symbol';
+                      if (compareLive) {
+                        if (compareIsLiveTick) {
+                          label = 'LIVE'; dot = '#10B981'; bgc = 'rgba(16,185,129,0.12)'; brd = 'rgba(16,185,129,0.3)'; glow = true;
+                          tip = 'Live NSE price feed — candles updating in real-time';
+                        } else {
+                          label = 'CACHED'; dot = '#F59E0B'; bgc = 'rgba(245,158,11,0.12)'; brd = 'rgba(245,158,11,0.3)';
+                          tip = 'Feed unavailable or market closed — showing last close / cached price';
+                        }
+                      }
+                      return (
+                        <span
+                          title={tip}
+                          style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'2px 7px', borderRadius:4, fontSize:'0.62rem', fontWeight:800, letterSpacing:'0.04em', background:bgc, border:`1px solid ${brd}`, color:dot, cursor:'help', userSelect:'none' }}
+                        >
+                          <span style={{
+                            width:6, height:6, borderRadius:'50%', background:dot, flexShrink:0,
+                            boxShadow: glow ? `0 0 6px ${dot}` : 'none',
+                            animation: glow ? 'livePulse 1.5s ease-in-out infinite' : 'none',
+                          }} />
+                          {label}
+                        </span>
+                      );
+                    })()}
+                  </div>
                 </div>
                 <div ref={containerRef2} style={{ width:'100%', height:520 }} />
               </div>

@@ -84,12 +84,12 @@ export const CHART_OPTIONS = {
   timeScale: {
     borderColor: 'rgba(99,102,241,0.12)',
     textColor: '#6B7280',
-    timeVisible: true,
+    timeVisible: false,
     secondsVisible: false,
     shiftVisibleRangeOnNewBar: false,
-    rightOffset: 6,
-    barSpacing: 6,
-    minBarSpacing: 0.1,
+    rightOffset: 8,
+    barSpacing: 8,
+    minBarSpacing: 0.5,
     allowBoldLabels: true,
   },
   handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
@@ -106,3 +106,25 @@ export const CANDLE_STYLE = {
   wickUpColor: '#26A69A',
   wickDownColor: '#EF5350',
 };
+
+/**
+ * Start time (epoch seconds) of the live intraday bucket containing `now`, aligned to the
+ * NSE session grid: each trading session's first bar begins at 09:15 IST, so live buckets
+ * are anchored at 09:15 + k*bucketSize per day (09:15/10:15/… for 1h).
+ * A naive floor-to-epoch-grid works for 1m/5m/15m (the +5:30 IST offset is an exact multiple
+ * of those sizes), but puts 1h boundaries at IST :30 — spawning duplicate ghost bars beside
+ * the :15-labeled history bars at session end.
+ *
+ * @param {string} interval  '1m' | '5m' | '15m' | '1h' (anything else falls back to 5m)
+ * @param {number} nowMs     timestamp in milliseconds
+ * @returns {number} bucket start as an epoch-seconds timestamp
+ */
+export function getSessionBucketStart(interval, nowMs) {
+  const bucketSize = ({ '1m': 60, '5m': 300, '15m': 900, '1h': 3600 })[interval] || 300;
+  const DAY = 86400;
+  const IST_OFFSET = 5.5 * 3600; // seconds (UTC + 05:30)
+  const nowSec = Math.floor(nowMs / 1000);
+  // Epoch second of 09:15 IST on the current IST day
+  const anchor = Math.floor((nowSec + IST_OFFSET) / DAY) * DAY - IST_OFFSET + (9 * 3600 + 15 * 60);
+  return anchor + Math.floor((nowSec - anchor) / bucketSize) * bucketSize;
+}

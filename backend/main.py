@@ -26,7 +26,7 @@ from backend.shared.security import verify_api_key, get_current_user_id
 from backend.shared.database import init_database
 from backend.data.database import (
     init_db, cleanup_old_tasks, save_live_tick, get_company_info,
-    get_stale_company_info, get_historical_prices
+    get_stale_company_info, get_historical_prices, get_live_tick_ohlcv
 )
 from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, ensure_session,
@@ -119,20 +119,32 @@ async def websocket_price_broadcast_loop():
                                     day_low = float(data_obj.get("low", 0.0))
 
                                     if ltp > 0:
-                                        market_live = is_market_open()
                                         change_pct = ((ltp - prev_close) / prev_close) if prev_close > 0 else 0.0
+                                        # When SmartAPI ltpData doesn't return day open/high/low (fields are 0),
+                                        # pull real session bounds from today's saved live ticks in SQLite
+                                        save_live_tick(t, round(ltp, 2), round(change_pct * 100, 3))
+                                        if day_open <= 0 or day_high <= 0 or day_low <= 0:
+                                            today_ohlcv = get_live_tick_ohlcv(t)
+                                            if today_ohlcv:
+                                                if day_open <= 0:
+                                                    day_open = float(today_ohlcv.get("open", 0.0) or 0.0)
+                                                if day_high <= 0:
+                                                    day_high = max(float(today_ohlcv.get("high", ltp) or ltp), ltp)
+                                                if day_low <= 0:
+                                                    day_low = min(float(today_ohlcv.get("low", ltp) or ltp), ltp)
+
+                                        market_live = is_market_open()
                                         prices_cache[t] = ltp
                                         payload = {
                                             "ticker": t,
                                             "price": round(ltp, 2),
-                                            "open": round(day_open, 2) if day_open > 0 else round(ltp, 2),
-                                            "high": round(day_high, 2) if day_high > 0 else round(ltp, 2),
-                                            "low": round(day_low, 2) if day_low > 0 else round(ltp, 2),
+                                            "open": round(day_open, 2) if day_open > 0 else 0.0,
+                                            "high": round(max(day_high, ltp), 2) if day_high > 0 else round(ltp, 2),
+                                            "low": round(min(day_low, ltp), 2) if day_low > 0 else round(ltp, 2),
                                             "close": round(prev_close, 2) if prev_close > 0 else round(ltp, 2),
                                             "change_pct": round(change_pct * 100, 3),
                                             "is_live": market_live,
                                         }
-                                        save_live_tick(t, round(ltp, 2), round(change_pct * 100, 3))
                                         await manager.broadcast(payload)
                                         fetched = True
                     except Exception as exc:
