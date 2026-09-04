@@ -6,7 +6,11 @@ import {
 
 /* ── Standard Indicator Database with Categories & Badges ── */
 const ALL_SCRIPTS = [
-  { id: 'vol_24h', name: '24-hour Volume', type: 'vol', category: 'technicals', tab: 'Indicators', desc: 'Calculates total rolling 24-hour traded volume.' },
+  { id: 'vol_24h', name: '24-hour Volume', type: 'vol', category: 'volume', tab: 'Indicators', desc: 'Calculates total rolling 24-hour traded volume.' },
+  { id: 'volume_profile', name: 'Volume Profile (POC, VAH, VAL)', type: 'overlay', category: 'volume', tab: 'Indicators', badge: 'PRO', badgeColor: '#A855F7', desc: 'Calculates volume by price, Point of Control (POC), and Value Area High/Low.' },
+  { id: 'order_flow', name: 'Order Flow & Delta Imbalance', type: 'oscillator', category: 'volume', tab: 'Indicators', badge: 'FLOW', badgeColor: '#00E5FF', desc: 'Volume-weighted momentum, delta pressure, absorption zones, and divergences.' },
+  { id: 'mtf_correlation', name: 'Multi-Timeframe Correlation Matrix', type: 'oscillator', category: 'technicals', tab: 'Indicators', badge: 'MTF', badgeColor: '#F59E0B', desc: 'Inter-timeframe correlation (1m to 1D) and multi-timeframe momentum alignment meter.' },
+  { id: 'smc', name: 'Smart Money Concepts (SMC - FVG & Order Blocks)', type: 'overlay', category: 'technicals', tab: 'Patterns', badges: [{ text: 'SMC', color: '#10B981' }, { text: 'AI', color: '#6366F1' }], desc: 'Algorithmic detection of Fair Value Gaps (FVG), Institutional Order Blocks, and BOS / CHoCH.' },
   { id: 'vwap', name: 'Volume Weighted Average Price (VWAP)', type: 'overlay', category: 'technicals', tab: 'Indicators', badge: 'HOT', badgeColor: '#06B6D4', desc: 'Calculates true average price weighted by cumulative volume across the session.' },
   { id: 'supertrend', name: 'Supertrend (10, 3)', type: 'overlay', category: 'technicals', tab: 'Indicators', badge: 'TREND', badgeColor: '#10B981', desc: 'ATR-based trailing stop & trend indicator providing dynamic support/resistance.' },
   { id: 'sma_20', name: 'Simple Moving Average (SMA)', type: 'overlay', category: 'technicals', tab: 'Indicators', desc: 'Arithmetic average of closing prices over configurable lookback period.' },
@@ -57,6 +61,10 @@ export default function IndicatorsModal({
       // Sidebar category filter
       if (activeSidebar === 'favorites') {
         if (!favorites.includes(script.id)) return false;
+      } else if (activeSidebar === 'volume') {
+        if (script.category !== 'volume' && script.type !== 'vol') return false;
+      } else if (activeSidebar === 'technicals') {
+        if (script.category !== 'technicals' && script.category !== 'volume') return false;
       }
 
       // Search text filter

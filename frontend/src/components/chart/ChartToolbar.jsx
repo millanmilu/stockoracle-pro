@@ -1,7 +1,8 @@
 import React from 'react';
 import { 
   Search, X, RotateCcw, Bell, Activity, Sliders, Calendar, 
-  Square, Columns, Rows, Grid2X2, Camera, Maximize2, Minimize2 
+  Square, Columns, Rows, Grid2X2, Camera, Maximize2, Minimize2,
+  Layers, Sparkles, Split
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { INTERVALS, POPULAR_STOCKS } from '../../utils/chartHelpers';
@@ -39,6 +40,16 @@ export default function ChartToolbar({
   handleSnapshot = () => {},
   isFullscreen = false,
   toggleFullscreen = () => {},
+  isSplitView = false,
+  setIsSplitView = () => {},
+  compareSymbol = 'NIFTY50',
+  setCompareSymbol = () => {},
+  showAdvancedPanel = false,
+  setShowAdvancedPanel = () => {},
+  advancedPanelTab = 'patterns',
+  setAdvancedPanelTab = () => {},
+  showSMC = false,
+  setShowSMC = () => {},
 }) {
   return (
     <div style={{
@@ -451,6 +462,80 @@ export default function ChartToolbar({
           }}
         >
           <Sliders size={13} />
+        </button>
+
+        {/* Split View / Comparison Mode Toggle */}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <button
+            onClick={() => {
+              const next = !isSplitView;
+              setIsSplitView(next);
+              if (next) {
+                toast.success(`⚖️ Split View enabled: Comparing with ${compareSymbol}`);
+              } else {
+                toast.success('Single chart view restored');
+              }
+            }}
+            title="Split-Screen Benchmark Comparison (Alt+S)"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '3px 8px', borderRadius: isSplitView ? '4px 0 0 4px' : 4,
+              border: isSplitView ? '1px solid #3B82F6' : '1px solid rgba(255,255,255,0.08)',
+              background: isSplitView ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.03)',
+              color: isSplitView ? '#60A5FA' : '#CBD5E1',
+              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer',
+            }}
+          >
+            <Split size={12} style={{ color: '#60A5FA' }} />
+            <span>Compare</span>
+          </button>
+          {isSplitView && (
+            <select
+              value={compareSymbol}
+              onChange={(e) => {
+                setCompareSymbol(e.target.value);
+                toast.success(`Comparing with ${e.target.value}`);
+              }}
+              style={{
+                height: 25,
+                background: '#090C18',
+                color: '#60A5FA',
+                border: '1px solid #3B82F6',
+                borderLeft: 'none',
+                borderRadius: '0 4px 4px 0',
+                padding: '0 4px',
+                fontSize: '0.68rem',
+                fontWeight: 800,
+                outline: 'none',
+                cursor: 'pointer',
+                fontFamily: 'JetBrains Mono, monospace',
+              }}
+              title="Select Comparison Benchmark"
+            >
+              {POPULAR_STOCKS.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* Pro Tools / Analytics Panel Toggle */}
+        <button
+          onClick={() => {
+            setShowAdvancedPanel(!showAdvancedPanel);
+          }}
+          title="Pro Analytics Drawer: AI Patterns, Volume Profile, Order Flow, MTF, SMC, Backtest (Alt+P)"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+            padding: '3px 9px', borderRadius: 4,
+            border: showAdvancedPanel ? '1px solid #A855F7' : '1px solid rgba(255,255,255,0.08)',
+            background: showAdvancedPanel ? 'rgba(168,85,247,0.25)' : 'rgba(255,255,255,0.03)',
+            color: showAdvancedPanel ? '#C084FC' : '#CBD5E1',
+            fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer',
+          }}
+        >
+          <Sparkles size={12} style={{ color: '#C084FC' }} />
+          <span>Pro Tools</span>
         </button>
 
         {/* TradingView Multi-Chart Layout Switcher [ 1x1 | 1x2 | 2x1 | 2x2 ] */}

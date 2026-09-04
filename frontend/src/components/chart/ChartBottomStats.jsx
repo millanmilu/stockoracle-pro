@@ -14,15 +14,144 @@ export default function ChartBottomStats({
   activeCandleRef,
   showBottomStats,
   setShowBottomStats,
+  interval = '1d',
+  rawHistory = null,
 }) {
-  if (!isDaily) return null;
+  const numCurPrice = curPrice != null && !isNaN(Number(curPrice)) ? Number(curPrice) : null;
+
+  // Intraday Session Summary Calculations
+  const intradayStats = React.useMemo(() => {
+    if (isDaily || !Array.isArray(rawHistory) || rawHistory.length === 0) return null;
+    let high = -Infinity;
+    let low = Infinity;
+    let totalVol = 0;
+    const firstCandle = rawHistory[0];
+    const lastCandle = rawHistory[rawHistory.length - 1];
+    
+    for (let i = 0; i < rawHistory.length; i++) {
+      const c = rawHistory[i];
+      const h = Number(c.high);
+      const l = Number(c.low);
+      const v = Number(c.volume || 0);
+      if (!isNaN(h) && h > high) high = h;
+      if (!isNaN(l) && l < low && l > 0) low = l;
+      if (!isNaN(v)) totalVol += v;
+    }
+    
+    const open = Number(firstCandle?.open || 0);
+    const close = numCurPrice || Number(lastCandle?.close || 0);
+    if (activeCandleRef?.current?.high) high = Math.max(high, Number(activeCandleRef.current.high));
+    if (activeCandleRef?.current?.low && Number(activeCandleRef.current.low) > 0) low = Math.min(low, Number(activeCandleRef.current.low));
+    
+    const rangePct = open > 0 && close > 0 ? ((close - open) / open) * 100 : 0;
+    const sessionSpreadPct = low > 0 && high > low ? ((high - low) / low) * 100 : 0;
+
+    return {
+      open, high, low, close, totalVol, rangePct, sessionSpreadPct
+    };
+  }, [isDaily, rawHistory, numCurPrice, activeCandleRef]);
+
+  if (!isDaily) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '3px 10px',
+            backgroundColor: '#0B0F1C',
+            border: '1px solid rgba(99,102,241,0.12)',
+            borderRadius: 6,
+            fontSize: '0.72rem',
+            color: '#94A3B8',
+            height: 26,
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span
+              style={{
+                fontSize: '0.62rem',
+                fontWeight: 800,
+                padding: '1px 6px',
+                borderRadius: 4,
+                background: wsLiveData ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.1)',
+                color: wsLiveData ? '#10B981' : '#94A3B8',
+                border: `1px solid ${wsLiveData ? 'rgba(16, 185, 129, 0.3)' : 'rgba(148, 163, 184, 0.2)'}`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  backgroundColor: wsLiveData ? '#10B981' : '#64748B',
+                  boxShadow: wsLiveData ? '0 0 6px #10B981' : 'none',
+                }}
+              />
+              {wsLiveData ? 'LIVE NSE' : 'INTRADAY'}
+            </span>
+
+            <span>
+              LTP:{' '}
+              <strong style={{ color: '#FFF', fontFamily: 'JetBrains Mono, monospace' }}>
+                {numCurPrice != null ? `₹${numCurPrice.toFixed(2)}` : (intradayStats?.close ? `₹${intradayStats.close.toFixed(2)}` : '—')}
+              </strong>
+            </span>
+            <span>
+              O:{' '}
+              <strong style={{ color: '#CBD5E1', fontFamily: 'JetBrains Mono, monospace' }}>
+                {intradayStats?.open ? `₹${intradayStats.open.toFixed(2)}` : '—'}
+              </strong>
+            </span>
+            <span>
+              H:{' '}
+              <strong style={{ color: '#10B981', fontFamily: 'JetBrains Mono, monospace' }}>
+                {intradayStats?.high && intradayStats.high > 0 ? `₹${intradayStats.high.toFixed(2)}` : '—'}
+              </strong>
+            </span>
+            <span>
+              L:{' '}
+              <strong style={{ color: '#EF5350', fontFamily: 'JetBrains Mono, monospace' }}>
+                {intradayStats?.low && intradayStats.low < Infinity ? `₹${intradayStats.low.toFixed(2)}` : '—'}
+              </strong>
+            </span>
+            <span>
+              Chg:{' '}
+              <strong style={{ color: (intradayStats?.rangePct || 0) >= 0 ? '#10B981' : '#EF5350', fontFamily: 'JetBrains Mono, monospace' }}>
+                {intradayStats != null ? `${intradayStats.rangePct >= 0 ? '+' : ''}${intradayStats.rangePct.toFixed(2)}%` : '—'}
+              </strong>
+            </span>
+            <span>
+              Spread:{' '}
+              <strong style={{ color: '#A855F7', fontFamily: 'JetBrains Mono, monospace' }}>
+                {intradayStats?.sessionSpreadPct ? `${intradayStats.sessionSpreadPct.toFixed(2)}%` : '—'}
+              </strong>
+            </span>
+            <span>
+              Session Vol:{' '}
+              <strong style={{ color: '#CBD5E1', fontFamily: 'JetBrains Mono, monospace' }}>
+                {intradayStats?.totalVol ? (intradayStats.totalVol >= 1e7 ? `${(intradayStats.totalVol / 1e7).toFixed(2)}Cr` : intradayStats.totalVol >= 1e5 ? `${(intradayStats.totalVol / 1e5).toFixed(2)}L` : intradayStats.totalVol.toLocaleString()) : '—'}
+              </strong>
+            </span>
+            <span style={{ fontSize: '0.62rem', padding: '1px 5px', borderRadius: 3, background: 'rgba(99,102,241,0.15)', color: '#818CF8', fontWeight: 700 }}>
+              {interval || 'Intraday'}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const sig = String(prediction?.signal || '').toLowerCase();
   const sigMeta = (SIG && (SIG[sig] || (sig.includes('buy') ? SIG.buy : sig.includes('sell') ? SIG.sell : SIG.hold))) || { label: 'HOLD', color: '#F59E0B' };
   const score = prediction?.ai_confidence_score != null && !isNaN(Number(prediction.ai_confidence_score)) ? Number(prediction.ai_confidence_score) : 0;
   const scoreColor = score >= 70 ? '#26A69A' : score >= 50 ? '#F59E0B' : '#EF5350';
 
-  const numCurPrice = curPrice != null && !isNaN(Number(curPrice)) ? Number(curPrice) : null;
   const num7dTarget = prediction?.predicted_price_7d != null && !isNaN(Number(prediction.predicted_price_7d)) ? Number(prediction.predicted_price_7d) : null;
   const rawRet7d = prediction?.predicted_return_7d;
   const numRet7d = rawRet7d != null && !isNaN(Number(rawRet7d)) ? Number(rawRet7d) : null;

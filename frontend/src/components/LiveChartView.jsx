@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { createChart, ColorType, LineStyle, CrosshairMode } from 'lightweight-charts';
 import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
-import { Activity, X } from 'lucide-react';
+import { Activity, X, Sparkles, BarChart2, Waves, Clock, ShieldAlert, Layers } from 'lucide-react';
 import toast from 'react-hot-toast';
 import MultiChartGrid from './MultiChartGrid';
 import DrawingTools from './chart-tools/DrawingTools';
@@ -11,6 +11,10 @@ import IndicatorsModal from './IndicatorsModal';
 import IndicatorSettingsModal from './IndicatorSettingsModal';
 import ChartSettingsModal from './ChartSettingsModal';
 import AIPatternRecognition from './chart-tools/AIPatternRecognition';
+import VolumeProfile from './chart-tools/VolumeProfile';
+import OrderFlow from './chart-tools/OrderFlow';
+import MultiTimeframeCorrelation from './chart-tools/MultiTimeframeCorrelation';
+import { detectFVGs, detectOrderBlocks, detectMarketStructure } from './chart-tools/smcEngine';
 import TrustBadge from './TrustBadge';
 import { parseNum, toChartTime, addBusinessDays, getSessionBucketStart, POPULAR_STOCKS, INTERVALS, SIG, CHART_OPTIONS, CANDLE_STYLE } from '../utils/chartHelpers';
 import { calculateSMA, calculateEMA, calculateBollingerBands, calculateRSI, calculateMACD, calculateALMA, calculateKeyLevels, detectPatterns, calculateVWAP, calculateSupertrend } from '../utils/chartIndicators';
@@ -91,6 +95,7 @@ export default function LiveChartView() {
   const [showKeyLevels,    setShowKeyLevels]    = useState(false);
   const [showPatterns,     setShowPatterns]     = useState(false);
   const [showAICone,       setShowAICone]       = useState(true);
+  const [showSMC,          setShowSMC]          = useState(false);
   const [showIndicatorSettingsModal, setShowIndicatorSettingsModal] = useState(false);
 
   // Customizable Indicator Parameters
@@ -179,6 +184,10 @@ export default function LiveChartView() {
   // Indicators Map & Toggle Handler
   const activeIndicatorsMap = useMemo(() => ({
     vol_24h: showVolume,
+    volume_profile: showAdvancedPanel && advancedPanelTab === 'volume_profile',
+    order_flow: showAdvancedPanel && advancedPanelTab === 'order_flow',
+    mtf_correlation: showAdvancedPanel && advancedPanelTab === 'mtf',
+    smc: showSMC,
     vwap: showVWAP,
     supertrend: showSupertrend,
     sma_20: showSMA,
@@ -190,13 +199,37 @@ export default function LiveChartView() {
     auto_key_levels: showKeyLevels,
     ai_patterns: showPatterns || (showAdvancedPanel && advancedPanelTab === 'patterns'),
     backtester: showAdvancedPanel && advancedPanelTab === 'backtest',
-  }), [showVolume, showVWAP, showSupertrend, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, showAdvancedPanel, advancedPanelTab]);
+  }), [showVolume, showVWAP, showSupertrend, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showKeyLevels, showPatterns, showSMC, showAdvancedPanel, advancedPanelTab]);
 
   const handleToggleIndicator = useCallback((id) => {
     switch (id) {
       case 'vol_24h':
       case 'volume':
         setShowVolume(prev => !prev);
+        break;
+      case 'volume_profile':
+        setShowAdvancedPanel(true);
+        setAdvancedPanelTab('volume_profile');
+        toast.success('Volume Profile opened');
+        break;
+      case 'order_flow':
+        setShowAdvancedPanel(true);
+        setAdvancedPanelTab('order_flow');
+        toast.success('Order Flow Analysis opened');
+        break;
+      case 'mtf_correlation':
+        setShowAdvancedPanel(true);
+        setAdvancedPanelTab('mtf');
+        toast.success('Multi-Timeframe Correlation opened');
+        break;
+      case 'smc':
+        setShowSMC(prev => {
+          const next = !prev;
+          toast.success(next ? 'Smart Money Concepts (SMC) activated' : 'Smart Money Concepts (SMC) disabled');
+          return next;
+        });
+        setShowAdvancedPanel(true);
+        setAdvancedPanelTab('smc');
         break;
       case 'vwap':
         setShowVWAP(prev => !prev);
@@ -289,6 +322,7 @@ export default function LiveChartView() {
   const vwapRef        = useRef(null);
   const supertrendRef  = useRef(null);
   const keyLevelLinesRef = useRef([]);
+  const smcPriceLinesRef = useRef([]);
   const alertLinesRef  = useRef([]);
   const lastTriggeredMap = useRef(new Set());
 
@@ -365,6 +399,16 @@ export default function LiveChartView() {
         if (e.key.toLowerCase() === 'r') { e.preventDefault(); setIsReplayMode(p => !p); setIsReplayPlaying(false); }
         else if (e.key.toLowerCase() === 'a') { e.preventDefault(); setShowAlertModal(true); }
         else if (e.key.toLowerCase() === 'l') { e.preventDefault(); toggleLogScale(); }
+        else if (e.key.toLowerCase() === 's') { e.preventDefault(); setIsSplitView(p => !p); toast.success('Toggled Split Comparison View'); }
+        else if (e.key.toLowerCase() === 'p') { e.preventDefault(); setShowAdvancedPanel(p => !p); }
+        else if (e.key.toLowerCase() === 'c') {
+          e.preventDefault();
+          setShowSMC(p => {
+            const next = !p;
+            toast.success(next ? 'Smart Money Concepts (SMC) ON' : 'Smart Money Concepts (SMC) OFF');
+            return next;
+          });
+        }
       }
     };
     window.addEventListener('keydown', handleChartKeys);
@@ -535,12 +579,19 @@ export default function LiveChartView() {
         const isUp = chg >= 0;
         const upCol = '#10B981';
         const dnCol = '#EF5350';
+        const volData = param.seriesData.get(volume);
+        const volVal = volData?.value;
+        const volStr = typeof volVal === 'number' && !isNaN(volVal) && volVal > 0
+          ? (volVal >= 1e7 ? (volVal / 1e7).toFixed(2) + 'Cr' : volVal >= 1e5 ? (volVal / 1e5).toFixed(2) + 'L' : volVal >= 1e3 ? (volVal / 1e3).toFixed(1) + 'K' : volVal.toFixed(0))
+          : null;
+
         hudRef.current.innerHTML = `
           <span style="color:#94A3B8">O: <strong style="color:#F1F5F9">₹${candleData.open.toFixed(2)}</strong></span>
           <span style="color:#94A3B8">H: <strong style="color:${upCol}">₹${candleData.high.toFixed(2)}</strong></span>
           <span style="color:#94A3B8">L: <strong style="color:${dnCol}">₹${candleData.low.toFixed(2)}</strong></span>
           <span style="color:#94A3B8">C: <strong style="color:${isUp ? upCol : dnCol}">₹${candleData.close.toFixed(2)}</strong></span>
           <span style="color:${isUp ? upCol : dnCol};font-weight:700">${isUp ? '+' : ''}${chg.toFixed(2)}%</span>
+          ${volStr ? `<span style="color:#94A3B8">V: <strong style="color:#CBD5E1">${volStr}</strong></span>` : ''}
         `;
       } else {
         hudRef.current.style.display = 'none';
@@ -590,6 +641,7 @@ export default function LiveChartView() {
       macdSignalRef.current = null;
       macdHistRef.current = null;
       keyLevelLinesRef.current = [];
+      smcPriceLinesRef.current = [];
       alertLinesRef.current = [];
       predLineRef.current = null;
       upperLineRef.current = null;
@@ -712,10 +764,12 @@ export default function LiveChartView() {
   useEffect(() => {
     if (!isSplitView || !containerRef2.current) return;
 
+    const initialW = containerRef2.current.clientWidth || 400;
+    const initialH = containerRef2.current.clientHeight || 500;
     const chart2 = createChart(containerRef2.current, {
       ...CHART_OPTIONS,
-      width : containerRef2.current.clientWidth,
-      height: 520,
+      width : initialW,
+      height: initialH,
     });
     chartRef2.current = chart2;
 
@@ -725,12 +779,12 @@ export default function LiveChartView() {
     let ro2AnimFrame = null;
     const ro2 = new ResizeObserver(entries => {
       if (entries[0] && chartRef2.current) {
-        const w = entries[0].contentRect.width;
-        if (w > 0) {
+        const { width, height } = entries[0].contentRect;
+        if (width > 0 && height > 0) {
           if (ro2AnimFrame) cancelAnimationFrame(ro2AnimFrame);
           ro2AnimFrame = requestAnimationFrame(() => {
             if (chartRef2.current) {
-              chartRef2.current.applyOptions({ width: w });
+              chartRef2.current.applyOptions({ width, height });
             }
           });
         }
@@ -1256,6 +1310,77 @@ export default function LiveChartView() {
       keyLevelLinesRef.current = [];
     }
 
+    // 12. Smart Money Concepts (SMC - Fair Value Gaps, Order Blocks, and BOS)
+    let currentSMC = null;
+    if (showSMC && candleRef.current && activeCandles.length >= 10) {
+      if (smcPriceLinesRef.current && smcPriceLinesRef.current.length > 0) {
+        smcPriceLinesRef.current.forEach(line => {
+          try { candleRef.current?.removePriceLine(line); } catch {}
+        });
+        smcPriceLinesRef.current = [];
+      }
+      try {
+        const fvgs = detectFVGs(activeCandles, 4);
+        const obs  = detectOrderBlocks(activeCandles, 50);
+        const ms   = detectMarketStructure(activeCandles, 5);
+
+        currentSMC = {
+          fvgs: fvgs.length,
+          obs: obs.length,
+          bos: ms.breaks.length,
+        };
+
+        // Draw unmitigated FVGs
+        fvgs.forEach(f => {
+          const isBull = f.type === 'bullish_fvg';
+          const pLine = candleRef.current.createPriceLine({
+            price: f.mid,
+            color: isBull ? '#10B981' : '#EF5350',
+            lineWidth: 1.5,
+            lineStyle: LineStyle.Dotted,
+            axisLabelVisible: true,
+            title: isBull ? `🟢 FVG ₹${f.bottom.toFixed(1)}-${f.top.toFixed(1)}` : `🔴 FVG ₹${f.bottom.toFixed(1)}-${f.top.toFixed(1)}`,
+          });
+          smcPriceLinesRef.current.push(pLine);
+        });
+
+        // Draw Order Blocks
+        obs.slice(-3).forEach(ob => {
+          const isBull = ob.type === 'bullish_ob';
+          const pLine = candleRef.current.createPriceLine({
+            price: ob.price,
+            color: isBull ? 'rgba(38,166,154,0.85)' : 'rgba(239,83,80,0.85)',
+            lineWidth: 1.5,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: isBull ? `🛡️ Bull OB ₹${ob.price.toFixed(1)}` : `⚔️ Bear OB ₹${ob.price.toFixed(1)}`,
+          });
+          smcPriceLinesRef.current.push(pLine);
+        });
+
+        // Draw Market Structure Breaks
+        ms.breaks.slice(-2).forEach(b => {
+          const isBull = b.type === 'BOS_BULL';
+          const pLine = candleRef.current.createPriceLine({
+            price: b.price,
+            color: isBull ? '#3B82F6' : '#F59E0B',
+            lineWidth: 1,
+            lineStyle: LineStyle.LargeDashed,
+            axisLabelVisible: true,
+            title: isBull ? `⚡ BOS High ₹${b.price.toFixed(1)}` : `⚡ BOS Low ₹${b.price.toFixed(1)}`,
+          });
+          smcPriceLinesRef.current.push(pLine);
+        });
+      } catch (err) {
+        console.error('Error drawing SMC levels:', err);
+      }
+    } else if (!showSMC && candleRef.current && smcPriceLinesRef.current.length > 0) {
+      smcPriceLinesRef.current.forEach(line => {
+        try { candleRef.current?.removePriceLine(line); } catch {}
+      });
+      smcPriceLinesRef.current = [];
+    }
+
     // Update real-time indicator legend values
     const lastCandle = activeCandles[activeCandles.length - 1];
     const smaCalculated = showSMA && activeCandles.length >= smaLen ? calculateSMA(activeCandles, smaLen) : [];
@@ -1275,6 +1400,7 @@ export default function LiveChartView() {
       alma: currentALMA,
       vwap: currentVWAP,
       supertrend: currentSupertrend,
+      smc: currentSMC,
       volume: lastCandle ? Number(rawHistory[rawHistory.length - 1]?.volume || 0) : null,
     });
 
@@ -1323,7 +1449,7 @@ export default function LiveChartView() {
       } catch {}
     }
 
-  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showVWAP, showSupertrend, showKeyLevels, showPatterns, indicatorParams, isReplayMode, replayIndex, chartReady]);
+  }, [rawHistory, prediction, interval, showVolume, showSMA, showEMA, showBB, showRSI, showMACD, showALMA, showVWAP, showSupertrend, showKeyLevels, showPatterns, showSMC, indicatorParams, isReplayMode, replayIndex, chartReady]);
 
   /* ── Secondary Comparison Chart Data Binding ───────────────── */
 
@@ -1920,6 +2046,16 @@ export default function LiveChartView() {
         handleSnapshot={handleSnapshot}
         isFullscreen={isFullscreen}
         toggleFullscreen={toggleFullscreen}
+        isSplitView={isSplitView}
+        setIsSplitView={setIsSplitView}
+        compareSymbol={compareSymbol}
+        setCompareSymbol={setCompareSymbol}
+        showAdvancedPanel={showAdvancedPanel}
+        setShowAdvancedPanel={setShowAdvancedPanel}
+        advancedPanelTab={advancedPanelTab}
+        setAdvancedPanelTab={setAdvancedPanelTab}
+        showSMC={showSMC}
+        setShowSMC={setShowSMC}
       />
 
       {/* ── Floating Bar Replay Auto-Play Control Bar ── */}
@@ -2002,6 +2138,7 @@ export default function LiveChartView() {
                   showALMA={showALMA}
                   showRSI={showRSI}
                   showMACD={showMACD}
+                  showSMC={showSMC}
                   indicatorValues={indicatorValues}
                   indicatorParams={indicatorParams}
                 />
@@ -2027,10 +2164,10 @@ export default function LiveChartView() {
 
               </div>
               
-              {/* ── Right Docked Pro Indicator Panel (AI Patterns, Backtest) ── */}
+              {/* ── Right Docked Pro Indicator Panel (AI Patterns, Volume, OrderFlow, MTF, SMC, Backtest) ── */}
               {showAdvancedPanel && (
                 <div style={{
-                  width: 320,
+                  width: 350,
                   height: '100%',
                   background: 'rgba(9,12,24,0.98)',
                   borderLeft: '1px solid rgba(168,85,247,0.2)',
@@ -2046,17 +2183,17 @@ export default function LiveChartView() {
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    padding: '10px 12px',
-                    borderBottom: '1px solid rgba(168,85,247,0.2)',
+                    padding: '8px 12px',
+                    borderBottom: '1px solid rgba(168,85,247,0.15)',
                     background: 'rgba(168,85,247,0.05)',
                   }}>
-                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#A855F7', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Activity size={13} />
-                      {advancedPanelTab === 'patterns' ? 'AI PATTERN SCANNER' :
-                       advancedPanelTab === 'backtest' ? 'STRATEGY BACKTEST' : 'INDICATOR PANEL'}
+                    <div style={{ fontSize: '0.74rem', fontWeight: 800, color: '#A855F7', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <Sparkles size={13} style={{ color: '#A855F7' }} />
+                      <span>PRO ANALYTICS DRAWER</span>
                     </div>
                     <button
                       onClick={() => setShowAdvancedPanel(false)}
+                      title="Close Drawer (Alt+P)"
                       style={{
                         background: 'none',
                         border: 'none',
@@ -2069,6 +2206,52 @@ export default function LiveChartView() {
                     >
                       <X size={14} />
                     </button>
+                  </div>
+
+                  {/* Tab Navigation Strip */}
+                  <div style={{
+                    display: 'flex',
+                    gap: 3,
+                    padding: '6px 8px',
+                    background: 'rgba(0,0,0,0.3)',
+                    borderBottom: '1px solid rgba(168,85,247,0.15)',
+                    overflowX: 'auto',
+                  }}>
+                    {[
+                      { id: 'patterns',       label: 'Patterns',  icon: Activity },
+                      { id: 'volume_profile', label: 'Volume',    icon: BarChart2 },
+                      { id: 'order_flow',     label: 'OrderFlow', icon: Waves },
+                      { id: 'mtf',            label: 'MTF',       icon: Clock },
+                      { id: 'smc',            label: 'SMC',       icon: ShieldAlert },
+                      { id: 'backtest',       label: 'Backtest',  icon: Layers },
+                    ].map(tab => {
+                      const Icon = tab.icon;
+                      const isTabActive = advancedPanelTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          onClick={() => setAdvancedPanelTab(tab.id)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '4px 7px',
+                            borderRadius: 4,
+                            border: isTabActive ? '1px solid #A855F7' : '1px solid transparent',
+                            background: isTabActive ? 'rgba(168,85,247,0.22)' : 'transparent',
+                            color: isTabActive ? '#E9D5FF' : '#94A3B8',
+                            fontSize: '0.66rem',
+                            fontWeight: isTabActive ? 800 : 600,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <Icon size={11} style={{ color: isTabActive ? '#C084FC' : '#6B7280' }} />
+                          <span>{tab.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                   
                   {/* Panel Content */}
@@ -2091,6 +2274,151 @@ export default function LiveChartView() {
                       />
                     )}
 
+                    {advancedPanelTab === 'volume_profile' && (
+                      <VolumeProfile candles={rawHistory || []} height={340} />
+                    )}
+
+                    {advancedPanelTab === 'order_flow' && (
+                      <OrderFlow candles={rawHistory || []} />
+                    )}
+
+                    {advancedPanelTab === 'mtf' && (
+                      <MultiTimeframeCorrelation candles={rawHistory || []} symbol={selectedSymbol} />
+                    )}
+
+                    {advancedPanelTab === 'smc' && (() => {
+                      const activeCandles = rawHistory || [];
+                      const fvgs = activeCandles.length >= 3 ? detectFVGs(activeCandles, 8) : [];
+                      const obs = activeCandles.length >= 5 ? detectOrderBlocks(activeCandles, 60) : [];
+                      const ms = activeCandles.length >= 10 ? detectMarketStructure(activeCandles, 5) : { breaks: [], swingHighs: [], swingLows: [] };
+
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                          <div style={{
+                            padding: '10px',
+                            background: 'rgba(255,255,255,0.02)',
+                            borderRadius: 8,
+                            border: '1px solid rgba(16,185,129,0.25)',
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                              <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#10B981' }}>SMART MONEY CONCEPTS</span>
+                              <button
+                                onClick={() => setShowSMC(p => {
+                                  const next = !p;
+                                  toast.success(next ? 'Smart Money Concepts (SMC) ON' : 'Smart Money Concepts (SMC) OFF');
+                                  return next;
+                                })}
+                                style={{
+                                  padding: '3px 9px',
+                                  borderRadius: 4,
+                                  border: 'none',
+                                  background: showSMC ? '#10B981' : 'rgba(255,255,255,0.1)',
+                                  color: showSMC ? '#090C18' : '#CBD5E1',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {showSMC ? '✓ ON CHART' : '+ OVERLAY'}
+                              </button>
+                            </div>
+                            <div style={{ fontSize: '0.66rem', color: '#94A3B8', lineHeight: 1.4 }}>
+                              Identifies institutional liquidity voids, unmitigated Fair Value Gaps (FVG), order blocks, and structure breaks.
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+                            <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.2)', textAlign: 'center' }}>
+                              <div style={{ fontSize: '0.58rem', color: '#6B7280' }}>Active FVGs</div>
+                              <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#10B981' }}>{fvgs.length}</div>
+                            </div>
+                            <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(59,130,246,0.2)', textAlign: 'center' }}>
+                              <div style={{ fontSize: '0.58rem', color: '#6B7280' }}>Order Blocks</div>
+                              <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#60A5FA' }}>{obs.length}</div>
+                            </div>
+                            <div style={{ padding: '6px 8px', borderRadius: 6, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', textAlign: 'center' }}>
+                              <div style={{ fontSize: '0.58rem', color: '#6B7280' }}>BOS Breaks</div>
+                              <div style={{ fontSize: '0.92rem', fontWeight: 800, color: '#F59E0B' }}>{ms.breaks.length}</div>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#CBD5E1' }}>
+                              ⚡ Unmitigated FVGs ({fvgs.length})
+                            </div>
+                            {fvgs.length === 0 ? (
+                              <div style={{ fontSize: '0.65rem', color: '#6B7280', fontStyle: 'italic', padding: '6px' }}>No active unmitigated FVGs in current lookback</div>
+                            ) : (
+                              fvgs.map((fvg, idx) => (
+                                <div key={idx} style={{
+                                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                  padding: '5px 8px', borderRadius: 6,
+                                  background: fvg.type === 'bullish_fvg' ? 'rgba(16,185,129,0.08)' : 'rgba(239,83,80,0.08)',
+                                  border: `1px solid ${fvg.borderColor}40`,
+                                  fontSize: '0.68rem',
+                                }}>
+                                  <span style={{ color: fvg.borderColor, fontWeight: 700 }}>
+                                    {fvg.type === 'bullish_fvg' ? '🟢 Bullish FVG' : '🔴 Bearish FVG'}
+                                  </span>
+                                  <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#CBD5E1' }}>
+                                    ₹{fvg.bottom.toFixed(1)} – ₹{fvg.top.toFixed(1)}
+                                  </span>
+                                </div>
+                              ))
+                            )}
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#CBD5E1' }}>
+                              🛡️ Institutional Order Blocks ({obs.length})
+                            </div>
+                            {obs.length === 0 ? (
+                              <div style={{ fontSize: '0.65rem', color: '#6B7280', fontStyle: 'italic', padding: '6px' }}>No recent order blocks detected</div>
+                            ) : (
+                              obs.map((ob, idx) => (
+                                <div key={idx} style={{
+                                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                  padding: '5px 8px', borderRadius: 6,
+                                  background: ob.type === 'bullish_ob' ? 'rgba(38,166,154,0.08)' : 'rgba(239,83,80,0.08)',
+                                  border: `1px solid ${ob.color}40`,
+                                  fontSize: '0.68rem',
+                                }}>
+                                  <span style={{ color: ob.color, fontWeight: 700 }}>
+                                    {ob.type === 'bullish_ob' ? '🛡️ Demand OB' : '⚔️ Supply OB'}
+                                  </span>
+                                  <span style={{ fontFamily: 'JetBrains Mono, monospace', color: '#CBD5E1' }}>
+                                    ₹{ob.price.toFixed(1)}
+                                  </span>
+                                </div>
+                              ))
+                            )}
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                            <div style={{ fontSize: '0.68rem', fontWeight: 800, color: '#CBD5E1' }}>
+                              🔄 Structure Breaks (BOS)
+                            </div>
+                            {ms.breaks.length === 0 ? (
+                              <div style={{ fontSize: '0.65rem', color: '#6B7280', fontStyle: 'italic', padding: '6px' }}>Market moving in equilibrium</div>
+                            ) : (
+                              ms.breaks.map((b, idx) => (
+                                <div key={idx} style={{
+                                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                  padding: '5px 8px', borderRadius: 6,
+                                  background: 'rgba(255,255,255,0.02)',
+                                  border: `1px solid ${b.color}40`,
+                                  fontSize: '0.68rem',
+                                }}>
+                                  <span style={{ color: b.color, fontWeight: 700 }}>{b.label}</span>
+                                  <span style={{ fontSize: '0.62rem', color: '#94A3B8' }}>Confirmed</span>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     {advancedPanelTab === 'backtest' && (
                       <BacktestOverlayPanel
                         symbol={selectedSymbol}
@@ -2109,13 +2437,18 @@ export default function LiveChartView() {
             {isSplitView && (
               <div style={{
                 background:'rgba(255,255,255,0.015)',
-                border:'1px solid rgba(59,130,246,0.2)',
-                borderRadius:18, overflow:'hidden',
+                border:'1px solid rgba(59,130,246,0.25)',
+                borderRadius: 8, overflow:'hidden',
                 position:'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                height: '100%',
+                flex: 1,
+                minHeight: 0,
               }}>
-                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, padding:'8px 14px', borderBottom:'1px solid rgba(255,255,255,0.03)' }}>
+                <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, padding:'6px 12px', borderBottom:'1px solid rgba(255,255,255,0.04)', background: 'rgba(59,130,246,0.03)', flexShrink: 0 }}>
                   <div style={{ display:'flex', gap:8, alignItems:'center', fontSize:'0.75rem', color:'#60A5FA', fontWeight:700, minWidth:0 }}>
-                    <span style={{ whiteSpace:'nowrap' }}>COMPARISON CHART:</span>
+                    <span style={{ whiteSpace:'nowrap' }}>COMPARISON:</span>
                     <select
                       value={compareSymbol}
                       onChange={e => setCompareSymbol(e.target.value)}
@@ -2162,7 +2495,7 @@ export default function LiveChartView() {
                     })()}
                   </div>
                 </div>
-                <div ref={containerRef2} style={{ width:'100%', height:520 }} />
+                <div ref={containerRef2} style={{ width:'100%', height:'100%', flex: 1, minHeight: 0 }} />
               </div>
             )}
           </div>
@@ -2191,6 +2524,8 @@ export default function LiveChartView() {
         activeCandleRef={activeCandleRef}
         showBottomStats={showBottomStats}
         setShowBottomStats={setShowBottomStats}
+        interval={interval}
+        rawHistory={rawHistory}
       />
 
       {/* ── TradingView Indicators, Metrics, and Strategies Modal ── */}

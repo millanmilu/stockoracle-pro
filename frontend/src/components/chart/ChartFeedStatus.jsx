@@ -39,18 +39,18 @@ export default function ChartFeedStatus({
     bgColor = 'rgba(239,68,68,0.12)';
     borderColor = 'rgba(239,68,68,0.35)';
     titleText = 'WebSocket disconnected — attempting to reconnect';
-  } else if (!clientOpen) {
-    label = 'MARKET CLOSED';
-    dotColor = '#64748B';
-    bgColor = 'rgba(100,116,139,0.12)';
-    borderColor = 'rgba(100,116,139,0.3)';
-    titleText = 'NSE market is closed (9:15–15:30 IST weekdays). Showing last close price.';
   } else if (wsIsLive) {
     label = 'LIVE';
     dotColor = '#10B981';
     bgColor = 'rgba(16,185,129,0.12)';
     borderColor = 'rgba(16,185,129,0.3)';
     titleText = 'Live NSE price feed via Angel One — candles updating in real-time';
+  } else if (!clientOpen) {
+    label = 'MARKET CLOSED';
+    dotColor = '#64748B';
+    bgColor = 'rgba(100,116,139,0.12)';
+    borderColor = 'rgba(100,116,139,0.3)';
+    titleText = 'NSE market is closed (9:15–15:30 IST weekdays). Showing last close price.';
   } else {
     label = 'CACHED';
     dotColor = '#F59E0B';

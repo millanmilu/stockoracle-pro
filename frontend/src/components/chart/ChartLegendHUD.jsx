@@ -18,6 +18,7 @@ export default function ChartLegendHUD({
   showALMA,
   showRSI,
   showMACD,
+  showSMC,
 }) {
   return (
     <div style={{
@@ -115,6 +116,14 @@ export default function ChartLegendHUD({
                 H: {Number(indicatorValues.macd.hist || 0) >= 0 ? '+' : ''}{fmt(indicatorValues.macd.hist)}
               </span>
             )}
+          </div>
+        )}
+        {showSMC && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(16,185,129,0.14)', border: '1px solid rgba(16,185,129,0.35)', padding: '1px 6px', borderRadius: 3, color: '#10B981' }}>
+            <span style={{ fontWeight: 800 }}>SMC:</span>
+            <span style={{ color: '#FFF' }}>
+              {indicatorValues?.smc ? `FVG ${indicatorValues.smc.fvgs || 0} | OB ${indicatorValues.smc.obs || 0}` : 'Active'}
+            </span>
           </div>
         )}
       </div>
