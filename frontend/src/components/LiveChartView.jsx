@@ -117,7 +117,7 @@ export default function LiveChartView() {
   const { fetchHistory, fetchPredict, searchStock, searchStocks, fetchBacktest } = useStock();
 
   const [interval,    setInterval]    = useState('1d');
-  const [timeframe,   setTimeframe]   = useState('5Y');
+  const [timeframe,   setTimeframe]   = useState('2Y');
   const [rawHistory,  setRawHistory]  = useState(null);
   const [prediction,  setPrediction]  = useState(null);
   const storeLive = useStore(s => s.livePrices?.[selectedSymbol]);
@@ -138,6 +138,8 @@ export default function LiveChartView() {
   const [loading,     setLoading]     = useState(true);
   const [predLoading, setPredLoading] = useState(true);
   const [dataSource,  setDataSource]  = useState('unknown');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [historyFetchError, setHistoryFetchError] = useState(null);
 
   // TradingView Multi-Chart Grid Layout State ('1x1' | '1x2' | '2x1' | '2x2')
   const [chartLayout, setChartLayout] = useState('1x1');
@@ -816,6 +818,7 @@ export default function LiveChartView() {
     if (!selectedSymbol) return;
     setLoading(true);
     setPredLoading(true);
+    setHistoryFetchError(null);
     // Clear old candles immediately on symbol change to prevent stale/single-candle ghost
     activeCandleRef.current = null;
     sessionOHLCRef.current = null;
@@ -833,7 +836,10 @@ export default function LiveChartView() {
     fetchHistory(selectedSymbol, interval, timeframe).then(result => {
       const candleCount = result?.candles?.length ?? 0;
       console.log(`[API] History loaded for ${selectedSymbol}: ${candleCount} candles (source: ${result?.dataSource ?? '?'})`);
-      if (candleCount <= 1) {
+      if (candleCount === 0) {
+        console.warn(`[API] ⚠️ No candles returned for ${selectedSymbol}. Backend may lack historical data.`);
+        setHistoryFetchError(`No historical data found for "${selectedSymbol}". Try a different symbol or check backend connection.`);
+      } else if (candleCount <= 1) {
         console.warn(`[API] ⚠️ Only ${candleCount} candle(s) returned for ${selectedSymbol}. Backend may lack historical data.`);
       }
       setRawHistory(result?.candles ?? []);
@@ -841,6 +847,9 @@ export default function LiveChartView() {
       setLoading(false);
     }).catch(err => {
       console.error('[API] History fetch failed:', err);
+      const errMsg = err?.response?.data?.detail || err?.message || 'Failed to load chart data';
+      setHistoryFetchError(`Chart data could not be loaded: ${errMsg}. Check backend connection.`);
+      setRawHistory([]);
       setLoading(false);
     });
 
@@ -899,7 +908,9 @@ export default function LiveChartView() {
       ws.onclose = () => {
         if (unmounted) return;
         setWsConnected(false);
+        setWsIsLive(false);
         useStore.getState().setWsConnected?.(false);
+        useStore.getState().setWsLiveData?.(false);
         reconnectTimeout = setTimeout(() => {
           retryDelay = Math.min(retryDelay * 1.5, 15000);
           connectWs();
@@ -909,6 +920,7 @@ export default function LiveChartView() {
       ws.onerror = () => {
         if (unmounted) return;
         setWsConnected(false);
+        setWsIsLive(false);
         useStore.getState().setWsConnected?.(false);
         try { ws.close(); } catch {}
       };
@@ -941,7 +953,6 @@ export default function LiveChartView() {
           // Always read fresh active symbol directly from store & ref to eliminate any closure issue
           const currentSym = useStore.getState().selectedSymbol || selectedSymbolRef.current;
           if (ticker === currentSym) {
-            console.log('[WS] Received price for active symbol:', ticker, price);
             // Anchor session OHLC if provided by server feed
             if (dayOpen > 0 || dayHigh > 0 || dayLow > 0) {
               sessionOHLCRef.current = {
@@ -1001,7 +1012,9 @@ export default function LiveChartView() {
         try { wsRef.current.close(); } catch {}
       }
       setWsConnected(false);
+      setWsIsLive(false);
       useStore.getState().setWsConnected?.(false);
+      useStore.getState().setWsLiveData?.(false);
     };
   }, []); // Persistent connection on mount
 
@@ -1024,6 +1037,9 @@ export default function LiveChartView() {
 
   useEffect(() => {
     if (!candleRef.current) return;
+    // rawHistory === null means data is still loading (symbol changed) — don't clear chart yet,
+    // as that causes a blank flash between symbol switches. Only clear when explicitly empty [].
+    if (rawHistory === null) return;
     if (!Array.isArray(rawHistory) || !rawHistory.length) {
       try {
         candleRef.current.setData([]);
@@ -2037,6 +2053,28 @@ export default function LiveChartView() {
             ))}
           </div>
 
+          {/* Period Range Selector (1M, 3M, 6M, 1Y, 2Y, 5Y) */}
+          <div style={{ display:'flex', gap:2, background:'rgba(255,255,255,0.03)', padding:'2px', borderRadius:5, border:'1px solid rgba(255,255,255,0.06)' }}>
+            {['1M','3M','6M','1Y','2Y','5Y'].map(tf => (
+              <button
+                key={tf}
+                onClick={() => setTimeframe(tf)}
+                style={{
+                  padding:'3px 7px',
+                  borderRadius:4,
+                  border:'none',
+                  background: timeframe === tf ? 'rgba(16,185,129,0.2)' : 'transparent',
+                  color: timeframe === tf ? '#10B981' : '#64748B',
+                  fontSize:'0.68rem',
+                  fontWeight: timeframe === tf ? 800 : 600,
+                  cursor:'pointer',
+                }}
+              >
+                {tf}
+              </button>
+            ))}
+          </div>
+
           {/* Chart Style: Pure Candlestick */}
           <div
             title="Chart Style: Standard Japanese Candlesticks"
@@ -2596,6 +2634,51 @@ export default function LiveChartView() {
                     <div style={{ width:38, height:38, borderRadius:'50%', border:'3px solid rgba(168,85,247,0.2)', borderTopColor:'#A855F7', animation:'spin 0.75s linear infinite' }} />
                     <span style={{ fontSize: '0.78rem', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>Loading {selectedSymbol} candles…</span>
                     <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+                  </div>
+                )}
+
+                {/* ── Empty / Error State Overlay ── */}
+                {!loading && (!Array.isArray(rawHistory) || rawHistory.length === 0) && (
+                  <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'rgba(7,10,20,0.97)', zIndex:24, gap: 14, padding: 20 }}>
+                    <div style={{ fontSize: '2rem' }}>📉</div>
+                    <div style={{ fontSize: '0.88rem', color: '#F0F0FF', fontWeight: 800, textAlign: 'center' }}>
+                      No Chart Data for {selectedSymbol}
+                    </div>
+                    {historyFetchError ? (
+                      <div style={{ fontSize: '0.72rem', color: '#EF5350', textAlign: 'center', maxWidth: 380, lineHeight: 1.6, fontFamily: 'JetBrains Mono, monospace', padding: '8px 12px', background: 'rgba(239,83,80,0.08)', border: '1px solid rgba(239,83,80,0.25)', borderRadius: 6 }}>
+                        ⚠️ {historyFetchError}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.72rem', color: '#94A3B8', textAlign: 'center', maxWidth: 360, lineHeight: 1.6 }}>
+                        No historical candles found. Backend may be offline or this symbol has no data in the database yet.
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                      <button
+                        onClick={() => {
+                          setHistoryFetchError(null);
+                          setLoading(true);
+                          fetchHistory(selectedSymbol, interval, timeframe).then(result => {
+                            setRawHistory(result?.candles ?? []);
+                            if (!result?.candles?.length) setHistoryFetchError('Still no data. Check backend & Angel One session.');
+                            setLoading(false);
+                          }).catch(err => {
+                            setHistoryFetchError(`Retry failed: ${err?.message || 'Unknown error'}`);
+                            setRawHistory([]);
+                            setLoading(false);
+                          });
+                        }}
+                        style={{ padding: '7px 18px', borderRadius: 6, border: 'none', background: '#6366F1', color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
+                      >
+                        🔄 Retry
+                      </button>
+                      <button
+                        onClick={() => { setHistoryFetchError(null); setLoading(true); fetchHistory(selectedSymbol, '1d', '1Y').then(r => { setRawHistory(r?.candles ?? []); setLoading(false); }).catch(() => setLoading(false)); }}
+                        style={{ padding: '7px 18px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.1)', color: '#818CF8', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
+                      >
+                        Try 1Y Data
+                      </button>
+                    </div>
                   </div>
                 )}
 

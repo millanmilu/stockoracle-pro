@@ -29,7 +29,7 @@ const useStore = create(
       // ── Live Prices & WebSocket Status ──────────────────────────────────────
       wsConnected: false,
       setWsConnected: (val) => set({ wsConnected: val }),
-      wsLiveData: true,       // false when backend falls back to stale DB price
+      wsLiveData: false,      // true only after confirmed live WS tick arrives
       setWsLiveData: (val) => set({ wsLiveData: val }),
       livePrices: {},   // { RELIANCE: { price: 1420, change_pct: 0.5 } }
       setLivePrice: (ticker, payload) =>
