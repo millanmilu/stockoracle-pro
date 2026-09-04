@@ -1,8 +1,7 @@
 import React from 'react';
 import { 
-  Search, X, RotateCcw, Bell, Activity, Sliders, Calendar, 
-  Square, Columns, Rows, Grid2X2, Camera, Maximize2, Minimize2,
-  Layers, Sparkles, Split
+  Search, X, RotateCcw, Activity, Sliders, Calendar, Clock,
+  Square, Columns, Rows, Grid2X2, Camera, Maximize2, Minimize2
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { INTERVALS, POPULAR_STOCKS } from '../../utils/chartHelpers';
@@ -304,26 +303,40 @@ export default function ChartToolbar({
 
         <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }} />
 
-        {/* Timeframe Interval Buttons */}
-        <div style={{ display:'flex', gap:2, background:'rgba(255,255,255,0.03)', padding:'2px', borderRadius:5, border:'1px solid rgba(255,255,255,0.06)' }}>
-          {INTERVALS.map(iv => (
-            <button
-              key={iv.value}
-              onClick={() => handleIntervalChange(iv.value)}
-              style={{
-                padding:'3px 8px',
-                borderRadius:4,
-                border:'none',
-                background: interval === iv.value ? 'rgba(99,102,241,0.25)' : 'transparent',
-                color: interval === iv.value ? '#818CF8' : '#64748B',
-                fontSize:'0.72rem',
-                fontWeight: interval === iv.value ? 800 : 600,
-                cursor:'pointer',
-              }}
-            >
-              {iv.label}
-            </button>
-          ))}
+        {/* Timeframe Interval Dropdown */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          background: 'rgba(99, 102, 241, 0.1)',
+          border: '1px solid rgba(99, 102, 241, 0.3)',
+          borderRadius: 5,
+          padding: '2px 7px',
+          height: 25,
+        }}>
+          <Clock size={12} style={{ color: '#818CF8', flexShrink: 0 }} />
+          <select
+            value={interval}
+            onChange={(e) => handleIntervalChange(e.target.value)}
+            style={{
+              background: 'transparent',
+              color: '#818CF8',
+              border: 'none',
+              fontSize: '0.72rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              outline: 'none',
+              fontFamily: 'JetBrains Mono, monospace',
+              padding: 0,
+            }}
+            title="Candle Interval Timeframe (1m, 5m, 15m, 1H, 1D)"
+          >
+            {INTERVALS.map(iv => (
+              <option key={iv.value} value={iv.value} style={{ background: '#0B0F1C', color: '#E2E8F0' }}>
+                {iv.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Timeframe Dropdown (1M, 3M, 6M, 1Y, 2Y, 5Y) */}
@@ -396,28 +409,6 @@ export default function ChartToolbar({
           <span>Replay</span>
         </button>
 
-        {/* Price Alert Button */}
-        <button
-          onClick={() => setShowAlertModal(true)}
-          title="Set Price Alert with Sound Chime"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            padding: '3px 8px', borderRadius: 4,
-            border: '1px solid rgba(168,85,247,0.3)',
-            background: 'rgba(168,85,247,0.12)',
-            color: '#A855F7',
-            fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
-          }}
-        >
-          <Bell size={12} style={{ color: '#A855F7' }} />
-          <span>Alert</span>
-          {Array.isArray(priceAlerts) && priceAlerts.filter(a => a && a.ticker === selectedSymbol && !a.triggered).length > 0 && (
-            <span style={{ backgroundColor: '#A855F7', color: '#fff', fontSize: '0.6rem', padding: '1px 5px', borderRadius: 8, fontWeight: 800 }}>
-              {priceAlerts.filter(a => a && a.ticker === selectedSymbol && !a.triggered).length}
-            </span>
-          )}
-        </button>
-
         {/* Indicators Modal Button */}
         <button
           onClick={() => setShowIndicatorsModal(true)}
@@ -462,80 +453,6 @@ export default function ChartToolbar({
           }}
         >
           <Sliders size={13} />
-        </button>
-
-        {/* Split View / Comparison Mode Toggle */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <button
-            onClick={() => {
-              const next = !isSplitView;
-              setIsSplitView(next);
-              if (next) {
-                toast.success(`⚖️ Split View enabled: Comparing with ${compareSymbol}`);
-              } else {
-                toast.success('Single chart view restored');
-              }
-            }}
-            title="Split-Screen Benchmark Comparison (Alt+S)"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '3px 8px', borderRadius: isSplitView ? '4px 0 0 4px' : 4,
-              border: isSplitView ? '1px solid #3B82F6' : '1px solid rgba(255,255,255,0.08)',
-              background: isSplitView ? 'rgba(59,130,246,0.25)' : 'rgba(255,255,255,0.03)',
-              color: isSplitView ? '#60A5FA' : '#CBD5E1',
-              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer',
-            }}
-          >
-            <Split size={12} style={{ color: '#60A5FA' }} />
-            <span>Compare</span>
-          </button>
-          {isSplitView && (
-            <select
-              value={compareSymbol}
-              onChange={(e) => {
-                setCompareSymbol(e.target.value);
-                toast.success(`Comparing with ${e.target.value}`);
-              }}
-              style={{
-                height: 25,
-                background: '#090C18',
-                color: '#60A5FA',
-                border: '1px solid #3B82F6',
-                borderLeft: 'none',
-                borderRadius: '0 4px 4px 0',
-                padding: '0 4px',
-                fontSize: '0.68rem',
-                fontWeight: 800,
-                outline: 'none',
-                cursor: 'pointer',
-                fontFamily: 'JetBrains Mono, monospace',
-              }}
-              title="Select Comparison Benchmark"
-            >
-              {POPULAR_STOCKS.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-          )}
-        </div>
-
-        {/* Pro Tools / Analytics Panel Toggle */}
-        <button
-          onClick={() => {
-            setShowAdvancedPanel(!showAdvancedPanel);
-          }}
-          title="Pro Analytics Drawer: AI Patterns, Volume Profile, Order Flow, MTF, SMC, Backtest (Alt+P)"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            padding: '3px 9px', borderRadius: 4,
-            border: showAdvancedPanel ? '1px solid #A855F7' : '1px solid rgba(255,255,255,0.08)',
-            background: showAdvancedPanel ? 'rgba(168,85,247,0.25)' : 'rgba(255,255,255,0.03)',
-            color: showAdvancedPanel ? '#C084FC' : '#CBD5E1',
-            fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer',
-          }}
-        >
-          <Sparkles size={12} style={{ color: '#C084FC' }} />
-          <span>Pro Tools</span>
         </button>
 
         {/* TradingView Multi-Chart Layout Switcher [ 1x1 | 1x2 | 2x1 | 2x2 ] */}
