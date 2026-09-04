@@ -37,7 +37,13 @@ def _plotext_api():
 
     if hasattr(plt, "candlestick"):
         return plt, False
-    return plt.figure, True
+    fig = getattr(plt, "figure", plt)
+    if callable(fig):
+        try:
+            fig = fig()
+        except Exception:
+            pass
+    return fig, True
 
 
 def _plotext_reset(api, is_v6):
@@ -79,32 +85,46 @@ def _plotext_theme(api, is_v6, theme):
 
 
 def _plotext_dates(api, is_v6, dates):
-    """Enables x-axis date interpretation for plotext >= 6 (required for candlestick).
-
-    Legacy plotext treats string dates as labels automatically.
+    """Enables x-axis date interpretation for plotext >= 6 (required for candlestick)
+    and plotext 5.x.
     """
-    if not is_v6:
-        return
-    form = "%Y-%m-%d"
-    if dates and " " in str(dates[0]):
-        form = "%Y-%m-%d %H:%M:%S"
-    try:
-        api.date().activate(form=form)
-    except Exception:
-        pass
+    if is_v6:
+        form = "%Y-%m-%d"
+        if dates and " " in str(dates[0]):
+            form = "%Y-%m-%d %H:%M:%S"
+        try:
+            api.date().activate(form=form)
+        except Exception:
+            pass
+    else:
+        if hasattr(api, "date_form"):
+            try:
+                api.date_form("Y-m-d")
+            except Exception:
+                pass
 
 
 def _plotext_candlestick(api, is_v6, dates, opens, highs, lows, closes):
     """Version-safe candlestick plot call."""
     if is_v6:
-        api.candlestick({
+        signal = api.candlestick({
             "date": dates,
             "open": opens,
             "close": closes,
             "high": highs,
             "low": lows,
         })
+        if hasattr(api, "draw"):
+            try:
+                api.draw(signal)
+            except Exception:
+                pass
     else:
+        if hasattr(api, "date_form"):
+            try:
+                api.date_form("Y-m-d")
+            except Exception:
+                pass
         api.candlestick(dates, {"Open": opens, "Close": closes, "High": highs, "Low": lows})
 
 
@@ -224,9 +244,8 @@ def render_ascii_candlestick_chart(df: pd.DataFrame, symbol: str, width: int = 7
             if "date" in sub_df.columns
             else [str(i) for i in range(len(sub_df))]
         )
-        # Legacy plotext uses the short label for axis ticks; plotext >= 6 needs
-        # the full date string so its date converter can parse it.
-        dates = full_dates if is_v6 else [d[-5:] for d in full_dates]
+        # Both plotext >= 6 and plotext 5.x (with date_form("Y-m-d")) require full date strings
+        dates = full_dates
 
         opens  = sub_df["open"].astype(float).tolist()
         highs  = sub_df["high"].astype(float).tolist()
