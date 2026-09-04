@@ -1910,15 +1910,11 @@ export default function LiveChartView() {
         rawHistory={rawHistory}
         setShowAlertModal={setShowAlertModal}
         priceAlerts={priceAlerts}
-        isLogScale={isLogScale}
-        toggleLogScale={toggleLogScale}
         showIndicatorsModal={showIndicatorsModal}
         setShowIndicatorsModal={setShowIndicatorsModal}
         activeIndicatorsCount={activeIndicatorsMap ? Object.values(activeIndicatorsMap).filter(Boolean).length : 0}
         showIndicatorSettingsModal={showIndicatorSettingsModal}
         setShowIndicatorSettingsModal={setShowIndicatorSettingsModal}
-        showKeyLevels={showKeyLevels}
-        setShowKeyLevels={setShowKeyLevels}
         chartLayout={chartLayout}
         setChartLayout={setChartLayout}
         handleSnapshot={handleSnapshot}

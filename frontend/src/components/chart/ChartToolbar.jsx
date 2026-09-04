@@ -1,6 +1,6 @@
 import React from 'react';
 import { 
-  Search, X, RotateCcw, Bell, Activity, Sliders, Sparkles, 
+  Search, X, RotateCcw, Bell, Activity, Sliders, Calendar, 
   Square, Columns, Rows, Grid2X2, Camera, Maximize2, Minimize2 
 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -29,15 +29,11 @@ export default function ChartToolbar({
   rawHistory = null,
   setShowAlertModal = () => {},
   priceAlerts = [],
-  isLogScale = false,
-  toggleLogScale = () => {},
   showIndicatorsModal = false,
   setShowIndicatorsModal = () => {},
   activeIndicatorsCount = 0,
   showIndicatorSettingsModal = false,
   setShowIndicatorSettingsModal = () => {},
-  showKeyLevels = false,
-  setShowKeyLevels = () => {},
   chartLayout = '1x1',
   setChartLayout = () => {},
   handleSnapshot = () => {},
@@ -319,45 +315,44 @@ export default function ChartToolbar({
           ))}
         </div>
 
-        {/* Period Range Selector (1M, 3M, 6M, 1Y, 2Y, 5Y) */}
-        <div style={{ display:'flex', gap:2, background:'rgba(255,255,255,0.03)', padding:'2px', borderRadius:5, border:'1px solid rgba(255,255,255,0.06)' }}>
-          {['1M','3M','6M','1Y','2Y','5Y'].map(tf => (
-            <button
-              key={tf}
-              onClick={() => setTimeframe(tf)}
-              style={{
-                padding:'3px 7px',
-                borderRadius:4,
-                border:'none',
-                background: timeframe === tf ? 'rgba(16,185,129,0.2)' : 'transparent',
-                color: timeframe === tf ? '#10B981' : '#64748B',
-                fontSize:'0.68rem',
-                fontWeight: timeframe === tf ? 800 : 600,
-                cursor:'pointer',
-              }}
-            >
-              {tf}
-            </button>
-          ))}
-        </div>
-
-        {/* Chart Style: Pure Candlestick */}
-        <div
-          title="Chart Style: Standard Japanese Candlesticks"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            padding: '3px 8px', borderRadius: 4,
-            border: '1px solid rgba(255,255,255,0.08)',
-            background: 'rgba(255,255,255,0.04)',
-            color: '#818CF8',
-            fontSize: '0.72rem', fontWeight: 700, userSelect: 'none'
-          }}
-        >
-          <span>🕯️ Candlestick</span>
+        {/* Timeframe Dropdown (1M, 3M, 6M, 1Y, 2Y, 5Y) */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          background: 'rgba(16, 185, 129, 0.1)',
+          border: '1px solid rgba(16, 185, 129, 0.28)',
+          borderRadius: 5,
+          padding: '2px 7px',
+          height: 25,
+        }}>
+          <Calendar size={12} style={{ color: '#10B981', flexShrink: 0 }} />
+          <select
+            value={timeframe}
+            onChange={(e) => setTimeframe(e.target.value)}
+            style={{
+              background: 'transparent',
+              color: '#10B981',
+              border: 'none',
+              fontSize: '0.72rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              outline: 'none',
+              fontFamily: 'JetBrains Mono, monospace',
+              padding: 0,
+            }}
+            title="Timeframe Range (1M, 3M, 6M, 1Y, 2Y, 5Y)"
+          >
+            {['1M', '3M', '6M', '1Y', '2Y', '5Y'].map(tf => (
+              <option key={tf} value={tf} style={{ background: '#0B0F1C', color: '#E2E8F0' }}>
+                {tf}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
-      {/* Right: Indicators, AI Overlays, Grid Switcher, Snapshot, Fullscreen */}
+      {/* Right: Replay, Alert, Indicators, Settings, Grid Switcher, Snapshot, Fullscreen */}
       <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink: 0 }}>
         {/* Historical Bar Replay Simulator Toggle */}
         <button
@@ -412,21 +407,6 @@ export default function ChartToolbar({
           )}
         </button>
 
-        {/* Logarithmic Scale Toggle */}
-        <button
-          onClick={toggleLogScale}
-          title="Toggle Logarithmic Price Scale"
-          style={{
-            padding: '3px 6px', borderRadius: 4,
-            border: isLogScale ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
-            background: isLogScale ? 'rgba(99,102,241,0.25)' : 'transparent',
-            color: isLogScale ? '#818CF8' : '#94A3B8',
-            fontSize: '0.68rem', fontWeight: 800, cursor: 'pointer'
-          }}
-        >
-          LOG
-        </button>
-
         {/* Indicators Modal Button */}
         <button
           onClick={() => setShowIndicatorsModal(true)}
@@ -471,31 +451,6 @@ export default function ChartToolbar({
           }}
         >
           <Sliders size={13} />
-        </button>
-
-        {/* Auto-Drawing AI Overlays (S/R, Pivots, Fibs) */}
-        <button
-          onClick={() => {
-            setShowKeyLevels((prev) => !prev);
-            toast.success(!showKeyLevels ? "🪄 AI Technical Overlays Enabled (S/R, Pivots, Fibs)" : "AI Overlays Disabled");
-          }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 5,
-            padding: '4px 9px',
-            borderRadius: 5,
-            border: showKeyLevels ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
-            background: showKeyLevels ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
-            color: showKeyLevels ? '#818CF8' : '#E2E8F0',
-            fontSize: '0.74rem',
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-          title="Auto-draw Support/Resistance & Fibonacci Overlays"
-        >
-          <Sparkles size={13} style={{ color: '#818CF8' }} />
-          <span>AI Overlays</span>
         </button>
 
         {/* TradingView Multi-Chart Layout Switcher [ 1x1 | 1x2 | 2x1 | 2x2 ] */}
