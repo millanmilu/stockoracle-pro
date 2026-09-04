@@ -15,4 +15,5 @@ frontend/dist/
 frontend/node_modules/
 .DS_Store
 .kilo/
-.freebuff/
+.freebuff/
+.continue/
