@@ -56,6 +56,13 @@ def init_db():
     try:
         with get_db_session() as session:
             session.execute(text("DELETE FROM historical_prices WHERE length(date) > 10 OR length(date) != 10"))
+            # Clean corrupt 1-row / single-candle fragments that block full backfills
+            session.execute(text("""
+                DELETE FROM historical_prices 
+                WHERE ticker IN (
+                    SELECT ticker FROM historical_prices GROUP BY ticker HAVING count(*) < 5
+                )
+            """))
     except Exception as e:
         logger.debug("Historical prices auto-cleansing check notice: %s", e)
 
@@ -116,6 +123,20 @@ def clear_ticker_history(ticker: str):
     with get_db_session() as session:
         session.execute(delete(HistoricalPrice).where(HistoricalPrice.ticker == ticker))
     logger.info("Cleared old historical DB records for %s.", ticker)
+
+
+def purge_stale_partial_history(min_rows: int = 5):
+    """Purges tickers that only have fewer than min_rows daily records, allowing fresh backfills."""
+    try:
+        with get_db_session() as session:
+            session.execute(text("""
+                DELETE FROM historical_prices 
+                WHERE ticker IN (
+                    SELECT ticker FROM historical_prices GROUP BY ticker HAVING count(*) < :min_rows
+                )
+            """), {"min_rows": min_rows})
+    except Exception as e:
+        logger.debug("purge_stale_partial_history notice: %s", e)
 
 
 

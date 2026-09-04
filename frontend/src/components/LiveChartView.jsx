@@ -318,7 +318,7 @@ export default function LiveChartView() {
   const [showAlertModal, setShowAlertModal] = useState(false);
   const [targetAlertPrice, setTargetAlertPrice] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [chartEngine, setChartEngine] = useState(() => localStorage.getItem('stockoracle_chart_engine') || 'tradingview');
+  const [chartEngine, setChartEngine] = useState(() => localStorage.getItem('stockoracle_chart_engine') || 'stockoracle');
 
   // Real-time Autocomplete Ticker Suggestions
   useEffect(() => {
@@ -1990,7 +1990,8 @@ export default function LiveChartView() {
               onClick={() => {
                 setChartEngine('stockoracle');
                 localStorage.setItem('stockoracle_chart_engine', 'stockoracle');
-                toast.success('⚡ Switched to StockOracle AI & SMC Terminal Engine');
+                handleIntervalChange('1d');
+                toast.success('⚡ Switched to StockOracle AI & SMC Terminal Engine (1D Candles)');
               }}
               style={{
                 padding: '3px 9px',
