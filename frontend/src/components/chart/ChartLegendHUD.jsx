@@ -1,5 +1,11 @@
 import React from 'react';
 
+const fmt = (v) => {
+  if (v == null) return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n.toFixed(2);
+};
+
 export default function ChartLegendHUD({
   hudRef,
   indicatorValues = {},
@@ -53,60 +59,62 @@ export default function ChartLegendHUD({
         fontSize: 10,
         fontFamily: 'JetBrains Mono, monospace',
       }}>
-        {showSMA && indicatorValues.sma != null && (
+        {showSMA && fmt(indicatorValues?.sma) != null && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(0,229,255,0.12)', border: '1px solid rgba(0,229,255,0.3)', padding: '1px 6px', borderRadius: 3, color: '#00E5FF' }}>
-            <span style={{ fontWeight: 800 }}>SMA {indicatorParams.smaPeriod}:</span>
-            <span style={{ color: '#FFF' }}>₹{indicatorValues.sma.toFixed(2)}</span>
+            <span style={{ fontWeight: 800 }}>SMA {indicatorParams?.smaPeriod}:</span>
+            <span style={{ color: '#FFF' }}>₹{fmt(indicatorValues.sma)}</span>
           </div>
         )}
-        {showEMA && indicatorValues.ema != null && (
+        {showEMA && fmt(indicatorValues?.ema) != null && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(255,145,0,0.12)', border: '1px solid rgba(255,145,0,0.3)', padding: '1px 6px', borderRadius: 3, color: '#FF9100' }}>
-            <span style={{ fontWeight: 800 }}>EMA {indicatorParams.emaPeriod}:</span>
-            <span style={{ color: '#FFF' }}>₹{indicatorValues.ema.toFixed(2)}</span>
+            <span style={{ fontWeight: 800 }}>EMA {indicatorParams?.emaPeriod}:</span>
+            <span style={{ color: '#FFF' }}>₹{fmt(indicatorValues.ema)}</span>
           </div>
         )}
-        {showBB && indicatorValues.bb && (
+        {showBB && indicatorValues?.bb && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(224,64,251,0.12)', border: '1px solid rgba(224,64,251,0.3)', padding: '1px 6px', borderRadius: 3, color: '#E040FB' }}>
-            <span style={{ fontWeight: 800 }}>BB ({indicatorParams.bbPeriod}, {indicatorParams.bbStdDev}):</span>
-            <span style={{ color: '#E040FB' }}>U ₹{indicatorValues.bb.upper?.toFixed(2)}</span>
-            <span style={{ color: '#F59E0B' }}>M ₹{indicatorValues.bb.middle?.toFixed(2)}</span>
-            <span style={{ color: '#E040FB' }}>L ₹{indicatorValues.bb.lower?.toFixed(2)}</span>
+            <span style={{ fontWeight: 800 }}>BB ({indicatorParams?.bbPeriod}, {indicatorParams?.bbStdDev}):</span>
+            {fmt(indicatorValues.bb.upper) && <span style={{ color: '#E040FB' }}>U ₹{fmt(indicatorValues.bb.upper)}</span>}
+            {fmt(indicatorValues.bb.middle) && <span style={{ color: '#F59E0B' }}>M ₹{fmt(indicatorValues.bb.middle)}</span>}
+            {fmt(indicatorValues.bb.lower) && <span style={{ color: '#E040FB' }}>L ₹{fmt(indicatorValues.bb.lower)}</span>}
           </div>
         )}
-        {showVWAP && indicatorValues.vwap != null && (
+        {showVWAP && fmt(indicatorValues?.vwap) != null && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(6,182,212,0.12)', border: '1px solid rgba(6,182,212,0.3)', padding: '1px 6px', borderRadius: 3, color: '#06B6D4' }}>
             <span style={{ fontWeight: 800 }}>VWAP:</span>
-            <span style={{ color: '#FFF' }}>₹{indicatorValues.vwap.toFixed(2)}</span>
+            <span style={{ color: '#FFF' }}>₹{fmt(indicatorValues.vwap)}</span>
           </div>
         )}
-        {showSupertrend && indicatorValues.supertrend != null && (
+        {showSupertrend && fmt(indicatorValues?.supertrend) != null && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', padding: '1px 6px', borderRadius: 3, color: '#10B981' }}>
             <span style={{ fontWeight: 800 }}>Supertrend:</span>
-            <span style={{ color: '#FFF' }}>₹{indicatorValues.supertrend.toFixed(2)}</span>
+            <span style={{ color: '#FFF' }}>₹{fmt(indicatorValues.supertrend)}</span>
           </div>
         )}
-        {showALMA && indicatorValues.alma != null && (
+        {showALMA && fmt(indicatorValues?.alma) != null && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.3)', padding: '1px 6px', borderRadius: 3, color: '#FACC15' }}>
             <span style={{ fontWeight: 800 }}>ALMA:</span>
-            <span style={{ color: '#FFF' }}>₹{indicatorValues.alma.toFixed(2)}</span>
+            <span style={{ color: '#FFF' }}>₹{fmt(indicatorValues.alma)}</span>
           </div>
         )}
-        {showRSI && indicatorValues.rsi != null && (
+        {showRSI && fmt(indicatorValues?.rsi) != null && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(244,63,94,0.12)', border: '1px solid rgba(244,63,94,0.3)', padding: '1px 6px', borderRadius: 3, color: '#F43F5E' }}>
-            <span style={{ fontWeight: 800 }}>RSI ({indicatorParams.rsiPeriod}):</span>
-            <span style={{ color: indicatorValues.rsi >= 70 ? '#EF5350' : indicatorValues.rsi <= 30 ? '#10B981' : '#FFF', fontWeight: 800 }}>
-              {indicatorValues.rsi.toFixed(2)}
+            <span style={{ fontWeight: 800 }}>RSI ({indicatorParams?.rsiPeriod}):</span>
+            <span style={{ color: Number(indicatorValues.rsi) >= 70 ? '#EF5350' : Number(indicatorValues.rsi) <= 30 ? '#10B981' : '#FFF', fontWeight: 800 }}>
+              {fmt(indicatorValues.rsi)}
             </span>
           </div>
         )}
-        {showMACD && indicatorValues.macd && (
+        {showMACD && indicatorValues?.macd && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', padding: '1px 6px', borderRadius: 3, color: '#38BDF8' }}>
-            <span style={{ fontWeight: 800 }}>MACD ({indicatorParams.macdFast},{indicatorParams.macdSlow},{indicatorParams.macdSignal}):</span>
-            <span>M: {indicatorValues.macd.macd?.toFixed(2)}</span>
-            <span style={{ color: '#F97316' }}>S: {indicatorValues.macd.signal?.toFixed(2)}</span>
-            <span style={{ color: (indicatorValues.macd.hist || 0) >= 0 ? '#10B981' : '#EF5350', fontWeight: 800 }}>
-              H: {(indicatorValues.macd.hist || 0) >= 0 ? '+' : ''}{indicatorValues.macd.hist?.toFixed(2)}
-            </span>
+            <span style={{ fontWeight: 800 }}>MACD ({indicatorParams?.macdFast},{indicatorParams?.macdSlow},{indicatorParams?.macdSignal}):</span>
+            {fmt(indicatorValues.macd.macd) && <span>M: {fmt(indicatorValues.macd.macd)}</span>}
+            {fmt(indicatorValues.macd.signal) && <span style={{ color: '#F97316' }}>S: {fmt(indicatorValues.macd.signal)}</span>}
+            {fmt(indicatorValues.macd.hist) && (
+              <span style={{ color: Number(indicatorValues.macd.hist || 0) >= 0 ? '#10B981' : '#EF5350', fontWeight: 800 }}>
+                H: {Number(indicatorValues.macd.hist || 0) >= 0 ? '+' : ''}{fmt(indicatorValues.macd.hist)}
+              </span>
+            )}
           </div>
         )}
       </div>

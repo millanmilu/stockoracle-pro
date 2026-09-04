@@ -4,16 +4,21 @@ import toast from 'react-hot-toast';
 import { playAlertChime } from '../../utils/soundChime';
 
 export default function PriceAlertModal({
-  selectedSymbol,
-  curPrice,
-  showAlertModal,
-  setShowAlertModal,
-  targetAlertPrice,
-  setTargetAlertPrice,
-  priceAlerts,
-  setPriceAlerts,
+  selectedSymbol = '',
+  curPrice = null,
+  showAlertModal = false,
+  setShowAlertModal = () => {},
+  targetAlertPrice = '',
+  setTargetAlertPrice = () => {},
+  priceAlerts = [],
+  setPriceAlerts = () => {},
 }) {
   if (!showAlertModal) return null;
+
+  const numCurPrice = curPrice != null && !isNaN(Number(curPrice)) ? Number(curPrice) : null;
+  const activeAlerts = Array.isArray(priceAlerts)
+    ? priceAlerts.filter(a => a && a.ticker === selectedSymbol)
+    : [];
 
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:150 }}>
@@ -39,10 +44,10 @@ export default function PriceAlertModal({
         </p>
 
         {/* Quick Price Percentage Presets */}
-        {curPrice && (
+        {numCurPrice != null && (
           <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
             {[-5, -2, -1, 1, 2, 5].map(pct => {
-              const targetP = (curPrice * (1 + pct / 100)).toFixed(2);
+              const targetP = (numCurPrice * (1 + pct / 100)).toFixed(2);
               return (
                 <button
                   key={pct}
@@ -64,7 +69,7 @@ export default function PriceAlertModal({
           <input
             type="number"
             step="0.05"
-            placeholder={`Target Price (LTP ₹${curPrice?.toFixed(2) || '0.00'})`}
+            placeholder={`Target Price (LTP ₹${numCurPrice != null ? numCurPrice.toFixed(2) : '0.00'})`}
             value={targetAlertPrice}
             onChange={e => setTargetAlertPrice(e.target.value)}
             style={{ flex:1, padding:'8px 12px', borderRadius:6, border:'1px solid rgba(168,85,247,0.3)', background:'#060913', color:'#fff', fontSize:'0.86rem', outline:'none', fontFamily:'JetBrains Mono, monospace' }}
@@ -77,11 +82,11 @@ export default function PriceAlertModal({
                   id: `alert_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
                   ticker: selectedSymbol,
                   price: p,
-                  direction: curPrice && p > curPrice ? 'above' : 'below',
+                  direction: numCurPrice && p > numCurPrice ? 'above' : 'below',
                   triggered: false,
                   createdAt: new Date().toISOString(),
                 };
-                setPriceAlerts(prev => [...prev, newAlert]);
+                setPriceAlerts(prev => [...(Array.isArray(prev) ? prev : []), newAlert]);
                 toast.success(`🔔 Alert line created for ${selectedSymbol} at ₹${p.toFixed(2)}`);
                 setTargetAlertPrice('');
               }
@@ -95,14 +100,14 @@ export default function PriceAlertModal({
         {/* Active Alerts List for this Symbol */}
         <div style={{ maxHeight:160, overflowY:'auto', display:'flex', flexDirection:'column', gap:4, marginTop:4 }}>
           <div style={{ fontSize:'0.66rem', color:'#64748B', fontWeight:700, letterSpacing:'0.05em' }}>
-            ACTIVE ALERTS ({priceAlerts.filter(a => a.ticker === selectedSymbol).length})
+            ACTIVE ALERTS ({activeAlerts.length})
           </div>
-          {priceAlerts.filter(a => a.ticker === selectedSymbol).length === 0 ? (
+          {activeAlerts.length === 0 ? (
             <div style={{ fontSize:'0.72rem', color:'#475569', padding:'6px 0', fontStyle:'italic' }}>
               No alerts set for {selectedSymbol}.
             </div>
           ) : (
-            priceAlerts.filter(a => a.ticker === selectedSymbol).map(alert => (
+            activeAlerts.map(alert => (
               <div key={alert.id} style={{
                 display:'flex', alignItems:'center', justifyContent:'space-between',
                 padding:'5px 8px', borderRadius:4, background:'rgba(255,255,255,0.03)',
@@ -113,7 +118,7 @@ export default function PriceAlertModal({
                   ₹{Number(alert.price).toFixed(2)} {alert.triggered ? '✓ (Triggered)' : '⏳ Active'}
                 </span>
                 <button
-                  onClick={() => setPriceAlerts(prev => prev.filter(a => a.id !== alert.id))}
+                  onClick={() => setPriceAlerts(prev => (Array.isArray(prev) ? prev : []).filter(a => a && a.id !== alert.id))}
                   style={{ background:'none', border:'none', color:'#EF5350', cursor:'pointer', fontSize:'0.72rem', padding:'0 4px' }}
                   title="Delete Alert"
                 >

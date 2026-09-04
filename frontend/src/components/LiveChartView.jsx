@@ -39,6 +39,11 @@ export default function LiveChartView() {
   const [timeframe,   setTimeframe]   = useState('2Y');
   const [rawHistory,  setRawHistory]  = useState(null);
   const [prediction,  setPrediction]  = useState(null);
+  // Split View & Comparison State
+  const [isSplitView, setIsSplitView] = useState(false);
+  const [compareSymbol, setCompareSymbol] = useState('NIFTY50');
+  const [rawHistoryCompare, setRawHistoryCompare] = useState(null);
+
   const storeLive = useStore(s => s.livePrices?.[selectedSymbol]);
   // Live tick for the comparison chart (split view). The WS handler stores every subscribed
   // ticker, so the compare symbol carries its own price / session OHLC / liveness flag.
@@ -69,11 +74,6 @@ export default function LiveChartView() {
   const [symbolModalFilter, setSymbolModalFilter] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
-
-  // Split View & Comparison State
-  const [isSplitView, setIsSplitView] = useState(false);
-  const [compareSymbol, setCompareSymbol] = useState('NIFTY50');
-  const [rawHistoryCompare, setRawHistoryCompare] = useState(null);
 
   // Indicator Toggles & TradingView Modals
   const [showIndicatorsModal, setShowIndicatorsModal] = useState(false);
@@ -133,7 +133,8 @@ export default function LiveChartView() {
   const [priceAlerts, setPriceAlerts] = useState(() => {
     try {
       const saved = localStorage.getItem('stockoracle_price_alerts');
-      return saved ? JSON.parse(saved) : [];
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
     } catch {
       return [];
     }
@@ -1744,7 +1745,9 @@ export default function LiveChartView() {
     alertLinesRef.current.forEach(l => { try { candleRef.current?.removePriceLine(l); } catch {} });
     alertLinesRef.current = [];
 
-    const stockAlerts = priceAlerts.filter(a => a.ticker === selectedSymbol && !a.triggered);
+    const stockAlerts = Array.isArray(priceAlerts)
+      ? priceAlerts.filter(a => a && a.ticker === selectedSymbol && !a.triggered)
+      : [];
     stockAlerts.forEach(alert => {
       try {
         const pLine = candleRef.current.createPriceLine({
@@ -1827,12 +1830,9 @@ export default function LiveChartView() {
   /* ── Derived Header & Stats values ────────────────────────── */
 
   const lastCandleClose = Array.isArray(rawHistory) && rawHistory.length ? parseNum(rawHistory[rawHistory.length - 1]?.close) : null;
-  const curPrice  = (wsLiveData && livePrice != null ? livePrice : null) ?? (lastCandleClose != null ? lastCandleClose : livePrice) ?? prediction?.current_price;
+  const rawCurPrice = (wsLiveData && livePrice != null ? livePrice : null) ?? (lastCandleClose != null ? lastCandleClose : livePrice) ?? prediction?.current_price;
+  const curPrice  = rawCurPrice != null && !isNaN(Number(rawCurPrice)) ? Number(rawCurPrice) : null;
   const changeUp  = (liveChange ?? 0) >= 0;
-  const sig       = prediction?.signal;
-  const sigMeta   = SIG[sig] ?? SIG.hold;
-  const score     = prediction?.ai_confidence_score ?? 0;
-  const scoreColor = score >= 70 ? '#26A69A' : score >= 50 ? '#F59E0B' : '#EF5350';
 
   /* ── Comparison chart (split view) live header values ─────── */
   const compareLastRow  = Array.isArray(rawHistoryCompare) && rawHistoryCompare.length ? rawHistoryCompare[rawHistoryCompare.length - 1] : null;
@@ -1914,7 +1914,7 @@ export default function LiveChartView() {
         toggleLogScale={toggleLogScale}
         showIndicatorsModal={showIndicatorsModal}
         setShowIndicatorsModal={setShowIndicatorsModal}
-        activeIndicatorsCount={Object.values(activeIndicatorsMap).filter(Boolean).length}
+        activeIndicatorsCount={activeIndicatorsMap ? Object.values(activeIndicatorsMap).filter(Boolean).length : 0}
         showIndicatorSettingsModal={showIndicatorSettingsModal}
         setShowIndicatorSettingsModal={setShowIndicatorSettingsModal}
         showKeyLevels={showKeyLevels}
@@ -2134,10 +2134,10 @@ export default function LiveChartView() {
                   {/* Live price / change / feed status for the comparison symbol */}
                   <div style={{ display:'flex', gap:10, alignItems:'center', fontFamily:'JetBrains Mono, monospace', fontSize:'0.74rem', whiteSpace:'nowrap' }}>
                     <span style={{ color: compareChangeUp ? '#10B981' : '#EF5350', fontWeight:800 }}>
-                      {compareDisplayPrice != null && !isNaN(compareDisplayPrice) ? `₹${compareDisplayPrice.toFixed(2)}` : '—'}
+                      {compareDisplayPrice != null && !isNaN(Number(compareDisplayPrice)) ? `₹${Number(compareDisplayPrice).toFixed(2)}` : '—'}
                     </span>
                     <span style={{ color: compareChangeUp ? '#10B981' : '#EF5350', fontWeight:700 }}>
-                      {compareChangePct != null && !isNaN(compareChangePct) ? `${compareChangeUp ? '+' : ''}${compareChangePct.toFixed(2)}%` : ''}
+                      {compareChangePct != null && !isNaN(Number(compareChangePct)) ? `${compareChangeUp ? '+' : ''}${Number(compareChangePct).toFixed(2)}%` : ''}
                     </span>
                     {(() => {
                       let label = '…', dot = '#64748B', bgc = 'transparent', brd = 'transparent', glow = false, tip = 'Waiting for the first price tick for this symbol';

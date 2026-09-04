@@ -1,12 +1,27 @@
 import React from 'react';
 import { FlaskConical } from 'lucide-react';
 
-export default function BacktestOverlayPanel({ symbol, showBacktest, setShowBacktest, backtestData, backtestLoading }) {
+export default function BacktestOverlayPanel({
+  symbol = '',
+  showBacktest = false,
+  setShowBacktest = () => {},
+  backtestData = null,
+  backtestLoading = false,
+}) {
   const cr = backtestData?.cumulative_return;
   const br = backtestData?.benchmark_return;
 
-  const pct = v => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`;
-  const col = v => v >= 0 ? '#10B981' : '#EF5350';
+  const pct = v => {
+    if (v == null) return '—';
+    const n = Number(v);
+    return isNaN(n) ? '—' : `${n >= 0 ? '+' : ''}${(n * 100).toFixed(2)}%`;
+  };
+  const col = v => (Number(v) >= 0 ? '#10B981' : '#EF5350');
+  const fmt = (v) => {
+    if (v == null) return '—';
+    const n = Number(v);
+    return isNaN(n) ? '—' : n.toFixed(2);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -46,16 +61,16 @@ export default function BacktestOverlayPanel({ symbol, showBacktest, setShowBack
       {/* Metrics */}
       {backtestData && !backtestLoading && (() => {
         const { cumulative_return: cr, benchmark_return: br, sharpe_ratio, max_drawdown, win_rate, total_trades, cagr } = backtestData;
-        const alpha = cr - br;
+        const alpha = (cr != null && br != null) ? (Number(cr) - Number(br)) : null;
         const rows = [
           { label: 'Strategy Return', value: pct(cr), color: col(cr) },
           { label: 'Benchmark (B&H)', value: pct(br), color: col(br) },
           { label: 'Alpha', value: pct(alpha), color: col(alpha) },
           { label: 'CAGR', value: pct(cagr), color: col(cagr) },
-          { label: 'Sharpe', value: sharpe_ratio.toFixed(2), color: sharpe_ratio >= 1 ? '#10B981' : sharpe_ratio >= 0 ? '#F59E0B' : '#EF5350' },
-          { label: 'Max Drawdown', value: pct(max_drawdown), color: max_drawdown > -0.1 ? '#10B981' : '#EF5350' },
-          { label: 'Win Rate', value: `${(win_rate * 100).toFixed(1)}%`, color: win_rate >= 0.55 ? '#10B981' : '#F59E0B' },
-          { label: 'Trades', value: total_trades, color: '#9CA3AF' },
+          { label: 'Sharpe', value: fmt(sharpe_ratio), color: Number(sharpe_ratio) >= 1 ? '#10B981' : Number(sharpe_ratio) >= 0 ? '#F59E0B' : '#EF5350' },
+          { label: 'Max Drawdown', value: pct(max_drawdown), color: Number(max_drawdown) > -0.1 ? '#10B981' : '#EF5350' },
+          { label: 'Win Rate', value: win_rate != null ? `${(Number(win_rate) * 100).toFixed(1)}%` : '—', color: Number(win_rate) >= 0.55 ? '#10B981' : '#F59E0B' },
+          { label: 'Trades', value: total_trades ?? '—', color: '#9CA3AF' },
         ];
         return (
           <>

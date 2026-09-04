@@ -17,10 +17,23 @@ export default function ChartBottomStats({
 }) {
   if (!isDaily) return null;
 
-  const sig = prediction?.signal;
-  const sigMeta = SIG[sig] ?? SIG.hold;
-  const score = prediction?.ai_confidence_score ?? 0;
+  const sig = String(prediction?.signal || '').toLowerCase();
+  const sigMeta = (SIG && (SIG[sig] || (sig.includes('buy') ? SIG.buy : sig.includes('sell') ? SIG.sell : SIG.hold))) || { label: 'HOLD', color: '#F59E0B' };
+  const score = prediction?.ai_confidence_score != null && !isNaN(Number(prediction.ai_confidence_score)) ? Number(prediction.ai_confidence_score) : 0;
   const scoreColor = score >= 70 ? '#26A69A' : score >= 50 ? '#F59E0B' : '#EF5350';
+
+  const numCurPrice = curPrice != null && !isNaN(Number(curPrice)) ? Number(curPrice) : null;
+  const num7dTarget = prediction?.predicted_price_7d != null && !isNaN(Number(prediction.predicted_price_7d)) ? Number(prediction.predicted_price_7d) : null;
+  const rawRet7d = prediction?.predicted_return_7d;
+  const numRet7d = rawRet7d != null && !isNaN(Number(rawRet7d)) ? Number(rawRet7d) : null;
+  const rawUpper = prediction?.predicted_upper_price_7d ?? prediction?.high_bound;
+  const numUpper = rawUpper != null && !isNaN(Number(rawUpper)) ? Number(rawUpper) : null;
+  const rawLower = prediction?.predicted_lower_price_7d ?? prediction?.low_bound;
+  const numLower = rawLower != null && !isNaN(Number(rawLower)) ? Number(rawLower) : null;
+
+  const candleOpen = activeCandleRef?.current?.open != null && !isNaN(Number(activeCandleRef.current.open)) ? Number(activeCandleRef.current.open) : null;
+  const candleHigh = activeCandleRef?.current?.high != null && !isNaN(Number(activeCandleRef.current.high)) ? Number(activeCandleRef.current.high) : null;
+  const candleLow  = activeCandleRef?.current?.low  != null && !isNaN(Number(activeCandleRef.current.low))  ? Number(activeCandleRef.current.low)  : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
@@ -69,38 +82,38 @@ export default function ChartBottomStats({
           <span>
             LTP:{' '}
             <strong style={{ color: '#FFF', fontFamily: 'JetBrains Mono, monospace' }}>
-              {curPrice ? `₹${curPrice.toFixed(2)}` : '—'}
+              {numCurPrice != null ? `₹${numCurPrice.toFixed(2)}` : '—'}
             </strong>
           </span>
           <span>
             O:{' '}
             <strong style={{ color: '#CBD5E1', fontFamily: 'JetBrains Mono, monospace' }}>
-              {activeCandleRef?.current?.open ? `₹${Number(activeCandleRef.current.open).toFixed(2)}` : '—'}
+              {candleOpen != null ? `₹${candleOpen.toFixed(2)}` : '—'}
             </strong>
           </span>
           <span>
             H:{' '}
             <strong style={{ color: '#10B981', fontFamily: 'JetBrains Mono, monospace' }}>
-              {activeCandleRef?.current?.high ? `₹${Number(activeCandleRef.current.high).toFixed(2)}` : '—'}
+              {candleHigh != null ? `₹${candleHigh.toFixed(2)}` : '—'}
             </strong>
           </span>
           <span>
             L:{' '}
             <strong style={{ color: '#EF5350', fontFamily: 'JetBrains Mono, monospace' }}>
-              {activeCandleRef?.current?.low ? `₹${Number(activeCandleRef.current.low).toFixed(2)}` : '—'}
+              {candleLow != null ? `₹${candleLow.toFixed(2)}` : '—'}
             </strong>
           </span>
           <span>
             7D Target:{' '}
             <strong style={{ color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>
-              {prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toFixed(2)}` : '—'}
+              {num7dTarget != null ? `₹${num7dTarget.toFixed(2)}` : '—'}
             </strong>
           </span>
           <span>
             Return:{' '}
-            <strong style={{ color: (prediction?.predicted_return_7d || 0) >= 0 ? '#10B981' : '#EF5350' }}>
-              {prediction?.predicted_return_7d != null
-                ? `${prediction.predicted_return_7d >= 0 ? '+' : ''}${(prediction.predicted_return_7d * 100).toFixed(2)}%`
+            <strong style={{ color: (numRet7d || 0) >= 0 ? '#10B981' : '#EF5350' }}>
+              {numRet7d != null
+                ? `${numRet7d >= 0 ? '+' : ''}${(numRet7d * 100).toFixed(2)}%`
                 : '—'}
             </strong>
           </span>
@@ -135,13 +148,13 @@ export default function ChartBottomStats({
           {[
             {
               label: 'CURRENT PRICE',
-              value: curPrice ? `₹${curPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—',
+              value: numCurPrice != null ? `₹${numCurPrice.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—',
               color: '#F0F0FF',
             },
             {
               label: 'AI TARGET (7D)',
-              value: prediction?.predicted_price_7d
-                ? `₹${prediction.predicted_price_7d.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+              value: num7dTarget != null
+                ? `₹${num7dTarget.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
                 : predLoading
                 ? 'Loading…'
                 : '—',
@@ -150,23 +163,23 @@ export default function ChartBottomStats({
             {
               label: 'EXPECTED RETURN',
               value:
-                prediction?.predicted_return_7d != null
-                  ? `${prediction.predicted_return_7d >= 0 ? '+' : ''}${(prediction.predicted_return_7d * 100).toFixed(2)}%`
+                numRet7d != null
+                  ? `${numRet7d >= 0 ? '+' : ''}${(numRet7d * 100).toFixed(2)}%`
                   : predLoading
                   ? 'Loading…'
                   : '—',
-              color: (prediction?.predicted_return_7d || 0) >= 0 ? '#10B981' : '#EF5350',
+              color: (numRet7d || 0) >= 0 ? '#10B981' : '#EF5350',
             },
             {
               label: 'AI CONFIDENCE',
-              value: prediction?.ai_confidence_score != null ? `${prediction.ai_confidence_score}/100` : predLoading ? 'Loading…' : '—',
+              value: prediction?.ai_confidence_score != null ? `${score}/100` : predLoading ? 'Loading…' : '—',
               color: scoreColor,
             },
             {
               label: '95% UPPER',
               value:
-                (prediction?.predicted_upper_price_7d ?? prediction?.high_bound)
-                  ? `₹${(prediction.predicted_upper_price_7d ?? prediction.high_bound).toFixed(2)}`
+                numUpper != null
+                  ? `₹${numUpper.toFixed(2)}`
                   : predLoading
                   ? 'Loading…'
                   : '—',
@@ -175,8 +188,8 @@ export default function ChartBottomStats({
             {
               label: '95% LOWER',
               value:
-                (prediction?.predicted_lower_price_7d ?? prediction?.low_bound)
-                  ? `₹${(prediction.predicted_lower_price_7d ?? prediction.low_bound).toFixed(2)}`
+                numLower != null
+                  ? `₹${numLower.toFixed(2)}`
                   : predLoading
                   ? 'Loading…'
                   : '—',

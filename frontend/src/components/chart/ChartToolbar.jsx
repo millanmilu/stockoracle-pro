@@ -7,42 +7,42 @@ import toast from 'react-hot-toast';
 import { INTERVALS, POPULAR_STOCKS } from '../../utils/chartHelpers';
 
 export default function ChartToolbar({
-  selectedSymbol,
-  handleSelectSymbol,
-  showSymbolModal,
-  setShowSymbolModal,
-  symbolModalFilter,
-  setSymbolModalFilter,
-  searchResults,
-  isSearching,
-  chartEngine,
-  setChartEngine,
-  interval,
-  handleIntervalChange,
-  timeframe,
-  setTimeframe,
-  isReplayMode,
-  setIsReplayMode,
-  isReplayPlaying,
-  setIsReplayPlaying,
-  setReplayIndex,
-  rawHistory,
-  setShowAlertModal,
-  priceAlerts,
-  isLogScale,
-  toggleLogScale,
-  showIndicatorsModal,
-  setShowIndicatorsModal,
-  activeIndicatorsCount,
-  showIndicatorSettingsModal,
-  setShowIndicatorSettingsModal,
-  showKeyLevels,
-  setShowKeyLevels,
-  chartLayout,
-  setChartLayout,
-  handleSnapshot,
-  isFullscreen,
-  toggleFullscreen,
+  selectedSymbol = '',
+  handleSelectSymbol = () => {},
+  showSymbolModal = false,
+  setShowSymbolModal = () => {},
+  symbolModalFilter = '',
+  setSymbolModalFilter = () => {},
+  searchResults = [],
+  isSearching = false,
+  chartEngine = 'stockoracle',
+  setChartEngine = () => {},
+  interval = '1d',
+  handleIntervalChange = () => {},
+  timeframe = '1Y',
+  setTimeframe = () => {},
+  isReplayMode = false,
+  setIsReplayMode = () => {},
+  isReplayPlaying = false,
+  setIsReplayPlaying = () => {},
+  setReplayIndex = () => {},
+  rawHistory = null,
+  setShowAlertModal = () => {},
+  priceAlerts = [],
+  isLogScale = false,
+  toggleLogScale = () => {},
+  showIndicatorsModal = false,
+  setShowIndicatorsModal = () => {},
+  activeIndicatorsCount = 0,
+  showIndicatorSettingsModal = false,
+  setShowIndicatorSettingsModal = () => {},
+  showKeyLevels = false,
+  setShowKeyLevels = () => {},
+  chartLayout = '1x1',
+  setChartLayout = () => {},
+  handleSnapshot = () => {},
+  isFullscreen = false,
+  toggleFullscreen = () => {},
 }) {
   return (
     <div style={{
@@ -128,7 +128,7 @@ export default function ChartToolbar({
                   }}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') {
-                      if (searchResults.length > 0) {
+                      if (Array.isArray(searchResults) && searchResults.length > 0) {
                         handleSelectSymbol(searchResults[0].ticker);
                       } else if (symbolModalFilter.trim()) {
                         handleSelectSymbol(symbolModalFilter.trim());
@@ -158,7 +158,7 @@ export default function ChartToolbar({
                 )}
 
                 {/* If user typed a search query, show live server search suggestions */}
-                {symbolModalFilter.trim() && searchResults.length > 0 && (
+                {symbolModalFilter.trim() && Array.isArray(searchResults) && searchResults.length > 0 && (
                   searchResults.map((item) => (
                     <div
                       key={item.ticker}
@@ -405,9 +405,9 @@ export default function ChartToolbar({
         >
           <Bell size={12} style={{ color: '#A855F7' }} />
           <span>Alert</span>
-          {priceAlerts.filter(a => a.ticker === selectedSymbol && !a.triggered).length > 0 && (
+          {Array.isArray(priceAlerts) && priceAlerts.filter(a => a && a.ticker === selectedSymbol && !a.triggered).length > 0 && (
             <span style={{ backgroundColor: '#A855F7', color: '#fff', fontSize: '0.6rem', padding: '1px 5px', borderRadius: 8, fontWeight: 800 }}>
-              {priceAlerts.filter(a => a.ticker === selectedSymbol && !a.triggered).length}
+              {priceAlerts.filter(a => a && a.ticker === selectedSymbol && !a.triggered).length}
             </span>
           )}
         </button>

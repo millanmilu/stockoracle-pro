@@ -42,6 +42,24 @@ export default class ErrorBoundary extends React.Component {
           <p style={{ margin: '0 0 16px 0', color: '#94A3B8', fontSize: '0.85rem', maxWidth: '420px' }}>
             A temporary display error occurred. Your trading data and active positions are safe.
           </p>
+          {this.state.error && (
+            <div style={{
+              margin: '0 0 16px 0',
+              padding: '10px 14px',
+              background: 'rgba(239, 83, 80, 0.12)',
+              border: '1px solid rgba(239, 83, 80, 0.35)',
+              borderRadius: '8px',
+              color: '#FCA5A5',
+              fontSize: '0.76rem',
+              fontFamily: 'monospace',
+              textAlign: 'left',
+              maxWidth: '560px',
+              wordBreak: 'break-word',
+              whiteSpace: 'pre-wrap',
+            }}>
+              <strong>Error:</strong> {this.state.error.message || String(this.state.error)}
+            </div>
+          )}
           <button
             onClick={this.handleReset}
             style={{

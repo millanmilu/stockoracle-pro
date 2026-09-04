@@ -1,5 +1,5 @@
 $sshKey = if (Test-Path "$PSScriptRoot\stockubu.pem") { "$PSScriptRoot\stockubu.pem" } else { "d:\Development\ai stock\stockubu.pem" }
-$userHost = "ubuntu@stockoracle.duckdns.org"
+$userHost = "ubuntu@ec2-54-165-116-67.compute-1.amazonaws.com"
 
 $remoteCommand = @"
 cd /var/www/stockoracle 2>/dev/null || cd ~/stockoracle-pro 2>/dev/null

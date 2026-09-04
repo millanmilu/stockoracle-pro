@@ -5,19 +5,19 @@ import React from 'react';
  * live feed connection badge, and stale data banner overlays on the chart canvas.
  */
 export default function ChartFeedStatus({
-  loading,
-  selectedSymbol,
-  rawHistory,
-  historyFetchError,
-  setHistoryFetchError,
-  setLoading,
-  fetchHistory,
-  setRawHistory,
-  interval,
-  timeframe,
-  historyReqSeqRef,
-  wsConnected,
-  wsIsLive,
+  loading = false,
+  selectedSymbol = '',
+  rawHistory = null,
+  historyFetchError = null,
+  setHistoryFetchError = () => {},
+  setLoading = () => {},
+  fetchHistory = () => Promise.resolve({ candles: [] }),
+  setRawHistory = () => {},
+  interval = '1d',
+  timeframe = '1Y',
+  historyReqSeqRef = { current: 0 },
+  wsConnected = false,
+  wsIsLive = false,
 }) {
   // Compute client-side IST market hours for badge and stale banner
   const nowUt = Date.now();

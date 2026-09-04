@@ -3,15 +3,15 @@ import { RotateCcw, Play, Pause, SkipForward } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function BarReplayControl({
-  isReplayMode,
-  setIsReplayMode,
-  isReplayPlaying,
-  setIsReplayPlaying,
-  replayIndex,
-  setReplayIndex,
-  replaySpeed,
-  setReplaySpeed,
-  rawHistory,
+  isReplayMode = false,
+  setIsReplayMode = () => {},
+  isReplayPlaying = false,
+  setIsReplayPlaying = () => {},
+  replayIndex = 0,
+  setReplayIndex = () => {},
+  replaySpeed = 1,
+  setReplaySpeed = () => {},
+  rawHistory = null,
 }) {
   if (!isReplayMode) return null;
 
