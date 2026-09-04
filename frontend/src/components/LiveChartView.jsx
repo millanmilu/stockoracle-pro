@@ -2,13 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { createChart, ColorType, LineStyle, CrosshairMode } from 'lightweight-charts';
 import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
-import { 
-  Maximize2, Minimize2, Camera, Bell, Search, 
-  Columns, Rows, Grid2X2, Square, Eye, EyeOff, Sparkles, TrendingUp,
-  ZoomIn, ZoomOut, Move, RotateCcw, Zap, Activity, Check,
-  BarChart3, Layers, Target, ChevronRight, ChevronLeft, X, FlaskConical,
-  Play, Pause, SkipForward, FastForward, ShieldAlert, Sliders
-} from 'lucide-react';
+import { Activity, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import MultiChartGrid from './MultiChartGrid';
 import DrawingTools from './chart-tools/DrawingTools';
@@ -24,89 +18,14 @@ import SymbolSearchModal from './chart-tools/SymbolSearchModal';
 import { playAlertChime } from '../utils/soundChime';
 import { getWsUrl } from '../utils/api';
 
-/* ─── Constants ─────────────────────────────────────────────────────────────── */
-
-
-
-/* ─── Backtest Overlay Side Panel ────────────────────────────────────────────── */
-
-function BacktestOverlayPanel({ symbol, showBacktest, setShowBacktest, backtestData, backtestLoading }) {
-  const cr  = backtestData?.cumulative_return;
-  const br  = backtestData?.benchmark_return;
-  const alpha = cr != null && br != null ? (cr - br) : null;
-
-  const pct = v => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`;
-  const col = v => v >= 0 ? '#10B981' : '#EF5350';
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* Toggle Button */}
-      <button
-        onClick={() => setShowBacktest(p => !p)}
-        style={{
-          width: '100%', padding: '8px 10px',
-          borderRadius: 8, border: `1px solid ${showBacktest ? '#10B981' : 'rgba(99,102,241,0.3)'}`,
-          background: showBacktest ? 'rgba(16,185,129,0.12)' : 'rgba(99,102,241,0.08)',
-          color: showBacktest ? '#10B981' : '#8B5CF6',
-          fontWeight: 700, fontSize: '0.75rem', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-        }}
-      >
-        <FlaskConical size={13} />
-        {showBacktest ? '✓ Backtest ON — markers visible' : 'Enable Backtest Overlay'}
-      </button>
-
-      {/* Loading */}
-      {showBacktest && backtestLoading && (
-        <div style={{ textAlign: 'center', padding: 16 }}>
-          <div className="spinner" style={{ width: 20, height: 20, margin: '0 auto 8px' }} />
-          <div style={{ fontSize: '0.72rem', color: '#6B7280' }}>Running backtest…</div>
-        </div>
-      )}
-
-      {/* Legend */}
-      {showBacktest && !backtestLoading && (
-        <div style={{ display: 'flex', gap: 8, fontSize: '0.68rem' }}>
-          <span style={{ color: '#10B981', fontWeight: 700 }}>▲ BUY</span>
-          <span style={{ color: '#EF5350', fontWeight: 700 }}>▼ SELL</span>
-          <span style={{ color: '#6B7280' }}>shown on chart</span>
-        </div>
-      )}
-
-      {/* Metrics */}
-      {backtestData && !backtestLoading && (() => {
-        const { cumulative_return: cr, benchmark_return: br, sharpe_ratio, max_drawdown, win_rate, total_trades, cagr, initial_capital, final_value } = backtestData;
-        const alpha = cr - br;
-        const rows = [
-          { label: 'Strategy Return', value: pct(cr), color: col(cr) },
-          { label: 'Benchmark (B&H)', value: pct(br), color: col(br) },
-          { label: 'Alpha', value: pct(alpha), color: col(alpha) },
-          { label: 'CAGR', value: pct(cagr), color: col(cagr) },
-          { label: 'Sharpe', value: sharpe_ratio.toFixed(2), color: sharpe_ratio >= 1 ? '#10B981' : sharpe_ratio >= 0 ? '#F59E0B' : '#EF5350' },
-          { label: 'Max Drawdown', value: pct(max_drawdown), color: max_drawdown > -0.1 ? '#10B981' : '#EF5350' },
-          { label: 'Win Rate', value: `${(win_rate * 100).toFixed(1)}%`, color: win_rate >= 0.55 ? '#10B981' : '#F59E0B' },
-          { label: 'Trades', value: total_trades, color: '#9CA3AF' },
-        ];
-        return (
-          <>
-            <div style={{ borderTop: '1px solid rgba(99,102,241,0.1)', paddingTop: 8, fontSize: '0.68rem', color: '#6366F1', fontWeight: 700, letterSpacing: '0.06em' }}>
-              PERFORMANCE METRICS
-            </div>
-            {rows.map(r => (
-              <div key={r.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', padding: '3px 0', borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                <span style={{ color: '#6B7280' }}>{r.label}</span>
-                <span style={{ color: r.color, fontFamily: 'JetBrains Mono, monospace', fontWeight: 700 }}>{r.value}</span>
-              </div>
-            ))}
-            <div style={{ marginTop: 6, padding: '6px 8px', background: 'rgba(99,102,241,0.06)', borderRadius: 8, fontSize: '0.68rem', color: '#4B5563', lineHeight: 1.5 }}>
-              📋 Buy when AI 7d return &gt; 1.5% · Stop-loss 4% · TP 8%
-            </div>
-          </>
-        );
-      })()}
-    </div>
-  );
-}
+// Subcomponents modularized for maintainability & clean testing
+import BacktestOverlayPanel from './chart/BacktestOverlayPanel';
+import PriceAlertModal from './chart/PriceAlertModal';
+import BarReplayControl from './chart/BarReplayControl';
+import ChartToolbar from './chart/ChartToolbar';
+import ChartLegendHUD from './chart/ChartLegendHUD';
+import ChartFeedStatus from './chart/ChartFeedStatus';
+import ChartBottomStats from './chart/ChartBottomStats';
 
 /* ─── Main Component ─────────────────────────────────────────────────────────── */
 
@@ -1968,701 +1887,57 @@ export default function LiveChartView() {
       `}</style>
 
       {/* ── TradingView Style Clean Compact Toolbar ── */}
-      <div style={{
-        display:'flex',
-        alignItems:'center',
-        justifyContent:'space-between',
-        flexWrap:'nowrap',
-        gap:8,
-        background:'#0B0F1C',
-        border:'1px solid rgba(99, 102, 241, 0.15)',
-        borderRadius:6,
-        padding:'4px 8px',
-        position: 'relative',
-        zIndex: 50,
-        flexShrink: 0,
-        height: 38,
-      }}>
-        {/* Left: Ticker Search Option + Timeframe Selector (Side-by-Side) */}
-        <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink: 0 }}>
-          {/* Symbol Search / Selector Dropdown */}
-          <div style={{ position: 'relative' }}>
-            <button
-              onClick={() => {
-                setShowSymbolModal(!showSymbolModal);
-                setShowIndicatorsModal(false);
-              }}
-
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '4px 10px',
-                borderRadius: 5,
-                background: 'rgba(99,102,241,0.15)',
-                border: '1px solid rgba(99,102,241,0.35)',
-                color: '#F0F0FF',
-                fontSize: '0.86rem',
-                fontWeight: 800,
-                fontFamily: 'JetBrains Mono, monospace',
-                cursor: 'pointer',
-              }}
-              title="Search & Change Stock Ticker"
-            >
-              <Search size={13} style={{ color: '#818CF8' }} />
-              <span>{selectedSymbol || 'STOCK'}</span>
-              <span style={{ fontSize: '0.65rem', color: '#94A3B8' }}>▾</span>
-            </button>
-
-            {/* Quick Symbol Search & Autocomplete Modal */}
-            {showSymbolModal && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: 'calc(100% + 4px)',
-                  left: 0,
-                  width: 'min(90vw, 320px)',
-                  backgroundColor: '#0F172A',
-                  border: '1px solid rgba(99, 102, 241, 0.4)',
-                  borderRadius: 8,
-                  padding: 8,
-                  zIndex: 300,
-                  boxShadow: '0 16px 36px rgba(0,0,0,0.85)',
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div style={{ position: 'relative', marginBottom: 8 }}>
-                  <Search size={13} style={{ position: 'absolute', left: 10, top: 10, color: '#64748B' }} />
-                  <input
-                    type="text"
-                    placeholder="Search any NSE stock (e.g. TATA, INFY)..."
-                    value={symbolModalFilter}
-                    onChange={(e) => setSymbolModalFilter(e.target.value)}
-                    autoFocus
-                    style={{
-                      width: '100%',
-                      padding: '7px 10px 7px 30px',
-                      borderRadius: 6,
-                      border: '1px solid rgba(99,102,241,0.25)',
-                      background: '#090C18',
-                      color: '#fff',
-                      fontSize: '0.78rem',
-                      outline: 'none',
-                      boxSizing: 'border-box',
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        if (searchResults.length > 0) {
-                          handleSelectSymbol(searchResults[0].ticker);
-                        } else if (symbolModalFilter.trim()) {
-                          handleSelectSymbol(symbolModalFilter.trim());
-                        }
-                      }
-                    }}
-                  />
-                  {symbolModalFilter && (
-                    <button
-                      onClick={() => setSymbolModalFilter('')}
-                      style={{
-                        position: 'absolute', right: 8, top: 7,
-                        background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer'
-                      }}
-                    >
-                      <X size={13} />
-                    </button>
-                  )}
-                </div>
-
-                {/* Search Results / Suggestions List */}
-                <div style={{ maxHeight: 260, overflowY: 'auto' }}>
-                  {isSearching && (
-                    <div style={{ padding: '8px 12px', fontSize: '0.72rem', color: '#818CF8', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div className="spinner" style={{ width: 12, height: 12 }} /> Searching NSE Universe...
-                    </div>
-                  )}
-
-                  {/* If user typed a search query, show live server search suggestions */}
-                  {symbolModalFilter.trim() && searchResults.length > 0 && (
-                    searchResults.map((item) => (
-                      <div
-                        key={item.ticker}
-                        onClick={() => handleSelectSymbol(item.ticker)}
-                        style={{
-                          padding: '8px 10px',
-                          borderRadius: 6,
-                          fontSize: '0.76rem',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          borderBottom: '1px solid rgba(255,255,255,0.04)',
-                          backgroundColor: selectedSymbol === item.ticker ? 'rgba(99,102,241,0.18)' : 'transparent',
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.14)'}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === item.ticker ? 'rgba(99,102,241,0.18)' : 'transparent'}
-                      >
-                        <div style={{ display: 'flex', flexDirection: 'column' }}>
-                          <span style={{ fontWeight: 800, color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>
-                            {item.ticker}
-                          </span>
-                          <span style={{ fontSize: '0.68rem', color: '#94A3B8', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {item.name}
-                          </span>
-                        </div>
-                        <span style={{ fontSize: '0.62rem', padding: '2px 6px', borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.06)', color: '#64748B' }}>
-                          {item.exchange || 'NSE'}
-                        </span>
-                      </div>
-                    ))
-                  )}
-
-                  {/* Fallback to popular stocks list when search query is empty or no server results */}
-                  {(!symbolModalFilter.trim() || (searchResults.length === 0 && !isSearching)) && (
-                    <div>
-                      <div style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, padding: '4px 8px', letterSpacing: '0.05em' }}>
-                        POPULAR NSE TICKERS
-                      </div>
-                      {POPULAR_STOCKS
-                        .filter((s) => !symbolModalFilter || s.toLowerCase().includes(symbolModalFilter.toLowerCase()))
-                        .map((sym) => (
-                          <div
-                            key={sym}
-                            onClick={() => handleSelectSymbol(sym)}
-                            style={{
-                              padding: '7px 10px',
-                              borderRadius: 4,
-                              fontSize: '0.75rem',
-                              fontWeight: 700,
-                              color: selectedSymbol === sym ? '#818CF8' : '#E2E8F0',
-                              backgroundColor: selectedSymbol === sym ? 'rgba(99,102,241,0.2)' : 'transparent',
-                              cursor: 'pointer',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.12)'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === sym ? 'rgba(99,102,241,0.2)' : 'transparent'}
-                          >
-                            <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{sym}</span>
-                            <span style={{ fontSize: '0.65rem', color: '#64748B' }}>NSE</span>
-                          </div>
-                        ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }} />
-
-          {/* Dual Engine Switcher: TradingView Full Heavy Engine vs StockOracle AI Engine */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            background: 'rgba(15, 23, 42, 0.95)',
-            padding: '2px',
-            borderRadius: 6,
-            border: '1px solid rgba(99, 102, 241, 0.3)',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
-          }}>
-            <button
-              type="button"
-              onClick={() => {
-                setChartEngine('tradingview');
-                localStorage.setItem('stockoracle_chart_engine', 'tradingview');
-                toast.success('🚀 Switched to TradingView Full Engine (100+ Indicators, 80+ Drawing Tools)');
-              }}
-              style={{
-                padding: '3px 9px',
-                borderRadius: 4,
-                border: 'none',
-                background: chartEngine === 'tradingview' ? 'linear-gradient(135deg, #2563EB, #4F46E5)' : 'transparent',
-                color: chartEngine === 'tradingview' ? '#FFFFFF' : '#94A3B8',
-                fontSize: '0.72rem',
-                fontWeight: 800,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                boxShadow: chartEngine === 'tradingview' ? '0 2px 8px rgba(37,99,235,0.4)' : 'none',
-              }}
-              title="Full TradingView Engine (80+ Drawing Tools, 100+ Built-in Indicators)"
-            >
-              <span>🔥 TV Full Engine</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setChartEngine('stockoracle');
-                localStorage.setItem('stockoracle_chart_engine', 'stockoracle');
-                handleIntervalChange('1d');
-                toast.success('⚡ Switched to StockOracle AI & SMC Terminal Engine (1D Candles)');
-              }}
-              style={{
-                padding: '3px 9px',
-                borderRadius: 4,
-                border: 'none',
-                background: chartEngine === 'stockoracle' ? 'linear-gradient(135deg, #A855F7, #6366F1)' : 'transparent',
-                color: chartEngine === 'stockoracle' ? '#FFFFFF' : '#94A3B8',
-                fontSize: '0.72rem',
-                fontWeight: 800,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                boxShadow: chartEngine === 'stockoracle' ? '0 2px 8px rgba(168,85,247,0.4)' : 'none',
-              }}
-              title="StockOracle AI Engine (SMC, Order Flow, Volume Profile, AI Forecasts)"
-            >
-              <span>⚡ AI / SMC Engine</span>
-            </button>
-          </div>
-
-          <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.1)' }} />
-
-          {/* Timeframe Interval Buttons */}
-          <div style={{ display:'flex', gap:2, background:'rgba(255,255,255,0.03)', padding:'2px', borderRadius:5, border:'1px solid rgba(255,255,255,0.06)' }}>
-            {INTERVALS.map(iv => (
-              <button
-                key={iv.value}
-                onClick={() => handleIntervalChange(iv.value)}
-                style={{
-                  padding:'3px 8px',
-                  borderRadius:4,
-                  border:'none',
-                  background: interval === iv.value ? 'rgba(99,102,241,0.25)' : 'transparent',
-                  color: interval === iv.value ? '#818CF8' : '#64748B',
-                  fontSize:'0.72rem',
-                  fontWeight: interval === iv.value ? 800 : 600,
-                  cursor:'pointer',
-                }}
-              >
-                {iv.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Period Range Selector (1M, 3M, 6M, 1Y, 2Y, 5Y) */}
-          <div style={{ display:'flex', gap:2, background:'rgba(255,255,255,0.03)', padding:'2px', borderRadius:5, border:'1px solid rgba(255,255,255,0.06)' }}>
-            {['1M','3M','6M','1Y','2Y','5Y'].map(tf => (
-              <button
-                key={tf}
-                onClick={() => setTimeframe(tf)}
-                style={{
-                  padding:'3px 7px',
-                  borderRadius:4,
-                  border:'none',
-                  background: timeframe === tf ? 'rgba(16,185,129,0.2)' : 'transparent',
-                  color: timeframe === tf ? '#10B981' : '#64748B',
-                  fontSize:'0.68rem',
-                  fontWeight: timeframe === tf ? 800 : 600,
-                  cursor:'pointer',
-                }}
-              >
-                {tf}
-              </button>
-            ))}
-          </div>
-
-          {/* Chart Style: Pure Candlestick */}
-          <div
-            title="Chart Style: Standard Japanese Candlesticks"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '3px 8px', borderRadius: 4,
-              border: '1px solid rgba(255,255,255,0.08)',
-              background: 'rgba(255,255,255,0.04)',
-              color: '#818CF8',
-              fontSize: '0.72rem', fontWeight: 700, userSelect: 'none'
-            }}
-          >
-            <span>🕯️ Candlestick</span>
-          </div>
-        </div>
-
-        {/* Right: Indicators, AI Overlays, Grid Switcher, Snapshot, Fullscreen */}
-        <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink: 0 }}>
-          {/* Historical Bar Replay Simulator Toggle */}
-          <button
-            onClick={() => {
-              const nextState = !isReplayMode;
-              setIsReplayMode(nextState);
-              if (nextState) {
-                // Ensure AI / SMC Engine is active for canvas interactive playback
-                setChartEngine('stockoracle');
-                localStorage.setItem('stockoracle_chart_engine', 'stockoracle');
-                const startIdx = Math.max(5, (rawHistory?.length || 100) - 60);
-                setReplayIndex(startIdx);
-                setIsReplayPlaying(true);
-                toast.success('▶️ Auto-Play Bar Replay Mode Started!');
-              } else {
-                setIsReplayPlaying(false);
-                toast.success('Exited Bar Replay Mode');
-              }
-            }}
-            title="Historical Bar Replay Simulator — Watch Candles Form Live"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '3px 9px', borderRadius: 4,
-              border: isReplayMode ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
-              background: isReplayMode ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.03)',
-              color: isReplayMode ? '#818CF8' : '#CBD5E1',
-              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
-            }}
-          >
-            <RotateCcw size={12} style={{ color: '#818CF8' }} className={isReplayMode && isReplayPlaying ? 'broker-spin' : ''} />
-            <span>Replay</span>
-          </button>
-
-          {/* 5. Interactive Canvas Price Alert Button */}
-          <button
-            onClick={() => setShowAlertModal(true)}
-            title="Set Price Alert with Sound Chime"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '3px 8px', borderRadius: 4,
-              border: '1px solid rgba(168,85,247,0.3)',
-              background: 'rgba(168,85,247,0.12)',
-              color: '#A855F7',
-              fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
-            }}
-          >
-            <Bell size={12} style={{ color: '#A855F7' }} />
-            <span>Alert</span>
-            {priceAlerts.filter(a => a.ticker === selectedSymbol && !a.triggered).length > 0 && (
-              <span style={{ backgroundColor: '#A855F7', color: '#fff', fontSize: '0.6rem', padding: '1px 5px', borderRadius: 8, fontWeight: 800 }}>
-                {priceAlerts.filter(a => a.ticker === selectedSymbol && !a.triggered).length}
-              </span>
-            )}
-          </button>
-
-          {/* Logarithmic Scale Toggle */}
-          <button
-            onClick={toggleLogScale}
-            title="Toggle Logarithmic Price Scale"
-            style={{
-              padding: '3px 6px', borderRadius: 4,
-              border: isLogScale ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
-              background: isLogScale ? 'rgba(99,102,241,0.25)' : 'transparent',
-              color: isLogScale ? '#818CF8' : '#94A3B8',
-              fontSize: '0.68rem', fontWeight: 800, cursor: 'pointer'
-            }}
-          >
-            LOG
-          </button>
-
-          {/* Indicators Modal Button */}
-          <button
-            onClick={() => setShowIndicatorsModal(true)}
-            title="Indicators, metrics, and strategies"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '4px 9px',
-              borderRadius: 5,
-              border: showIndicatorsModal ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.08)',
-              background: showIndicatorsModal ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
-              color: showIndicatorsModal ? '#818CF8' : '#E2E8F0',
-              fontSize: '0.74rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            <Activity size={13} style={{ color: '#818CF8' }} />
-            <span>Indicators</span>
-            {Object.values(activeIndicatorsMap).filter(Boolean).length > 0 && (
-              <span style={{ backgroundColor: '#6366F1', color: '#fff', fontSize: '0.62rem', padding: '1px 5px', borderRadius: 10, fontWeight: 800 }}>
-                {Object.values(activeIndicatorsMap).filter(Boolean).length}
-              </span>
-            )}
-          </button>
-
-          {/* Indicator Parameters Settings Button */}
-          <button
-            onClick={() => setShowIndicatorSettingsModal(true)}
-            title="Configure Indicator Periods & Inputs (SMA, EMA, BB, RSI, MACD)"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '4px 7px',
-              borderRadius: 5,
-              border: showIndicatorSettingsModal ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.08)',
-              background: showIndicatorSettingsModal ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
-              color: '#818CF8',
-              cursor: 'pointer',
-            }}
-          >
-            <Sliders size={13} />
-          </button>
-
-          {/* Auto-Drawing AI Overlays (S/R, Pivots, Fibs) */}
-          <button
-            onClick={() => {
-              setShowKeyLevels((prev) => !prev);
-              toast.success(!showKeyLevels ? "🪄 AI Technical Overlays Enabled (S/R, Pivots, Fibs)" : "AI Overlays Disabled");
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '4px 9px',
-              borderRadius: 5,
-              border: showKeyLevels ? '1px solid #818CF8' : '1px solid rgba(255,255,255,0.08)',
-              background: showKeyLevels ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.03)',
-              color: showKeyLevels ? '#818CF8' : '#E2E8F0',
-              fontSize: '0.74rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-            title="Auto-draw Support/Resistance & Fibonacci Overlays"
-          >
-            <Sparkles size={13} style={{ color: '#818CF8' }} />
-            <span>AI Overlays</span>
-          </button>
-
-          {/* TradingView Multi-Chart Layout Switcher [ 1x1 | 1x2 | 2x1 | 2x2 ] */}
-          <div style={{ display:'flex', alignItems:'center', gap:2, background:'rgba(255,255,255,0.03)', padding:'2px', borderRadius:5, border:'1px solid rgba(255,255,255,0.06)' }}>
-            <button
-              onClick={() => setChartLayout('1x1')}
-              title="Single Chart (1x1)"
-              style={{
-                padding:'3px 6px',
-                borderRadius:3,
-                border:'none',
-                background: chartLayout === '1x1' ? '#6366F1' : 'transparent',
-                color: chartLayout === '1x1' ? '#fff' : '#64748B',
-                cursor:'pointer',
-                display:'flex',
-                alignItems:'center',
-              }}
-            >
-              <Square size={13} />
-            </button>
-            <button
-              onClick={() => setChartLayout('1x2')}
-              title="Side-by-Side (1x2)"
-              style={{
-                padding:'3px 6px',
-                borderRadius:3,
-                border:'none',
-                background: chartLayout === '1x2' ? '#6366F1' : 'transparent',
-                color: chartLayout === '1x2' ? '#fff' : '#64748B',
-                cursor:'pointer',
-                display:'flex',
-                alignItems:'center',
-              }}
-            >
-              <Columns size={13} />
-            </button>
-            <button
-              onClick={() => setChartLayout('2x1')}
-              title="Stacked (2x1)"
-              style={{
-                padding:'3px 6px',
-                borderRadius:3,
-                border:'none',
-                background: chartLayout === '2x1' ? '#6366F1' : 'transparent',
-                color: chartLayout === '2x1' ? '#fff' : '#64748B',
-                cursor:'pointer',
-                display:'flex',
-                alignItems:'center',
-              }}
-            >
-              <Rows size={13} />
-            </button>
-            <button
-              onClick={() => setChartLayout('2x2')}
-              title="Quad Grid (2x2)"
-              style={{
-                padding:'3px 6px',
-                borderRadius:3,
-                border:'none',
-                background: chartLayout === '2x2' ? '#6366F1' : 'transparent',
-                color: chartLayout === '2x2' ? '#fff' : '#64748B',
-                cursor:'pointer',
-                display:'flex',
-                alignItems:'center',
-              }}
-            >
-              <Grid2X2 size={13} />
-            </button>
-          </div>
-
-          {/* Snapshot Camera */}
-          <button
-            onClick={handleSnapshot}
-            title="Download Snapshot"
-            style={{ padding:'4px 6px', borderRadius:5, border:'1px solid rgba(255,255,255,0.08)', background:'transparent', color:'#94A3B8', cursor:'pointer' }}
-          >
-            <Camera size={13} />
-          </button>
-
-          {/* Fullscreen */}
-          <button
-            onClick={toggleFullscreen}
-            title="Fullscreen Chart"
-            style={{ padding:'4px 6px', borderRadius:5, border:'1px solid rgba(255,255,255,0.08)', background:'transparent', color:'#94A3B8', cursor:'pointer' }}
-          >
-            {isFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-          </button>
-        </div>
-      </div>
+      <ChartToolbar
+        selectedSymbol={selectedSymbol}
+        handleSelectSymbol={handleSelectSymbol}
+        showSymbolModal={showSymbolModal}
+        setShowSymbolModal={setShowSymbolModal}
+        symbolModalFilter={symbolModalFilter}
+        setSymbolModalFilter={setSymbolModalFilter}
+        searchResults={searchResults}
+        isSearching={isSearching}
+        chartEngine={chartEngine}
+        setChartEngine={setChartEngine}
+        interval={interval}
+        handleIntervalChange={handleIntervalChange}
+        timeframe={timeframe}
+        setTimeframe={setTimeframe}
+        isReplayMode={isReplayMode}
+        setIsReplayMode={setIsReplayMode}
+        isReplayPlaying={isReplayPlaying}
+        setIsReplayPlaying={setIsReplayPlaying}
+        setReplayIndex={setReplayIndex}
+        rawHistory={rawHistory}
+        setShowAlertModal={setShowAlertModal}
+        priceAlerts={priceAlerts}
+        isLogScale={isLogScale}
+        toggleLogScale={toggleLogScale}
+        showIndicatorsModal={showIndicatorsModal}
+        setShowIndicatorsModal={setShowIndicatorsModal}
+        activeIndicatorsCount={Object.values(activeIndicatorsMap).filter(Boolean).length}
+        showIndicatorSettingsModal={showIndicatorSettingsModal}
+        setShowIndicatorSettingsModal={setShowIndicatorSettingsModal}
+        showKeyLevels={showKeyLevels}
+        setShowKeyLevels={setShowKeyLevels}
+        chartLayout={chartLayout}
+        setChartLayout={setChartLayout}
+        handleSnapshot={handleSnapshot}
+        isFullscreen={isFullscreen}
+        toggleFullscreen={toggleFullscreen}
+      />
 
       {/* ── Floating Bar Replay Auto-Play Control Bar ── */}
-      {isReplayMode && (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '6px 14px', background: 'linear-gradient(135deg, rgba(15, 23, 42, 0.98), rgba(30, 41, 59, 0.95))',
-          border: '1px solid rgba(99, 102, 241, 0.4)', borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)',
-          flexShrink: 0, gap: 10, zIndex: 40, flexWrap: 'wrap',
-        }}>
-          {/* Left Title & Current Date/Bar Info */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#818CF8', display: 'flex', alignItems: 'center', gap: 5 }}>
-              <RotateCcw size={14} className={isReplayPlaying ? 'broker-spin' : ''} />
-              <span>BAR REPLAY</span>
-            </span>
-            <div style={{
-              fontSize: '0.7rem', color: '#CBD5E1', fontFamily: 'JetBrains Mono, monospace',
-              background: 'rgba(0,0,0,0.4)', padding: '2px 8px', borderRadius: 4,
-              border: '1px solid rgba(255,255,255,0.06)'
-            }}>
-              📅 {rawHistory && rawHistory[replayIndex - 1] ? (rawHistory[replayIndex - 1].date || rawHistory[replayIndex - 1].time) : 'Live'}
-              <span style={{ color: '#64748B', marginLeft: 6 }}>({replayIndex || 0}/{rawHistory?.length || 0} bars)</span>
-            </div>
-          </div>
-
-          {/* Center Playback Controls */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            {/* Rewind to Start */}
-            <button
-              onClick={() => {
-                setIsReplayPlaying(false);
-                setReplayIndex(5);
-                toast('Rewound to oldest candle');
-              }}
-              title="Jump to oldest candle"
-              style={{ padding: '4px 8px', borderRadius: 5, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.72rem', cursor: 'pointer', fontWeight: 700 }}
-            >
-              ⏮ Start
-            </button>
-
-            {/* Step Back -10 */}
-            <button
-              onClick={() => {
-                setIsReplayPlaying(false);
-                setReplayIndex(prev => Math.max(5, (prev || 10) - 10));
-              }}
-              title="Jump back 10 bars"
-              style={{ padding: '4px 8px', borderRadius: 5, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.72rem', cursor: 'pointer', fontWeight: 700 }}
-            >
-              ⏪ -10
-            </button>
-
-            {/* Play / Pause Auto Play Button */}
-            <button
-              onClick={() => {
-                if (!isReplayPlaying) {
-                  const total = rawHistory?.length || 100;
-                  if (!replayIndex || replayIndex >= total - 1) {
-                    setReplayIndex(Math.max(5, total - 60));
-                  }
-                  setIsReplayPlaying(true);
-                } else {
-                  setIsReplayPlaying(false);
-                }
-              }}
-              style={{
-                padding: '5px 16px', borderRadius: 6,
-                background: isReplayPlaying ? 'linear-gradient(135deg, #EF4444, #DC2626)' : 'linear-gradient(135deg, #10B981, #059669)',
-                color: '#FFF', border: 'none', fontWeight: 800, fontSize: '0.76rem',
-                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-                boxShadow: isReplayPlaying ? '0 2px 10px rgba(239,68,68,0.4)' : '0 2px 10px rgba(16,185,129,0.4)',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              {isReplayPlaying ? <Pause size={14} /> : <Play size={14} />}
-              {isReplayPlaying ? 'PAUSE' : 'AUTO PLAY'}
-            </button>
-
-            {/* Step Forward +1 */}
-            <button
-              onClick={() => {
-                setIsReplayPlaying(false);
-                setReplayIndex(prev => Math.min((rawHistory?.length || 100), (prev || 10) + 1));
-              }}
-              title="Step forward 1 bar"
-              style={{ padding: '4px 9px', borderRadius: 5, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.72rem', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 700 }}
-            >
-              <SkipForward size={13} /> +1
-            </button>
-
-            {/* Step Forward +10 */}
-            <button
-              onClick={() => {
-                setIsReplayPlaying(false);
-                setReplayIndex(prev => Math.min((rawHistory?.length || 100), (prev || 10) + 10));
-              }}
-              title="Jump forward 10 bars"
-              style={{ padding: '4px 8px', borderRadius: 5, background: '#1E293B', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.72rem', cursor: 'pointer', fontWeight: 700 }}
-            >
-              ⏩ +10
-            </button>
-
-            {/* Speed Selector Pills */}
-            <div style={{ display: 'flex', gap: 2, background: 'rgba(0,0,0,0.4)', padding: '2px 4px', borderRadius: 5, border: '1px solid rgba(255,255,255,0.08)' }}>
-              {[0.5, 1, 2, 3, 5, 10].map(spd => (
-                <button
-                  key={spd}
-                  onClick={() => setReplaySpeed(spd)}
-                  style={{
-                    padding: '3px 6px', borderRadius: 3, border: 'none',
-                    background: replaySpeed === spd ? '#6366F1' : 'transparent',
-                    color: replaySpeed === spd ? '#FFF' : '#94A3B8',
-                    fontSize: '0.68rem', fontWeight: 800, cursor: 'pointer'
-                  }}
-                >
-                  {spd}x
-                </button>
-              ))}
-            </div>
-
-            {/* Scrubber Timeline Slider */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 4 }}>
-              <input
-                type="range"
-                min="5"
-                max={rawHistory?.length || 100}
-                value={replayIndex || (rawHistory?.length || 100)}
-                onChange={(e) => {
-                  setIsReplayPlaying(false);
-                  setReplayIndex(Number(e.target.value));
-                }}
-                style={{ width: 140, cursor: 'pointer', accentColor: '#818CF8' }}
-              />
-            </div>
-          </div>
-
-          {/* Exit Button */}
-          <button
-            onClick={() => {
-              setIsReplayMode(false);
-              setIsReplayPlaying(false);
-            }}
-            style={{
-              padding: '4px 10px', borderRadius: 5,
-              background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)',
-              color: '#EF4444', fontSize: '0.72rem', fontWeight: 800, cursor: 'pointer'
-            }}
-          >
-            ✕ Exit Replay
-          </button>
-        </div>
-      )}
+      <BarReplayControl
+        isReplayMode={isReplayMode}
+        setIsReplayMode={setIsReplayMode}
+        isReplayPlaying={isReplayPlaying}
+        setIsReplayPlaying={setIsReplayPlaying}
+        replayIndex={replayIndex}
+        setReplayIndex={setReplayIndex}
+        replaySpeed={replaySpeed}
+        setReplaySpeed={setReplaySpeed}
+        rawHistory={rawHistory}
+      />
 
       {/* ── Main Chart Body: Multi-Chart Grid OR Single Chart Workstation (Fills Available Height) ── */}
       {chartLayout !== '1x1' ? (
@@ -2721,256 +1996,36 @@ export default function LiveChartView() {
               {/* ── Center Chart Canvas ── */}
               <div style={{ flex: 1, position: 'relative', overflow: 'hidden', height: '100%' }}>
                 {/* ── TradingView Style On-Chart Active Indicators Legend & HUD ── */}
-                <div style={{
-                  position: 'absolute',
-                  top: 10,
-                  left: 12,
-                  zIndex: 20,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4,
-                  pointerEvents: 'none',
-                  userSelect: 'none',
-                }}>
-                  {/* Ultra-Fast Live Hover OHLCV HUD (Direct 0ms DOM Ref) */}
-                  <div
-                    ref={hudRef}
-                    style={{
-                      display: 'none',
-                      alignItems: 'center',
-                      gap: 8,
-                      fontSize: 11,
-                      background: 'rgba(7, 10, 20, 0.92)',
-                      padding: '3px 10px',
-                      borderRadius: 4,
-                      backdropFilter: 'blur(6px)',
-                      border: '1px solid rgba(99,102,241,0.3)',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.6)',
-                      fontFamily: 'JetBrains Mono, monospace',
-                      pointerEvents: 'none',
-                    }}
-                  />
+                <ChartLegendHUD
+                  hudRef={hudRef}
+                  showSMA={showSMA}
+                  showEMA={showEMA}
+                  showBB={showBB}
+                  showVWAP={showVWAP}
+                  showSupertrend={showSupertrend}
+                  showALMA={showALMA}
+                  showRSI={showRSI}
+                  showMACD={showMACD}
+                  indicatorValues={indicatorValues}
+                  indicatorParams={indicatorParams}
+                />
 
-                  {/* ── On-Chart Active Indicator Value Readouts (TradingView Style) ── */}
-                  <div style={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    gap: 5,
-                    alignItems: 'center',
-                    fontSize: 10,
-                    fontFamily: 'JetBrains Mono, monospace',
-                  }}>
-                    {showSMA && indicatorValues.sma != null && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(0,229,255,0.12)', border: '1px solid rgba(0,229,255,0.3)', padding: '1px 6px', borderRadius: 3, color: '#00E5FF' }}>
-                        <span style={{ fontWeight: 800 }}>SMA {indicatorParams.smaPeriod}:</span>
-                        <span style={{ color: '#FFF' }}>₹{indicatorValues.sma.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {showEMA && indicatorValues.ema != null && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(255,145,0,0.12)', border: '1px solid rgba(255,145,0,0.3)', padding: '1px 6px', borderRadius: 3, color: '#FF9100' }}>
-                        <span style={{ fontWeight: 800 }}>EMA {indicatorParams.emaPeriod}:</span>
-                        <span style={{ color: '#FFF' }}>₹{indicatorValues.ema.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {showBB && indicatorValues.bb && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(224,64,251,0.12)', border: '1px solid rgba(224,64,251,0.3)', padding: '1px 6px', borderRadius: 3, color: '#E040FB' }}>
-                        <span style={{ fontWeight: 800 }}>BB ({indicatorParams.bbPeriod}, {indicatorParams.bbStdDev}):</span>
-                        <span style={{ color: '#E040FB' }}>U ₹{indicatorValues.bb.upper?.toFixed(2)}</span>
-                        <span style={{ color: '#F59E0B' }}>M ₹{indicatorValues.bb.middle?.toFixed(2)}</span>
-                        <span style={{ color: '#E040FB' }}>L ₹{indicatorValues.bb.lower?.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {showVWAP && indicatorValues.vwap != null && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(6,182,212,0.12)', border: '1px solid rgba(6,182,212,0.3)', padding: '1px 6px', borderRadius: 3, color: '#06B6D4' }}>
-                        <span style={{ fontWeight: 800 }}>VWAP:</span>
-                        <span style={{ color: '#FFF' }}>₹{indicatorValues.vwap.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {showSupertrend && indicatorValues.supertrend != null && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', padding: '1px 6px', borderRadius: 3, color: '#10B981' }}>
-                        <span style={{ fontWeight: 800 }}>Supertrend:</span>
-                        <span style={{ color: '#FFF' }}>₹{indicatorValues.supertrend.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {showALMA && indicatorValues.alma != null && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(250,204,21,0.12)', border: '1px solid rgba(250,204,21,0.3)', padding: '1px 6px', borderRadius: 3, color: '#FACC15' }}>
-                        <span style={{ fontWeight: 800 }}>ALMA:</span>
-                        <span style={{ color: '#FFF' }}>₹{indicatorValues.alma.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {showRSI && indicatorValues.rsi != null && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(244,63,94,0.12)', border: '1px solid rgba(244,63,94,0.3)', padding: '1px 6px', borderRadius: 3, color: '#F43F5E' }}>
-                        <span style={{ fontWeight: 800 }}>RSI ({indicatorParams.rsiPeriod}):</span>
-                        <span style={{ color: indicatorValues.rsi >= 70 ? '#EF5350' : indicatorValues.rsi <= 30 ? '#10B981' : '#FFF', fontWeight: 800 }}>
-                          {indicatorValues.rsi.toFixed(2)}
-                        </span>
-                      </div>
-                    )}
-                    {showMACD && indicatorValues.macd && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', padding: '1px 6px', borderRadius: 3, color: '#38BDF8' }}>
-                        <span style={{ fontWeight: 800 }}>MACD ({indicatorParams.macdFast},{indicatorParams.macdSlow},{indicatorParams.macdSignal}):</span>
-                        <span>M: {indicatorValues.macd.macd?.toFixed(2)}</span>
-                        <span style={{ color: '#F97316' }}>S: {indicatorValues.macd.signal?.toFixed(2)}</span>
-                        <span style={{ color: (indicatorValues.macd.hist || 0) >= 0 ? '#10B981' : '#EF5350', fontWeight: 800 }}>
-                          H: {(indicatorValues.macd.hist || 0) >= 0 ? '+' : ''}{indicatorValues.macd.hist?.toFixed(2)}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {loading && (
-                  <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#070A14', zIndex:25, gap: 12 }}>
-                    <div style={{ width:38, height:38, borderRadius:'50%', border:'3px solid rgba(168,85,247,0.2)', borderTopColor:'#A855F7', animation:'spin 0.75s linear infinite' }} />
-                    <span style={{ fontSize: '0.78rem', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace', fontWeight: 600 }}>Loading {selectedSymbol} candles…</span>
-                    <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-                  </div>
-                )}
-
-                {/* ── Empty / Error State Overlay ── */}
-                {!loading && (!Array.isArray(rawHistory) || rawHistory.length === 0) && (
-                  <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'rgba(7,10,20,0.97)', zIndex:24, gap: 14, padding: 20 }}>
-                    <div style={{ fontSize: '2rem' }}>📉</div>
-                    <div style={{ fontSize: '0.88rem', color: '#F0F0FF', fontWeight: 800, textAlign: 'center' }}>
-                      No Chart Data for {selectedSymbol}
-                    </div>
-                    {historyFetchError ? (
-                      <div style={{ fontSize: '0.72rem', color: '#EF5350', textAlign: 'center', maxWidth: 380, lineHeight: 1.6, fontFamily: 'JetBrains Mono, monospace', padding: '8px 12px', background: 'rgba(239,83,80,0.08)', border: '1px solid rgba(239,83,80,0.25)', borderRadius: 6 }}>
-                        ⚠️ {historyFetchError}
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: '0.72rem', color: '#94A3B8', textAlign: 'center', maxWidth: 360, lineHeight: 1.6 }}>
-                        No historical candles found. Backend may be offline or this symbol has no data in the database yet.
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                      <button
-                        onClick={() => {
-                          setHistoryFetchError(null);
-                          setLoading(true);
-                          const seq = ++historyReqSeqRef.current;
-                          fetchHistory(selectedSymbol, interval, timeframe).then(result => {
-                            if (seq !== historyReqSeqRef.current) return;
-                            setRawHistory(result?.candles ?? []);
-                            if (!result?.candles?.length) setHistoryFetchError('Still no data. Check backend & Angel One session.');
-                            setLoading(false);
-                          }).catch(err => {
-                            if (seq !== historyReqSeqRef.current) return;
-                            setHistoryFetchError(`Retry failed: ${err?.message || 'Unknown error'}`);
-                            setRawHistory([]);
-                            setLoading(false);
-                          });
-                        }}
-                        style={{ padding: '7px 18px', borderRadius: 6, border: 'none', background: '#6366F1', color: '#fff', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
-                      >
-                        🔄 Retry
-                      </button>
-                      <button
-                        onClick={() => {
-                          setHistoryFetchError(null);
-                          setLoading(true);
-                          const seq = ++historyReqSeqRef.current;
-                          fetchHistory(selectedSymbol, '1d', '1Y').then(r => {
-                            if (seq !== historyReqSeqRef.current) return;
-                            setRawHistory(r?.candles ?? []);
-                            setLoading(false);
-                          }).catch(() => {
-                            if (seq !== historyReqSeqRef.current) return;
-                            setLoading(false);
-                          });
-                        }}
-                        style={{ padding: '7px 18px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.35)', background: 'rgba(99,102,241,0.1)', color: '#818CF8', fontWeight: 700, fontSize: '0.78rem', cursor: 'pointer' }}
-                      >
-                        Try 1Y Data
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Feed Status Badge (top-right of chart) ── */}
-                {!loading && (() => {
-                  // Compute client-side IST market hours for badge
-                  const nowUt = Date.now();
-                  const istOff = 5.5 * 3600 * 1000;
-                  const istD = new Date(nowUt + istOff);
-                  const iDay = istD.getUTCDay();
-                  const iHr  = istD.getUTCHours();
-                  const iMin = istD.getUTCMinutes();
-                  const clientOpen = iDay >= 1 && iDay <= 5 &&
-                    ((iHr > 9) || (iHr === 9 && iMin >= 15)) &&
-                    ((iHr < 15) || (iHr === 15 && iMin <= 30));
-
-                  let label, dotColor, bgColor, borderColor, titleText;
-                  if (!wsConnected) {
-                    label = 'DISCONNECTED'; dotColor = '#EF4444'; bgColor = 'rgba(239,68,68,0.12)'; borderColor = 'rgba(239,68,68,0.35)';
-                    titleText = 'WebSocket disconnected — attempting to reconnect';
-                  } else if (!clientOpen) {
-                    label = 'MARKET CLOSED'; dotColor = '#64748B'; bgColor = 'rgba(100,116,139,0.12)'; borderColor = 'rgba(100,116,139,0.3)';
-                    titleText = 'NSE market is closed (9:15–15:30 IST weekdays). Showing last close price.';
-                  } else if (wsIsLive) {
-                    label = 'LIVE'; dotColor = '#10B981'; bgColor = 'rgba(16,185,129,0.12)'; borderColor = 'rgba(16,185,129,0.3)';
-                    titleText = 'Live NSE price feed via Angel One — candles updating in real-time';
-                  } else {
-                    label = 'CACHED'; dotColor = '#F59E0B'; bgColor = 'rgba(245,158,11,0.12)'; borderColor = 'rgba(245,158,11,0.3)';
-                    titleText = 'Angel One API unavailable — showing cached/delayed price data';
-                  }
-                  return (
-                    <div
-                      title={titleText}
-                      style={{
-                        position: 'absolute', top: 10, right: 10, zIndex: 20,
-                        display: 'flex', alignItems: 'center', gap: 5,
-                        padding: '3px 8px', borderRadius: 4,
-                        background: bgColor, border: `1px solid ${borderColor}`,
-                        fontSize: '0.68rem', fontWeight: 800,
-                        fontFamily: 'JetBrains Mono, monospace',
-                        color: dotColor, pointerEvents: 'auto', cursor: 'help',
-                        userSelect: 'none',
-                      }}
-                    >
-                      <span style={{
-                        width: 6, height: 6, borderRadius: '50%',
-                        backgroundColor: dotColor,
-                        boxShadow: wsConnected && wsIsLive ? `0 0 6px ${dotColor}` : 'none',
-                        animation: wsConnected && wsIsLive ? 'livePulse 1.5s ease-in-out infinite' : 'none',
-                        flexShrink: 0,
-                      }} />
-                      {label}
-                    </div>
-                  );
-                })()}
-
-                {/* ── Stale Data Warning Banner ── */}
-                {!loading && wsConnected && wsIsLive === false && (() => {
-                  const nowUt = Date.now();
-                  const istOff = 5.5 * 3600 * 1000;
-                  const istD = new Date(nowUt + istOff);
-                  const iDay = istD.getUTCDay();
-                  const iHr  = istD.getUTCHours();
-                  const iMin = istD.getUTCMinutes();
-                  const clientOpen = iDay >= 1 && iDay <= 5 &&
-                    ((iHr > 9) || (iHr === 9 && iMin >= 15)) &&
-                    ((iHr < 15) || (iHr === 15 && iMin <= 30));
-                  if (!clientOpen) return null; // Only show during market hours
-                  return (
-                    <div style={{
-                      position: 'absolute', bottom: 36, left: 0, right: 0,
-                      zIndex: 15, display: 'flex', justifyContent: 'center',
-                      pointerEvents: 'none',
-                    }}>
-                      <div style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                        padding: '5px 14px', borderRadius: 6,
-                        background: 'rgba(245,158,11,0.14)', border: '1px solid rgba(245,158,11,0.4)',
-                        fontSize: '0.7rem', fontWeight: 700, color: '#F59E0B',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                        backdropFilter: 'blur(6px)',
-                      }}>
-                        ⚠️ Angel One API unavailable — chart showing cached/delayed data. Candles will resume when connection restores.
-                      </div>
-                    </div>
-                  );
-                })()}
+                {/* ── Feed Overlays & Live Status Badges ── */}
+                <ChartFeedStatus
+                  loading={loading}
+                  selectedSymbol={selectedSymbol}
+                  rawHistory={rawHistory}
+                  historyFetchError={historyFetchError}
+                  setHistoryFetchError={setHistoryFetchError}
+                  setLoading={setLoading}
+                  fetchHistory={fetchHistory}
+                  setRawHistory={setRawHistory}
+                  interval={interval}
+                  timeframe={timeframe}
+                  historyReqSeqRef={historyReqSeqRef}
+                  wsConnected={wsConnected}
+                  wsIsLive={wsIsLive}
+                />
 
                 <div ref={containerRef} style={{ width:'100%', height:'100%' }} />
 
@@ -3119,217 +2174,28 @@ export default function LiveChartView() {
       )}
 
       {/* ── Interactive Canvas Price Alert & Sound Chime Manager Modal ── */}
-      {showAlertModal && (
-        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.75)', backdropFilter:'blur(6px)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:150 }}>
-          <div style={{ background:'#0D1322', border:'1px solid rgba(168,85,247,0.4)', borderRadius:14, padding:20, width:380, maxWidth:'92vw', display:'flex', flexDirection:'column', gap:12, boxShadow:'0 20px 40px rgba(0,0,0,0.8)' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-              <h3 style={{ margin:0, color:'#F0F0FF', fontSize:'1rem', display:'flex', alignItems:'center', gap:8 }}>
-                <Bell size={16} color="#A855F7" /> Price Alerts: {selectedSymbol}
-              </h3>
-              <button
-                onClick={() => {
-                  playAlertChime();
-                  toast.success('🔔 Alert Chime Tested');
-                }}
-                title="Test Crystal Audio Chime"
-                style={{ padding:'2px 8px', borderRadius:4, background:'rgba(168,85,247,0.15)', border:'1px solid rgba(168,85,247,0.3)', color:'#A855F7', fontSize:'0.68rem', cursor:'pointer', fontWeight:700 }}
-              >
-                🔊 Test Chime
-              </button>
-            </div>
-
-            <p style={{ margin:0, color:'#94A3B8', fontSize:'0.74rem' }}>
-              Set an alert line on the chart canvas. Rings audio chime & sends toast notification on price hit:
-            </p>
-
-            {/* Quick Price Percentage Presets */}
-            {curPrice && (
-              <div style={{ display:'flex', gap:4, flexWrap:'wrap' }}>
-                {[-5, -2, -1, 1, 2, 5].map(pct => {
-                  const targetP = (curPrice * (1 + pct / 100)).toFixed(2);
-                  return (
-                    <button
-                      key={pct}
-                      onClick={() => setTargetAlertPrice(targetP)}
-                      style={{
-                        padding:'3px 6px', borderRadius:4, border:'1px solid rgba(255,255,255,0.1)',
-                        background:'rgba(255,255,255,0.04)', color: pct > 0 ? '#10B981' : '#EF5350',
-                        fontSize:'0.68rem', fontWeight:700, cursor:'pointer'
-                      }}
-                    >
-                      {pct > 0 ? `+${pct}%` : `${pct}%`} (₹{Number(targetP).toFixed(0)})
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-
-            <div style={{ display:'flex', gap:6 }}>
-              <input
-                type="number"
-                step="0.05"
-                placeholder={`Target Price (LTP ₹${curPrice?.toFixed(2) || '0.00'})`}
-                value={targetAlertPrice}
-                onChange={e => setTargetAlertPrice(e.target.value)}
-                style={{ flex:1, padding:'8px 12px', borderRadius:6, border:'1px solid rgba(168,85,247,0.3)', background:'#060913', color:'#fff', fontSize:'0.86rem', outline:'none', fontFamily:'JetBrains Mono, monospace' }}
-              />
-              <button
-                onClick={() => {
-                  const p = Number(targetAlertPrice);
-                  if (p > 0) {
-                    const newAlert = {
-                      id: `alert_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-                      ticker: selectedSymbol,
-                      price: p,
-                      direction: curPrice && p > curPrice ? 'above' : 'below',
-                      triggered: false,
-                      createdAt: new Date().toISOString(),
-                    };
-                    setPriceAlerts(prev => [...prev, newAlert]);
-                    toast.success(`🔔 Alert line created for ${selectedSymbol} at ₹${p.toFixed(2)}`);
-                    setTargetAlertPrice('');
-                  }
-                }}
-                style={{ padding:'8px 16px', borderRadius:6, border:'none', background:'#A855F7', color:'#fff', fontWeight:700, fontSize:'0.82rem', cursor:'pointer' }}
-              >
-                + Add Alert
-              </button>
-            </div>
-
-            {/* Active Alerts List for this Symbol */}
-            <div style={{ maxHeight:160, overflowY:'auto', display:'flex', flexDirection:'column', gap:4, marginTop:4 }}>
-              <div style={{ fontSize:'0.66rem', color:'#64748B', fontWeight:700, letterSpacing:'0.05em' }}>
-                ACTIVE ALERTS ({priceAlerts.filter(a => a.ticker === selectedSymbol).length})
-              </div>
-              {priceAlerts.filter(a => a.ticker === selectedSymbol).length === 0 ? (
-                <div style={{ fontSize:'0.72rem', color:'#475569', padding:'6px 0', fontStyle:'italic' }}>
-                  No alerts set for {selectedSymbol}.
-                </div>
-              ) : (
-                priceAlerts.filter(a => a.ticker === selectedSymbol).map(alert => (
-                  <div key={alert.id} style={{
-                    display:'flex', alignItems:'center', justifyContent:'space-between',
-                    padding:'5px 8px', borderRadius:4, background:'rgba(255,255,255,0.03)',
-                    border: alert.triggered ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(168,85,247,0.2)',
-                    fontSize:'0.74rem'
-                  }}>
-                    <span style={{ color: alert.triggered ? '#10B981' : '#F0F0FF', fontFamily:'JetBrains Mono, monospace', fontWeight:700 }}>
-                      ₹{Number(alert.price).toFixed(2)} {alert.triggered ? '✓ (Triggered)' : '⏳ Active'}
-                    </span>
-                    <button
-                      onClick={() => setPriceAlerts(prev => prev.filter(a => a.id !== alert.id))}
-                      style={{ background:'none', border:'none', color:'#EF5350', cursor:'pointer', fontSize:'0.72rem', padding:'0 4px' }}
-                      title="Delete Alert"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div style={{ display:'flex', justifyContent:'flex-end', marginTop:6 }}>
-              <button
-                onClick={() => setShowAlertModal(false)}
-                style={{ padding:'6px 14px', borderRadius:6, border:'1px solid rgba(255,255,255,0.1)', background:'rgba(255,255,255,0.05)', color:'#CBD5E1', cursor:'pointer', fontSize:'0.76rem' }}
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PriceAlertModal
+        showAlertModal={showAlertModal}
+        setShowAlertModal={setShowAlertModal}
+        selectedSymbol={selectedSymbol}
+        curPrice={curPrice}
+        targetAlertPrice={targetAlertPrice}
+        setTargetAlertPrice={setTargetAlertPrice}
+        priceAlerts={priceAlerts}
+        setPriceAlerts={setPriceAlerts}
+      />
 
       {/* ── Compact Space-Saving Bottom Status Bar with Expandable Insights ── */}
-      {isDaily && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flexShrink: 0 }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '3px 10px',
-            backgroundColor: '#0B0F1C',
-            border: '1px solid rgba(99,102,241,0.12)',
-            borderRadius: 6,
-            fontSize: '0.72rem',
-            color: '#94A3B8',
-            height: 26,
-            flexShrink: 0,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <span style={{
-                fontSize: '0.62rem',
-                fontWeight: 800,
-                padding: '1px 6px',
-                borderRadius: 4,
-                background: wsLiveData ? 'rgba(16, 185, 129, 0.15)' : 'rgba(148, 163, 184, 0.1)',
-                color: wsLiveData ? '#10B981' : '#94A3B8',
-                border: `1px solid ${wsLiveData ? 'rgba(16, 185, 129, 0.3)' : 'rgba(148, 163, 184, 0.2)'}`,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4
-              }}>
-                <span style={{
-                  width: 5,
-                  height: 5,
-                  borderRadius: '50%',
-                  backgroundColor: wsLiveData ? '#10B981' : '#64748B',
-                  boxShadow: wsLiveData ? '0 0 6px #10B981' : 'none'
-                }} />
-                {wsLiveData ? 'LIVE NSE' : 'EOD SYNC'}
-              </span>
-
-              <span>LTP: <strong style={{ color: '#FFF', fontFamily: 'JetBrains Mono, monospace' }}>{curPrice ? `₹${curPrice.toFixed(2)}` : '—'}</strong></span>
-              <span>O: <strong style={{ color: '#CBD5E1', fontFamily: 'JetBrains Mono, monospace' }}>{activeCandleRef.current?.open ? `₹${Number(activeCandleRef.current.open).toFixed(2)}` : '—'}</strong></span>
-              <span>H: <strong style={{ color: '#10B981', fontFamily: 'JetBrains Mono, monospace' }}>{activeCandleRef.current?.high ? `₹${Number(activeCandleRef.current.high).toFixed(2)}` : '—'}</strong></span>
-              <span>L: <strong style={{ color: '#EF5350', fontFamily: 'JetBrains Mono, monospace' }}>{activeCandleRef.current?.low ? `₹${Number(activeCandleRef.current.low).toFixed(2)}` : '—'}</strong></span>
-              <span>7D Target: <strong style={{ color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>{prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toFixed(2)}` : '—'}</strong></span>
-              <span>Return: <strong style={{ color: (prediction?.predicted_return_7d || 0) >= 0 ? '#10B981' : '#EF5350' }}>{prediction?.predicted_return_7d != null ? `${prediction.predicted_return_7d >= 0 ? '+' : ''}${(prediction.predicted_return_7d * 100).toFixed(2)}%` : '—'}</strong></span>
-              <span>Signal: <strong style={{ color: sigMeta.color }}>{predLoading ? 'Loading…' : sigMeta.label}</strong></span>
-              <span>Confidence: <strong style={{ color: scoreColor }}>{score}/100</strong></span>
-            </div>
-
-            <button
-              onClick={() => setShowBottomStats(!showBottomStats)}
-              style={{
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: 4,
-                padding: '2px 6px',
-                color: '#818CF8',
-                cursor: 'pointer',
-                fontSize: '0.68rem',
-                fontWeight: 600,
-              }}
-            >
-              {showBottomStats ? '▴ Hide' : '▾ Stats'}
-            </button>
-          </div>
-
-          {/* Expanded Cards (Shown only on demand) */}
-          {showBottomStats && (
-            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))', gap:6 }}>
-              {[
-                { label:'CURRENT PRICE',   value: curPrice ? `₹${curPrice.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : '—', color:'#F0F0FF' },
-                { label:'AI TARGET (7D)',  value: prediction?.predicted_price_7d ? `₹${prediction.predicted_price_7d.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}` : predLoading ? 'Loading…' : '—', color:'#818CF8' },
-                { label:'EXPECTED RETURN', value: prediction?.predicted_return_7d != null ? `${prediction.predicted_return_7d>=0?'+':''}${(prediction.predicted_return_7d*100).toFixed(2)}%` : predLoading ? 'Loading…' : '—',
-                  color: prediction?.predicted_return_7d >= 0 ? '#10B981' : '#EF5350' },
-                { label:'AI CONFIDENCE',   value: prediction?.ai_confidence_score != null ? `${prediction.ai_confidence_score}/100` : predLoading ? 'Loading…' : '—', color:scoreColor },
-                { label:'95% UPPER',       value:(prediction?.predicted_upper_price_7d??prediction?.high_bound) ? `₹${(prediction.predicted_upper_price_7d??prediction.high_bound).toFixed(2)}` : predLoading?'Loading…':'—', color:'#10B981' },
-                { label:'95% LOWER',       value:(prediction?.predicted_lower_price_7d??prediction?.low_bound)  ? `₹${(prediction.predicted_lower_price_7d??prediction.low_bound).toFixed(2)}`  : predLoading?'Loading…':'—', color:'#EF5350' },
-              ].map(({ label, value, color }) => (
-                <div key={label} style={{
-                  background:'rgba(255,255,255,0.02)', border:'1px solid rgba(99,102,241,0.12)',
-                  borderRadius:6, padding:'6px 10px',
-                }}>
-                  <div style={{ fontSize:'0.58rem', color:'#64748B', letterSpacing:'0.06em', marginBottom:2 }}>{label}</div>
-                  <div style={{ fontSize:'0.78rem', fontWeight:700, color, fontFamily:'JetBrains Mono, monospace' }}>{value}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+      <ChartBottomStats
+        isDaily={isDaily}
+        wsLiveData={wsLiveData}
+        curPrice={curPrice}
+        prediction={prediction}
+        predLoading={predLoading}
+        activeCandleRef={activeCandleRef}
+        showBottomStats={showBottomStats}
+        setShowBottomStats={setShowBottomStats}
+      />
 
       {/* ── TradingView Indicators, Metrics, and Strategies Modal ── */}
       <IndicatorsModal
