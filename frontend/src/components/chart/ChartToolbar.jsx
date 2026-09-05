@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Calendar, Clock, Maximize2, Minimize2, RotateCcw } from 'lucide-react';
+import { Search, X, Calendar, Clock, Maximize2, Minimize2, RotateCcw, Activity } from 'lucide-react';
 import { INTERVALS, POPULAR_STOCKS } from '../../utils/chartHelpers';
 
 export default function ChartToolbar({
@@ -13,6 +13,8 @@ export default function ChartToolbar({
   isFullscreen = false,
   onToggleFullscreen = () => {},
   searchStocks = null,
+  activeIndicatorCount = 0,
+  onOpenIndicators = () => {},
 }) {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -312,6 +314,45 @@ export default function ChartToolbar({
             ))}
           </select>
         </div>
+
+        {/* fx Indicators Library Button */}
+        <button
+          onClick={onOpenIndicators}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            background: activeIndicatorCount > 0 ? 'rgba(99, 102, 241, 0.22)' : 'rgba(99, 102, 241, 0.1)',
+            border: `1px solid ${activeIndicatorCount > 0 ? 'rgba(99, 102, 241, 0.5)' : 'rgba(99, 102, 241, 0.3)'}`,
+            borderRadius: 5,
+            padding: '2px 8px',
+            height: 25,
+            color: activeIndicatorCount > 0 ? '#A5B4FC' : '#818CF8',
+            fontSize: '0.72rem',
+            fontWeight: 800,
+            cursor: 'pointer',
+            fontFamily: 'JetBrains Mono, monospace',
+            transition: 'all 0.15s ease',
+          }}
+          title="Technical Indicators & Studies"
+        >
+          <Activity size={12} />
+          <span>fx Indicators</span>
+          {activeIndicatorCount > 0 && (
+            <span
+              style={{
+                fontSize: '0.62rem',
+                backgroundColor: '#6366F1',
+                color: '#fff',
+                padding: '0px 5px',
+                borderRadius: 8,
+                fontWeight: 800,
+              }}
+            >
+              {activeIndicatorCount}
+            </span>
+          )}
+        </button>
       </div>
 
       {/* Right: Reset Zoom, Fullscreen */}

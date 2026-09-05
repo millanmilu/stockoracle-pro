@@ -111,6 +111,71 @@ def calculate_fibonacci_levels(df: pd.DataFrame, period: int = 50) -> Dict[str, 
         "fib_618": high_roll - 0.618 * diff
     }
 
+def calculate_vwap(df: pd.DataFrame) -> pd.Series:
+    """Calculates Volume Weighted Average Price (VWAP)."""
+    typical_price = (df["high"] + df["low"] + df["close"]) / 3.0
+    if "volume" not in df.columns or df["volume"].sum() == 0:
+        return typical_price
+    cum_vol_price = (typical_price * df["volume"]).cumsum()
+    cum_vol = df["volume"].cumsum()
+    vwap = cum_vol_price / (cum_vol.replace(0, np.nan))
+    return vwap.ffill().bfill().fillna(typical_price)
+
+def calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) -> Dict[str, pd.Series]:
+    """Calculates Supertrend indicator with trend direction (1 = Bullish green, -1 = Bearish red)."""
+    atr = calculate_atr(df, period)
+    hl2 = (df["high"] + df["low"]) / 2.0
+    basic_upper = hl2 + (multiplier * atr)
+    basic_lower = hl2 - (multiplier * atr)
+
+    n = len(df)
+    final_upper = np.zeros(n)
+    final_lower = np.zeros(n)
+    supertrend = np.zeros(n)
+    direction = np.ones(n)
+
+    close_arr = df["close"].to_numpy()
+    basic_upper_arr = basic_upper.to_numpy()
+    basic_lower_arr = basic_lower.to_numpy()
+
+    for i in range(n):
+        if i == 0:
+            final_upper[i] = basic_upper_arr[i]
+            final_lower[i] = basic_lower_arr[i]
+            supertrend[i] = final_lower[i]
+            direction[i] = 1
+            continue
+
+        if basic_upper_arr[i] < final_upper[i-1] or close_arr[i-1] > final_upper[i-1]:
+            final_upper[i] = basic_upper_arr[i]
+        else:
+            final_upper[i] = final_upper[i-1]
+
+        if basic_lower_arr[i] > final_lower[i-1] or close_arr[i-1] < final_lower[i-1]:
+            final_lower[i] = basic_lower_arr[i]
+        else:
+            final_lower[i] = final_lower[i-1]
+
+        if direction[i-1] == 1:
+            if close_arr[i] < final_lower[i]:
+                direction[i] = -1
+                supertrend[i] = final_upper[i]
+            else:
+                direction[i] = 1
+                supertrend[i] = final_lower[i]
+        else:
+            if close_arr[i] > final_upper[i]:
+                direction[i] = 1
+                supertrend[i] = final_lower[i]
+            else:
+                direction[i] = -1
+                supertrend[i] = final_upper[i]
+
+    return {
+        "supertrend": pd.Series(supertrend, index=df.index),
+        "direction": pd.Series(direction, index=df.index),
+    }
+
 def detect_candlestick_patterns(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     o, h, l, c = df["open"], df["high"], df["low"], df["close"]
@@ -199,11 +264,20 @@ def enrich_stock_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df.copy()
     
-    # 1. Standard Technical indicators
+    # 1. Standard Moving Averages & Trend indicators
     df["sma_20"] = calculate_sma(df["close"], 20)
     df["sma_50"] = calculate_sma(df["close"], 50)
+    df["sma_200"] = calculate_sma(df["close"], 200)
+    df["ema_9"] = calculate_ema(df["close"], 9)
     df["ema_12"] = calculate_ema(df["close"], 12)
+    df["ema_21"] = calculate_ema(df["close"], 21)
     df["ema_26"] = calculate_ema(df["close"], 26)
+    df["vwap"] = calculate_vwap(df)
+
+    st_data = calculate_supertrend(df, 10, 3.0)
+    df["supertrend"] = st_data["supertrend"]
+    df["supertrend_dir"] = st_data["direction"]
+
     df["rsi"] = calculate_rsi(df["close"], 14)
     
     macd_data = calculate_macd(df["close"])

@@ -4,12 +4,16 @@ import { useStock } from '../hooks/useStock';
 import ChartToolbar from './chart/ChartToolbar';
 import ChartCanvas from './chart/ChartCanvas';
 import ChartBottomStats from './chart/ChartBottomStats';
+import IndicatorModal from './chart/IndicatorModal';
+import IndicatorLegend from './chart/IndicatorLegend';
+import OscillatorPane from './chart/OscillatorPane';
+import { DEFAULT_ACTIVE_INDICATORS } from './chart/indicatorDefinitions';
 import { toChartTime, getSessionBucketStart } from '../utils/chartHelpers';
 
 /**
  * LiveChartView — Rebuilt Clean Master Controller
  * Focused purely on smooth candlestick rendering, accurate historical data,
- * and flicker-free live price tracking with Angel One broker feeds.
+ * real-time indicators suite, and flicker-free live price tracking.
  */
 export default function LiveChartView() {
   const selectedSymbol = useStore(s => s.selectedSymbol || 'RELIANCE');
@@ -27,10 +31,31 @@ export default function LiveChartView() {
   const [dataSource, setDataSource] = useState('angel_one');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Advanced Indicators State
+  const [activeIndicators, setActiveIndicators] = useState(() => {
+    try {
+      const saved = localStorage.getItem('stockoracle_indicators');
+      return saved ? JSON.parse(saved) : DEFAULT_ACTIVE_INDICATORS;
+    } catch {
+      return DEFAULT_ACTIVE_INDICATORS;
+    }
+  });
+  const [hiddenIndicators, setHiddenIndicators] = useState([]);
+  const [indicatorValues, setIndicatorValues] = useState({});
+  const [showIndicatorModal, setShowIndicatorModal] = useState(false);
+
   const activeCandleRef = useRef(null);
   const chartCanvasRef = useRef(null);
+  const oscillatorPaneRef = useRef(null);
   const containerRef = useRef(null);
   const lastVerifiedPriceRef = useRef(null);
+
+  // Persist active indicators to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('stockoracle_indicators', JSON.stringify(activeIndicators));
+    } catch {}
+  }, [activeIndicators]);
 
   // 1. Fetch & Staged Historical Data Loading
   const loadHistory = useCallback(async (symbol, iv, tf) => {
@@ -62,9 +87,10 @@ export default function LiveChartView() {
         const close = Number(c.close);
         const volume = Number(c.volume || 0);
 
-        // Enforce OHLC consistency invariant
+        // Enforce OHLC consistency invariant & preserve all indicator attributes
         if (t && !isNaN(open) && open > 0 && !isNaN(close) && close > 0 && !isNaN(high) && !isNaN(low)) {
           formatted.push({
+            ...c,
             time: t,
             open,
             high: Math.max(high, open, close),
@@ -87,7 +113,6 @@ export default function LiveChartView() {
         if (i === 0 || formatted[i].time !== formatted[i - 1].time) {
           deduplicated.push(formatted[i]);
         } else {
-          // If duplicate timestamp, take the latest bar values
           deduplicated[deduplicated.length - 1] = formatted[i];
         }
       }
@@ -162,13 +187,11 @@ export default function LiveChartView() {
 
     // Check if ongoing active candle matches the current time bucket
     if (active && active.time === currentBucketTime) {
-      // Smoothly update ongoing session wick (Open stays fixed, High/Low expand, Close tracks LTP)
       active.high = Math.max(Number(active.high), ltp);
       active.low = Math.min(Number(active.low), ltp);
       active.close = ltp;
       chartCanvasRef.current?.updateActiveCandle(active);
     } else if (currentBucketTime) {
-      // Bucket rolled over or new session started -> Start new active candle
       const newCandle = {
         time: currentBucketTime,
         open: ltp,
@@ -181,6 +204,33 @@ export default function LiveChartView() {
       chartCanvasRef.current?.updateActiveCandle(newCandle);
     }
   }, [storeLiveTick, interval]);
+
+  // Indicator Handlers
+  const handleToggleIndicator = useCallback((id) => {
+    setActiveIndicators((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  }, []);
+
+  const handleClearAllIndicators = useCallback(() => {
+    setActiveIndicators([]);
+    setHiddenIndicators([]);
+  }, []);
+
+  const handleToggleHideIndicator = useCallback((id) => {
+    setHiddenIndicators((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  }, []);
+
+  const handleRemoveIndicator = useCallback((id) => {
+    setActiveIndicators((prev) => prev.filter((item) => item !== id));
+    setHiddenIndicators((prev) => prev.filter((item) => item !== id));
+  }, []);
+
+  const handleVisibleRangeChange = useCallback((range) => {
+    oscillatorPaneRef.current?.syncRange(range);
+  }, []);
 
   // 3. Toolbar Handlers
   const handleSelectSymbol = useCallback((sym) => {
@@ -250,56 +300,104 @@ export default function LiveChartView() {
         isFullscreen={isFullscreen}
         onToggleFullscreen={handleToggleFullscreen}
         searchStocks={searchStocks}
+        activeIndicatorCount={activeIndicators.length}
+        onOpenIndicators={() => setShowIndicatorModal(true)}
       />
 
       {/* 2. Main Chart Viewport Area */}
-      <div style={{ flex: 1, position: 'relative', width: '100%', minHeight: 0, overflow: 'hidden' }}>
-        {loading && candles.length === 0 && (
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 20,
-            backgroundColor: 'rgba(9, 12, 21, 0.7)',
-            color: '#818CF8',
-            fontFamily: 'JetBrains Mono, monospace',
-            fontSize: '0.85rem',
-            gap: 8,
-          }}>
-            <div className="spinner" style={{ width: 16, height: 16 }} />
-            Loading {selectedSymbol} Candles...
-          </div>
+      <div
+        style={{
+          flex: 1,
+          position: 'relative',
+          width: '100%',
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          borderRadius: 6,
+        }}
+      >
+        <div style={{ flex: 1, position: 'relative', width: '100%', minHeight: 0, overflow: 'hidden' }}>
+          {loading && candles.length === 0 && (
+            <div style={{
+              position: 'absolute',
+              inset: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 20,
+              backgroundColor: 'rgba(9, 12, 21, 0.7)',
+              color: '#818CF8',
+              fontFamily: 'JetBrains Mono, monospace',
+              fontSize: '0.85rem',
+              gap: 8,
+            }}>
+              <div className="spinner" style={{ width: 16, height: 16 }} />
+              Loading {selectedSymbol} Candles...
+            </div>
+          )}
+
+          {error && (
+            <div style={{
+              position: 'absolute',
+              top: 12,
+              right: 12,
+              zIndex: 20,
+              backgroundColor: 'rgba(239, 83, 80, 0.15)',
+              border: '1px solid rgba(239, 83, 80, 0.3)',
+              borderRadius: 4,
+              padding: '4px 10px',
+              color: '#EF5350',
+              fontSize: '0.72rem',
+              fontFamily: 'JetBrains Mono, monospace',
+            }}>
+              {error}
+            </div>
+          )}
+
+          {/* On-Chart Indicator Legend HUD */}
+          <IndicatorLegend
+            activeIndicators={activeIndicators}
+            hiddenIndicators={hiddenIndicators}
+            indicatorValues={indicatorValues}
+            onToggleHide={handleToggleHideIndicator}
+            onRemove={handleRemoveIndicator}
+          />
+
+          <ChartCanvas
+            ref={chartCanvasRef}
+            candles={candles}
+            activeCandleRef={activeCandleRef}
+            interval={interval}
+            selectedSymbol={selectedSymbol}
+            livePrice={curPrice}
+            liveChange={dayChange}
+            activeIndicators={activeIndicators}
+            hiddenIndicators={hiddenIndicators}
+            onHoverValues={setIndicatorValues}
+            onVisibleRangeChange={handleVisibleRangeChange}
+          />
+        </div>
+
+        {/* Synchronized Oscillator Sub-Pane (RSI) */}
+        {activeIndicators.includes('rsi') && (
+          <OscillatorPane
+            ref={oscillatorPaneRef}
+            type="rsi"
+            candles={candles}
+            onClose={() => handleRemoveIndicator('rsi')}
+          />
         )}
 
-        {error && (
-          <div style={{
-            position: 'absolute',
-            top: 12,
-            right: 12,
-            zIndex: 20,
-            backgroundColor: 'rgba(239, 83, 80, 0.15)',
-            border: '1px solid rgba(239, 83, 80, 0.3)',
-            borderRadius: 4,
-            padding: '4px 10px',
-            color: '#EF5350',
-            fontSize: '0.72rem',
-            fontFamily: 'JetBrains Mono, monospace',
-          }}>
-            {error}
-          </div>
+        {/* Synchronized Oscillator Sub-Pane (MACD) */}
+        {activeIndicators.includes('macd') && (
+          <OscillatorPane
+            ref={oscillatorPaneRef}
+            type="macd"
+            candles={candles}
+            onClose={() => handleRemoveIndicator('macd')}
+          />
         )}
-
-        <ChartCanvas
-          ref={chartCanvasRef}
-          candles={candles}
-          activeCandleRef={activeCandleRef}
-          interval={interval}
-          selectedSymbol={selectedSymbol}
-          livePrice={curPrice}
-          liveChange={dayChange}
-        />
       </div>
 
       {/* 3. Footer Session Summary Bar */}
@@ -311,6 +409,15 @@ export default function LiveChartView() {
         activeCandleRef={activeCandleRef}
         interval={interval}
         dataSource={dataSource}
+      />
+
+      {/* 4. Indicator Library Modal */}
+      <IndicatorModal
+        isOpen={showIndicatorModal}
+        onClose={() => setShowIndicatorModal(false)}
+        activeIndicators={activeIndicators}
+        onToggleIndicator={handleToggleIndicator}
+        onClearAll={handleClearAllIndicators}
       />
     </div>
   );
