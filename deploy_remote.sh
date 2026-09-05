@@ -1,13 +1,24 @@
 #!/bin/bash
 # ==============================================================================
 # StockOracle Pro — 1-Click Remote Deployment Script (Bash / Linux / macOS)
-# Usage: ./deploy_remote.sh [path/to/key.pem] [host_ip]
+# Usage: ./deploy_remote.sh [path/to/key.pem] [host_ip] [--update-python]
 # ==============================================================================
 
 set -e
 
-KEY_ARG="$1"
-HOST_ARG="${2:-54.165.116.67}"
+KEY_ARG=""
+HOST_ARG="54.165.116.67"
+UPDATE_PY="0"
+
+for arg in "$@"; do
+    if [[ "$arg" == *.pem ]]; then
+        KEY_ARG="$arg"
+    elif [[ "$arg" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || [[ "$arg" == *.duckdns.org ]] || [[ "$arg" == *.amazonaws.com ]]; then
+        HOST_ARG="$arg"
+    elif [[ "$arg" == "--update-python" ]] || [[ "$arg" == "-p" ]]; then
+        UPDATE_PY="1"
+    fi
+done
 
 # 1. Locate SSH Key
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,41 +42,42 @@ USER_HOST="ubuntu@$HOST_ARG"
 
 echo -e "\033[0;36m============================================================\033[0m"
 echo -e "\033[0;36m   StockOracle Pro — Remote Automated Deployment\033[0m"
-echo -e "\033[0;34m   Target:  $USER_HOST\033[0m"
-echo -e "\033[0;34m   SSH Key: $SSH_KEY\033[0m"
+echo -e "\033[0;34m   Target:        $USER_HOST\033[0m"
+echo -e "\033[0;34m   SSH Key:       $SSH_KEY\033[0m"
+echo -e "\033[0;34m   Update Python: $([ "$UPDATE_PY" = "1" ] && echo "Yes" || echo "No (Fast Mode)")\033[0m"
 echo -e "\033[0;36m============================================================\033[0m"
 echo ""
 
-REMOTE_CMD=$(cat << 'REMOTE'
+REMOTE_CMD=$(cat << REMOTE
 set -e
 PROJECT_DIR="/var/www/stockoracle"
-cd "$PROJECT_DIR"
+cd "\$PROJECT_DIR"
+UPDATE_PY="$UPDATE_PY"
 
 echo "=== [1/6] Syncing latest code from GitHub ==="
-ENV_BACKUP="$HOME/.stockoracle_backend_env_backup"
+ENV_BACKUP="\$HOME/.stockoracle_backend_env_backup"
 if [ -f backend/.env ]; then
-    cp backend/.env "$ENV_BACKUP"
+    cp backend/.env "\$ENV_BACKUP"
 fi
 
 git fetch origin main
 git reset --hard origin/main
 
-if [ -f "$ENV_BACKUP" ]; then
-    cp "$ENV_BACKUP" backend/.env
+if [ -f "\$ENV_BACKUP" ]; then
+    cp "\$ENV_BACKUP" backend/.env
 fi
-echo "✓ Code synced to latest main commit: $(git rev-parse --short HEAD)"
+echo "✓ Code synced to latest main commit: \$(git rev-parse --short HEAD)"
 
 echo ""
 echo "=== [2/6] Checking Python dependencies ==="
 if [ -f venv/bin/activate ]; then
-    if [ ! -f venv/.requirements_installed ] || [ backend/requirements.txt -nt venv/.requirements_installed ]; then
-        echo "Requirements modified, updating Python packages..."
+    if [ "\$UPDATE_PY" = "1" ]; then
+        echo "Updating Python packages (--update-python requested)..."
         source venv/bin/activate
         pip install -r backend/requirements.txt --quiet
-        touch venv/.requirements_installed
         echo "✓ Python dependencies updated."
     else
-        echo "✓ Python dependencies up to date (cached, skipping re-install)."
+        echo "✓ Python environment ready (cached for max speed)."
     fi
 else
     echo "Creating virtual environment..."
@@ -73,7 +85,6 @@ else
     source venv/bin/activate
     pip install --upgrade pip --quiet
     pip install -r backend/requirements.txt --quiet
-    touch venv/.requirements_installed
     echo "✓ Virtual environment created."
 fi
 
@@ -89,12 +100,12 @@ if [ -f node_modules/vite/bin/vite.js ]; then
 else
     npx vite build || npm run build
 fi
-cd "$PROJECT_DIR"
+cd "\$PROJECT_DIR"
 echo "✓ Frontend built successfully into frontend/dist."
 
 echo ""
 echo "=== [4/6] Setting Proper File Permissions ==="
-sudo chown -R ubuntu:ubuntu "$PROJECT_DIR"
+sudo chown -R ubuntu:ubuntu "\$PROJECT_DIR"
 echo "✓ File ownership set to ubuntu:ubuntu."
 
 echo ""
@@ -106,18 +117,18 @@ echo "✓ Services restarted."
 
 echo ""
 echo "=== [6/6] Health Verification ==="
-sleep 2
-STATUS=$(sudo systemctl is-active stockoracle.service || echo "failed")
-if [ "$STATUS" = "active" ]; then
+sleep 3
+STATUS=\$(sudo systemctl is-active stockoracle.service || echo "failed")
+if [ "\$STATUS" = "active" ]; then
     echo "✓ stockoracle.service is RUNNING (active)."
 else
-    echo "✗ ERROR: stockoracle.service status: $STATUS"
+    echo "✗ ERROR: stockoracle.service status: \$STATUS"
     sudo journalctl -u stockoracle.service -n 20 --no-pager
     exit 1
 fi
 
-HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/health || echo "000")
-echo "✓ API Health Status: HTTP $HTTP_CODE"
+HTTP_CODE=\$(curl -sk -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/health || echo "000")
+echo "✓ API Health Status: HTTP \$HTTP_CODE"
 
 echo ""
 echo "============================================================"
