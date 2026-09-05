@@ -139,6 +139,39 @@ def purge_stale_partial_history(min_rows: int = 5):
         logger.debug("purge_stale_partial_history notice: %s", e)
 
 
+def clear_all_stored_price_data():
+    """
+    Clears all stored historical and cached price data across the database:
+    - historical_prices
+    - intraday_candles
+    - live_ticks
+    - company_info
+    - predictions
+    - screener_results
+    - screener_daily_metrics
+    - monte_carlo
+    Preserves stock_universe (instrument tokens) and broker_accounts!
+    """
+    tables_to_clear = [
+        "historical_prices",
+        "intraday_candles",
+        "live_ticks",
+        "company_info",
+        "predictions",
+        "screener_results",
+        "screener_daily_metrics",
+        "monte_carlo",
+    ]
+    with get_db_session() as session:
+        for table in tables_to_clear:
+            try:
+                session.execute(text(f"DELETE FROM {table};"))
+            except Exception as e:
+                logger.warning("Could not clear table %s: %s", table, e)
+        session.commit()
+    logger.info("Successfully cleared all stored price data from database.")
+
+
 
 def _normalize_price(v):
     try:

@@ -246,17 +246,18 @@ async def lifespan(app: FastAPI):
 
     price_task = asyncio.create_task(websocket_price_broadcast_loop())
     alert_task = asyncio.create_task(run_alert_scheduler_loop())
-    prefetch_task = asyncio.create_task(prefetch_all_tickers())
     keepalive_task = asyncio.create_task(run_session_keepalive_loop())
-    from backend.research.screener_pipeline import run_screener_refresh_loop
-    screener_refresh_task = asyncio.create_task(run_screener_refresh_loop())
+    # Note: Startup background prefetch and auto-population are disabled.
+    # Data is strictly fetched on-demand from Angel One when the user searches/selects that stock.
+
+    background_tasks = [price_task, alert_task, keepalive_task]
 
     try:
         yield
     finally:
-        for task in (price_task, alert_task, prefetch_task, keepalive_task, screener_refresh_task):
+        for task in background_tasks:
             task.cancel()
-        for task in (price_task, alert_task, prefetch_task, keepalive_task, screener_refresh_task):
+        for task in background_tasks:
             with suppress(asyncio.CancelledError):
                 await task
 
