@@ -129,13 +129,32 @@ export default function LiveChartView() {
     const isIntraday = interval !== '1d';
     const nowMs = Date.now();
 
+    // IST Day of Week & Market Time Calculation
+    const istDate = new Date(nowMs + (5.5 * 3600 * 1000));
+    const istDayOfWeek = istDate.getUTCDay(); // 0 = Sunday, 6 = Saturday
+    const isWeekend = istDayOfWeek === 0 || istDayOfWeek === 6;
+
+    // Invariant: Weekend ticks must never generate artificial weekend candles
+    if (isWeekend) {
+      return;
+    }
+
+    const istHours = istDate.getUTCHours();
+    const istMinutes = istDate.getUTCMinutes();
+    const istTimeMin = istHours * 60 + istMinutes;
+    const isMarketHours = istTimeMin >= 555 && istTimeMin <= 930; // 09:15 to 15:30 IST
+
+    // For intraday, ignore ticks outside continuous market hours to prevent isolated night bars
+    if (isIntraday && !isMarketHours) {
+      return;
+    }
+
     // Determine current interval candle timestamp
     let currentBucketTime = null;
     if (isIntraday) {
       currentBucketTime = getSessionBucketStart(interval, nowMs);
     } else {
       // IST Market Date YYYY-MM-DD
-      const istDate = new Date(nowMs + (5.5 * 3600 * 1000));
       currentBucketTime = istDate.toISOString().substring(0, 10);
     }
 

@@ -648,6 +648,10 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
                             "close": float, "volume": int})
             df.attrs["data_source"] = "angel_one"
 
+            # Filter out weekend dates (Saturday=5, Sunday=6) to discard exchange mock/DR testing sessions
+            dt_raw = pd.to_datetime(df["date"], format='mixed', errors='coerce')
+            df = df[dt_raw.dt.dayofweek < 5].copy()
+
             if is_intraday:
                 df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d %H:%M:%S")
                 df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
