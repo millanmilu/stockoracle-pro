@@ -2,6 +2,117 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Clock, Maximize2, Minimize2, RotateCcw, Activity } from 'lucide-react';
 import { INTERVALS, POPULAR_STOCKS } from '../../utils/chartHelpers';
 
+export const QUICK_INTERVAL_CHIPS = [
+  { label: '1s', value: '1s' },
+  { label: '1m', value: '1m' },
+  { label: '5m', value: '5m' },
+  { label: '15m', value: '15m' },
+  { label: '1H', value: '1h' },
+  { label: '4H', value: '4h' },
+  { label: '1D', value: '1d' },
+];
+
+/**
+ * Real-time Candle Countdown Hook
+ * Calculates exact time remaining until active candle closes, anchored to NSE 09:15 IST.
+ * Updates accurately every 1000ms.
+ */
+function useCandleCountdown(interval) {
+  const [remaining, setRemaining] = useState({ text: '--:--', isLive: false });
+
+  useEffect(() => {
+    function tick() {
+      const nowMs = Date.now();
+      const istDate = new Date(nowMs + 5.5 * 3600 * 1000);
+      const istDayOfWeek = istDate.getUTCDay(); // 0=Sun, 6=Sat
+      const isWeekend = istDayOfWeek === 0 || istDayOfWeek === 6;
+
+      const istHours = istDate.getUTCHours();
+      const istMinutes = istDate.getUTCMinutes();
+      const istSeconds = istDate.getUTCSeconds();
+      const istTotalSec = istHours * 3600 + istMinutes * 60 + istSeconds;
+
+      const marketOpenSec = 9 * 3600 + 15 * 60;  // 09:15 IST (33,300s)
+      const marketCloseSec = 15 * 3600 + 30 * 60; // 15:30 IST (55,800s)
+      const isMarketOpen = !isWeekend && istTotalSec >= marketOpenSec && istTotalSec <= marketCloseSec;
+
+      if (interval === '1d') {
+        if (!isMarketOpen) {
+          setRemaining({ text: isWeekend || istTotalSec > marketCloseSec ? 'Closed' : 'Pre-Mkt', isLive: false });
+          return;
+        }
+        const diffSec = marketCloseSec - istTotalSec;
+        const h = Math.floor(diffSec / 3600);
+        const m = Math.floor((diffSec % 3600) / 60);
+        const s = diffSec % 60;
+        setRemaining({
+          text: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+          isLive: true,
+        });
+        return;
+      }
+
+      if (interval === '4h') {
+        if (!isMarketOpen) {
+          setRemaining({ text: 'Closed', isLive: false });
+          return;
+        }
+        const bar1Close = 13 * 3600 + 15 * 60; // 13:15 IST
+        const targetSec = istTotalSec < bar1Close ? bar1Close : marketCloseSec;
+        const diffSec = Math.max(0, targetSec - istTotalSec);
+        const h = Math.floor(diffSec / 3600);
+        const m = Math.floor((diffSec % 3600) / 60);
+        const s = diffSec % 60;
+        setRemaining({
+          text: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+          isLive: true,
+        });
+        return;
+      }
+
+      if (interval === '1s') {
+        setRemaining({ text: '00:01', isLive: isMarketOpen });
+        return;
+      }
+
+      const bucketSizes = {
+        '30s': 30,
+        '1m': 60,
+        '5m': 300,
+        '15m': 900,
+        '30m': 1800,
+        '1h': 3600,
+      };
+      const bSec = bucketSizes[interval] || 60;
+
+      // Elapsed seconds within the current interval bucket from 09:15 anchor
+      let elapsed = (istTotalSec - marketOpenSec) % bSec;
+      if (elapsed < 0) elapsed += bSec;
+      const diffSec = bSec - elapsed;
+
+      let formatted = '';
+      if (diffSec >= 3600) {
+        const h = Math.floor(diffSec / 3600);
+        const m = Math.floor((diffSec % 3600) / 60);
+        const s = diffSec % 60;
+        formatted = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      } else {
+        const m = Math.floor(diffSec / 60);
+        const s = diffSec % 60;
+        formatted = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+      }
+
+      setRemaining({ text: formatted, isLive: isMarketOpen });
+    }
+
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [interval]);
+
+  return remaining;
+}
+
 export default function ChartToolbar({
   selectedSymbol = 'RELIANCE',
   onSelectSymbol = () => {},
@@ -14,6 +125,7 @@ export default function ChartToolbar({
   activeIndicatorCount = 0,
   onOpenIndicators = () => {},
 }) {
+  const countdown = useCandleCountdown(interval);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -241,7 +353,49 @@ export default function ChartToolbar({
 
         <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.12)' }} />
 
-        {/* Timeframe Interval Dropdown */}
+        {/* Quick Timeframe Chips (1-Click Switch) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          {QUICK_INTERVAL_CHIPS.map((chip) => {
+            const isActive = interval === chip.value;
+            return (
+              <button
+                key={chip.value}
+                onClick={() => onIntervalChange(chip.value)}
+                style={{
+                  padding: '2px 7px',
+                  borderRadius: 4,
+                  fontSize: '0.70rem',
+                  fontWeight: 800,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  border: isActive ? '1px solid #818CF8' : '1px solid transparent',
+                  background: isActive ? '#4F46E5' : 'rgba(255, 255, 255, 0.05)',
+                  color: isActive ? '#FFFFFF' : '#94A3B8',
+                  cursor: 'pointer',
+                  transition: 'all 0.12s ease',
+                  height: 25,
+                  lineHeight: '19px',
+                }}
+                onMouseEnter={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = 'rgba(99, 102, 241, 0.18)';
+                    e.currentTarget.style.color = '#E2E8F0';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
+                    e.currentTarget.style.color = '#94A3B8';
+                  }
+                }}
+                title={`Switch to ${chip.label}`}
+              >
+                {chip.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Full Interval Selector Dropdown */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -267,7 +421,7 @@ export default function ChartToolbar({
               fontFamily: 'JetBrains Mono, monospace',
               padding: 0,
             }}
-            title="Candle Resolution (Timeframe)"
+            title="All Resolutions Dropdown"
           >
             {INTERVALS.map(iv => (
               <option key={iv.value} value={iv.value} style={{ background: '#0B0F1C', color: '#E2E8F0' }}>
@@ -275,6 +429,41 @@ export default function ChartToolbar({
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Real-Time Candle Countdown Timer Badge */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            background: countdown.isLive ? 'rgba(16, 185, 129, 0.10)' : 'rgba(100, 116, 139, 0.10)',
+            border: `1px solid ${countdown.isLive ? 'rgba(16, 185, 129, 0.35)' : 'rgba(100, 116, 139, 0.25)'}`,
+            borderRadius: 5,
+            padding: '2px 8px',
+            height: 25,
+            fontSize: '0.70rem',
+            fontWeight: 800,
+            fontFamily: 'JetBrains Mono, monospace',
+            color: countdown.isLive ? '#10B981' : '#94A3B8',
+            letterSpacing: '0.04em',
+            whiteSpace: 'nowrap',
+            userSelect: 'none',
+          }}
+          title={`Active candle closing countdown (${interval} candle, IST)`}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              backgroundColor: countdown.isLive ? '#10B981' : '#64748B',
+              boxShadow: countdown.isLive ? '0 0 6px rgba(16, 185, 129, 0.85)' : 'none',
+              display: 'inline-block',
+              flexShrink: 0,
+            }}
+          />
+          <span>{countdown.text}</span>
         </div>
 
         {/* fx Indicators Library Button */}
