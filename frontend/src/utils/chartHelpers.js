@@ -45,17 +45,21 @@ export function addBusinessDays(dateStr, days) {
 export const POPULAR_STOCKS = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'WIPRO', 'NIFTY50', 'BANKNIFTY'];
 
 export const INTERVALS = [
-  { label: '1m', value: '1m' },
-  { label: '5m', value: '5m' },
-  { label: '15m', value: '15m' },
-  { label: '1H', value: '1h' },
-  { label: '1D', value: '1d' },
+  { label: '1s (1 sec)', value: '1s' },
+  { label: '30s (30 sec)', value: '30s' },
+  { label: '1m (1 min)', value: '1m' },
+  { label: '5m (5 min)', value: '5m' },
+  { label: '15m (15 min)', value: '15m' },
+  { label: '30m (30 min)', value: '30m' },
+  { label: '1H (1 hour)', value: '1h' },
+  { label: '4H (4 hour)', value: '4h' },
+  { label: '1D (Daily)', value: '1d' },
 ];
 
 export const SIG = {
-  buy:  { label: '\u25B2 BUY',  color: '#10B981', bg: 'rgba(16,185,129,0.10)', border: 'rgba(16,185,129,0.28)' },
-  sell: { label: '\u25BC SELL', color: '#EF5350', bg: 'rgba(239,83,80,0.10)',  border: 'rgba(239,83,80,0.28)' },
-  hold: { label: '\u25C6 HOLD', color: '#F59E0B', bg: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.28)' },
+  buy:  { label: '▲ BUY',  color: '#10B981', bg: 'rgba(16,185,129,0.10)', border: 'rgba(16,185,129,0.28)' },
+  sell: { label: '▼ SELL', color: '#EF5350', bg: 'rgba(239,83,80,0.10)',  border: 'rgba(239,83,80,0.28)' },
+  hold: { label: '◆ HOLD', color: '#F59E0B', bg: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.28)' },
 };
 
 export const CHART_OPTIONS = {
@@ -111,16 +115,33 @@ export const CANDLE_STYLE = {
  * Start time (epoch seconds) of the live intraday bucket containing `now`, aligned to the
  * NSE session grid: each trading session's first bar begins at 09:15 IST, so live buckets
  * are anchored at 09:15 + k*bucketSize per day (09:15/10:15/… for 1h).
- * A naive floor-to-epoch-grid works for 1m/5m/15m (the +5:30 IST offset is an exact multiple
- * of those sizes), but puts 1h boundaries at IST :30 — spawning duplicate ghost bars beside
- * the :15-labeled history bars at session end.
  *
- * @param {string} interval  '1m' | '5m' | '15m' | '1h' (anything else falls back to 5m)
+ * @param {string} interval  '1s' | '30s' | '1m' | '5m' | '15m' | '30m' | '1h' | '4h'
  * @param {number} nowMs     timestamp in milliseconds
  * @returns {number} bucket start as an epoch-seconds timestamp
  */
 export function getSessionBucketStart(interval, nowMs) {
-  const bucketSize = ({ '1m': 60, '5m': 300, '15m': 900, '1h': 3600 })[interval] || 300;
+  if (interval === '4h') {
+    // 4h sessions: 09:15 and 13:15 IST
+    const DAY = 86400;
+    const IST_OFFSET = 5.5 * 3600;
+    const nowSec = Math.floor(nowMs / 1000);
+    const dayStartSec = Math.floor((nowSec + IST_OFFSET) / DAY) * DAY - IST_OFFSET;
+    const morningStart = dayStartSec + (9 * 3600 + 15 * 60); // 09:15 IST
+    const afternoonStart = dayStartSec + (13 * 3600 + 15 * 60); // 13:15 IST
+    return nowSec >= afternoonStart ? afternoonStart : morningStart;
+  }
+
+  const bucketSize = ({
+    '1s': 1,
+    '30s': 30,
+    '1m': 60,
+    '5m': 300,
+    '15m': 900,
+    '30m': 1800,
+    '1h': 3600,
+  })[interval] || 300;
+
   const DAY = 86400;
   const IST_OFFSET = 5.5 * 3600; // seconds (UTC + 05:30)
   const nowSec = Math.floor(nowMs / 1000);

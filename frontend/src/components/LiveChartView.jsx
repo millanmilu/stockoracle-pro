@@ -24,7 +24,6 @@ export default function LiveChartView() {
   const { fetchHistory, searchStocks } = useStock();
 
   const [interval, setInterval] = useState('1d');
-  const [timeframe, setTimeframe] = useState('1Y');
   const [candles, setCandles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -58,13 +57,13 @@ export default function LiveChartView() {
   }, [activeIndicators]);
 
   // 1. Fetch & Staged Historical Data Loading
-  const loadHistory = useCallback(async (symbol, iv, tf) => {
+  const loadHistory = useCallback(async (symbol, iv) => {
     setLoading(true);
     setError(null);
     activeCandleRef.current = null;
 
     try {
-      const res = await fetchHistory(symbol, iv, tf);
+      const res = await fetchHistory(symbol, iv);
       const rawCandles = res?.candles || [];
       const source = res?.dataSource || 'angel_one';
       setDataSource(source);
@@ -133,10 +132,10 @@ export default function LiveChartView() {
     }
   }, [fetchHistory]);
 
-  // Load history on symbol, interval, or timeframe change
+  // Load history on symbol or interval change
   useEffect(() => {
-    loadHistory(selectedSymbol, interval, timeframe);
-  }, [selectedSymbol, interval, timeframe, loadHistory]);
+    loadHistory(selectedSymbol, interval);
+  }, [selectedSymbol, interval, loadHistory]);
 
   // 2. Real-Time Live Tick Processing & Smooth Active Candle Tracking
   useEffect(() => {
@@ -243,10 +242,6 @@ export default function LiveChartView() {
     setInterval(iv);
   }, []);
 
-  const handleTimeframeChange = useCallback((tf) => {
-    setTimeframe(tf);
-  }, []);
-
   const handleResetZoom = useCallback(() => {
     chartCanvasRef.current?.fitContent();
   }, []);
@@ -294,8 +289,6 @@ export default function LiveChartView() {
         onSelectSymbol={handleSelectSymbol}
         interval={interval}
         onIntervalChange={handleIntervalChange}
-        timeframe={timeframe}
-        onTimeframeChange={handleTimeframeChange}
         onResetZoom={handleResetZoom}
         isFullscreen={isFullscreen}
         onToggleFullscreen={handleToggleFullscreen}

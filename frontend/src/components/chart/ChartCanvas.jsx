@@ -115,7 +115,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       timeScale: {
         ...CHART_OPTIONS.timeScale,
         timeVisible: interval !== '1d',
-        secondsVisible: false,
+        secondsVisible: interval === '1s' || interval === '30s',
       },
     });
 
@@ -219,6 +219,18 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     };
   }, [interval, updateHUD, activeCandleRef, candles, onHoverValues, onVisibleRangeChange]);
 
+  // Update timeScale options when interval changes (e.g. secondsVisible for 1s/30s)
+  useEffect(() => {
+    if (chartInstanceRef.current) {
+      try {
+        chartInstanceRef.current.timeScale().applyOptions({
+          timeVisible: interval !== '1d',
+          secondsVisible: interval === '1s' || interval === '30s',
+        });
+      } catch {}
+    }
+  }, [interval]);
+
   // Load Historical Candles into Series whenever data changes
   useEffect(() => {
     if (!candleSeriesRef.current || !volumeSeriesRef.current || !Array.isArray(candles) || candles.length === 0) {
@@ -243,7 +255,15 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       candleSeriesRef.current.setData(formattedCandles);
       volumeSeriesRef.current.setData(formattedVolumes);
 
-      chartInstanceRef.current?.timeScale().fitContent();
+      if (formattedCandles.length > 150) {
+        const total = formattedCandles.length;
+        chartInstanceRef.current?.timeScale().setVisibleLogicalRange({
+          from: total - 120,
+          to: total + 5,
+        });
+      } else {
+        chartInstanceRef.current?.timeScale().fitContent();
+      }
 
       // Seed initial HUD
       const last = candles[candles.length - 1];

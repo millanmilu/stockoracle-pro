@@ -58,6 +58,7 @@ SESSION_REFRESH_HOURS = 8
 
 # Angel One error codes that indicate an expired / invalid session
 _AUTH_ERROR_CODES = {"AB1010", "AG8002", "AB1004"}
+_full_backfill_done: set = set()
 
 
 def get_session_status() -> bool:
@@ -541,17 +542,21 @@ def _synthesize_fallback_candles(
 
 # ── fetch_stock_data ──
 
-def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> Optional[pd.DataFrame]:
+def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> Optional[pd.DataFrame]:
     """
     Fetches historical OHLCV data.
-    First checks local SQLite DB. If missing or stale, fetches from Angel One SmartAPI,
-    updates SQLite DB, and returns. (Yahoo Finance fallback is disabled).
+    First checks database. If missing or stale, fetches from Angel One SmartAPI,
+    updates DB, and returns. (Yahoo Finance fallback is disabled).
+
+    Supports intervals: '1s', '30s', '1m', '5m', '15m', '30m', '1h', '4h', '1d'.
+    When interval is '1d' (Daily), fetches and returns complete multi-year data
+    from stock inception/beginning.
 
     Sets df.attrs['data_source'] on every returned DataFrame:
       'memory_cache'  — served from in-memory LRU cache
-      'sqlite'        — freshly read from local SQLite (up-to-date)
+      'sqlite'        — freshly read from local database (up-to-date)
       'angel_one'     — live data from Angel One SmartAPI
-      'sqlite_stale'  — last-resort SQLite data (possibly outdated)
+      'sqlite_stale'  — last-resort database data (possibly outdated)
     """
     ticker = ticker.upper().strip()
     cache_key = f"hist_{ticker}_{period}_{interval}"
@@ -563,30 +568,53 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
         return fresh
 
     token_info = get_token_info(ticker)
+    interval_clean = interval.lower().strip()
+
+    # 4h interval: constructed by fetching 1-hour candles and grouping into 09:15 and 13:15 sessions
+    if interval_clean == "4h":
+        df_1h = fetch_stock_data(ticker, period="90D" if period in ["ALL", "MAX", None, "1Y", "5Y"] else period, interval="1h")
+        if df_1h is not None and not df_1h.empty:
+            dt = pd.to_datetime(df_1h["date"], format="mixed")
+            is_morning = dt.dt.hour < 13
+            df_1h_copy = df_1h.copy()
+            df_1h_copy["bucket"] = dt.dt.strftime("%Y-%m-%d ") + is_morning.map({True: "09:15:00", False: "13:15:00"})
+            df_4h = df_1h_copy.groupby("bucket", as_index=False).agg({
+                "open": "first",
+                "high": "max",
+                "low": "min",
+                "close": "last",
+                "volume": "sum"
+            }).rename(columns={"bucket": "date"}).sort_values("date")
+            df_4h.attrs["data_source"] = df_1h.attrs.get("data_source", "angel_one")
+            _set_cached(cache_key, df_4h)
+            return df_4h
+        return None
+
+    # 1s and 30s intervals: base high-resolution 1m candles for live tick seconds bucketing
+    if interval_clean in ["1s", "30s"]:
+        df_1m = fetch_stock_data(ticker, period="7D" if period in ["ALL", "MAX", None, "1Y", "5Y"] else period, interval="1m")
+        if df_1m is not None and not df_1m.empty:
+            df_sec = df_1m.copy()
+            df_sec.attrs["data_source"] = df_1m.attrs.get("data_source", "angel_one")
+            _set_cached(cache_key, df_sec)
+            return df_sec
+        return None
 
     # Map period to days count
     period_map = {
         "2D":  2,   "7D":  7,   "10D": 10,  "1W":  7,
         "45D": 45,  "1M":  30,  "120D": 120, "3M": 90,
         "200D": 200, "6M": 180, "370D": 370, "1Y": 365,
-        "2Y":  730, "5Y": 1825,
+        "2Y":  730, "5Y": 1825, "ALL": 9000, "MAX": 9000,
     }
-    days = period_map.get(period.upper(), 120)
-
-    # Trigger 5Y backfill if requested and missing from DB
-    if period.upper() == "5Y" and not interval.lower() in ["1m", "5m", "15m", "1h"]:
-        backfilled = backfill_5y_history(ticker)
-        if backfilled is not None and len(backfilled) >= 100:
-            backfilled.attrs["data_source"] = "angel_one"
-            return backfilled
+    days = period_map.get(period.upper() if period else "ALL", 9000 if interval_clean == "1d" else 120)
 
     todate = datetime.now()
     fromdate = todate - timedelta(days=days)
-
     fromdate_str = fromdate.strftime("%Y-%m-%d")
     todate_str = todate.strftime("%Y-%m-%d")
 
-    is_intraday = interval.lower() in ["1m", "5m", "15m", "1h"]
+    is_intraday = interval_clean in ["1m", "5m", "15m", "30m", "1h"]
 
     def _expected_latest_trading_day() -> str:
         now = datetime.now(_IST)
@@ -598,13 +626,16 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
             target = target - timedelta(days=1)
         return target.strftime("%Y-%m-%d")
 
-    # 2. Check SQLite local database (ONLY FOR DAILY INTERVAL '1d')
+    # 2. Check local database (ONLY FOR DAILY INTERVAL '1d')
     db_df = None
     if not is_intraday:
-        db_df = get_historical_prices(ticker, fromdate_str, todate_str)
+        if period in ["ALL", "MAX", None, "5Y"]:
+            db_df = get_historical_prices(ticker)
+        else:
+            db_df = get_historical_prices(ticker, fromdate_str, todate_str)
+
         if db_df is not None and not db_df.empty:
             if len(db_df) < 5:
-                # Corrupt/isolated fragment row (e.g. single candle) - clear it so fallbacks fetch full history
                 from backend.data.database import clear_ticker_history
                 clear_ticker_history(ticker)
                 db_df = None
@@ -612,20 +643,60 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
                 latest_db_date_str = str(db_df["date"].max())[:10]
                 expected_date_str = _expected_latest_trading_day()
                 is_up_to_date = latest_db_date_str >= expected_date_str
-                expected_trading_days = int(days * (5/7))
-                if is_up_to_date and len(db_df) >= expected_trading_days * 0.8:
-                    db_df.attrs["data_source"] = "sqlite"
-                    _set_cached(cache_key, db_df)
-                    return db_df
 
-    # 3. Fetch from Angel One (if session available)
+                # Check if full inception backfill has been performed
+                has_full_history = (ticker in _full_backfill_done) or (len(db_df) >= 2500)
+
+                if has_full_history:
+                    if is_up_to_date:
+                        db_df.attrs["data_source"] = "sqlite"
+                        _set_cached(cache_key, db_df)
+                        return db_df
+                    else:
+                        # Database has extensive history but missing today's/yesterday's session
+                        ensure_session()
+                        if _session_active and token_info and token_info.get("token"):
+                            recent_param = {
+                                "exchange":    token_info["exch_seg"],
+                                "symboltoken": token_info["token"],
+                                "interval":    "ONE_DAY",
+                                "fromdate":    (todate - timedelta(days=30)).strftime("%Y-%m-%d 00:00"),
+                                "todate":      todate.strftime("%Y-%m-%d 23:59"),
+                            }
+                            resp = _call_api(smartApi.getCandleData, recent_param)
+                            if resp and resp.get("status") and resp.get("data"):
+                                recent_df = pd.DataFrame(resp["data"], columns=["date", "open", "high", "low", "close", "volume"])
+                                recent_df = recent_df.astype({"open": float, "high": float, "low": float, "close": float, "volume": int})
+                                dt_raw = pd.to_datetime(recent_df["date"], format='mixed', errors='coerce')
+                                recent_df = recent_df[dt_raw.dt.dayofweek < 5].copy()
+                                recent_df["date"] = pd.to_datetime(recent_df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")
+                                save_historical_prices(ticker, recent_df)
+                                updated_df = get_historical_prices(ticker)
+                                if updated_df is not None and not updated_df.empty:
+                                    updated_df.attrs["data_source"] = "angel_one"
+                                    _set_cached(cache_key, updated_df)
+                                    return updated_df
+
+        # If DB has fewer than 300 records or is empty, trigger full backfill from inception
+        if period in ["ALL", "MAX", None, "5Y"]:
+            full_df = backfill_full_history(ticker)
+            if full_df is not None and not full_df.empty:
+                full_df.attrs["data_source"] = "angel_one"
+                _set_cached(cache_key, full_df)
+                return full_df
+
+    # 3. Fetch from Angel One for intraday (or daily fallback)
     ensure_session()
     if _session_active and token_info and token_info.get("token"):
         interval_map = {
-            "1m": "ONE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE",
-            "1h": "ONE_HOUR",   "1d": "ONE_DAY",
+            "1m":  "ONE_MINUTE",
+            "5m":  "FIVE_MINUTE",
+            "15m": "FIFTEEN_MINUTE",
+            "30m": "THIRTY_MINUTE",
+            "1h":  "ONE_HOUR",
+            "1d":  "ONE_DAY",
         }
-        api_interval = interval_map.get(interval.lower(), "ONE_DAY")
+        api_interval = interval_map.get(interval_clean, "ONE_DAY")
         max_days = 30 if is_intraday else 365
         api_fromdate = todate - timedelta(days=min(days, max_days))
 
@@ -661,10 +732,10 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
                 df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")
                 df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
 
-                # Save daily records to local SQLite database (UPSERT)
+                # Save daily records to local database (UPSERT)
                 save_historical_prices(ticker, df)
 
-                merged_df = get_historical_prices(ticker, fromdate_str, todate_str)
+                merged_df = get_historical_prices(ticker) if period in ["ALL", "MAX", None] else get_historical_prices(ticker, fromdate_str, todate_str)
                 final_df = merged_df if (merged_df is not None and not merged_df.empty) else df
                 final_df.attrs["data_source"] = "angel_one"
                 _set_cached(cache_key, final_df)
@@ -849,14 +920,14 @@ def fetch_company_info(ticker: str) -> Optional[dict]:
 
 # ── Combined Historical + Live Data ───────────────────────────────────────────
 
-def get_combined_stock_data(ticker: str, period: str = "2Y") -> Optional[pd.DataFrame]:
+def get_combined_stock_data(ticker: str, period: str = "ALL") -> Optional[pd.DataFrame]:
     """
-    Returns the most complete and current OHLCV DataFrame for a ticker by:
-      1. Fetching historical data from DB / Angel One API (fetch_stock_data)
+    Returns the complete OHLCV DataFrame for a ticker from stock inception/beginning:
+      1. Fetching historical daily data from DB / Angel One API (fetch_stock_data)
       2. Appending today's live tick data as a synthetic OHLCV candle if available
          (or updating today's candle if it already exists in history)
 
-    This ensures prediction models always see today's price action even before
+    This ensures prediction models and charts always see today's price action even before
     the official end-of-day candle is available.
     """
     ticker = ticker.upper()
@@ -895,50 +966,46 @@ def get_combined_stock_data(ticker: str, period: str = "2Y") -> Optional[pd.Data
     return df
 
 
-def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
+def backfill_full_history(ticker: str) -> Optional[pd.DataFrame]:
     """
-    Downloads 5 years of daily historical OHLCV data for a ticker
-    using Angel One SmartAPI in 1-year chunks and bulk saves into SQLite DB.
+    Downloads complete historical daily OHLCV data from stock inception/beginning
+    using Angel One SmartAPI in 1400-day chunks (approx 4 years per request) backwards
+    up to 25+ years (or until no more candles are returned), and bulk saves into DB.
     """
     ticker = ticker.upper().strip()
-    logger.info("Fetching 5-year historical data via Angel One SmartAPI for %s...", ticker)
+    logger.info("Fetching full historical data from inception via Angel One SmartAPI for %s...", ticker)
 
-    todate = datetime.now()
-    fromdate = todate - timedelta(days=1825)
-    fromdate_str = fromdate.strftime("%Y-%m-%d")
-    todate_str   = todate.strftime("%Y-%m-%d")
-
-    # Check if DB already has 5Y history (> 1000 records)
-    existing_df = get_historical_prices(ticker, fromdate_str, todate_str)
-    if existing_df is not None and len(existing_df) >= 1000:
-        logger.info("Found existing %d 5-year records in SQLite DB for %s.", len(existing_df), ticker)
+    # Check if DB already has extensive history (> 2500 records)
+    existing_df = get_historical_prices(ticker)
+    if existing_df is not None and len(existing_df) >= 2500:
+        _full_backfill_done.add(ticker)
+        logger.info("Found extensive existing %d records in DB for %s.", len(existing_df), ticker)
         return existing_df
 
     token_info = get_token_info(ticker)
     if not token_info:
         logger.error("Token not found for '%s'.", ticker)
-        return existing_df if (existing_df is not None and len(existing_df) >= 200) else None
+        return existing_df if (existing_df is not None and len(existing_df) >= 50) else None
 
     ensure_session()
     if not _session_active or not smartApi:
         logger.warning("Angel One session inactive — returning current DB history for %s.", ticker)
-        return existing_df if (existing_df is not None and len(existing_df) >= 200) else None
+        return existing_df if (existing_df is not None and len(existing_df) >= 50) else None
 
-    # Chunk 5 years into 365-day blocks (Angel One max per request)
+    cur_date = datetime.now()
     all_chunks = []
-    chunk_end = todate
+    consecutive_empty = 0
 
-    for i in range(5):
-        chunk_start = chunk_end - timedelta(days=365)
-        if chunk_start < fromdate:
-            chunk_start = fromdate
+    for i in range(8):  # 8 * 1400 days = ~30 years (covers 1995 to present)
+        to_d = cur_date - timedelta(days=i * 1400)
+        from_d = to_d - timedelta(days=1400)
 
         historicParam = {
             "exchange":    token_info["exch_seg"],
             "symboltoken": token_info["token"],
             "interval":    "ONE_DAY",
-            "fromdate":    chunk_start.strftime("%Y-%m-%d 00:00"),
-            "todate":      chunk_end.strftime("%Y-%m-%d 23:59"),
+            "fromdate":    from_d.strftime("%Y-%m-%d 00:00"),
+            "todate":      to_d.strftime("%Y-%m-%d 23:59"),
         }
 
         try:
@@ -949,13 +1016,23 @@ def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
                     columns=["date", "open", "high", "low", "close", "volume"]
                 )
                 cdf = cdf.astype({"open": float, "high": float, "low": float, "close": float, "volume": int})
+                # Filter weekend mock/DR sessions
+                dt_raw = pd.to_datetime(cdf["date"], format='mixed', errors='coerce')
+                cdf = cdf[dt_raw.dt.dayofweek < 5].copy()
                 cdf["date"] = pd.to_datetime(cdf["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")
-                all_chunks.append(cdf)
+                if not cdf.empty:
+                    all_chunks.append(cdf)
+                    consecutive_empty = 0
+                else:
+                    consecutive_empty += 1
+            else:
+                consecutive_empty += 1
         except Exception as e:
-            logger.warning("Chunk fetch error (%s to %s): %s", chunk_start, chunk_end, e)
+            logger.warning("Chunk fetch error (%s to %s) for %s: %s", from_d, to_d, ticker, e)
+            consecutive_empty += 1
 
-        chunk_end = chunk_start - timedelta(days=1)
-        if chunk_end <= fromdate:
+        if consecutive_empty >= 2 and i >= 2:
+            # Reached before stock inception (IPO)
             break
 
     if all_chunks:
@@ -967,7 +1044,14 @@ def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
             from backend.data.database import clear_ticker_history
             clear_ticker_history(ticker)
             save_historical_prices(ticker, clean_df)
-            logger.info("Stored %d 5-year Angel One records in SQLite for %s.", len(clean_df), ticker)
+            _full_backfill_done.add(ticker)
+            logger.info("Stored %d full-history Angel One records in DB for %s (from %s to %s).",
+                        len(clean_df), ticker, clean_df["date"].min(), clean_df["date"].max())
             return clean_df
 
-    return existing_df if (existing_df is not None and len(existing_df) >= 200) else None
+    return existing_df if (existing_df is not None and len(existing_df) >= 50) else None
+
+
+def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
+    """Backward-compatible wrapper pointing to full history backfill."""
+    return backfill_full_history(ticker)

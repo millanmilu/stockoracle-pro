@@ -34,32 +34,46 @@ def get_stock_info(ticker: str):
 
 
 @router.get("/stock/{ticker}/history")
-def get_stock_history(ticker: str, timeframe: str = "5Y", interval: str = "1d"):
+def get_stock_history(ticker: str, timeframe: Optional[str] = None, interval: str = "1d"):
     """
     Fetches historical OHLCV data with technical indicators.
     Returns standard envelope { data: [...], data_source: "angel_one" | "sqlite" | "yahoo_finance" }
     and sets X-Data-Source response header.
+
+    When interval='1d' and timeframe is omitted, returns complete multi-year data from inception.
     """
     t = ticker.upper().strip()
 
-    days_map = {
-        "1D": "2D", "5D": "7D", "1W": "10D", "1M": "45D",
-        "3M": "120D", "6M": "200D", "1Y": "370D", "2Y": "2Y", "5Y": "5Y",
-    }
-    period = days_map.get(timeframe.upper())
-    if not period:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid timeframe '{timeframe}'. Valid: 1D, 5D, 1W, 1M, 3M, 6M, 1Y, 2Y, 5Y.",
-        )
-
-    valid_intervals = {"1m", "5m", "15m", "1h", "1d"}
+    valid_intervals = {"1s", "30s", "1m", "5m", "15m", "30m", "1h", "4h", "1d"}
     iv = interval.lower()
     if iv not in valid_intervals:
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid interval '{interval}'. Valid: 1m, 5m, 15m, 1h, 1d.",
+            detail=f"Invalid interval '{interval}'. Valid: 1s, 30s, 1m, 5m, 15m, 30m, 1h, 4h, 1d.",
         )
+
+    days_map = {
+        "1D": "2D", "5D": "7D", "1W": "10D", "1M": "45D",
+        "3M": "120D", "6M": "200D", "1Y": "370D", "2Y": "2Y", "5Y": "5Y",
+        "ALL": "ALL", "MAX": "ALL",
+    }
+    if timeframe:
+        period = days_map.get(timeframe.upper())
+        if not period:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid timeframe '{timeframe}'. Valid: 1D, 5D, 1W, 1M, 3M, 6M, 1Y, 2Y, 5Y, ALL.",
+            )
+    else:
+        # Default lookbacks: 1d loads all history from inception; intraday loads optimal window
+        if iv == "1d":
+            period = "ALL"
+        elif iv in ["1s", "30s", "1m"]:
+            period = "7D"
+        elif iv in ["5m", "15m", "30m"]:
+            period = "30D"
+        else:  # 1h, 4h
+            period = "90D"
 
     if iv == "1d":
         df = get_combined_stock_data(t, period=period)

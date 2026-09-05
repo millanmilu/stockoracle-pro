@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Calendar, Clock, Maximize2, Minimize2, RotateCcw, Activity } from 'lucide-react';
+import { Search, X, Clock, Maximize2, Minimize2, RotateCcw, Activity } from 'lucide-react';
 import { INTERVALS, POPULAR_STOCKS } from '../../utils/chartHelpers';
 
 export default function ChartToolbar({
@@ -7,8 +7,6 @@ export default function ChartToolbar({
   onSelectSymbol = () => {},
   interval = '1d',
   onIntervalChange = () => {},
-  timeframe = '1Y',
-  onTimeframeChange = () => {},
   onResetZoom = () => {},
   isFullscreen = false,
   onToggleFullscreen = () => {},
@@ -274,42 +272,6 @@ export default function ChartToolbar({
             {INTERVALS.map(iv => (
               <option key={iv.value} value={iv.value} style={{ background: '#0B0F1C', color: '#E2E8F0' }}>
                 {iv.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* History Range Dropdown */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          background: 'rgba(16, 185, 129, 0.1)',
-          border: '1px solid rgba(16, 185, 129, 0.28)',
-          borderRadius: 5,
-          padding: '2px 7px',
-          height: 25,
-        }}>
-          <Calendar size={12} style={{ color: '#10B981', flexShrink: 0 }} />
-          <select
-            value={timeframe}
-            onChange={(e) => onTimeframeChange(e.target.value)}
-            style={{
-              background: 'transparent',
-              color: '#10B981',
-              border: 'none',
-              fontSize: '0.72rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              outline: 'none',
-              fontFamily: 'JetBrains Mono, monospace',
-              padding: 0,
-            }}
-            title="History Lookback Range"
-          >
-            {['1M', '3M', '6M', '1Y', '2Y', '5Y'].map(tf => (
-              <option key={tf} value={tf} style={{ background: '#0B0F1C', color: '#E2E8F0' }}>
-                {tf}
               </option>
             ))}
           </select>

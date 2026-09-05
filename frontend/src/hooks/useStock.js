@@ -18,10 +18,12 @@ export function useStock() {
     } finally { setLoading(false); }
   }, []);
 
-  const fetchHistory = useCallback(async (ticker, interval = '1d', timeframe = '5Y') => {
+  const fetchHistory = useCallback(async (ticker, interval = '1d', timeframe = null) => {
     setHistoryError(null);
     try {
-      const { data } = await api.get(`/api/stock/${ticker}/history`, { params: { interval, timeframe } });
+      const params = { interval };
+      if (timeframe) params.timeframe = timeframe;
+      const { data } = await api.get(`/api/stock/${ticker}/history`, { params });
       // API returns { data: [...], data_source: "angel_one" | "sqlite" | ... }
       if (data && Array.isArray(data.data)) {
         return { candles: data.data, dataSource: data.data_source || 'unknown' };
