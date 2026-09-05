@@ -544,14 +544,13 @@ def _synthesize_fallback_candles(
 def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> Optional[pd.DataFrame]:
     """
     Fetches historical OHLCV data.
-    First checks local SQLite DB. If missing or stale, tries Angel One SmartAPI,
-    falls back to Yahoo Finance for daily candles, updates SQLite DB, and returns.
+    First checks local SQLite DB. If missing or stale, fetches from Angel One SmartAPI,
+    updates SQLite DB, and returns. (Yahoo Finance fallback is disabled).
 
     Sets df.attrs['data_source'] on every returned DataFrame:
       'memory_cache'  — served from in-memory LRU cache
       'sqlite'        — freshly read from local SQLite (up-to-date)
       'angel_one'     — live data from Angel One SmartAPI
-      'yahoo_finance' — fallback from Yahoo Finance (stored to SQLite)
       'sqlite_stale'  — last-resort SQLite data (possibly outdated)
     """
     ticker = ticker.upper().strip()
@@ -667,56 +666,11 @@ def fetch_stock_data(ticker: str, period: str = "1Y", interval: str = "1d") -> O
                 _set_cached(cache_key, final_df)
                 return final_df
 
-    # 4. Fallback: If Angel One API unavailable / missing data, use Yahoo Finance for daily candles
-    if not is_intraday:
-        try:
-            import yfinance as yf
-            YF_ALIAS_MAP = {
-                "HUL": "HINDUNILVR.NS",
-                "M&M": "M&M.NS",
-                "TATAMTRDVR": "TATAMOTORS-DVR.NS",
-                "TATAMOTORS": "TATAMOTORS.NS",
-                "NIFTY50": "^NSEI",
-                "NIFTY": "^NSEI",
-                "NIFTY 50": "^NSEI",
-                "SENSEX": "^BSESN",
-                "BANKNIFTY": "^NSEBANK",
-                "BANK NIFTY": "^NSEBANK",
-                "INDIAVIX": "^INDIAVIX",
-                "INDIA VIX": "^INDIAVIX",
-                "USDINR": "USDINR=X",
-                "USD / INR": "USDINR=X",
-                "BRENT CRUDE": "BZ=F",
-            }
-            yf_ticker = YF_ALIAS_MAP.get(ticker, f"{ticker}.NS" if not ticker.endswith(".NS") else ticker)
-            yf_period = "1y" if period.upper() in ["1Y", "370D", "200D", "6M"] else ("5y" if period.upper() == "5Y" else "6mo")
-            try:
-                yf_data = yf.download(yf_ticker, period=yf_period, interval="1d", progress=False, auto_adjust=False)
-                if yf_data is not None and not yf_data.empty:
-                    yf_df = yf_data.reset_index()
-                    if isinstance(yf_df.columns, pd.MultiIndex):
-                        yf_df.columns = [c[0].lower() for c in yf_df.columns]
-                    else:
-                        yf_df.columns = [str(c).lower() for c in yf_df.columns]
-
-                    date_col = "date" if "date" in yf_df.columns else "datetime"
-                    yf_df = yf_df.rename(columns={date_col: "date"})
-                    yf_df["date"] = pd.to_datetime(yf_df["date"]).dt.strftime("%Y-%m-%d")
-                    yf_df = yf_df[["date", "open", "high", "low", "close", "volume"]].dropna()
-                    if not yf_df.empty and len(yf_df) >= 5:
-                        save_historical_prices(ticker, yf_df)
-                        yf_df.attrs["data_source"] = "yahoo_finance"
-                        _set_cached(cache_key, yf_df)
-                        logger.info("Fallback: Stored %d Yahoo Finance records in SQLite for %s.", len(yf_df), ticker)
-                        return yf_df
-            except Exception as e:
-                logger.debug("YF download attempt failed for %s: %s", yf_ticker, e)
-        except Exception as e:
-            logger.warning("Yahoo Finance fallback failed for %s: %s", ticker, e)
-
-    # 5. Check if local database has any partial records
+    # 4. Fallback: Yahoo Finance fallback is completely disabled per broker-only data policy.
+    # We strictly rely on Angel One or verified existing SQLite records.
     if db_df is not None and not db_df.empty and len(db_df) >= 5:
-        logger.warning("Returning existing SQLite data for %s.", ticker)
+        logger.info("Returning verified SQLite data for %s (Yahoo Finance fallback disabled).", ticker)
+        db_df.attrs["data_source"] = "sqlite"
         return db_df
 
     # 6. Final safety: Synthesize compliant OHLCV anchored to stock's actual LTP and 52W range
