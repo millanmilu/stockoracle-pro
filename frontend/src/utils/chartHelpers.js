@@ -74,7 +74,7 @@ export const CHART_OPTIONS = {
     horzLines: { color: 'rgba(99,102,241,0.06)' },
   },
   crosshair: {
-    mode: 0,
+    mode: 0, // CrosshairMode.Normal
     vertLine: { color: 'rgba(129,140,248,0.4)', width: 1, style: 2, labelBackgroundColor: '#1e1060' },
     horzLine: { color: 'rgba(129,140,248,0.4)', width: 1, style: 2, labelBackgroundColor: '#1e1060' },
   },
@@ -84,6 +84,7 @@ export const CHART_OPTIONS = {
     scaleMargins: { top: 0.08, bottom: 0.16 },
     autoScale: true,
     alignLabels: true,
+    minimumWidth: 72, // Strict pixel alignment across main chart and stacked panes
   },
   timeScale: {
     borderColor: 'rgba(99,102,241,0.12)',
@@ -91,13 +92,14 @@ export const CHART_OPTIONS = {
     timeVisible: false,
     secondsVisible: false,
     shiftVisibleRangeOnNewBar: false,
-    rightOffset: 8,
-    barSpacing: 8,
+    lockVisibleTimeRangeOnResize: true, // Prevents zoom jitter when panes appear/disappear or on resize
+    rightOffset: 12,
+    barSpacing: 9,
     minBarSpacing: 0.5,
     allowBoldLabels: true,
   },
   handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-  handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+  handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
   kineticScroll: { touch: true, mouse: true },
 };
 

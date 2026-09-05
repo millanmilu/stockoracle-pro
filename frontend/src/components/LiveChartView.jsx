@@ -5,7 +5,6 @@ import ChartToolbar from './chart/ChartToolbar';
 import ChartCanvas from './chart/ChartCanvas';
 import ChartBottomStats from './chart/ChartBottomStats';
 import IndicatorModal from './chart/IndicatorModal';
-import IndicatorLegend from './chart/IndicatorLegend';
 import OscillatorPane from './chart/OscillatorPane';
 import { DEFAULT_ACTIVE_INDICATORS } from './chart/indicatorDefinitions';
 import { toChartTime, getSessionBucketStart } from '../utils/chartHelpers';
@@ -45,7 +44,9 @@ export default function LiveChartView() {
 
   const activeCandleRef = useRef(null);
   const chartCanvasRef = useRef(null);
-  const oscillatorPaneRef = useRef(null);
+  const rsiPaneRef = useRef(null);
+  const macdPaneRef = useRef(null);
+  const isSyncingRangeRef = useRef(false);
   const containerRef = useRef(null);
   const lastVerifiedPriceRef = useRef(null);
 
@@ -227,8 +228,39 @@ export default function LiveChartView() {
     setHiddenIndicators((prev) => prev.filter((item) => item !== id));
   }, []);
 
-  const handleVisibleRangeChange = useCallback((range) => {
-    oscillatorPaneRef.current?.syncRange(range);
+  // Synchronized Visible Logical Range with loop guard across all stacked panes
+  const handleVisibleRangeChange = useCallback((range, source) => {
+    if (isSyncingRangeRef.current || !range) return;
+    isSyncingRangeRef.current = true;
+
+    try {
+      if (source !== 'main') {
+        chartCanvasRef.current?.setVisibleLogicalRange(range);
+      }
+      if (source !== 'rsi') {
+        rsiPaneRef.current?.setVisibleLogicalRange(range);
+      }
+      if (source !== 'macd') {
+        macdPaneRef.current?.setVisibleLogicalRange(range);
+      }
+    } finally {
+      requestAnimationFrame(() => {
+        isSyncingRangeRef.current = false;
+      });
+    }
+  }, []);
+
+  // Synchronized Crosshair Hairline across main chart and sub-panes
+  const handleCrosshairMove = useCallback(({ x, time, source }) => {
+    if (source !== 'main') {
+      chartCanvasRef.current?.setSyncedCrosshair({ x, time, source });
+    }
+    if (source !== 'rsi') {
+      rsiPaneRef.current?.setSyncedCrosshair({ x, time, source });
+    }
+    if (source !== 'macd') {
+      macdPaneRef.current?.setSyncedCrosshair({ x, time, source });
+    }
   }, []);
 
   // 3. Toolbar Handlers
@@ -348,15 +380,6 @@ export default function LiveChartView() {
             </div>
           )}
 
-          {/* On-Chart Indicator Legend HUD */}
-          <IndicatorLegend
-            activeIndicators={activeIndicators}
-            hiddenIndicators={hiddenIndicators}
-            indicatorValues={indicatorValues}
-            onToggleHide={handleToggleHideIndicator}
-            onRemove={handleRemoveIndicator}
-          />
-
           <ChartCanvas
             ref={chartCanvasRef}
             candles={candles}
@@ -367,28 +390,38 @@ export default function LiveChartView() {
             liveChange={dayChange}
             activeIndicators={activeIndicators}
             hiddenIndicators={hiddenIndicators}
-            onHoverValues={setIndicatorValues}
+            onToggleHideIndicator={handleToggleHideIndicator}
+            onRemoveIndicator={handleRemoveIndicator}
             onVisibleRangeChange={handleVisibleRangeChange}
+            onCrosshairMove={handleCrosshairMove}
           />
         </div>
 
         {/* Synchronized Oscillator Sub-Pane (RSI) */}
         {activeIndicators.includes('rsi') && (
           <OscillatorPane
-            ref={oscillatorPaneRef}
+            ref={rsiPaneRef}
             type="rsi"
             candles={candles}
+            isHidden={hiddenIndicators.includes('rsi')}
+            onToggleHide={handleToggleHideIndicator}
             onClose={() => handleRemoveIndicator('rsi')}
+            onVisibleRangeChange={handleVisibleRangeChange}
+            onCrosshairMove={handleCrosshairMove}
           />
         )}
 
         {/* Synchronized Oscillator Sub-Pane (MACD) */}
         {activeIndicators.includes('macd') && (
           <OscillatorPane
-            ref={oscillatorPaneRef}
+            ref={macdPaneRef}
             type="macd"
             candles={candles}
+            isHidden={hiddenIndicators.includes('macd')}
+            onToggleHide={handleToggleHideIndicator}
             onClose={() => handleRemoveIndicator('macd')}
+            onVisibleRangeChange={handleVisibleRangeChange}
+            onCrosshairMove={handleCrosshairMove}
           />
         )}
       </div>
