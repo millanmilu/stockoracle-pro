@@ -2,16 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Clock, Maximize2, Minimize2, RotateCcw, Activity } from 'lucide-react';
 import { INTERVALS, POPULAR_STOCKS } from '../../utils/chartHelpers';
 
-export const QUICK_INTERVAL_CHIPS = [
-  { label: '1s', value: '1s' },
-  { label: '1m', value: '1m' },
-  { label: '5m', value: '5m' },
-  { label: '15m', value: '15m' },
-  { label: '1H', value: '1h' },
-  { label: '4H', value: '4h' },
-  { label: '1D', value: '1d' },
-];
-
 /**
  * Real-time Candle Countdown Hook
  * Calculates exact time remaining until active candle closes, anchored to NSE 09:15 IST.
@@ -353,49 +343,7 @@ export default function ChartToolbar({
 
         <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.12)' }} />
 
-        {/* Quick Timeframe Chips (1-Click Switch) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          {QUICK_INTERVAL_CHIPS.map((chip) => {
-            const isActive = interval === chip.value;
-            return (
-              <button
-                key={chip.value}
-                onClick={() => onIntervalChange(chip.value)}
-                style={{
-                  padding: '2px 7px',
-                  borderRadius: 4,
-                  fontSize: '0.70rem',
-                  fontWeight: 800,
-                  fontFamily: 'JetBrains Mono, monospace',
-                  border: isActive ? '1px solid #818CF8' : '1px solid transparent',
-                  background: isActive ? '#4F46E5' : 'rgba(255, 255, 255, 0.05)',
-                  color: isActive ? '#FFFFFF' : '#94A3B8',
-                  cursor: 'pointer',
-                  transition: 'all 0.12s ease',
-                  height: 25,
-                  lineHeight: '19px',
-                }}
-                onMouseEnter={(e) => {
-                  if (!isActive) {
-                    e.currentTarget.style.background = 'rgba(99, 102, 241, 0.18)';
-                    e.currentTarget.style.color = '#E2E8F0';
-                  }
-                }}
-                onMouseLeave={(e) => {
-                  if (!isActive) {
-                    e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                    e.currentTarget.style.color = '#94A3B8';
-                  }
-                }}
-                title={`Switch to ${chip.label}`}
-              >
-                {chip.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Full Interval Selector Dropdown */}
+        {/* Timeframe Interval Dropdown */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
