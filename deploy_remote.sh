@@ -1,36 +1,42 @@
-param (
-    [string]$KeyPath = "",
-    [string]$HostAddress = "54.165.116.67"
-)
+#!/bin/bash
+# ==============================================================================
+# StockOracle Pro — 1-Click Remote Deployment Script (Bash / Linux / macOS)
+# Usage: ./deploy_remote.sh [path/to/key.pem] [host_ip]
+# ==============================================================================
+
+set -e
+
+KEY_ARG="$1"
+HOST_ARG="${2:-54.165.116.67}"
 
 # 1. Locate SSH Key
-$candidateKeys = @(
-    $KeyPath,
-    "$PSScriptRoot\stock.pem",
-    "$PSScriptRoot\stockubu.pem",
-    "$HOME\.ssh\stock.pem",
-    "$HOME\.ssh\stockubu.pem",
-    "d:\Development\ai stock\stockubu.pem"
-) | Where-Object { $_ -and (Test-Path $_) }
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SSH_KEY=""
 
-if ($candidateKeys.Count -eq 0) {
-    Write-Host "[ERROR] Could not find SSH private key file (stock.pem or stockubu.pem)." -ForegroundColor Red
-    Write-Host "Please place stock.pem in the project root or specify with: .\deploy_remote.ps1 -KeyPath path\to\key.pem" -ForegroundColor Yellow
+for k in "$KEY_ARG" "$SCRIPT_DIR/stock.pem" "$SCRIPT_DIR/stockubu.pem" "$HOME/.ssh/stock.pem" "$HOME/.ssh/stockubu.pem"; do
+    if [ -n "$k" ] && [ -f "$k" ]; then
+        SSH_KEY="$k"
+        break
+    fi
+done
+
+if [ -z "$SSH_KEY" ]; then
+    echo -e "\033[0;31m[ERROR] Could not find SSH private key file (stock.pem or stockubu.pem).\033[0m"
+    echo -e "\033[0;33mPlease place stock.pem in the project root or run: ./deploy_remote.sh path/to/key.pem\033[0m"
     exit 1
-}
+fi
 
-$sshKey = $candidateKeys[0]
-$userHost = "ubuntu@$HostAddress"
+chmod 400 "$SSH_KEY" 2>/dev/null || true
+USER_HOST="ubuntu@$HOST_ARG"
 
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "   StockOracle Pro - Remote Automated Deployment" -ForegroundColor Cyan
-Write-Host "   Target:  $userHost" -ForegroundColor DarkCyan
-Write-Host "   SSH Key: $sshKey" -ForegroundColor DarkCyan
-Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host ""
+echo -e "\033[0;36m============================================================\033[0m"
+echo -e "\033[0;36m   StockOracle Pro — Remote Automated Deployment\033[0m"
+echo -e "\033[0;34m   Target:  $USER_HOST\033[0m"
+echo -e "\033[0;34m   SSH Key: $SSH_KEY\033[0m"
+echo -e "\033[0;36m============================================================\033[0m"
+echo ""
 
-# 2. Remote Deployment Script to run on EC2
-$remoteCommand = @'
+REMOTE_CMD=$(cat << 'REMOTE'
 set -e
 PROJECT_DIR="/var/www/stockoracle"
 cd "$PROJECT_DIR"
@@ -119,7 +125,7 @@ echo "  🚀 DEPLOYMENT COMPLETED SUCCESSFULLY"
 echo "  Domain:   https://stockoracle.duckdns.org"
 echo "  Amplify:  https://main.d3qrmvw6hu9g61.amplifyapp.com"
 echo "============================================================"
-'@
+REMOTE
+)
 
-# 3. Execute via SSH
-ssh -F /dev/null -o StrictHostKeyChecking=no -i "$sshKey" "$userHost" "$remoteCommand"
+ssh -F /dev/null -o StrictHostKeyChecking=no -i "$SSH_KEY" "$USER_HOST" "$REMOTE_CMD"
