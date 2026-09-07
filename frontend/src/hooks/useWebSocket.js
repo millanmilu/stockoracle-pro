@@ -61,7 +61,8 @@ export function useWebSocket(onMessage) {
           setWsConnected(true);
           retryDelayRef.current = 1000; // Reset backoff upon successful connection
 
-          // Subscribe immediately to current symbol and universe
+          // Subscribe immediately to the currently selected symbol FIRST (avoid missing
+          // the first tick for the symbol the user is actually viewing), then add popular universe.
           const currentSym = useStore.getState().selectedSymbol || 'RELIANCE';
           sendSubscription(ws, currentSym);
 

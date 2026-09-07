@@ -189,6 +189,17 @@ async def run_session_keepalive_loop():
     fail_count = 0
     last_alert_time = 0.0
 
+    # Proactive initial refresh: if server starts during market hours with no active session,
+    # attempt authentication immediately rather than waiting up to 60s for the first loop iteration.
+    now = datetime.now(_IST)
+    is_market_hours = now.weekday() < 5 and (
+        (now.hour == 9 and now.minute >= 15) or (9 < now.hour < 15) or (now.hour == 15 and now.minute <= 30)
+    )
+    if ANGEL_API_KEY and ANGEL_CLIENT_ID and ANGEL_PASSWORD and ANGEL_TOTP_SECRET:
+        if is_market_hours and not _session_active:
+            logger.info("Server started during market hours with no active session — attempting immediate auth...")
+            ensure_session()
+
     while True:
         try:
             now = datetime.now(_IST)
@@ -198,7 +209,8 @@ async def run_session_keepalive_loop():
 
             if ANGEL_API_KEY and ANGEL_CLIENT_ID and ANGEL_PASSWORD and ANGEL_TOTP_SECRET:
                 # Case A: Pre-market refresh: force fresh token so the entire trading day has a clean session
-                if is_pre_market:
+                # Widen window to 08:40–09:15 IST to reduce race-condition misses on startup
+                if is_pre_market or (is_weekday and now.hour == 8 and now.minute >= 40):
                     if not _session_active or (_session_created_at and (now - _session_created_at).total_seconds() > 3600):
                         logger.info("Pre-market session keepalive: Refreshing Angel One session for upcoming trading session...")
                         reset_session()
@@ -570,22 +582,30 @@ def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> 
     token_info = get_token_info(ticker)
     interval_clean = interval.lower().strip()
 
-    # 4h interval: constructed by fetching 1-hour candles and grouping into 09:15 and 13:15 sessions
+    # 4h interval: constructed by grouping 1-hour candles into two NSE session buckets:
+    #   Morning bucket  -> 09:15–12:59 (covers 09:15, 10:15, 11:15, 12:15)
+    #   Afternoon bucket -> 13:15–15:30 (covers 13:15, 14:15, 15:15)
+    # Each bucket is labelled with its session start time (09:15 or 13:15).
     if interval_clean == "4h":
         df_1h = fetch_stock_data(ticker, period="90D" if period in ["ALL", "MAX", None, "1Y", "5Y"] else period, interval="1h")
         if df_1h is not None and not df_1h.empty:
-            dt = pd.to_datetime(df_1h["date"], format="mixed")
+            dt = pd.to_datetime(df_1h["date"], format="mixed", errors="coerce")
+            # Assign each 1h candle to the session bucket it belongs to
             is_morning = dt.dt.hour < 13
+            bucket_label = is_morning.map({True: "09:15:00", False: "13:15:00"})
             df_1h_copy = df_1h.copy()
-            df_1h_copy["bucket"] = dt.dt.strftime("%Y-%m-%d ") + is_morning.map({True: "09:15:00", False: "13:15:00"})
+            df_1h_copy["bucket_date"] = dt.dt.strftime("%Y-%m-%d")
+            df_1h_copy["bucket"] = df_1h_copy["bucket_date"] + " " + bucket_label
             df_4h = df_1h_copy.groupby("bucket", as_index=False).agg({
                 "open": "first",
                 "high": "max",
                 "low": "min",
                 "close": "last",
-                "volume": "sum"
+                "volume": "sum",
             }).rename(columns={"bucket": "date"}).sort_values("date")
+            # Retag as 4h so upstream consumers know the interval
             df_4h.attrs["data_source"] = df_1h.attrs.get("data_source", "angel_one")
+            df_4h.attrs["interval"] = "4h"
             _set_cached(cache_key, df_4h)
             return df_4h
         return None

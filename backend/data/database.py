@@ -56,6 +56,8 @@ def init_db():
     try:
         with get_db_session() as session:
             session.execute(text("DELETE FROM historical_prices WHERE length(date) > 10 OR length(date) != 10"))
+            # Ensure UNIQUE index exists on (ticker, date) for SQLite ON CONFLICT upsert support
+            session.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS idx_hist_ticker_date ON historical_prices (ticker, date)"))
             # Clean corrupt 1-row / single-candle fragments that block full backfills
             session.execute(text("""
                 DELETE FROM historical_prices 

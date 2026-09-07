@@ -168,19 +168,10 @@ async def websocket_price_broadcast_loop():
                         base_high = 0.0
                         base_low = 0.0
 
+                        # Invariant: PREFER verified historical close over stale company_info.
+                        # Company info cache can be hours old; historical close is the most
+                        # reliable last-known price when live LTP is unavailable.
                         if not base_price:
-                            info = await asyncio.to_thread(get_company_info, t)
-                            if not info:
-                                info = await asyncio.to_thread(get_stale_company_info, t)
-                            if info and info.get("current_price"):
-                                base_price = float(info["current_price"])
-                                base_open = float(info.get("open", base_price) or base_price)
-                                base_high = float(info.get("day_high", base_price) or base_price)
-                                base_low = float(info.get("day_low", base_price) or base_price)
-                                prices_cache[t] = base_price
-
-                        # Invariant fallback: strictly fall back to verified historical close price
-                        if not base_price or base_price <= 0:
                             hist = await asyncio.to_thread(get_historical_prices, t)
                             if hist is not None and not (isinstance(hist, pd.DataFrame) and hist.empty):
                                 if isinstance(hist, pd.DataFrame):
@@ -200,6 +191,25 @@ async def websocket_price_broadcast_loop():
                                         base_high = float(last_candle.get("day_high", last_candle.get("high", base_price)) or base_price)
                                         base_low = float(last_candle.get("day_low", last_candle.get("low", base_price)) or base_price)
                                         prices_cache[t] = base_price
+
+                        # Secondary fallback: company_info (may be stale, but better than nothing)
+                        if not base_price or base_price <= 0:
+                            info = await asyncio.to_thread(get_company_info, t)
+                            if not info:
+                                info = await asyncio.to_thread(get_stale_company_info, t)
+                            if info and info.get("current_price"):
+                                base_price = float(info["current_price"])
+                                if base_price > 0:
+                                    base_open = float(info.get("open", base_price) or base_price)
+                                    base_high = float(info.get("day_high", base_price) or base_price)
+                                    base_low = float(info.get("day_low", base_price) or base_price)
+                                    prices_cache[t] = base_price
+
+                        # Final safety: if somehow still no price, skip this ticker this cycle
+                        if not base_price or base_price <= 0:
+                            logger.debug("No verified price available for %s — skipping broadcast this cycle", t)
+                            await asyncio.sleep(0.5)
+                            continue
 
                         if base_price and base_price > 0:
                             change_pct = round(((base_price - base_open) / base_open) * 100, 3) if base_open > 0 else 0.0

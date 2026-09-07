@@ -49,6 +49,7 @@ export default function LiveChartView() {
   const isSyncingRangeRef = useRef(false);
   const containerRef = useRef(null);
   const lastVerifiedPriceRef = useRef(null);
+  const recentPricesRef = useRef([]); // Rolling window of recent LTPs for adaptive spike detection
   const spikeCountRef = useRef(0);
 
   // Persist active indicators to localStorage
@@ -155,15 +156,34 @@ export default function LiveChartView() {
       return;
     }
 
-    // Outlier Spike Protection: Ignore ticks deviating > 20% from verified reference unless consistent
+    // Outlier Spike Protection: Ignore ticks deviating beyond an adaptive threshold
+    // from the verified reference price. Combines a 20% static floor with a
+    // rolling mean-absolute-deviation (MAD) measure of recent volatility so that
+    // genuine large moves in high-BW stocks are not silently dropped while
+    // fat-finger errors are still caught.
     const refPrice = lastVerifiedPriceRef.current || ltp;
-    if (Math.abs(ltp - refPrice) / refPrice > 0.20) {
+    const staticThreshold = 0.20;
+    let adaptiveThreshold = 0.05;
+    const recent = recentPricesRef.current;
+    if (recent.length >= 5) {
+      const mean = recent.reduce((a, b) => a + b, 0) / recent.length;
+      const mad = recent.reduce((a, b) => a + Math.abs(b - mean), 0) / recent.length;
+      const madBased = (mad / refPrice) * 3;
+      adaptiveThreshold = Math.max(0.05, Math.min(0.30, madBased));
+    }
+    const effectiveThreshold = Math.max(staticThreshold, adaptiveThreshold);
+    if (Math.abs(ltp - refPrice) / refPrice > effectiveThreshold) {
       spikeCountRef.current = (spikeCountRef.current || 0) + 1;
       if (spikeCountRef.current < 3) {
         return;
       }
     }
     spikeCountRef.current = 0;
+    // Maintain rolling window for adaptive threshold
+    recentPricesRef.current.push(ltp);
+    if (recentPricesRef.current.length > 20) {
+      recentPricesRef.current.shift();
+    }
     lastVerifiedPriceRef.current = ltp;
 
     const isIntraday = interval !== '1d';
