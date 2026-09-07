@@ -91,7 +91,7 @@ export const CHART_OPTIONS = {
     textColor: '#6B7280',
     timeVisible: false,
     secondsVisible: false,
-    shiftVisibleRangeOnNewBar: false,
+    shiftVisibleRangeOnNewBar: true,
     lockVisibleTimeRangeOnResize: true, // Prevents zoom jitter when panes appear/disappear or on resize
     rightOffset: 12,
     barSpacing: 9,

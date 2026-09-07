@@ -102,10 +102,14 @@ async def websocket_price_broadcast_loop():
 
                 tickers_to_check = list(active_subscribed) if active_subscribed else popular_tickers
 
+                try:
+                    ensure_session()
+                except Exception as e:
+                    logger.debug("Session refresh check failed: %s", e)
+
                 for t in tickers_to_check:
                     fetched = False
                     try:
-                        ensure_session()
                         if get_session_status() and smartApi:
                             tok = get_token_info(t)
                             if tok:
@@ -198,13 +202,15 @@ async def websocket_price_broadcast_loop():
                                         prices_cache[t] = base_price
 
                         if base_price and base_price > 0:
+                            change_pct = round(((base_price - base_open) / base_open) * 100, 3) if base_open > 0 else 0.0
                             payload = {
                                 "ticker": t,
                                 "price": round(base_price, 2),
                                 "open": round(base_open, 2) if base_open > 0 else round(base_price, 2),
                                 "high": round(base_high, 2) if base_high > 0 else round(base_price, 2),
                                 "low": round(base_low, 2) if base_low > 0 else round(base_price, 2),
-                                "change_pct": 0.0,
+                                "close": round(base_price, 2),
+                                "change_pct": change_pct,
                                 "is_live": False,
                             }
                             await manager.broadcast(payload)

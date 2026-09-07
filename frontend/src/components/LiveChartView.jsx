@@ -62,6 +62,7 @@ export default function LiveChartView() {
     setLoading(true);
     setError(null);
     activeCandleRef.current = null;
+    lastVerifiedPriceRef.current = null;
 
     try {
       const res = await fetchHistory(symbol, iv);
@@ -144,6 +145,14 @@ export default function LiveChartView() {
     const ltp = Number(storeLiveTick.price);
     if (isNaN(ltp) || ltp <= 0) return;
 
+    // Do not process tick if historical data has not finished loading
+    if (loading || candles.length === 0) return;
+
+    // Verify tick belongs to currently selected symbol
+    if (storeLiveTick.ticker && selectedSymbol && storeLiveTick.ticker.toUpperCase() !== selectedSymbol.toUpperCase()) {
+      return;
+    }
+
     // Outlier Spike Protection: Ignore ticks deviating > 20% from verified reference
     const refPrice = lastVerifiedPriceRef.current || ltp;
     if (Math.abs(ltp - refPrice) / refPrice > 0.20) {
@@ -192,18 +201,22 @@ export default function LiveChartView() {
       active.close = ltp;
       chartCanvasRef.current?.updateActiveCandle(active);
     } else if (currentBucketTime) {
+      const openPrice = (!isIntraday && Number(storeLiveTick.open) > 0) ? Number(storeLiveTick.open) : ltp;
+      const highPrice = (!isIntraday && Number(storeLiveTick.high) > 0) ? Math.max(Number(storeLiveTick.high), ltp) : ltp;
+      const lowPrice = (!isIntraday && Number(storeLiveTick.low) > 0) ? Math.min(Number(storeLiveTick.low), ltp) : ltp;
+
       const newCandle = {
         time: currentBucketTime,
-        open: ltp,
-        high: ltp,
-        low: ltp,
+        open: openPrice,
+        high: highPrice,
+        low: lowPrice,
         close: ltp,
-        volume: 0,
+        volume: (!isIntraday && Number(storeLiveTick.volume) > 0) ? Number(storeLiveTick.volume) : 0,
       };
       activeCandleRef.current = newCandle;
       chartCanvasRef.current?.updateActiveCandle(newCandle);
     }
-  }, [storeLiveTick, interval]);
+  }, [storeLiveTick, interval, loading, candles, selectedSymbol]);
 
   // Indicator Handlers
   const handleToggleIndicator = useCallback((id) => {

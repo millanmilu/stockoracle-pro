@@ -11,6 +11,7 @@ import ProRightPanel from './components/ProRightPanel';
 
 import KeymapModal from './components/KeymapModal';
 import CommandPalette from './components/terminal/CommandPalette';
+import { useWebSocket } from './hooks/useWebSocket';
 
 const MultiChartGrid = lazy(() => import('./components/MultiChartGrid'));
 const NewsPanel = lazy(() => import('./components/NewsPanel'));
@@ -63,6 +64,7 @@ function AIPredictionView() {
 }
 
 export default function App() {
+  useWebSocket();
   const activeView = useStore(s => s.activeView);
   const trainingStatus = useStore(s => s.trainingStatus);
   const selectedSymbol = useStore(s => s.selectedSymbol);

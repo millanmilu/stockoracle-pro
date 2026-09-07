@@ -173,10 +173,20 @@ const ChartCanvas = forwardRef(function ChartCanvas({
               color: candle.close >= candle.open ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
             });
           }
+          if (candlesRef.current) {
+            const lastIdx = candlesRef.current.length - 1;
+            if (lastIdx >= 0 && candlesRef.current[lastIdx].time === candle.time) {
+              candlesRef.current[lastIdx] = { ...candlesRef.current[lastIdx], ...candle };
+            } else if (lastIdx >= 0 && candle.time > candlesRef.current[lastIdx].time) {
+              candlesRef.current.push({ ...candle });
+            }
+          }
           if (!isHoveringRef.current) {
             updateLegend(candle);
           }
-        } catch {}
+        } catch (err) {
+          console.warn('Error updating active candle series:', err);
+        }
       }
     },
     setVisibleLogicalRange: (range) => {
