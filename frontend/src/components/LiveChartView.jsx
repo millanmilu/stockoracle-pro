@@ -49,6 +49,7 @@ export default function LiveChartView() {
   const isSyncingRangeRef = useRef(false);
   const containerRef = useRef(null);
   const lastVerifiedPriceRef = useRef(null);
+  const spikeCountRef = useRef(0);
 
   // Persist active indicators to localStorage
   useEffect(() => {
@@ -63,6 +64,7 @@ export default function LiveChartView() {
     setError(null);
     activeCandleRef.current = null;
     lastVerifiedPriceRef.current = null;
+    spikeCountRef.current = 0;
 
     try {
       const res = await fetchHistory(symbol, iv);
@@ -153,11 +155,15 @@ export default function LiveChartView() {
       return;
     }
 
-    // Outlier Spike Protection: Ignore ticks deviating > 20% from verified reference
+    // Outlier Spike Protection: Ignore ticks deviating > 20% from verified reference unless consistent
     const refPrice = lastVerifiedPriceRef.current || ltp;
     if (Math.abs(ltp - refPrice) / refPrice > 0.20) {
-      return;
+      spikeCountRef.current = (spikeCountRef.current || 0) + 1;
+      if (spikeCountRef.current < 3) {
+        return;
+      }
     }
+    spikeCountRef.current = 0;
     lastVerifiedPriceRef.current = ltp;
 
     const isIntraday = interval !== '1d';

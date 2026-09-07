@@ -16,4 +16,9 @@ frontend/node_modules/
 .DS_Store
 .kilo/
 .freebuff/
-.continue/
+.continue/
+.bin/
+.python3.12/
+*.db
+logs/
+

@@ -506,7 +506,7 @@ def _synthesize_fallback_candles(
         return df
 
     # Standard daily fallback
-    end_date = datetime.now()
+    end_date = datetime.now(_IST)
     dates = pd.date_range(end=end_date, periods=n_days, freq="B").strftime("%Y-%m-%d").tolist()
 
     returns = np.random.normal(0.0003, 0.015, n_days)
@@ -609,7 +609,7 @@ def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> 
     }
     days = period_map.get(period.upper() if period else "ALL", 9000 if interval_clean == "1d" else 120)
 
-    todate = datetime.now()
+    todate = datetime.now(_IST)
     fromdate = todate - timedelta(days=days)
     fromdate_str = fromdate.strftime("%Y-%m-%d")
     todate_str = todate.strftime("%Y-%m-%d")
@@ -750,16 +750,35 @@ def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> 
 
     # 6. Final safety: Synthesize compliant OHLCV anchored to stock's actual LTP and 52W range
     try:
-        from backend.data.database import execute_screener_sql_query
-        scr = execute_screener_sql_query(where_clause="ticker = ?", params=[ticker], limit=1)
-        base_price = 1000.0
+        base_price = 0.0
         high_52 = None
         low_52 = None
-        if scr and scr.get("results") and len(scr["results"]) > 0:
-            row = scr["results"][0]
-            base_price = float(row.get("close_price") or 1000.0)
-            high_52 = float(row.get("close_price", 1000.0) * (1.0 + abs(row.get("distance_52w_high_pct", -15.0)) / 100.0))
-            low_52 = float(row.get("close_price", 1000.0) * (1.0 - abs(row.get("distance_52w_low_pct", 30.0)) / 100.0))
+
+        # 1. Prefer latest close from verified local SQLite records
+        db_recent = get_historical_prices(ticker)
+        if db_recent is not None and not db_recent.empty:
+            base_price = float(db_recent.iloc[-1].get("close", 0.0) or 0.0)
+
+        # 2. Check company_info cache
+        if not base_price or base_price <= 0:
+            c_info = get_company_info(ticker)
+            if c_info and c_info.get("current_price"):
+                base_price = float(c_info["current_price"])
+                high_52 = float(c_info.get("fifty_two_week_high") or 0.0) or None
+                low_52 = float(c_info.get("fifty_two_week_low") or 0.0) or None
+
+        # 3. Check screener table
+        if not base_price or base_price <= 0:
+            from backend.data.database import execute_screener_sql_query
+            scr = execute_screener_sql_query(where_clause="ticker = ?", params=[ticker], limit=1)
+            if scr and scr.get("results") and len(scr["results"]) > 0:
+                row = scr["results"][0]
+                base_price = float(row.get("close_price") or 1000.0)
+                high_52 = float(row.get("close_price", 1000.0) * (1.0 + abs(row.get("distance_52w_high_pct", -15.0)) / 100.0))
+                low_52 = float(row.get("close_price", 1000.0) * (1.0 - abs(row.get("distance_52w_low_pct", 30.0)) / 100.0))
+
+        if not base_price or base_price <= 0:
+            base_price = 1000.0
 
         syn_df = _synthesize_fallback_candles(ticker, target_price=base_price, high_52w=high_52, low_52w=low_52, n_days=days, interval=interval)
         if syn_df is not None and not syn_df.empty:
@@ -824,7 +843,7 @@ def fetch_company_info(ticker: str) -> Optional[dict]:
         from sqlalchemy import func, select
         with get_db_session() as session:
             # 52-week range
-            from_52w = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+            from_52w = (datetime.now(_IST) - timedelta(days=365)).strftime("%Y-%m-%d")
             stmt_52w = select(
                 func.max(HistoricalPrice.high),
                 func.min(HistoricalPrice.low)
@@ -992,7 +1011,7 @@ def backfill_full_history(ticker: str) -> Optional[pd.DataFrame]:
         logger.warning("Angel One session inactive — returning current DB history for %s.", ticker)
         return existing_df if (existing_df is not None and len(existing_df) >= 50) else None
 
-    cur_date = datetime.now()
+    cur_date = datetime.now(_IST)
     all_chunks = []
     consecutive_empty = 0
 
