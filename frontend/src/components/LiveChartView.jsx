@@ -222,11 +222,15 @@ export default function LiveChartView() {
 
     // Check if ongoing active candle matches the current time bucket
     if (active && active.time === currentBucketTime) {
-      active.high = Math.max(Number(active.high), ltp);
-      active.low = Math.min(Number(active.low), ltp);
-      active.close = ltp;
-      chartCanvasRef.current?.updateActiveCandle(active);
-    } else if (currentBucketTime) {
+      // Only mutate ongoing active candle during live market hours or confirmed live ticks
+      if (isMarketHours || storeLiveTick.is_live) {
+        active.high = Math.max(Number(active.high), ltp);
+        active.low = Math.min(Number(active.low), ltp);
+        active.close = ltp;
+        chartCanvasRef.current?.updateActiveCandle(active);
+      }
+    } else if (currentBucketTime && (isMarketHours || storeLiveTick.is_live)) {
+      // Only spawn a NEW session candle during market hours with verified live ticks
       const openPrice = (!isIntraday && Number(storeLiveTick.open) > 0) ? Number(storeLiveTick.open) : ltp;
       const highPrice = (!isIntraday && Number(storeLiveTick.high) > 0) ? Math.max(Number(storeLiveTick.high), ltp) : ltp;
       const lowPrice = (!isIntraday && Number(storeLiveTick.low) > 0) ? Math.min(Number(storeLiveTick.low), ltp) : ltp;
