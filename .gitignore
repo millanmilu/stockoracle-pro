@@ -20,5 +20,7 @@ frontend/node_modules/
 .bin/
 .python3.12/
 *.db
+*.db-shm
+*.db-wal
 logs/
 

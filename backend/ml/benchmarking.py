@@ -31,8 +31,10 @@ def run_walk_forward_benchmark(ticker: str, df: pd.DataFrame, n_folds: int = 5, 
     model_errors = []
     naive_errors = []
     sma_errors = []
+    strategy_returns = []
     direction_hits = 0
     total_predictions = 0
+
 
     # Ensure enough room for n_folds
     usable_test_len = min(n_folds * test_days, total_len - 60)
@@ -83,11 +85,17 @@ def run_walk_forward_benchmark(ticker: str, df: pd.DataFrame, n_folds: int = 5, 
         sma_errors.append(s_mape)
 
         # Directional Hit Rate (did model predict sign of return correctly?)
-        actual_direction = np.sign(test_closes[-1] - last_train_price)
-        predicted_direction = np.sign(model_pred[-1] - last_train_price)
+        actual_ret = float((test_closes[-1] - last_train_price) / last_train_price)
+        pred_ret = float((model_pred[-1] - last_train_price) / last_train_price)
+        actual_direction = np.sign(actual_ret)
+        predicted_direction = np.sign(pred_ret)
         if actual_direction == predicted_direction:
             direction_hits += 1
         total_predictions += 1
+
+        # Real strategy return for this fold (directional long/short)
+        strat_return = actual_ret if predicted_direction >= 0 else -actual_ret
+        strategy_returns.append(strat_return)
 
         fold_results.append({
             "fold": f + 1,
@@ -96,6 +104,8 @@ def run_walk_forward_benchmark(ticker: str, df: pd.DataFrame, n_folds: int = 5, 
             "model_mape": round(m_mape, 2),
             "naive_mape": round(n_mape, 2),
             "sma_mape": round(s_mape, 2),
+            "actual_return_pct": round(actual_ret * 100, 2),
+            "strategy_return_pct": round(strat_return * 100, 2),
             "direction_correct": bool(actual_direction == predicted_direction),
         })
 
@@ -106,17 +116,27 @@ def run_walk_forward_benchmark(ticker: str, df: pd.DataFrame, n_folds: int = 5, 
 
     # Alpha vs Naive baseline
     alpha_pct = round(avg_naive_mape - avg_model_mape, 2)
-    sharpe_approx = round((hit_rate - 50.0) / 10.0 + 1.2, 2) if hit_rate > 50 else round(0.8 - (50.0 - hit_rate) / 20.0, 2)
+
+    # Real empirical Sharpe ratio from fold returns (annualized)
+    empirical_sharpe = None
+    if len(strategy_returns) >= 2:
+        std_ret = float(np.std(strategy_returns))
+        if std_ret > 1e-6:
+            # Annualization factor based on fold step length
+            ann_factor = np.sqrt(max(1.0, 252.0 / max(1, step)))
+            empirical_sharpe = round(float(np.mean(strategy_returns) / std_ret * ann_factor), 2)
+
 
     return {
         "ticker": ticker,
+        "benchmark_model": "Momentum-Damped Drift Baseline",
         "n_folds": len(fold_results),
         "avg_model_mape": avg_model_mape,
         "avg_naive_mape": avg_naive_mape,
         "avg_sma_mape": avg_sma_mape,
         "directional_accuracy_pct": hit_rate,
         "alpha_vs_naive_pct": alpha_pct,
-        "estimated_sharpe_ratio": max(0.2, sharpe_approx),
-        "outperformed_baselines": bool(avg_model_mape <= avg_naive_mape or hit_rate >= 55.0),
+        "annualized_sharpe_ratio": empirical_sharpe,
+        "outperformed_baselines": bool(avg_model_mape <= avg_naive_mape and hit_rate >= 50.0),
         "folds": fold_results,
     }

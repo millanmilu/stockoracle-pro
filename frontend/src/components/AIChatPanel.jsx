@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import useStore from '../store/useStore';
 import api from '../utils/api';
-import { Send, Bot, User, Sparkles, RotateCcw } from 'lucide-react';
+import { Send, Bot, User, Sparkles, RotateCcw, AlertCircle } from 'lucide-react';
+
 
 const QUICK_PROMPTS = [
   'Is this a buy right now?',
@@ -49,14 +50,16 @@ export default function AIChatPanel({ ticker: propTicker }) {
       const { data } = await api.post('/api/ai/chat', { ticker, question });
       setMessages((prev) => [...prev, { role: 'ai', content: data.answer, ts: new Date() }]);
     } catch (err) {
+      const errorDetail = err.response?.data?.detail || '⚠️ AI analyst engine is temporarily unavailable. Please configure your API key in Settings.';
       setMessages((prev) => [
         ...prev,
-        { role: 'ai', content: '⚠️ Unable to reach AI. Check that GEMINI_API_KEY is set in backend/.env', ts: new Date() },
+        { role: 'error', content: typeof errorDetail === 'string' ? errorDetail : '⚠️ Service unavailable.', ts: new Date() },
       ]);
     } finally {
       setLoading(false);
     }
   };
+
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -152,21 +155,21 @@ export default function AIChatPanel({ ticker: propTicker }) {
             <div style={{
               width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              background: msg.role === 'user' ? 'rgba(99,102,241,0.2)' : 'rgba(16,185,129,0.15)',
-              border: `1px solid ${msg.role === 'user' ? 'rgba(99,102,241,0.4)' : 'rgba(16,185,129,0.3)'}`,
+              background: msg.role === 'user' ? 'rgba(99,102,241,0.2)' : (msg.role === 'error' ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)'),
+              border: `1px solid ${msg.role === 'user' ? 'rgba(99,102,241,0.4)' : (msg.role === 'error' ? 'rgba(239,68,68,0.3)' : 'rgba(16,185,129,0.3)')}`,
             }}>
               {msg.role === 'user'
                 ? <User size={13} color="#818CF8" />
-                : <Bot size={13} color="#10B981" />}
+                : (msg.role === 'error' ? <AlertCircle size={13} color="#EF4444" /> : <Bot size={13} color="#10B981" />)}
             </div>
             {/* Bubble */}
             <div style={{
               maxWidth: '82%',
               padding: '8px 11px',
               borderRadius: msg.role === 'user' ? '12px 4px 12px 12px' : '4px 12px 12px 12px',
-              background: msg.role === 'user' ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.04)',
-              border: `1px solid ${msg.role === 'user' ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.08)'}`,
-              color: '#E2E8F0',
+              background: msg.role === 'user' ? 'rgba(99,102,241,0.15)' : (msg.role === 'error' ? 'rgba(239,68,68,0.08)' : 'rgba(255,255,255,0.04)'),
+              border: `1px solid ${msg.role === 'user' ? 'rgba(99,102,241,0.25)' : (msg.role === 'error' ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.08)')}`,
+              color: msg.role === 'error' ? '#FCA5A5' : '#E2E8F0',
               fontSize: '0.8rem',
               lineHeight: 1.55,
             }}>
@@ -244,6 +247,17 @@ export default function AIChatPanel({ ticker: propTicker }) {
         >
           <Send size={15} />
         </button>
+      </div>
+
+      {/* Regulatory Disclaimer Notice */}
+      <div style={{
+        padding: '5px 4px 0 4px',
+        fontSize: '0.62rem',
+        color: '#64748B',
+        textAlign: 'center',
+        lineHeight: 1.3,
+      }}>
+        ⚠️ AI quantitative analyst explains technical context. Not SEBI-registered investment advice.
       </div>
     </div>
   );

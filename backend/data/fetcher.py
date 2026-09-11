@@ -28,7 +28,8 @@ from backend.data.database import (
     save_historical_prices, get_historical_prices,
     save_company_info, get_company_info, get_stale_company_info,
     get_live_tick_ohlcv, save_stock_universe, search_stock_universe,
-    get_stock_universe_token, purge_stale_partial_history
+    get_stock_universe_token, purge_stale_partial_history,
+    get_intraday_candles, save_intraday_candles,
 )
 
 # Clean any 1-row or partial fragment rows from historical_prices
@@ -438,119 +439,6 @@ def _set_cached(key: str, data):
     _cache[key] = (cached_data, datetime.now() + timedelta(seconds=CACHE_TTL_SECONDS))
 
 
-def _synthesize_fallback_candles(
-    ticker: str,
-    target_price: float = 1000.0,
-    high_52w: float = None,
-    low_52w: float = None,
-    n_days: int = 250,
-    interval: str = "1d"
-) -> pd.DataFrame:
-    """Generates authentic compliant daily or intraday OHLCV bars when broker/external APIs are unavailable."""
-    np.random.seed(abs(hash(ticker)) % 10000)
-    now_ist = datetime.now(_IST)
-    is_intraday = interval.lower() in ["1m", "5m", "15m", "1h"]
-
-    target_price = float(target_price) if target_price and target_price > 0 else 1000.0
-    high_52w = float(high_52w) if high_52w and high_52w > target_price else target_price * 1.15
-    low_52w = float(low_52w) if low_52w and low_52w < target_price else target_price * 0.85
-
-    if is_intraday:
-        step_minutes = {"1m": 1, "5m": 5, "15m": 15, "1h": 60}.get(interval.lower(), 5)
-        timestamps = []
-        target_days = []
-        curr_day = now_ist.date()
-        while len(target_days) < 3:
-            if curr_day.weekday() < 5:  # Monday to Friday
-                target_days.append(curr_day)
-            curr_day = curr_day - timedelta(days=1)
-        target_days.reverse()
-
-        for d in target_days:
-            # Indian equity trading session: 09:15 to 15:30 IST
-            session_start = datetime(d.year, d.month, d.day, 9, 15, tzinfo=_IST)
-            session_end = datetime(d.year, d.month, d.day, 15, 30, tzinfo=_IST)
-            bar_time = session_start
-            while bar_time <= session_end:
-                if d == now_ist.date() and bar_time > now_ist:
-                    break
-                timestamps.append(bar_time.strftime("%Y-%m-%d %H:%M:%S"))
-                bar_time += timedelta(minutes=step_minutes)
-
-        if not timestamps:
-            d = target_days[-1]
-            session_start = datetime(d.year, d.month, d.day, 9, 15, tzinfo=_IST)
-            session_end = datetime(d.year, d.month, d.day, 15, 30, tzinfo=_IST)
-            bar_time = session_start
-            while bar_time <= session_end:
-                timestamps.append(bar_time.strftime("%Y-%m-%d %H:%M:%S"))
-                bar_time += timedelta(minutes=step_minutes)
-
-        total_bars = len(timestamps)
-        returns = np.random.normal(0.0001, 0.002, total_bars)
-        price_curve = np.zeros(total_bars)
-        price_curve[-1] = target_price
-        for i in range(total_bars - 2, -1, -1):
-            price_curve[i] = price_curve[i + 1] / (1.0 + returns[i + 1])
-            price_curve[i] = max(low_52w * 0.95, min(high_52w * 1.05, price_curve[i]))
-
-        records = []
-        for i in range(total_bars):
-            close_p = round(float(price_curve[i]), 2)
-            open_p = round(float(price_curve[i] * (1.0 + np.random.normal(0, 0.001))), 2)
-            max_oc = max(open_p, close_p)
-            min_oc = min(open_p, close_p)
-            high_p = round(max_oc * (1.0 + abs(float(np.random.normal(0.001, 0.002)))), 2)
-            low_p = round(min_oc * (1.0 - abs(float(np.random.normal(0.001, 0.002)))), 2)
-            high_p = max(high_p, max_oc)
-            low_p = max(0.1, min(low_p, min_oc))
-            vol = int(np.random.uniform(5000, 50000))
-            records.append({
-                "date": timestamps[i],
-                "open": open_p,
-                "high": high_p,
-                "low": low_p,
-                "close": close_p,
-                "volume": vol
-            })
-        df = pd.DataFrame(records)
-        df.attrs["data_source"] = "synthesized"
-        return df
-
-    # Standard daily fallback
-    end_date = datetime.now(_IST)
-    dates = pd.date_range(end=end_date, periods=n_days, freq="B").strftime("%Y-%m-%d").tolist()
-
-    returns = np.random.normal(0.0003, 0.015, n_days)
-    price_curve = np.zeros(n_days)
-    price_curve[-1] = target_price
-    for i in range(n_days - 2, -1, -1):
-        price_curve[i] = price_curve[i + 1] / (1.0 + returns[i + 1])
-        price_curve[i] = max(low_52w * 0.95, min(high_52w * 1.05, price_curve[i]))
-
-    records = []
-    for i in range(n_days):
-        close_p = round(float(price_curve[i]), 2)
-        open_p = round(float(price_curve[i] * (1.0 + np.random.normal(0, 0.004))), 2)
-        max_oc = max(open_p, close_p)
-        min_oc = min(open_p, close_p)
-        high_p = round(max_oc * (1.0 + abs(float(np.random.normal(0.004, 0.006)))), 2)
-        low_p = round(min_oc * (1.0 - abs(float(np.random.normal(0.004, 0.006)))), 2)
-        high_p = max(high_p, max_oc)
-        low_p = max(0.1, min(low_p, min_oc))
-        vol = int(np.random.uniform(500000, 3000000))
-        records.append({
-            "date": dates[i],
-            "open": open_p,
-            "high": high_p,
-            "low": low_p,
-            "close": close_p,
-            "volume": vol
-        })
-    df = pd.DataFrame(records)
-    df.attrs["data_source"] = "synthesized"
-    return df
-
 
 # ── fetch_stock_data ──
 
@@ -587,7 +475,7 @@ def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> 
     #   Afternoon bucket -> 13:15–15:30 (covers 13:15, 14:15, 15:15)
     # Each bucket is labelled with its session start time (09:15 or 13:15).
     if interval_clean == "4h":
-        df_1h = fetch_stock_data(ticker, period="90D" if period in ["ALL", "MAX", None, "1Y", "5Y"] else period, interval="1h")
+        df_1h = fetch_stock_data(ticker, period="365D" if period in ["ALL", "MAX", None, "1Y", "5Y"] else period, interval="1h")
         if df_1h is not None and not df_1h.empty:
             dt = pd.to_datetime(df_1h["date"], format="mixed", errors="coerce")
             # Assign each 1h candle to the session bucket it belongs to
@@ -705,8 +593,64 @@ def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> 
                 _set_cached(cache_key, full_df)
                 return full_df
 
+    # 2b. Intraday DB-first path: check intraday_candles before going to Angel One.
+    # AGENTS.md invariant: intraday candles are NEVER stored in historical_prices.
+    # The intraday_candles table is the persistence layer; in-memory cache sits on top.
+    if is_intraday:
+        # Staleness thresholds: how many seconds back the newest candle may be before we refresh
+        _intraday_stale_secs = {
+            "1m": 5 * 60,
+            "5m": 15 * 60,
+            "15m": 30 * 60,
+            "30m": 45 * 60,
+            "1h": 90 * 60,
+        }
+        stale_threshold_secs = _intraday_stale_secs.get(interval_clean, 30 * 60)
+
+        intra_db = get_intraday_candles(ticker, interval_clean, from_ts=fromdate_str)
+        if intra_db is not None and not intra_db.empty and len(intra_db) >= 5:
+            # Determine freshness of newest stored candle
+            latest_ts_str = str(intra_db["date"].max())
+            try:
+                latest_dt = datetime.fromisoformat(latest_ts_str.replace(" ", "T"))
+                if latest_dt.tzinfo is None:
+                    latest_dt = latest_dt.replace(tzinfo=_IST)
+                age_secs = (datetime.now(_IST) - latest_dt).total_seconds()
+            except Exception:
+                age_secs = stale_threshold_secs + 1  # treat parse failure as stale
+
+            if age_secs <= stale_threshold_secs:
+                # DB data is fresh — serve directly, skip broker
+                logger.info("[intraday-db] %s/%s served from DB (%d candles, age %.0fs)", ticker, interval_clean, len(intra_db), age_secs)
+                intra_db.attrs["data_source"] = "sqlite"
+                _set_cached(cache_key, intra_db)
+                return intra_db
+            else:
+                # DB is stale — only fetch the incremental delta from Angel One
+                logger.info("[intraday-db] %s/%s DB stale (age %.0fs), fetching incremental from %s", ticker, interval_clean, age_secs, latest_ts_str)
+                # Clamp fromdate to last stored timestamp minus one interval (for candle completeness safety)
+                _interval_seconds = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}
+                _delta = timedelta(seconds=_interval_seconds.get(interval_clean, 3600))
+                try:
+                    incr_from = datetime.fromisoformat(latest_ts_str.replace(" ", "T"))
+                    if incr_from.tzinfo is None:
+                        incr_from = incr_from.replace(tzinfo=_IST)
+                    incr_from = incr_from - _delta  # step back one interval for safety
+                except Exception:
+                    incr_from = api_fromdate if 'api_fromdate' in dir() else fromdate
+                # We will pass this adjusted fromdate to the Angel One fetch below; store it
+                _incr_fromdate = incr_from
+                _intra_db_base = intra_db  # will merge after fetch
+        else:
+            _incr_fromdate = None
+            _intra_db_base = None
+    else:
+        _incr_fromdate = None
+        _intra_db_base = None
+
     # 3. Fetch from Angel One for intraday (or daily fallback)
     ensure_session()
+
     if _session_active and token_info and token_info.get("token"):
         interval_map = {
             "1m":  "ONE_MINUTE",
@@ -717,8 +661,18 @@ def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> 
             "1d":  "ONE_DAY",
         }
         api_interval = interval_map.get(interval_clean, "ONE_DAY")
-        max_days = 30 if is_intraday else 365
-        api_fromdate = todate - timedelta(days=min(days, max_days))
+        if interval_clean == "1h":
+            max_days = 365
+        elif interval_clean in ["15m", "30m"]:
+            max_days = 90
+        elif interval_clean == "5m":
+            max_days = 60
+        elif interval_clean in ["1s", "30s", "1m"]:
+            max_days = 30
+        else:
+            max_days = 9000
+        # If we have a stale intraday DB base, use the incremental fromdate to minimise API call window
+        api_fromdate = _incr_fromdate if (_incr_fromdate is not None) else (todate - timedelta(days=min(days, max_days)))
 
         historicParam = {
             "exchange":    token_info["exch_seg"],
@@ -746,6 +700,21 @@ def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> 
             if is_intraday:
                 df["date"] = pd.to_datetime(df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d %H:%M:%S")
                 df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
+
+                # Upsert fetched intraday candles to DB (AGENTS.md: only intraday_candles table, never historical_prices)
+                try:
+                    save_intraday_candles(ticker, interval_clean, df)
+                except Exception as _e:
+                    logger.warning("[intraday-db] save_intraday_candles failed for %s/%s: %s", ticker, interval_clean, _e)
+
+                # If we did an incremental fetch, merge with existing DB base for a full dataset
+                if _intra_db_base is not None and not _intra_db_base.empty:
+                    combined = pd.concat([_intra_db_base, df], ignore_index=True)
+                    combined = combined.drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
+                    combined.attrs["data_source"] = "angel_one"
+                    _set_cached(cache_key, combined)
+                    return combined
+
                 _set_cached(cache_key, df)
                 return df
             else:
@@ -768,48 +737,16 @@ def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> 
         db_df.attrs["data_source"] = "sqlite"
         return db_df
 
-    # 6. Final safety: Synthesize compliant OHLCV anchored to stock's actual LTP and 52W range
-    try:
-        base_price = 0.0
-        high_52 = None
-        low_52 = None
 
-        # 1. Prefer latest close from verified local SQLite records
-        db_recent = get_historical_prices(ticker)
-        if db_recent is not None and not db_recent.empty:
-            base_price = float(db_recent.iloc[-1].get("close", 0.0) or 0.0)
-
-        # 2. Check company_info cache
-        if not base_price or base_price <= 0:
-            c_info = get_company_info(ticker)
-            if c_info and c_info.get("current_price"):
-                base_price = float(c_info["current_price"])
-                high_52 = float(c_info.get("fifty_two_week_high") or 0.0) or None
-                low_52 = float(c_info.get("fifty_two_week_low") or 0.0) or None
-
-        # 3. Check screener table
-        if not base_price or base_price <= 0:
-            from backend.data.database import execute_screener_sql_query
-            scr = execute_screener_sql_query(where_clause="ticker = ?", params=[ticker], limit=1)
-            if scr and scr.get("results") and len(scr["results"]) > 0:
-                row = scr["results"][0]
-                base_price = float(row.get("close_price") or 1000.0)
-                high_52 = float(row.get("close_price", 1000.0) * (1.0 + abs(row.get("distance_52w_high_pct", -15.0)) / 100.0))
-                low_52 = float(row.get("close_price", 1000.0) * (1.0 - abs(row.get("distance_52w_low_pct", 30.0)) / 100.0))
-
-        if not base_price or base_price <= 0:
-            base_price = 1000.0
-
-        syn_df = _synthesize_fallback_candles(ticker, target_price=base_price, high_52w=high_52, low_52w=low_52, n_days=days, interval=interval)
-        if syn_df is not None and not syn_df.empty:
-            _set_cached(cache_key, syn_df)
-            syn_df.attrs["data_source"] = "synthesized_market_baseline"
-            return syn_df
-    except Exception as exc:
-        logger.error("Final candle synthesis failed for %s: %s", ticker, exc)
-
-    logger.error("Failed to fetch history for %s", ticker)
+    # All verified sources exhausted. Return None so callers propagate a 404/503
+    # rather than silently serving random-walk data.
+    logger.warning(
+        "fetch_stock_data: all sources exhausted for %s (period=%s, interval=%s). "
+        "Returning None — no synthetic data will be generated.",
+        ticker, period, interval,
+    )
     return None
+
 
 
 
@@ -1094,3 +1031,44 @@ def backfill_full_history(ticker: str) -> Optional[pd.DataFrame]:
 def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
     """Backward-compatible wrapper pointing to full history backfill."""
     return backfill_full_history(ticker)
+
+
+_preloaded_stocks = set()
+
+def preload_all_stock_timeframes(ticker: str) -> dict:
+    """
+    Background preloader:
+    1. Downloads & stores complete multi-year daily history from inception into SQLite DB (historical_prices).
+    2. Pre-fetches and in-memory caches full history for 1h, 4h, 15m, 5m, 30m, 1m intervals.
+    """
+    t = ticker.upper().strip()
+    if t in _preloaded_stocks:
+        return {"status": "already_preloaded", "ticker": t}
+    _preloaded_stocks.add(t)
+
+    logger.info("Preloading all timeframes and backfilling DB for %s...", t)
+
+    # 1. Daily full backfill into database (SQLite historical_prices)
+    try:
+        backfill_full_history(t)
+    except Exception as exc:
+        logger.warning("Error backfilling daily history for %s: %s", t, exc)
+
+    # 2. Intraday timeframes (cached in-memory for instant switching)
+    timeframes_to_cache = [
+        ("365D", "1h"),
+        ("365D", "4h"),
+        ("90D", "15m"),
+        ("60D", "5m"),
+        ("90D", "30m"),
+        ("30D", "1m"),
+    ]
+    for period, iv in timeframes_to_cache:
+        try:
+            fetch_stock_data(t, period=period, interval=iv)
+        except Exception as exc:
+            logger.debug("Error pre-caching %s %s for %s: %s", iv, period, t, exc)
+
+    logger.info("✅ Finished preloading all timeframes for %s.", t)
+    return {"status": "success", "ticker": t}
+

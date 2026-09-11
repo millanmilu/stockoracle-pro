@@ -26,6 +26,14 @@ function formatIndicatorValue(def, candle) {
     return `₹${Number(val).toFixed(2)}`;
   }
   if (def.type === 'overlay_multi') {
+    if (def.subLines && def.subLines.length >= 3) {
+      const u = candle[def.subLines[0].field];
+      const m = candle[def.subLines[1].field];
+      const l = candle[def.subLines[2].field];
+      if (m != null && !isNaN(Number(m))) {
+        return `M:${Number(m).toFixed(1)} U:${Number(u).toFixed(1)} L:${Number(l).toFixed(1)}`;
+      }
+    }
     const u = candle.bb_upper;
     const m = candle.bb_middle;
     const l = candle.bb_lower;
@@ -321,11 +329,18 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     });
 
     // Resize Observer
+    let hasFittedInitial = false;
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
           chart.applyOptions({ width, height });
+          if (!hasFittedInitial) {
+            hasFittedInitial = true;
+            requestAnimationFrame(() => {
+              try { chart.timeScale().fitContent(); } catch {}
+            });
+          }
         }
       }
     });
@@ -377,15 +392,10 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       candleSeriesRef.current.setData(formattedCandles);
       volumeSeriesRef.current.setData(formattedVolumes);
 
-      if (formattedCandles.length > 150) {
-        const total = formattedCandles.length;
-        chartInstanceRef.current?.timeScale().setVisibleLogicalRange({
-          from: total - 120,
-          to: total + 5,
-        });
-      } else {
-        chartInstanceRef.current?.timeScale().fitContent();
-      }
+      chartInstanceRef.current?.timeScale().fitContent();
+      requestAnimationFrame(() => {
+        try { chartInstanceRef.current?.timeScale().fitContent(); } catch {}
+      });
 
       // Seed initial legend values
       resetLegendToLatest();

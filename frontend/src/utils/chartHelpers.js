@@ -32,11 +32,18 @@ export function toChartTime(dateStr, isIntraday) {
 }
 
 export function addBusinessDays(dateStr, days) {
-  const d = new Date(dateStr);
+  if (!dateStr) return '';
+  const cleanStr = String(dateStr).split('T')[0].trim();
+  const parts = cleanStr.split('-').map(Number);
+  if (parts.length < 3 || parts.some(isNaN)) {
+    return dateStr;
+  }
+  const [year, month, day] = parts;
+  const d = new Date(Date.UTC(year, month - 1, day));
   let added = 0;
   while (added < days) {
-    d.setDate(d.getDate() + 1);
-    const dow = d.getDay();
+    d.setUTCDate(d.getUTCDate() + 1);
+    const dow = d.getUTCDay();
     if (dow !== 0 && dow !== 6) added++;
   }
   return d.toISOString().split('T')[0];
@@ -52,7 +59,7 @@ export const INTERVALS = [
   { label: '15m (15 min)', value: '15m' },
   { label: '30m (30 min)', value: '30m' },
   { label: '1H (1 hour)', value: '1h' },
-  { label: '4H (4 hour)', value: '4h' },
+  { label: '4H (4 hours)', value: '4h' },
   { label: '1D (Daily)', value: '1d' },
 ];
 

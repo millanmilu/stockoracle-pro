@@ -131,9 +131,10 @@ If you have mapped a real domain name to your Elastic IP in your domain host (li
 1. Log into your **AWS Console** and search for **AWS Amplify**.
 2. Click **New App** $\rightarrow$ **Host web app**.
 3. Choose **GitHub** and connect your account. Select your repository and the branch (e.g. `main`).
-4. In build settings, Amplify will auto-detect the Vite React workspace configuration. Make sure target build command points to:
-   - Base Directory: `frontend/dist`
-   - Build Command: `npm run build`
+4. In build settings, configure the monorepo structure by distinguishing the app/base directory from the build output directory:
+   - **App / Base Directory**: `frontend` (where `package.json` resides so Amplify finds the `npm run build` command)
+   - **Build Command**: `npm run build`
+   - **Artifacts / Output Directory**: `dist` (Vite writes build output to `dist` relative to the `frontend` base directory)
 5. In **Environment Variables** configuration, add:
    - `VITE_API_URL` = `https://api.stockoracle.yourdomain.com` (or your backend's HTTP path)
 6. Click **Save and Deploy**.

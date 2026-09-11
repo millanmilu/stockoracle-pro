@@ -8,6 +8,8 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
 from backend.data.fetcher import fetch_stock_data, get_session_status
 from backend.analysis.backtester import run_backtest
 from backend.services.ai_consensus import compute_ai_consensus
+from backend.api._guards import require_real_data
+
 
 logger = logging.getLogger("StockOracle.API.ML")
 
@@ -34,6 +36,7 @@ def predict_stock(symbol: str):
             status_code=404,
             detail=f"Insufficient price history for '{sym}' to generate forecast.",
         )
+    require_real_data(df, sym, "predict")
 
     info = fetch_company_info(sym)
     ltp = info.get("ltp") if info else None
@@ -58,7 +61,11 @@ def get_shap_drivers_endpoint(symbol: str):
     sym = symbol.upper().strip()
     from backend.analysis.explainer import get_shap_explanation
     df = fetch_stock_data(sym, period="2Y")
+    if df is None or df.empty:
+        raise HTTPException(status_code=404, detail=f"No price history for '{sym}'.")
+    require_real_data(df, sym, "shap-drivers")
     return get_shap_explanation(sym, df)
+
 
 
 
@@ -121,6 +128,7 @@ def get_stock_backtest(
     df = fetch_stock_data(t, period="2Y")
     if df is None or len(df) < 80:
         raise HTTPException(status_code=404, detail=f"Insufficient history for '{t}'.")
+    require_real_data(df, t, "backtest")
     return run_backtest(
         df, t,
         initial_capital=initial_capital,
@@ -148,6 +156,7 @@ def get_model_benchmark_endpoint(ticker: str):
     df = fetch_stock_data(t, period="2Y")
     if df is None or len(df) < 50:
         raise HTTPException(status_code=404, detail=f"Insufficient historical data for '{t}'.")
+    require_real_data(df, t, "ml-benchmark")
     from backend.ml.benchmarking import run_walk_forward_benchmark
     return run_walk_forward_benchmark(t, df)
 
@@ -166,6 +175,8 @@ def get_forecast_bands_endpoint(ticker: str):
     df = fetch_stock_data(t, period="1Y")
     if df is None or len(df) < 30:
         raise HTTPException(status_code=404, detail=f"Insufficient history for '{t}'.")
+    require_real_data(df, t, "forecast-bands")
     from backend.ml.forecast_bands import compute_forecast_bands
     return compute_forecast_bands(t, df)
+
 

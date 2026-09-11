@@ -20,8 +20,10 @@ from backend.analysis.monte_carlo import run_monte_carlo_simulation
 from backend.analysis.anomaly import detect_anomalies
 from backend.analysis.macro import get_macro_data
 from backend.analysis.supply_chain import get_supply_chain
+from backend.api._guards import require_real_data
 
 logger = logging.getLogger("StockOracle.API.Research")
+
 
 router = APIRouter(prefix="/api", tags=["Research & Analytics"])
 
@@ -67,7 +69,9 @@ def get_stock_patterns(ticker: str, period: Optional[str] = "1Y", lookback: Opti
     df = fetch_stock_data(t, period=period)
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
+    require_real_data(df, t, "patterns")
     return get_pattern_summary(df, lookback=lookback)
+
 
 
 @router.get("/stock/{ticker}/levels")
@@ -77,7 +81,9 @@ def get_stock_levels(ticker: str):
     df = fetch_stock_data(t, period="1Y")
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
+    require_real_data(df, t, "levels")
     return calculate_support_resistance(df)
+
 
 
 @router.get("/stock/{ticker}/volatility")
@@ -87,7 +93,9 @@ def get_stock_volatility(ticker: str):
     df = fetch_stock_data(t, period="1Y")
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
+    require_real_data(df, t, "volatility")
     return calculate_volatility_forecast(df, ticker=t)
+
 
 
 @router.get("/stock/{ticker}/montecarlo")
@@ -122,6 +130,7 @@ def get_stock_monte_carlo(
     df = fetch_stock_data(t, period="1Y")
     if df is None or len(df) < 30:
         raise HTTPException(status_code=404, detail=f"Insufficient price history for '{t}'.")
+    require_real_data(df, t, "montecarlo")
 
     result = run_monte_carlo_simulation(
         prices=df["close"].values.astype(float),
@@ -154,7 +163,9 @@ def get_stock_anomalies(ticker: str):
     df = fetch_stock_data(t, period="1Y")
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No price history for '{t}'.")
+    require_real_data(df, t, "anomalies")
     return detect_anomalies(df)
+
 
 
 @router.get("/macro")
@@ -304,14 +315,20 @@ def delete_user_saved_scan(
 def get_corporate_actions(ticker: str):
     """Returns upcoming and historical dividends, bonus shares, and stock splits."""
     t = ticker.upper().strip()
+    # Corporate actions data requires a live broker connection or a dedicated data-provider
+    # integration (e.g. NSE/BSE corporate filings API). No hardcoded placeholder data is
+    # served here to prevent users from acting on fictional dividend / split information.
     return {
         "ticker": t,
-        "actions": [
-            {"type": "DIVIDEND", "amount": "₹10.00 per share", "ex_date": "2026-06-15", "status": "COMPLETED"},
-            {"type": "BONUS", "ratio": "1:1", "ex_date": "2025-11-20", "status": "COMPLETED"},
-            {"type": "SPLIT", "old_fv": "₹10", "new_fv": "₹2", "ex_date": "2024-08-10", "status": "COMPLETED"}
-        ]
+        "actions": [],
+        "status": "unavailable",
+        "message": (
+            "Corporate actions data (dividends, bonus issues, stock splits) requires a "
+            "live broker connection or a dedicated data-provider integration. "
+            "No data is currently available."
+        ),
     }
+
 
 
 # ── Screener.in-Style Financials & Advanced Screener Platform ────────────────

@@ -28,14 +28,21 @@ function toChartTime(dateStr, isIntraday) {
   return String(dateStr).slice(0, 10);
 }
 
-// Add N business days forward skipping weekends
+// Add N business days forward skipping weekends (strictly in UTC)
 function addBusinessDays(dateStr, days) {
-  const d = new Date(dateStr);
+  if (!dateStr) return '';
+  const cleanStr = String(dateStr).split('T')[0].trim();
+  const parts = cleanStr.split('-').map(Number);
+  if (parts.length < 3 || parts.some(isNaN)) {
+    return dateStr;
+  }
+  const [year, month, day] = parts;
+  const d = new Date(Date.UTC(year, month - 1, day));
   let added = 0;
   while (added < days) {
-    d.setDate(d.getDate() + 1);
-    const day = d.getDay();
-    if (day !== 0 && day !== 6) added++;
+    d.setUTCDate(d.getUTCDate() + 1);
+    const dow = d.getUTCDay();
+    if (dow !== 0 && dow !== 6) added++;
   }
   return d.toISOString().slice(0, 10);
 }

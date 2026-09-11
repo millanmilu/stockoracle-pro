@@ -26,5 +26,9 @@ def test_ai_consensus_structure():
     assert "fundamental" in engines
 
     assert 0.0 <= engines["technical"]["score"] <= 100.0
-    assert 0.0 <= engines["ml"]["score"] <= 100.0
+    if engines["ml"]["score"] is not None:
+        assert 0.0 <= engines["ml"]["score"] <= 100.0
+    else:
+        assert engines["ml"].get("available") is False
     assert 0.0 <= engines["fundamental"]["score"] <= 100.0
+

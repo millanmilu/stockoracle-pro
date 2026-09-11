@@ -4,9 +4,11 @@ from functools import lru_cache
 from datetime import datetime, timedelta
 from backend.data.fetcher import fetch_stock_data
 from backend.analysis.sentiment import fetch_and_score_sentiment
+from backend.api._guards import require_real_data
 
 import time
 from functools import wraps
+
 
 def ttl_cache(ttl_seconds):
     cache = {}
@@ -38,6 +40,7 @@ def get_features(symbol: str, end_date: str = None) -> pd.DataFrame:
         df = fetch_stock_data(symbol, period="2Y")
         if df is None or df.empty:
             return pd.DataFrame()
+        require_real_data(df, symbol, "feature_engineer")
             
         df = df.copy()
         
@@ -51,37 +54,39 @@ def get_features(symbol: str, end_date: str = None) -> pd.DataFrame:
         loss = -delta.where(delta < 0, 0.0)
         avg_gain = gain.rolling(window=14, min_periods=1).mean()
         avg_loss = loss.rolling(window=14, min_periods=1).mean()
-        rs = avg_gain / (avg_loss + 1e-9)
-        df['rsi_14'] = 100 - (100 / (1 + rs))
+        rs = avg_gain / avg_loss.replace(0, np.nan)
+        df['rsi_14'] = 100 - (100 / (1 + rs)).fillna(50)
         
-        # 2. MACD (12, 26, 9)
-        ema_12 = df['close'].ewm(span=12, adjust=False).mean()
-        ema_26 = df['close'].ewm(span=26, adjust=False).mean()
-        df['macd'] = ema_12 - ema_26
+        # 2-4. Simple Moving Averages
+        df['sma_20'] = df['close'].rolling(window=20, min_periods=1).mean()
+        df['sma_50'] = df['close'].rolling(window=50, min_periods=1).mean()
+        df['sma_200'] = df['close'].rolling(window=200, min_periods=1).mean()
         
-        # 3. ATR (14)
-        high_low = df['high'] - df['low']
-        high_close = (df['high'] - df['close'].shift()).abs()
-        low_close = (df['low'] - df['close'].shift()).abs()
-        tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-        df['atr_14'] = tr.rolling(window=14, min_periods=1).mean()
+        # 5-7. Exponential Moving Averages
+        df['ema_12'] = df['close'].ewm(span=12, adjust=False).mean()
+        df['ema_26'] = df['close'].ewm(span=26, adjust=False).mean()
+        df['ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
         
-        # 4. Bollinger %B (20, 2)
+        # 8. MACD Line, Signal, Histogram
+        df['macd'] = df['ema_12'] - df['ema_26']
+        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
+        df['macd_hist'] = df['macd'] - df['macd_signal']
+        
+        # 9. Bollinger Bands (20-day, 2 std)
         rolling_mean_20 = df['close'].rolling(window=20, min_periods=1).mean()
         rolling_std_20 = df['close'].rolling(window=20, min_periods=1).std()
-        upper_band = rolling_mean_20 + (rolling_std_20 * 2)
-        lower_band = rolling_mean_20 - (rolling_std_20 * 2)
-        df['bb_pct_b'] = (df['close'] - lower_band) / (upper_band - lower_band + 1e-9)
+        df['bb_upper'] = rolling_mean_20 + (rolling_std_20 * 2)
+        df['bb_lower'] = rolling_mean_20 - (rolling_std_20 * 2)
+        bb_width = df['bb_upper'] - df['bb_lower']
+        df['bb_percent'] = (df['close'] - df['bb_lower']) / bb_width.replace(0, np.nan)
+        df['bb_percent'] = df['bb_percent'].fillna(0.5)
         
-        # 5-8. Rolling means (5, 10, 20, 50)
-        df['roll_mean_5'] = df['close'].rolling(window=5, min_periods=1).mean()
-        df['roll_mean_10'] = df['close'].rolling(window=10, min_periods=1).mean()
-        df['roll_mean_20'] = rolling_mean_20
-        df['roll_mean_50'] = df['close'].rolling(window=50, min_periods=1).mean()
+        # 10. Volume SMA Ratio (Volume / 20-day Volume SMA)
+        vol_sma_20 = df['volume'].rolling(window=20, min_periods=1).mean()
+        df['volume_sma_ratio'] = df['volume'] / vol_sma_20.replace(0, np.nan)
+        df['volume_sma_ratio'] = df['volume_sma_ratio'].fillna(1.0)
         
-        # 9-11. Rolling stds (5, 10, 20)
-        df['roll_std_5'] = df['close'].rolling(window=5, min_periods=1).std().fillna(0)
-        df['roll_std_10'] = df['close'].rolling(window=10, min_periods=1).std().fillna(0)
+        # 11. Historical Volatility (20-day rolling std of close)
         df['roll_std_20'] = rolling_std_20.fillna(0)
         
         # 12-16. Lagged closing prices (t-1, t-2, t-3, t-4, t-5)
@@ -100,12 +105,17 @@ def get_features(symbol: str, end_date: str = None) -> pd.DataFrame:
         df['dow_sin'] = np.sin(2 * np.pi * day_of_week / 7)
         df['dow_cos'] = np.cos(2 * np.pi * day_of_week / 7)
         
+        # 21. Sentiment: Prevent temporal look-ahead leakage.
+        # Live today-only sentiment must NEVER be broadcast across 2 years of historical daily
+        # training bars. We initialize a neutral baseline (0.0) for historical rows and populate
+        # only the latest row with today's score for live inference.
+        df['sentiment'] = 0.0
         try:
             sentiment_score = fetch_and_score_sentiment(symbol)
-        except Exception as exc:
-            sentiment_score = 0.0
-            print(f"⚠️ Sentiment fetch failed for {symbol}: {exc}")
-        df['sentiment'] = sentiment_score
+            if sentiment_score is not None and len(df) > 0:
+                df.iloc[-1, df.columns.get_loc('sentiment')] = float(sentiment_score)
+        except Exception:
+            pass
         
         # Drop rows with NaNs caused by lagging/rolling (mainly first 50 days)
         df = df.dropna()

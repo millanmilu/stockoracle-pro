@@ -22,6 +22,18 @@ const ALL_SCRIPTS = [
   { id: 'auto_key_levels', name: 'Auto Key Levels', type: 'overlay', category: 'technicals', tab: 'Indicators', badges: [{ text: 'AI', color: '#6366F1' }, { text: 'AUTO', color: '#F97316' }], desc: 'AI-detected major reaction support, equilibrium, and resistance levels.' },
   { id: 'ai_patterns', name: '13-Pattern Candlestick Scanner', type: 'pattern', category: 'technicals', tab: 'Patterns', badge: 'AI', badgeColor: '#10B981', desc: 'Scans for Doji, Hammer, Morning Star, Evening Star, Harami, and Engulfing patterns.' },
   { id: 'backtester', name: 'Strategy Backtester Overlay', type: 'strategy', category: 'technicals', tab: 'Strategies', badge: 'LAB', badgeColor: '#F59E0B', desc: 'Historical equity curve and trade simulation on chart candles.' },
+  { id: 'stoch_k', name: 'Stochastic %K', type: 'oscillator', category: 'technicals', tab: 'Indicators', desc: 'Fast stochastic %K line (14‑period momentum).' },
+  { id: 'stoch_d', name: 'Stochastic %D', type: 'oscillator', category: 'technicals', tab: 'Indicators', desc: 'Smoothed stochastic %D line (3‑period SMA of %K).' },
+  { id: 'cci', name: 'Commodity Channel Index (CCI)', type: 'oscillator', category: 'technicals', tab: 'Indicators', desc: 'Mean deviation of price from its statistical average (20‑period).' },
+  { id: 'williams_r', name: 'Williams %R (-100 to 0)', type: 'oscillator', category: 'technicals', tab: 'Indicators', desc: 'Measures overbought (> -20) and oversold (< -80) levels.' },
+  { id: 'mfi', name: 'Money Flow Index (MFI)', type: 'oscillator', category: 'technicals', tab: 'Indicators', badge: 'VOL', badgeColor: '#06B6D4', desc: 'Volume‑weighted momentum index measuring buying/selling pressure.' },
+  { id: 'obv', name: 'On‑Balance Volume (OBV)', type: 'overlay', category: 'volume', tab: 'Indicators', badge: 'ACC/DIST', badgeColor: '#10B981', desc: 'Cumulative volume flow based on candle close direction.' },
+  { id: 'roc', name: 'Rate of Change (ROC)', type: 'oscillator', category: 'technicals', tab: 'Indicators', desc: 'Percentage velocity change of price over 12 periods.' },
+  { id: 'keltner', name: 'Keltner Channels (20, 2)', type: 'overlay', category: 'technicals', tab: 'Indicators', badge: 'VOLATILITY', badgeColor: '#818CF8', desc: 'Volatility bands based on 20 EMA and 2x ATR envelopes.' },
+  { id: 'donchian', name: 'Donchian Channels (20)', type: 'overlay', category: 'technicals', tab: 'Indicators', desc: '20-period highest high and lowest low price channels.' },
+  { id: 'market_regime', name: 'Market Regime Classifier', type: 'overlay', category: 'technicals', tab: 'Indicators', badge: 'AI', badgeColor: '#10B981', desc: 'Classifies Trending (Bull/Bear), Volatility Expansion, or Consolidation.' },
+  { id: 'divergence', name: 'RSI Divergence Scanner', type: 'pattern', category: 'technicals', tab: 'Patterns', badge: 'ALPHA', badgeColor: '#F59E0B', desc: 'Auto-detects Bullish and Bearish divergences between price and RSI.' },
+  { id: 'ichimoku', name: 'Ichimoku Cloud', type: 'overlay', category: 'technicals', tab: 'Indicators', badge: 'PRO', badgeColor: '#A855F7', desc: 'Tenkan‑Sen, Kijun‑Sen, Senkou‑Span A/B, and Chikou‑Span.' },
 ];
 
 const SIDEBAR_NAV = [
@@ -198,13 +210,14 @@ export default function IndicatorsModal({
                   key={tab}
                   onClick={() => setActiveTab(tab)}
                   style={{
-                    padding: '5px 14px',
+                    padding: '6px 16px',
                     borderRadius: 20,
                     border: 'none',
                     backgroundColor: isActive ? '#FFFFFF' : 'transparent',
                     color: isActive ? '#131722' : '#868993',
-                    fontSize: '0.78rem',
+                    fontSize: '0.85rem',
                     fontWeight: isActive ? 700 : 500,
+                    letterSpacing: '0.02em',
                     cursor: 'pointer',
                     transition: 'all 0.15s ease',
                   }}
@@ -307,7 +320,7 @@ export default function IndicatorsModal({
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        padding: '10px 14px',
+                        padding: '12px 16px',
                         borderRadius: 6,
                         cursor: 'pointer',
                         backgroundColor: isEnabled ? 'rgba(59, 130, 246, 0.12)' : 'transparent',

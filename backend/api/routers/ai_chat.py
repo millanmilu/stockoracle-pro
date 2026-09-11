@@ -15,6 +15,7 @@ from backend.data.fetcher import fetch_stock_data, get_token_info
 from backend.analysis.indicators import enrich_stock_dataframe
 from backend.analysis.patterns import get_pattern_summary
 from backend.analysis.levels import calculate_support_resistance
+from backend.api._guards import require_real_data
 
 logger = logging.getLogger("StockOracle.API.AIChat")
 
@@ -37,6 +38,8 @@ async def ai_chat_endpoint(req: ChatRequest):
     df = await loop.run_in_executor(None, lambda: fetch_stock_data(t, period="3M"))
     if df is None or df.empty:
         raise HTTPException(status_code=404, detail=f"No data found for '{t}'")
+    require_real_data(df, t, "ai-chat")
+
 
     enriched_df = enrich_stock_dataframe(df)
 
@@ -85,7 +88,16 @@ async def ai_chat_endpoint(req: ChatRequest):
 
     from backend.ai.chat import build_stock_context, ask_gemini
     context = build_stock_context(t, enriched_df, pred_data, patterns, levels, news_items)
-    answer = await loop.run_in_executor(None, lambda: ask_gemini(req.question, context))
+    try:
+        answer = await loop.run_in_executor(None, lambda: ask_gemini(req.question, context))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("AI chat generation error for %s: %s", t, e)
+        raise HTTPException(
+            status_code=503,
+            detail="AI analyst engine is currently unavailable. Please verify your API key in Broker & AI Settings."
+        )
 
     return {"answer": answer, "ticker": t}
 
@@ -118,6 +130,7 @@ async def get_ai_trade_explain_endpoint(symbol: str):
         df_2y = await loop.run_in_executor(None, lambda: fetch_stock_data(sym, period="2Y"))
         if df_2y is None or len(df_2y) < 50:
             raise HTTPException(status_code=404, detail=f"Insufficient history for '{sym}'")
+        require_real_data(df_2y, sym, "ai-trade-explain-2y")
 
         info = fetch_company_info(sym)
         ltp = info.get("ltp") if info else None
@@ -126,8 +139,10 @@ async def get_ai_trade_explain_endpoint(symbol: str):
         df = await loop.run_in_executor(None, lambda: fetch_stock_data(sym, period="45D"))
         if df is None or df.empty:
             raise HTTPException(status_code=404, detail=f"No data for '{sym}'")
+        require_real_data(df, sym, "ai-trade-explain-45d")
         edf = enrich_stock_dataframe(df)
         last = edf.iloc[-1]
+
 
         signal = pred_data.get("signal", "NEUTRAL")
         pred_return = pred_data.get("predicted_return_pct", 0.0)

@@ -161,6 +161,16 @@ def refresh_screener_metrics_from_market() -> Dict[str, Any]:
         try:
             df = fetch_stock_data(ticker, period="1Y", interval="1d")
             if df is not None and not df.empty and len(df) >= 5:
+                # Guard: never upsert metrics derived from synthetic/random-walk data.
+                data_source = df.attrs.get("data_source") or "unknown"
+                if data_source in {"synthesized", "synthesized_market_baseline"}:
+                    logger.warning(
+                        "Screener skipping %s — fetch_stock_data returned synthesized data "
+                        "(broker offline or no verified records). Existing DB row preserved.",
+                        ticker,
+                    )
+                    errors.append(f"{ticker}: synthesized data rejected — DB row unchanged")
+                    continue
                 metrics = compute_metrics_from_ohlcv(ticker, df, item)
                 if metrics:
                     upsert_screener_daily_metric(metrics)
@@ -173,13 +183,20 @@ def refresh_screener_metrics_from_market() -> Dict[str, Any]:
                     item_copy["close_price"] = float(c_info.get("price") or c_info.get("current_price"))
                     item_copy["change_1d_pct"] = float(c_info.get("change_pct") or c_info.get("changePercent") or item["change_1d_pct"])
                     upsert_screener_daily_metric(item_copy)
+                    updated_count += 1
                 else:
-                    upsert_screener_daily_metric(item)
-                updated_count += 1
+                    # No real data available; leave the existing DB row intact rather than
+                    # overwriting with stale hardcoded seed values.
+                    logger.info(
+                        "Screener skipping %s — no real price data available. Existing DB row preserved.",
+                        ticker,
+                    )
         except Exception as exc:
             logger.warning("Metrics refresh failed for %s: %s", ticker, exc)
             errors.append(f"{ticker}: {str(exc)}")
-            upsert_screener_daily_metric(item)
+            # Do NOT fall back to upsert_screener_daily_metric(item) here; that would
+            # overwrite a previously-valid DB row with hardcoded seed data.
+
 
     logger.info("Screener metrics refresh complete. %d/%d stocks updated.", updated_count, len(MASTER_NSE_UNIVERSE))
     return {

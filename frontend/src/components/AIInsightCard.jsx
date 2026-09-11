@@ -102,31 +102,51 @@ export default function AIInsightCard() {
           </div>
           <div style={{ color: '#64748B', marginTop: '3px', fontSize: '0.72rem' }}>
             Confidence Range: {formatPrice(low_bound)} - {formatPrice(high_bound)}
+            {predictionData?.confidence_score != null ? ` (Score: ${predictionData.confidence_score}/100)` : ' (Uncalibrated)'}
+          </div>
+          <div style={{ marginTop: '6px' }}>
+            <span style={{
+              fontSize: '0.65rem',
+              fontFamily: 'JetBrains Mono, monospace',
+              padding: '2px 7px',
+              borderRadius: 4,
+              background: predictionData?.model_trained ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
+              color: predictionData?.model_trained ? '#10B981' : '#F59E0B',
+              border: `1px solid ${predictionData?.model_trained ? 'rgba(16,185,129,0.25)' : 'rgba(245,158,11,0.25)'}`
+            }}>
+              Engine: {predictionData?.model_type || 'Statistical Trend Heuristic'}
+            </span>
           </div>
         </div>
+
 
         {/* Right side: Top Features */}
         <div style={{ flex: 1 }}>
           <h3 style={{ margin: '0 0 15px 0', color: '#aaa', fontSize: '0.9rem' }}>Key Drivers (XGBoost Gain)</h3>
-          {Object.entries(explainData || {})
-            .filter(([_, val]) => typeof val === 'number' || (typeof val === 'string' && !isNaN(parseFloat(val))))
-            .map(([feature, pct]) => {
-              const numericPct = typeof pct === 'number' ? pct : parseFloat(pct) || 0;
-              return (
-                <div key={feature} style={{ marginBottom: '10px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                    <span style={{ color: '#ddd' }}>{String(feature || '').replace(/_/g, ' ').toUpperCase()}</span>
-                    <span style={{ color: '#888' }}>{numericPct}%</span>
+          {explainData && Object.keys(explainData).length > 0 ? (
+            Object.entries(explainData)
+              .filter(([_, val]) => typeof val === 'number' || (typeof val === 'string' && !isNaN(parseFloat(val))))
+              .map(([feature, pct]) => {
+                const numericPct = typeof pct === 'number' ? pct : parseFloat(pct) || 0;
+                return (
+                  <div key={feature} style={{ marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
+                      <span style={{ color: '#ddd' }}>{String(feature || '').replace(/_/g, ' ').toUpperCase()}</span>
+                      <span style={{ color: '#888' }}>{numericPct}%</span>
+                    </div>
+                    <div style={{ width: '100%', backgroundColor: 'var(--border, #333)', height: '6px', borderRadius: '3px' }}>
+                      <div style={{ width: `${Math.min(100, Math.max(0, numericPct))}%`, backgroundColor: '#0ea5e9', height: '100%', borderRadius: '3px' }} />
+                    </div>
                   </div>
-                  <div style={{ width: '100%', backgroundColor: 'var(--border, #333)', height: '6px', borderRadius: '3px' }}>
-                    <div style={{ width: `${Math.min(100, Math.max(0, numericPct))}%`, backgroundColor: '#0ea5e9', height: '100%', borderRadius: '3px' }} />
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })
+          ) : (
+            <div style={{ fontSize: '0.78rem', color: '#64748B', fontStyle: 'italic', padding: '8px 0' }}>
+              No trained XGBoost model found for {selectedSymbol}. Train via Model Manager to evaluate feature attribution.
+            </div>
+          )}
         </div>
       </div>
-
 
       {/* 3-Engine AI Consensus Gauge */}
       <AIConsensusGauge ticker={selectedSymbol} />
@@ -146,10 +166,17 @@ export default function AIInsightCard() {
                 AI Trade Explanation
               </span>
             </div>
-            <span style={{ fontSize: '0.68rem', color: '#10B981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
-              Backtested Accuracy ~78%
-            </span>
+            {predictionData?.model_trained ? (
+              <span style={{ fontSize: '0.68rem', color: '#10B981', background: 'rgba(16,185,129,0.1)', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                {predictionData?.mape != null ? `OOS MAPE ~${predictionData.mape}%` : 'Trained Ensemble'}
+              </span>
+            ) : (
+              <span style={{ fontSize: '0.68rem', color: '#F59E0B', background: 'rgba(245,158,11,0.1)', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>
+                Statistical Heuristic (Drift + RSI)
+              </span>
+            )}
           </div>
+
           {explanationLoading ? (
             <div style={{ fontSize: '0.8rem', color: '#6B7280' }}>Generating explanation…</div>
           ) : aiExplanation?.explanation ? (

@@ -13,9 +13,12 @@ import logging
 from typing import Optional, Dict, Any, Tuple
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+from fastapi import HTTPException
 
 from backend.core.logging import get_logger
+from backend.shared.security import encrypt_value, decrypt_value
 from backend.data.database import (
+
     get_active_ai_provider_from_db,
     get_all_ai_providers_from_db,
     increment_ai_provider_requests,
@@ -27,34 +30,29 @@ logger = get_logger("stockoracle.ai.provider")
 # ── Encryption / Decryption Utilities ──────────────────────────────────────────
 
 def _get_encryption_key() -> bytes:
-    """Derives a stable 32-byte key for Fernet AES-128-CBC encryption."""
+    """Derives legacy 32-byte key for backwards compatibility."""
     secret = os.environ.get("JWT_SECRET", "stockoracle_pro_master_ai_secret_key_2026")
     salt = b"stockoracle_ai_salt_v2"
-    # PBKDF2 key derivation (32 bytes)
     derived = hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt, 100000, dklen=32)
     return base64.urlsafe_b64encode(derived)
 
 
 def encrypt_api_key(raw_key: str) -> str:
-    """Encrypts an API key string into a base64 encoded ciphertext."""
+    """Encrypts an API key string using the unified platform vault."""
     if not raw_key:
         return ""
-    try:
-        from cryptography.fernet import Fernet
-        f = Fernet(_get_encryption_key())
-        return f.encrypt(raw_key.strip().encode("utf-8")).decode("utf-8")
-    except Exception:
-        # Fallback XOR obfuscation if cryptography package is missing
-        key_bytes = _get_encryption_key()
-        raw_bytes = raw_key.strip().encode("utf-8")
-        xored = bytes(b ^ key_bytes[i % len(key_bytes)] for i, b in enumerate(raw_bytes))
-        return "OBF:" + base64.b64encode(xored).decode("utf-8")
+    return encrypt_value(raw_key)
 
 
 def decrypt_api_key(encrypted_key: str) -> str:
-    """Decrypts an API key string."""
+    """Decrypts an API key string with seamless backwards-compatibility."""
     if not encrypted_key:
         return ""
+    # Try platform vault first
+    val = decrypt_value(encrypted_key)
+    if val and val != encrypted_key and not val.startswith("ENC:"):
+        return val
+    # Fallback to legacy provider decryption
     try:
         if encrypted_key.startswith("OBF:"):
             key_bytes = _get_encryption_key()
@@ -64,8 +62,9 @@ def decrypt_api_key(encrypted_key: str) -> str:
         f = Fernet(_get_encryption_key())
         return f.decrypt(encrypted_key.encode("utf-8")).decode("utf-8")
     except Exception as exc:
-        logger.error("Failed decrypting API key: %s", exc)
-        return ""
+        logger.debug("Legacy decrypt fallback: %s", exc)
+        return val or encrypted_key
+
 
 
 def mask_api_key(key: str) -> str:
@@ -323,20 +322,25 @@ def _call_gemini_api(key: str, model_name: str, prompt: str, system_prompt: str,
             last_exc = sdk_err
             # Fallback to direct REST HTTP request for this candidate model
             try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{cur_model}:generateContent?key={key}"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{cur_model}:generateContent"
                 payload = {
                     "contents": [{"parts": [{"text": prompt}]}],
                     "generationConfig": {"maxOutputTokens": max_tokens, "temperature": temp}
                 }
                 if system_prompt:
                     payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
-                req = Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+                headers = {
+                    "Content-Type": "application/json",
+                    "x-goog-api-key": key,
+                }
+                req = Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers)
                 with urlopen(req, timeout=20) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data["candidates"][0]["content"]["parts"][0]["text"].strip()
             except Exception as http_err:
                 last_exc = http_err
                 continue
+
 
     if last_exc:
         raise last_exc
@@ -605,10 +609,14 @@ def ask_ai(
             continue
 
     # If all configured providers fail or no key is present
-    return (
+    err_detail = (
         "AI engine not configured or all providers temporarily unavailable. "
-        "Please configure your API key in Broker & AI Settings (supports Gemini, OpenAI, Claude, Mistral, Cohere, Groq)."
+        "Please configure an API key in Broker & AI Settings (supports Gemini, OpenAI, Claude, Mistral, Cohere, Groq)."
+        + (f" Last error: {last_error}" if last_error else "")
     )
+    logger.error("ask_ai failure: %s", err_detail)
+    raise HTTPException(status_code=503, detail=err_detail)
+
 
 
 def extract_json_from_ai_response(raw_text: str) -> Optional[Dict[str, Any]]:

@@ -33,13 +33,7 @@ def get_top_features(symbol: str, top_n: int = 5) -> dict:
     symbol = symbol.upper().strip()
     model_path = os.path.join(MODEL_DIR, f"{symbol}.json")
     if not os.path.exists(model_path):
-        return {
-            "rsi_14": 28.5,
-            "sma_50": 24.0,
-            "macd_hist": 20.5,
-            "volatility_30": 15.0,
-            "volume_sma_ratio": 12.0,
-        }
+        return {}
 
     try:
         import xgboost as xgb
@@ -70,7 +64,7 @@ def get_top_features(symbol: str, top_n: int = 5) -> dict:
         return {k: v for k, v in sorted_features}
     except Exception as e:
         logger.warning("Error calculating top features for %s: %s", symbol, e)
-        return {"rsi_14": 30.0, "sma_50": 25.0, "macd_hist": 22.0}
+        return {}
 
 
 def get_shap_explanation(symbol: str, df: pd.DataFrame = None) -> dict:
@@ -79,6 +73,16 @@ def get_shap_explanation(symbol: str, df: pd.DataFrame = None) -> dict:
     """
     sym = symbol.upper().strip()
     top_raw = get_top_features(sym, top_n=5)
+
+    if not top_raw:
+        return {
+            "ticker": sym,
+            "status": "no_trained_model",
+            "primary_driver": None,
+            "primary_driver_weight_pct": None,
+            "summary": f"No trained ML model found for {sym}. Train a model via POST /api/train/{sym} to generate SHAP feature attributions.",
+            "signal_drivers": [],
+        }
 
     drivers = []
     for feat_name, imp_pct in top_raw.items():
@@ -96,11 +100,12 @@ def get_shap_explanation(symbol: str, df: pd.DataFrame = None) -> dict:
             "description": description,
         })
 
-    top_label = drivers[0]["label"] if drivers else "Technical Indicators"
-    top_pct = drivers[0]["importance_pct"] if drivers else 30.0
+    top_label = drivers[0]["label"]
+    top_pct = drivers[0]["importance_pct"]
 
     return {
         "ticker": sym,
+        "status": "available",
         "primary_driver": top_label,
         "primary_driver_weight_pct": top_pct,
         "summary": f"Prediction for {sym} is primarily driven by {top_label} ({top_pct}% weight), followed by trend and volatility structure.",

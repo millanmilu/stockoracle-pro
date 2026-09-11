@@ -24,7 +24,7 @@ echo "Backend launched (PID: $BACKEND_PID). Logs: logs/backend.log"
 # 2. Launch Vite Frontend Dev Server
 echo "[2/2] Starting Frontend on http://localhost:5173 ..."
 cd "$PROJECT_DIR/frontend"
-nohup node node_modules/vite/bin/vite.js --host 0.0.0.0 --port 5173 </dev/null > "$PROJECT_DIR/logs/frontend.log" 2>&1 &
+nohup "$PROJECT_DIR/.bin/bin/node" node_modules/vite/bin/vite.js --host 0.0.0.0 --port 5173 </dev/null > "$PROJECT_DIR/logs/frontend.log" 2>&1 &
 FRONTEND_PID=$!
 disown $FRONTEND_PID
 echo "Frontend launched (PID: $FRONTEND_PID). Logs: logs/frontend.log"

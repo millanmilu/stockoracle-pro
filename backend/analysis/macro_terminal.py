@@ -11,6 +11,10 @@ logger = logging.getLogger("StockOracle.Analysis.MacroTerminal")
 def get_sovereign_macro_dashboard() -> Dict[str, Any]:
     """
     Returns comprehensive sovereign yields, RBI policy stance, inflation, and cross-asset correlations.
+
+    NOTE: All figures below are static reference values last updated manually.
+    Real-time integration with RBI, NSE, or a market-data vendor is required for live readings.
+    The ``data_notice`` field in the response makes this explicit to all consumers.
     """
     india_10y_yield = 7.02
     us_10y_yield = 4.24
@@ -46,14 +50,15 @@ def get_sovereign_macro_dashboard() -> Dict[str, Any]:
         {"period": "Jul 26", "india_10y": 7.02, "us_10y": 4.24, "spread_bps": 278},
     ]
 
-    # Major Benchmark Indices for Ribbon / Ticker Tape
+    # Major Benchmark Indices — status is STATIC (not live) until a real-time data
+    # integration is wired in. Consumers must not treat these as current market prices.
     indices = [
-        {"symbol": "NIFTY 50",    "name": "NSE Benchmark",     "price": 24852.40, "change_pct": 0.42,  "status": "LIVE"},
-        {"symbol": "SENSEX",      "name": "BSE Benchmark",     "price": 81340.20, "change_pct": 0.38,  "status": "LIVE"},
-        {"symbol": "BANK NIFTY",  "name": "Banking Index",     "price": 53210.50, "change_pct": 0.65,  "status": "LIVE"},
-        {"symbol": "INDIA VIX",   "name": "Volatility Index",  "price": 12.84,    "change_pct": -3.20, "status": "LIVE"},
-        {"symbol": "USD / INR",   "name": "Forex",             "price": 83.92,    "change_pct": -0.05, "status": "LIVE"},
-        {"symbol": "BRENT CRUDE", "name": "Commodity ($)",     "price": 78.45,    "change_pct": -1.15, "status": "LIVE"},
+        {"symbol": "NIFTY 50",    "name": "NSE Benchmark",     "price": 24852.40, "change_pct": 0.42,  "status": "STATIC"},
+        {"symbol": "SENSEX",      "name": "BSE Benchmark",     "price": 81340.20, "change_pct": 0.38,  "status": "STATIC"},
+        {"symbol": "BANK NIFTY",  "name": "Banking Index",     "price": 53210.50, "change_pct": 0.65,  "status": "STATIC"},
+        {"symbol": "INDIA VIX",   "name": "Volatility Index",  "price": 12.84,    "change_pct": -3.20, "status": "STATIC"},
+        {"symbol": "USD / INR",   "name": "Forex",             "price": 83.92,    "change_pct": -0.05, "status": "STATIC"},
+        {"symbol": "BRENT CRUDE", "name": "Commodity ($)",     "price": 78.45,    "change_pct": -1.15, "status": "STATIC"},
     ]
 
     return {
@@ -67,4 +72,10 @@ def get_sovereign_macro_dashboard() -> Dict[str, Any]:
         "correlations": correlations,
         "yield_curve_history": yield_curve_history,
         "indices": indices,
+        "data_notice": (
+            "Macro figures (sovereign yields, RBI repo rate, CPI, GDP growth) and index prices "
+            "are static reference values last updated manually. They are NOT real-time. "
+            "Live integration with RBI, NSE, or a market-data vendor is required for current readings."
+        ),
     }
+

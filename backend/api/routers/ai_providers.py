@@ -5,10 +5,12 @@ Provides endpoints for managing, testing, activating, and monitoring Multi-AI LL
 import os
 import logging
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Security
 from pydantic import BaseModel, Field
 
+from backend.shared.security import verify_api_key
 from backend.core.logging import get_logger
+
 from backend.data.database import (
     get_all_ai_providers_from_db,
     get_active_ai_provider_from_db,
@@ -120,7 +122,10 @@ def get_ai_providers():
 
 
 @router.post("/test")
-def test_provider_endpoint(req: AIProviderTestRequest):
+def test_provider_endpoint(
+    req: AIProviderTestRequest,
+    _auth: None = Security(verify_api_key),
+):
     """
     Runs a live, timed probe against the designated AI provider to verify latency & credentials.
     """
@@ -150,7 +155,10 @@ def test_provider_endpoint(req: AIProviderTestRequest):
 
 
 @router.post("/save")
-def save_provider_endpoint(req: AIProviderSaveRequest):
+def save_provider_endpoint(
+    req: AIProviderSaveRequest,
+    _auth: None = Security(verify_api_key),
+):
     """
     Encrypts and permanently stores provider credentials and preferred model in the database.
     """
@@ -202,7 +210,10 @@ def save_provider_endpoint(req: AIProviderSaveRequest):
 
 
 @router.post("/activate")
-def activate_provider_endpoint(req: AIProviderActivateRequest):
+def activate_provider_endpoint(
+    req: AIProviderActivateRequest,
+    _auth: None = Security(verify_api_key),
+):
     """
     Sets the active AI provider for the entire platform.
     """
@@ -221,7 +232,11 @@ def activate_provider_endpoint(req: AIProviderActivateRequest):
 
 
 @router.delete("/delete")
-def delete_provider_endpoint(req: AIProviderDeleteRequest):
+def delete_provider_endpoint(
+    req: AIProviderDeleteRequest,
+    _auth: None = Security(verify_api_key),
+):
+
     """
     Deletes the encrypted credentials and configuration for a provider from SQLite.
     """

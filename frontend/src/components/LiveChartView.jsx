@@ -20,7 +20,7 @@ export default function LiveChartView() {
   const wsLiveData = useStore(s => s.wsLiveData);
   const storeLiveTick = useStore(s => s.livePrices?.[selectedSymbol]);
 
-  const { fetchHistory, searchStocks } = useStock();
+  const { fetchHistory, searchStocks, preloadStock } = useStock();
 
   const [interval, setInterval] = useState('1d');
   const [candles, setCandles] = useState([]);
@@ -68,7 +68,8 @@ export default function LiveChartView() {
     spikeCountRef.current = 0;
 
     try {
-      const res = await fetchHistory(symbol, iv);
+      // Fetch full available history for the selected interval
+      const res = await fetchHistory(symbol, iv, 'ALL');
       const rawCandles = res?.candles || [];
       const source = res?.dataSource || 'angel_one';
       setDataSource(source);
@@ -306,12 +307,20 @@ export default function LiveChartView() {
     }
   }, []);
 
+  // Preload all timeframes and backfill DB for initial symbol
+  useEffect(() => {
+    if (selectedSymbol) {
+      preloadStock(selectedSymbol);
+    }
+  }, [selectedSymbol, preloadStock]);
+
   // 3. Toolbar Handlers
   const handleSelectSymbol = useCallback((sym) => {
     if (sym && sym !== selectedSymbol) {
+      preloadStock(sym);
       setSelectedSymbol(sym);
     }
-  }, [selectedSymbol, setSelectedSymbol]);
+  }, [selectedSymbol, setSelectedSymbol, preloadStock]);
 
   const handleIntervalChange = useCallback((iv) => {
     setInterval(iv);

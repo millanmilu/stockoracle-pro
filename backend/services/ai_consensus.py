@@ -12,6 +12,7 @@ import numpy as np
 
 from backend.data.fetcher import fetch_stock_data, fetch_company_info
 from backend.analysis.indicators import enrich_stock_dataframe
+from backend.api._guards import require_real_data
 
 logger = logging.getLogger("StockOracle.AIConsensus")
 
@@ -21,9 +22,13 @@ def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
     # 1. Fetch data & company info
     info = fetch_company_info(ticker)
     df = fetch_stock_data(ticker, period="3M", interval="1d")
+    if df is not None and not df.empty:
+        require_real_data(df, ticker, "ai-consensus")
     enriched = enrich_stock_dataframe(df) if df is not None and not df.empty else None
 
-    cur_price = info.get("current_price", 100.0) if info else 100.0
+    cur_price = info.get("current_price", 0.0) if info else 0.0
+    if not cur_price and enriched is not None and len(enriched) > 0:
+        cur_price = float(enriched.iloc[-1].get("close", 0.0))
     prev_close = info.get("previous_close", cur_price) if info else cur_price
     change_pct = ((cur_price - prev_close) / prev_close) * 100 if prev_close > 0 else 0.0
 
@@ -59,7 +64,14 @@ def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
         if macd_hist > 0:
             tech_score += 10
             tech_drivers.append("Positive MACD Momentum Histogram")
+        else:
+            tech_score -= 5
 
+        if adx > 25:
+            tech_score += 5
+            tech_drivers.append(f"Strong Trend Regime (ADX {adx:.1f})")
+
+        # 1-day momentum
         if change_pct > 1.0:
             tech_score += 10
         elif change_pct < -1.0:
@@ -69,7 +81,9 @@ def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
     tech_signal = "BUY" if tech_score >= 65 else ("SELL" if tech_score <= 40 else "HOLD")
 
     # ── Engine 2: Machine Learning Prediction Engine ──
-    ml_score = 52.0
+    ml_score = None
+    ml_signal = "UNAVAILABLE"
+    ml_available = False
     try:
         from backend.analysis.trainer import predict_future
         pred = predict_future(ticker)
@@ -83,12 +97,14 @@ def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
             ml_score = max(15.0, 45.0 - (pred_conf * 0.3) - (abs(pred_return) * 150))
         else:
             ml_score = 50.0 + (pred_return * 100)
+        ml_score = round(min(98.0, max(12.0, ml_score)), 1)
+        ml_signal = "BUY" if ml_score >= 62 else ("SELL" if ml_score <= 42 else "HOLD")
+        ml_available = True
     except Exception as exc:
-        logger.debug("ML consensus calculation fallback for %s: %s", ticker, exc)
-        ml_score = tech_score * 0.95
-
-    ml_score = round(min(98.0, max(12.0, ml_score)), 1)
-    ml_signal = "BUY" if ml_score >= 62 else ("SELL" if ml_score <= 42 else "HOLD")
+        logger.debug("ML consensus engine unavailable for %s (model not trained): %s", ticker, exc)
+        ml_score = None
+        ml_signal = "UNAVAILABLE"
+        ml_available = False
 
     # ── Engine 3: Fundamental & News Sentiment Engine ──
     fund_score = 55.0
@@ -111,23 +127,34 @@ def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
     fund_signal = "BUY" if fund_score >= 60 else ("SELL" if fund_score <= 45 else "HOLD")
 
     # ── Consensus Aggregation ──
-    consensus_score = round((tech_score * 0.40) + (ml_score * 0.35) + (fund_score * 0.25), 1)
+    # If ML model is not trained, dynamically reweight available engines honestly
+    if ml_available and ml_score is not None:
+        consensus_score = round((tech_score * 0.40) + (ml_score * 0.35) + (fund_score * 0.25), 1)
+        active_signals = [tech_signal, ml_signal, fund_signal]
+        total_engines = 3
+    else:
+        consensus_score = round((tech_score * 0.60) + (fund_score * 0.40), 1)
+        active_signals = [tech_signal, fund_signal]
+        total_engines = 2
 
-    buy_votes = sum(1 for s in [tech_signal, ml_signal, fund_signal] if s == "BUY")
-    sell_votes = sum(1 for s in [tech_signal, ml_signal, fund_signal] if s == "SELL")
+    buy_votes = sum(1 for s in active_signals if s == "BUY")
+    sell_votes = sum(1 for s in active_signals if s == "SELL")
 
-    if buy_votes == 3:
+    if buy_votes == total_engines:
         overall_signal = "STRONG BUY"
-        agreement = "3/3 Engines Agree (Bullish)"
-    elif buy_votes == 2:
+        agreement = f"{total_engines}/{total_engines} Active Engines Agree (Bullish)"
+    elif buy_votes >= 2:
         overall_signal = "BUY"
-        agreement = "2/3 Engines Agree (Bullish)"
+        agreement = f"{buy_votes}/{total_engines} Active Engines Agree (Bullish)"
+    elif sell_votes == total_engines:
+        overall_signal = "STRONG SELL"
+        agreement = f"{total_engines}/{total_engines} Active Engines Agree (Bearish)"
     elif sell_votes >= 2:
-        overall_signal = "STRONG SELL" if sell_votes == 3 else "SELL"
-        agreement = f"{sell_votes}/3 Engines Agree (Bearish)"
+        overall_signal = "SELL"
+        agreement = f"{sell_votes}/{total_engines} Active Engines Agree (Bearish)"
     else:
         overall_signal = "NEUTRAL / HOLD"
-        agreement = "Mixed Signals (Consolidation)"
+        agreement = f"Mixed Signals ({total_engines} Active Engines)"
 
     return {
         "ticker": ticker,
@@ -147,7 +174,9 @@ def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
                 "name": "XGBoost Probability Forecast",
                 "score": ml_score,
                 "signal": ml_signal,
+                "available": ml_available,
             },
+
             "fundamental": {
                 "name": "Fundamentals & Market Sentiment",
                 "score": fund_score,

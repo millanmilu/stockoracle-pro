@@ -15,8 +15,10 @@ import time
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
+from backend.api._guards import require_real_data
 
 logger = logging.getLogger("StockOracle.API.SentimentTA")
+
 
 router = APIRouter(prefix="/api", tags=["Sentiment & TA 2.0"])
 
@@ -326,8 +328,10 @@ async def get_sentiment_ta(ticker: str, period: Optional[str] = "3M"):
     # 1. Process Price Data & TA Indicators
     if isinstance(df_res, Exception) or df_res is None or df_res.empty:
         return {"error": f"No price data available for '{t}'", "ticker": t}
+    require_real_data(df_res, t, "sentiment-ta")
 
     df = df_res
+
     edf = enrich_stock_dataframe(df)
     last = edf.iloc[-1]
 

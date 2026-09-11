@@ -133,10 +133,18 @@ export function useStock() {
     } catch (_) { return { items: [] }; }
   }, []);
 
+  const preloadStock = useCallback(async (ticker) => {
+    if (!ticker) return;
+    try {
+      await api.post(`/api/stock/${ticker}/preload`);
+    } catch (_) {}
+  }, []);
+
   return {
     loading, error, historyError,
     fetchInfo, fetchHistory, fetchPredict, fetchMonteCarlo, fetchAnomalies,
     fetchScreener, fetchBacktest, fetchPatterns, fetchLevels, fetchVolatility,
     searchStock, searchStocks, fetchNews, startTraining, fetchTrainingStatus,
+    preloadStock,
   };
 }

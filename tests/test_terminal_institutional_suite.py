@@ -2,7 +2,9 @@
 StockOracle Pro — OpenBB & OpenTerminalUI Institutional Suite Regression Tests
 Verifies DCF Valuation, RRG Sector Rotation, Options Strategy Payoff, Volume Profile, Macro Hub, and Quant Risk.
 """
+from unittest.mock import patch
 import pytest
+import pandas as pd
 from fastapi.testclient import TestClient
 
 from backend.main import app
@@ -49,13 +51,34 @@ def test_options_strategy_payoff_and_vol_surface():
 
 
 def test_volume_profile_poc_and_value_area():
-    """Verifies Volume Profile (VPVR) price bins and POC calculation."""
-    vp = calculate_volume_profile("RELIANCE", period="1M", n_bins=20)
-    if "error" not in vp:
-        assert "poc_price" in vp
-        assert "vah_price" in vp
-        assert "val_price" in vp
-        assert len(vp["profile"]) == 20
+    """Verifies Volume Profile (VPVR) price bins and POC calculation deterministically."""
+    fixture_df = pd.DataFrame({
+        "open":   [100.0, 102.0, 101.0, 105.0, 108.0, 107.0, 110.0, 112.0, 115.0, 114.0, 116.0, 118.0],
+        "high":   [103.0, 104.0, 106.0, 109.0, 111.0, 112.0, 114.0, 116.0, 118.0, 117.0, 120.0, 122.0],
+        "low":    [99.0,  100.0, 100.0, 104.0, 106.0, 105.0, 109.0, 110.0, 113.0, 112.0, 115.0, 116.0],
+        "close":  [102.0, 101.0, 105.0, 108.0, 107.0, 110.0, 112.0, 115.0, 114.0, 116.0, 118.0, 120.0],
+        "volume": [10000, 15000, 12000, 25000, 30000, 20000, 18000, 22000, 28000, 16000, 19000, 24000],
+    })
+
+    n_bins = 20
+    with patch("backend.analysis.volume_profile.fetch_stock_data", return_value=fixture_df):
+        vp = calculate_volume_profile("RELIANCE", period="1M", n_bins=n_bins)
+
+    assert "error" not in vp, f"Unexpected error in volume profile: {vp.get('error')}"
+
+    # 1. The returned profile contains the requested number of bins
+    assert "profile" in vp
+    assert len(vp["profile"]) == n_bins
+
+    # 2. POC/VAH/VAL are numerically ordered: val_price <= poc_price <= vah_price
+    assert "val_price" in vp and "poc_price" in vp and "vah_price" in vp
+    assert vp["val_price"] <= vp["poc_price"] <= vp["vah_price"]
+
+    # 3. Total allocated profile volume equals fixture's volume (within expected rounding tolerance)
+    fixture_volume_total = fixture_df["volume"].sum()
+    profile_volume_total = sum(b["total_volume"] for b in vp["profile"])
+    assert abs(profile_volume_total - fixture_volume_total) <= n_bins
+    assert abs(vp["total_volume"] - fixture_volume_total) <= 1
 
 
 def test_sovereign_macro_dashboard():

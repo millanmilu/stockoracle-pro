@@ -146,12 +146,18 @@ def fetch_sentiment_and_headlines(symbol: str) -> dict:
         except Exception as e:
             logger.debug("Yahoo Finance RSS fetch failed for %s: %s", t, e)
 
-    # 3. Fallback headlines if feeds are completely empty/rate-limited
+    # If feeds are empty or rate-limited, return an honest empty state — never invent fake headlines
     if not headlines:
-        headlines = [
-            {"title": f"{t} trading in active range amid quarterly sector rebalancing and institutional flows.", "source": "Market Wire", "published": ""},
-            {"title": f"Analyst consensus remains focused on {t} earnings growth trajectory and margin delivery.", "source": "NSE Intelligence", "published": ""}
-        ]
+        result = {
+            "ticker": t,
+            "sentiment_score": None,
+            "headlines": [],
+            "structured_headlines": [],
+            "source_count": 0,
+            "status": "no_news_available",
+        }
+        _SENTIMENT_CACHE[t] = {"data": result, "timestamp": now}
+        return result
 
     # Score headlines
     titles = [h["title"] for h in headlines]
@@ -167,6 +173,7 @@ def fetch_sentiment_and_headlines(symbol: str) -> dict:
         "headlines": titles[:8],
         "structured_headlines": headlines[:8],
         "source_count": len(headlines),
+        "status": "available",
     }
 
     # Store in cache
@@ -175,7 +182,9 @@ def fetch_sentiment_and_headlines(symbol: str) -> dict:
 
 
 def fetch_and_score_sentiment(symbol: str) -> float:
-    """Legacy compatibility wrapper: returns just float score."""
+    """Legacy compatibility wrapper: returns float score or 0.0 if unavailable."""
     res = fetch_sentiment_and_headlines(symbol)
-    return res.get("sentiment_score", 0.0)
+    score = res.get("sentiment_score")
+    return float(score) if score is not None else 0.0
+
 

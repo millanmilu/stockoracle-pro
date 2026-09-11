@@ -1,23 +1,31 @@
 import os
 import numpy as np
 import pandas as pd
-import torch
-import torch.nn as nn
+try:
+    import torch
+    import torch.nn as nn
+    device = torch.device("cpu")
+    from backend.ml.lstm_model import BiLSTMWithAttention
+    from backend.ml.transformer_model import TransformerEncoderModel
+    TORCH_AVAILABLE = True
+except ImportError:
+    torch = None
+    nn = None
+    device = None
+    BiLSTMWithAttention = None
+    TransformerEncoderModel = None
+    TORCH_AVAILABLE = False
 from typing import Dict, Any, Tuple, List, Optional
 from sklearn.ensemble import GradientBoostingRegressor
 
 from backend.analysis.indicators import enrich_stock_dataframe
-from backend.ml.lstm_model import BiLSTMWithAttention
-from backend.ml.transformer_model import TransformerEncoderModel
 
 # Absolute path to the saved_models directory
 MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saved_models")
 
-# Device configuration (forces CPU-only to save resources on EC2)
-device = torch.device("cpu")
-
 # Number of features per timestep in the sequence
 N_FEATURES = 10
+
 
 class StockPredictor:
     def __init__(self, window_size: int = 20):
@@ -335,6 +343,8 @@ class StockPredictor:
             "upper_return":    expected_return + (1.96 * uncertainty),
             "lower_return":    expected_return - (1.96 * uncertainty),
             "confidence_std":  uncertainty,
+            "val_rmse":        val_rmse,
+            "val_mape":        checkpoint.get("val_mape"),
             "weights":         {"bilstm": round(w_lstm, 3), "transformer": round(w_trans, 3), "gbdt": round(w_gbdt, 3)},
             "individual_preds":{"bilstm": pred_lstm, "transformer": pred_trans, "gbdt": pred_gbdt}
         }
@@ -342,7 +352,7 @@ class StockPredictor:
     def predict(self, ticker: str, df: pd.DataFrame, current_price: Optional[float] = None) -> Dict[str, Any]:
         """
         Unified inference entry point for frontend consumption.
-        Tries saved neural ensemble model; if not yet trained, uses quantitative trend model fallback.
+        Tries saved neural ensemble model; if not yet trained, uses statistical trend heuristic fallback.
         """
         ticker = ticker.upper().strip()
         closes = df["close"].values.astype(float)
@@ -351,16 +361,27 @@ class StockPredictor:
         expected_ret = 0.0
         upper_ret = 0.02
         lower_ret = -0.02
-        model_name = "Quantitative Trend Model"
+        model_name = "Statistical Trend Heuristic (Uncalibrated)"
+        model_trained = False
+        val_mape = None
+        confidence_score = None
+        uncertainty = 0.02
+        weights = {"bilstm": 0.35, "transformer": 0.35, "gbdt": 0.30}
 
         try:
             details = self.load_and_predict(df, ticker, return_details=True)
             expected_ret = float(details["expected_return"])
             upper_ret = float(details["upper_return"])
             lower_ret = float(details["lower_return"])
+            uncertainty = float(details.get("confidence_std", 0.02))
+            val_mape = details.get("val_mape")
+            weights = details.get("weights", weights)
             model_name = "Tri-Model Ensemble (BiLSTM + Transformer + GBDT)"
+            model_trained = True
+            # Real confidence score derived strictly from model uncertainty vs reference scale
+            confidence_score = round(max(20.0, min(95.0, 100.0 * (1.0 - min(1.0, uncertainty / 0.10)))), 1)
         except Exception:
-            # High-fidelity statistical fallback: Exponential Weighted Moving Drift + RSI Mean Reversion
+            # Statistical fallback: Exponential Weighted Moving Drift + RSI Mean Reversion
             enriched = enrich_stock_dataframe(df)
             last = enriched.iloc[-1]
             rsi = float(last.get("rsi", 50.0))
@@ -384,6 +405,11 @@ class StockPredictor:
             expected_ret = drift
             upper_ret = drift + 1.96 * vol
             lower_ret = drift - 1.96 * vol
+            uncertainty = vol
+            model_name = "Statistical Trend Heuristic (Uncalibrated)"
+            model_trained = False
+            confidence_score = None  # No trained model to certify confidence score
+            val_mape = None          # No out-of-sample MAPE for heuristic
 
         # Calculate absolute price levels
         predicted_price = cur_price * (1.0 + expected_ret)
@@ -403,8 +429,6 @@ class StockPredictor:
         else:
             signal = "HOLD"
 
-        confidence_score = max(50.0, min(95.0, 75.0 + abs(pct_return) * 4.0))
-
         return {
             "ticker": ticker,
             "current_price": round(cur_price, 2),
@@ -416,14 +440,14 @@ class StockPredictor:
             "low_bound": round(low_bound, 2),
             "predicted_upper_price_7d": round(high_bound, 2),
             "predicted_lower_price_7d": round(low_bound, 2),
-            "confidence_score": round(confidence_score, 1),
-            "ai_confidence_score": round(confidence_score, 1),
+            "confidence_score": confidence_score,
+            "ai_confidence_score": confidence_score,
             "signal": signal,
             "model_type": model_name,
-            "model_trained": bool(model_name.startswith("Tri-Model")),
-            "model_weights": {"bilstm": 0.35, "transformer": 0.35, "gbdt": 0.30},
+            "model_trained": model_trained,
+            "model_weights": weights,
             "confidence_std": round(abs(upper_ret - lower_ret) / 3.92, 4),
-            "mape": round(abs(expected_ret) * 50.0 + 1.5, 2),
+            "mape": val_mape,
         }
 
 

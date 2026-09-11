@@ -1,31 +1,16 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Menu, Zap, Sun, Moon, Maximize2, Minimize2, Search, Bookmark, TrendingUp, TrendingDown } from 'lucide-react';
+import { Menu, Zap, Sun, Moon, Maximize2, Minimize2, Search, Bookmark, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
 import useStore from '../store/useStore';
 import api from '../utils/api';
 
-const DEFAULT_INDICES = [
-  { symbol: 'NIFTY 50', price: 24852.4, change_pct: 0.42 },
-  { symbol: 'SENSEX', price: 81340.2, change_pct: 0.38 },
-  { symbol: 'BANK NIFTY', price: 53210.5, change_pct: 0.65 },
-  { symbol: 'RELIANCE', price: 1317.0, change_pct: 0.36 },
-  { symbol: 'TCS', price: 2296.2, change_pct: 0.53 },
-  { symbol: 'HDFCBANK', price: 1642.5, change_pct: 0.85 },
-  { symbol: 'INFY', price: 1845.0, change_pct: -0.42 },
-  { symbol: 'ICICIBANK', price: 1198.0, change_pct: 1.12 },
-  { symbol: 'SBIN', price: 824.5, change_pct: 0.74 },
-  { symbol: 'BHARTIARTL', price: 1542.0, change_pct: 1.35 },
-  { symbol: 'ITC', price: 495.2, change_pct: -0.15 },
-  { symbol: 'WIPRO', price: 512.0, change_pct: 0.28 },
-  { symbol: 'INDIA VIX', price: 12.84, change_pct: -3.20 },
-  { symbol: 'USD / INR', price: 83.92, change_pct: -0.05 },
-  { symbol: 'BRENT CRUDE', price: 78.45, change_pct: -1.15 },
-];
+// No DEFAULT_INDICES — hardcoded prices must never be shown as if they were live market data.
 
 export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenCommandPalette }) {
   const selectedSymbol = useStore(s => s.selectedSymbol);
   const theme = useStore(s => s.theme);
   const setTheme = useStore(s => s.setTheme);
-  const [indices, setIndices] = useState(DEFAULT_INDICES);
+  const [indices, setIndices] = useState([]);
+  const [tapeUnavailable, setTapeUnavailable] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Search state
@@ -44,24 +29,22 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Fetch tape data
+  // Fetch tape data — never fall back to hardcoded prices
   useEffect(() => {
     const fetchTape = async () => {
       try {
         const { data } = await api.get('/api/terminal/ticker-tape');
         if (Array.isArray(data.indices) && data.indices.length > 0) {
-          const merged = data.indices.map((item, i) => {
-            const def = DEFAULT_INDICES.find(d => d.symbol === item.symbol) || DEFAULT_INDICES[i] || {};
-            return {
-              ...def,
-              ...item,
-              price: item.price != null && item.price > 0 ? item.price : def.price,
-              change_pct: item.change_pct != null ? item.change_pct : def.change_pct,
-            };
-          });
-          setIndices(merged);
+          setIndices(data.indices);
+          setTapeUnavailable(false);
+        } else {
+          setIndices([]);
+          setTapeUnavailable(true);
         }
-      } catch {}
+      } catch {
+        setIndices([]);
+        setTapeUnavailable(true);
+      }
     };
     fetchTape();
     const interval = setInterval(fetchTape, 25000);
@@ -103,7 +86,7 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
     setResults([]);
   };
 
-  const tapeItems = [...indices, ...indices];
+  const tapeItems = indices.length > 0 ? [...indices, ...indices] : [];
 
   return (
     <div
@@ -205,51 +188,69 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 20, background: 'linear-gradient(90deg, #050713, transparent)', zIndex: 2, pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 20, background: 'linear-gradient(270deg, #050713, transparent)', zIndex: 2, pointerEvents: 'none' }} />
 
-        <div className="topbar-marquee-track">
-          {tapeItems.map((item, idx) => {
-            const price = Number(item.price || 0);
-            const changePct = Number(item.change_pct || 0);
-            const isUp = changePct >= 0;
-            return (
-              <div
-                key={idx}
-                onClick={() => {
-                  if (item.symbol && !item.symbol.includes('/') && !item.symbol.includes('VIX') && !item.symbol.includes('CRUDE')) {
-                    useStore.getState().setSelectedSymbol(item.symbol.replace(/\s+/g, ''));
-                  }
-                }}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  padding: '0 14px',
-                  fontSize: '0.68rem',
-                  fontFamily: 'JetBrains Mono, monospace',
-                  borderRight: '1px solid rgba(255, 255, 255, 0.05)',
-                  cursor: 'pointer',
-                  userSelect: 'none'
-                }}
-              >
-                <span style={{ color: '#94A3B8', fontWeight: 600 }}>{item.symbol}</span>
-                <span style={{ fontWeight: 700, color: '#F1F5F9' }}>
-                  {price >= 100 ? price.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : price.toFixed(2)}
-                </span>
-                <span style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 2,
-                  color: isUp ? '#10B981' : '#EF4444',
-                  fontWeight: 700,
-                  fontSize: '0.63rem'
-                }}>
-                  {isUp ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
-                  {isUp ? '+' : ''}{changePct.toFixed(2)}%
-                </span>
-              </div>
-            );
-          })}
-        </div>
+        {tapeUnavailable || tapeItems.length === 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.66rem', fontFamily: 'JetBrains Mono, monospace', color: '#475569', paddingLeft: 8 }}>
+            <AlertCircle size={11} />
+            <span>Market data unavailable</span>
+          </div>
+        ) : (
+          <div className="topbar-marquee-track">
+            {tapeItems.map((item, idx) => {
+              const price = Number(item.price || 0);
+              const changePct = Number(item.change_pct || 0);
+              const isUp = changePct >= 0;
+              const isStatic = item.status === 'STATIC';
+              return (
+                <div
+                  key={idx}
+                  onClick={() => {
+                    if (item.symbol && !item.symbol.includes('/') && !item.symbol.includes('VIX') && !item.symbol.includes('CRUDE')) {
+                      useStore.getState().setSelectedSymbol(item.symbol.replace(/\s+/g, ''));
+                    }
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    padding: '0 14px',
+                    fontSize: '0.68rem',
+                    fontFamily: 'JetBrains Mono, monospace',
+                    borderRight: '1px solid rgba(255, 255, 255, 0.05)',
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    opacity: isStatic ? 0.55 : 1,
+                  }}
+                  title={isStatic ? 'Reference value — not real-time' : undefined}
+                >
+                  <span style={{ color: '#94A3B8', fontWeight: 600 }}>{item.symbol}</span>
+                  <span style={{ fontWeight: 700, color: isStatic ? '#64748B' : '#F1F5F9' }}>
+                    {price > 0
+                      ? (price >= 100 ? price.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : price.toFixed(2))
+                      : '—'}
+                  </span>
+                  {price > 0 && (
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 2,
+                      color: isUp ? '#10B981' : '#EF4444',
+                      fontWeight: 700,
+                      fontSize: '0.63rem'
+                    }}>
+                      {isUp ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
+                      {isUp ? '+' : ''}{changePct.toFixed(2)}%
+                    </span>
+                  )}
+                  {isStatic && (
+                    <span style={{ fontSize: '0.5rem', color: '#475569', fontWeight: 500 }}>REF</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
+
 
       {/* Right: Actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, position: 'relative', zIndex: 110 }}>
