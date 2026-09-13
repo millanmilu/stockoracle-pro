@@ -7,7 +7,7 @@ import ChartBottomStats from './chart/ChartBottomStats';
 import IndicatorModal from './chart/IndicatorModal';
 import OscillatorPane from './chart/OscillatorPane';
 import { DEFAULT_ACTIVE_INDICATORS } from './chart/indicatorDefinitions';
-import { toChartTime, getSessionBucketStart } from '../utils/chartHelpers';
+import { toChartTime, getSessionBucketStart, isCryptoSymbol, subscribeLiveTick } from '../utils/chartHelpers';
 
 /**
  * LiveChartView — Rebuilt Clean Master Controller
@@ -22,7 +22,14 @@ export default function LiveChartView() {
 
   const { fetchHistory, searchStocks, preloadStock } = useStock();
 
-  const [interval, setInterval] = useState('1d');
+  const selectedInterval = useStore(s => s.selectedInterval || '1m');
+  const setSelectedInterval = useStore(s => s.setSelectedInterval);
+
+  const [interval, setIntervalState] = useState(() => selectedInterval || '1m');
+  const setInterval = (newIv) => {
+    setIntervalState(newIv);
+    setSelectedInterval?.(newIv);
+  };
   const [candles, setCandles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -44,6 +51,12 @@ export default function LiveChartView() {
 
   const activeCandleRef = useRef(null);
   const chartCanvasRef = useRef(null);
+  // Latest-value refs so the live-tick listener NEVER needs re-subscription
+  // (ticks flow outside React renders — see processLiveTick below)
+  const intervalRef = useRef(interval);
+  const symbolRef = useRef(selectedSymbol);
+  const readyRef = useRef({ loading: true, hasCandles: false });
+  const pendingTickRef = useRef({ rafId: null, ltp: null });
   const rsiPaneRef = useRef(null);
   const macdPaneRef = useRef(null);
   const isSyncingRangeRef = useRef(false);
@@ -65,6 +78,7 @@ export default function LiveChartView() {
     setError(null);
     activeCandleRef.current = null;
     lastVerifiedPriceRef.current = null;
+    recentPricesRef.current = [];
     spikeCountRef.current = 0;
 
     try {
@@ -128,6 +142,7 @@ export default function LiveChartView() {
       if (deduplicated.length > 0) {
         const last = deduplicated[deduplicated.length - 1];
         lastVerifiedPriceRef.current = last.close;
+        recentPricesRef.current = [last.close];
         activeCandleRef.current = { ...last };
       }
     } catch (err) {
@@ -143,25 +158,142 @@ export default function LiveChartView() {
     loadHistory(selectedSymbol, interval);
   }, [selectedSymbol, interval, loadHistory]);
 
-  // 2. Real-Time Live Tick Processing & Smooth Active Candle Tracking
+  // Keep imperative refs in sync for the render-free tick path
   useEffect(() => {
-    if (!storeLiveTick || storeLiveTick.price == null) return;
-    const ltp = Number(storeLiveTick.price);
-    if (isNaN(ltp) || ltp <= 0) return;
+    intervalRef.current = interval;
+  }, [interval]);
+  useEffect(() => {
+    symbolRef.current = selectedSymbol;
+  }, [selectedSymbol]);
+  useEffect(() => {
+    readyRef.current = { loading, hasCandles: candles.length > 0 };
+  }, [loading, candles]);
 
-    // Do not process tick if historical data has not finished loading
-    if (loading || candles.length === 0) return;
+  // Applies a verified LTP to the ongoing active candle (or spawns a new
+  // session-bucket candle). Called at most once per animation frame from
+  // processLiveTick — this is the ONLY hot path, kept free of React state.
+  const applyTickToCandle = useCallback((ltp) => {
+    const interval = intervalRef.current;
+    const selectedSymbol = symbolRef.current;
+    const isIntraday = interval !== '1d';
+    const isCrypto = isCryptoSymbol(selectedSymbol);
+    const nowMs = Date.now();
 
-    // Verify tick belongs to currently selected symbol
-    if (storeLiveTick.ticker && selectedSymbol && storeLiveTick.ticker.toUpperCase() !== selectedSymbol.toUpperCase()) {
+    // IST Day of Week & Market Time Calculation
+    const istDate = new Date(nowMs + (5.5 * 3600 * 1000));
+    const istDayOfWeek = istDate.getUTCDay(); // 0 = Sunday, 6 = Saturday
+    const isWeekend = istDayOfWeek === 0 || istDayOfWeek === 6;
+
+    // Invariant: Weekend ticks must never generate artificial weekend candles (for NSE equities)
+    if (isWeekend && !isCrypto) {
       return;
     }
 
-    // Outlier Spike Protection: Ignore ticks deviating beyond an adaptive threshold
-    // from the verified reference price. Combines a 20% static floor with a
-    // rolling mean-absolute-deviation (MAD) measure of recent volatility so that
-    // genuine large moves in high-BW stocks are not silently dropped while
-    // fat-finger errors are still caught.
+    const istHours = istDate.getUTCHours();
+    const istMinutes = istDate.getUTCMinutes();
+    const istTimeMin = istHours * 60 + istMinutes;
+    const isMarketHours = istTimeMin >= 555 && istTimeMin <= 930; // 09:15 to 15:30 IST
+
+    // For intraday, ignore ticks outside continuous market hours to prevent isolated night bars (for NSE equities)
+    if (isIntraday && !isMarketHours && !isCrypto) {
+      return;
+    }
+
+    const storeLiveTick = useStore.getState().livePrices?.[selectedSymbol] || {};
+
+    // 1. Direct Live Exchange Candle (e.g. from Binance continuous kline stream).
+    // The incoming tick price always wins for close/high/low so sub-second
+    // aggTrade ticks move the candle fluidly between exchange kline updates.
+    if (storeLiveTick.liveCandle) {
+      const rawCandle = storeLiveTick.liveCandle;
+      const formattedTime = toChartTime(rawCandle.time, isIntraday);
+      if (formattedTime) {
+        const o = Number(rawCandle.open);
+        const c = ltp;
+        const liveCandle = {
+          ...rawCandle,
+          time: formattedTime,
+          open: o,
+          high: Math.max(Number(rawCandle.high), o, c),
+          low: Math.min(Number(rawCandle.low), o, c),
+          close: c,
+          volume: Number(rawCandle.volume || 0),
+        };
+        activeCandleRef.current = liveCandle;
+        chartCanvasRef.current?.updateActiveCandle(liveCandle);
+        return;
+      }
+    }
+
+    // 2. Synthetic Session Bucketing for Indian Equities / Generic Ticks
+    let currentBucketTime = null;
+    if (isIntraday) {
+      currentBucketTime = getSessionBucketStart(interval, nowMs, isCrypto);
+    } else {
+      // IST Market Date YYYY-MM-DD (or UTC for crypto)
+      currentBucketTime = isCrypto ? new Date(nowMs).toISOString().substring(0, 10) : istDate.toISOString().substring(0, 10);
+    }
+
+    let active = activeCandleRef.current;
+    const canUpdateCandle = isMarketHours || storeLiveTick.is_live || isCrypto;
+
+    // Check if ongoing active candle matches the current time bucket
+    if (active && active.time === currentBucketTime) {
+      // Only mutate ongoing active candle during live market hours, confirmed live ticks, or 24/7 crypto
+      if (canUpdateCandle) {
+        active.high = Math.max(Number(active.high), ltp);
+        active.low = Math.min(Number(active.low), ltp);
+        active.close = ltp;
+        chartCanvasRef.current?.updateActiveCandle(active);
+      }
+    } else if (currentBucketTime && canUpdateCandle) {
+      // Only spawn a NEW session candle during market hours with verified live ticks or 24/7 crypto
+      const isContinuation = active?.time && (
+        typeof active.time === 'number' && typeof currentBucketTime === 'number'
+          ? (currentBucketTime - active.time) <= 300
+          : active.time === currentBucketTime
+      );
+      const prevClose = (isContinuation && active?.close != null) ? Number(active.close) : null;
+      const openPrice = (!isIntraday && Number(storeLiveTick.open) > 0)
+        ? Number(storeLiveTick.open)
+        : (prevClose && !isNaN(prevClose) ? prevClose : ltp);
+      const highPrice = Math.max(openPrice, ltp);
+      const lowPrice = Math.min(openPrice, ltp);
+
+      const newCandle = {
+        time: currentBucketTime,
+        open: openPrice,
+        high: highPrice,
+        low: lowPrice,
+        close: ltp,
+        volume: (!isIntraday && Number(storeLiveTick.volume) > 0) ? Number(storeLiveTick.volume) : 0,
+      };
+      activeCandleRef.current = newCandle;
+      chartCanvasRef.current?.updateActiveCandle(newCandle);
+    }
+  }, []);
+
+  // 2. Real-Time Live Tick Processing — render-free path.
+  // Ticks arrive via the 60-FPS live tick bus (emitLiveTick) and are applied
+  // directly to the chart through imperative refs. React state is NOT touched
+  // per tick: pending ticks are coalesced to one update per animation frame,
+  // so bursts of ticks can never cause render jank.
+  const processLiveTick = useCallback((tick) => {
+    if (!tick || tick.price == null) return;
+    const ltp = Number(tick.price);
+    if (isNaN(ltp) || ltp <= 0) return;
+
+    // Verify tick belongs to currently selected symbol
+    const sym = symbolRef.current;
+    if (tick.ticker && sym && String(tick.ticker).toUpperCase() !== String(sym).toUpperCase()) return;
+
+    // Do not process ticks until historical data has finished loading
+    if (readyRef.current.loading || !readyRef.current.hasCandles) return;
+
+    // Outlier Spike Protection: ignore ticks deviating beyond an adaptive
+    // threshold from the verified reference price. 20% static floor combined
+    // with a rolling mean-absolute-deviation measure so genuine large moves in
+    // high-beta stocks are kept while fat-finger errors are caught.
     const refPrice = lastVerifiedPriceRef.current || ltp;
     const staticThreshold = 0.20;
     let adaptiveThreshold = 0.05;
@@ -180,74 +312,33 @@ export default function LiveChartView() {
       }
     }
     spikeCountRef.current = 0;
-    // Maintain rolling window for adaptive threshold
     recentPricesRef.current.push(ltp);
     if (recentPricesRef.current.length > 20) {
       recentPricesRef.current.shift();
     }
     lastVerifiedPriceRef.current = ltp;
 
-    const isIntraday = interval !== '1d';
-    const nowMs = Date.now();
-
-    // IST Day of Week & Market Time Calculation
-    const istDate = new Date(nowMs + (5.5 * 3600 * 1000));
-    const istDayOfWeek = istDate.getUTCDay(); // 0 = Sunday, 6 = Saturday
-    const isWeekend = istDayOfWeek === 0 || istDayOfWeek === 6;
-
-    // Invariant: Weekend ticks must never generate artificial weekend candles
-    if (isWeekend) {
-      return;
+    // Coalesce ticks: apply at most one candle update per animation frame
+    pendingTickRef.current.ltp = ltp;
+    if (pendingTickRef.current.rafId == null) {
+      pendingTickRef.current.rafId = requestAnimationFrame(() => {
+        pendingTickRef.current.rafId = null;
+        applyTickToCandle(pendingTickRef.current.ltp);
+      });
     }
+  }, [applyTickToCandle]);
 
-    const istHours = istDate.getUTCHours();
-    const istMinutes = istDate.getUTCMinutes();
-    const istTimeMin = istHours * 60 + istMinutes;
-    const isMarketHours = istTimeMin >= 555 && istTimeMin <= 930; // 09:15 to 15:30 IST
-
-    // For intraday, ignore ticks outside continuous market hours to prevent isolated night bars
-    if (isIntraday && !isMarketHours) {
-      return;
-    }
-
-    // Determine current interval candle timestamp
-    let currentBucketTime = null;
-    if (isIntraday) {
-      currentBucketTime = getSessionBucketStart(interval, nowMs);
-    } else {
-      // IST Market Date YYYY-MM-DD
-      currentBucketTime = istDate.toISOString().substring(0, 10);
-    }
-
-    let active = activeCandleRef.current;
-
-    // Check if ongoing active candle matches the current time bucket
-    if (active && active.time === currentBucketTime) {
-      // Only mutate ongoing active candle during live market hours or confirmed live ticks
-      if (isMarketHours || storeLiveTick.is_live) {
-        active.high = Math.max(Number(active.high), ltp);
-        active.low = Math.min(Number(active.low), ltp);
-        active.close = ltp;
-        chartCanvasRef.current?.updateActiveCandle(active);
+  // Subscribe once — refs above keep the handler fresh without re-subscribing
+  useEffect(() => {
+    const unsub = subscribeLiveTick(processLiveTick);
+    return () => {
+      unsub();
+      if (pendingTickRef.current.rafId != null) {
+        cancelAnimationFrame(pendingTickRef.current.rafId);
+        pendingTickRef.current.rafId = null;
       }
-    } else if (currentBucketTime && (isMarketHours || storeLiveTick.is_live)) {
-      // Only spawn a NEW session candle during market hours with verified live ticks
-      const openPrice = (!isIntraday && Number(storeLiveTick.open) > 0) ? Number(storeLiveTick.open) : ltp;
-      const highPrice = (!isIntraday && Number(storeLiveTick.high) > 0) ? Math.max(Number(storeLiveTick.high), ltp) : ltp;
-      const lowPrice = (!isIntraday && Number(storeLiveTick.low) > 0) ? Math.min(Number(storeLiveTick.low), ltp) : ltp;
-
-      const newCandle = {
-        time: currentBucketTime,
-        open: openPrice,
-        high: highPrice,
-        low: lowPrice,
-        close: ltp,
-        volume: (!isIntraday && Number(storeLiveTick.volume) > 0) ? Number(storeLiveTick.volume) : 0,
-      };
-      activeCandleRef.current = newCandle;
-      chartCanvasRef.current?.updateActiveCandle(newCandle);
-    }
-  }, [storeLiveTick, interval, loading, candles, selectedSymbol]);
+    };
+  }, [processLiveTick]);
 
   // Indicator Handlers
   const handleToggleIndicator = useCallback((id) => {
@@ -379,6 +470,9 @@ export default function LiveChartView() {
         searchStocks={searchStocks}
         activeIndicatorCount={activeIndicators.length}
         onOpenIndicators={() => setShowIndicatorModal(true)}
+        livePrice={curPrice}
+        liveChange={dayChange}
+        isLive={isLive}
       />
 
       {/* 2. Main Chart Viewport Area */}
@@ -487,6 +581,7 @@ export default function LiveChartView() {
         activeCandleRef={activeCandleRef}
         interval={interval}
         dataSource={dataSource}
+        selectedSymbol={selectedSymbol}
       />
 
       {/* 4. Indicator Library Modal */}

@@ -1,8 +1,9 @@
 import React from 'react';
+import { isCryptoSymbol } from '../../utils/chartHelpers';
 
 /**
  * ChartBottomStats — Bottom Session Summary Bar
- * Displays live NSE status, LTP, session O/H/L bounds, change %, and total traded volume.
+ * Displays live session status, LTP, session O/H/L bounds, change %, and total traded volume.
  */
 export default function ChartBottomStats({
   isLive = false,
@@ -12,7 +13,10 @@ export default function ChartBottomStats({
   activeCandleRef,
   interval = '1d',
   dataSource = 'angel_one',
+  selectedSymbol = '',
 }) {
+  const isCrypto = isCryptoSymbol(selectedSymbol);
+  const currSym = isCrypto ? '$' : '₹';
   // Extract session stats from active candle or historical candles
   const stats = React.useMemo(() => {
     let open = null;
@@ -110,14 +114,14 @@ export default function ChartBottomStats({
               boxShadow: isLive ? '0 0 6px #10B981' : 'none',
             }}
           />
-          {isLive ? 'LIVE NSE' : (interval === '1d' ? 'DAILY' : 'INTRADAY')}
+          {isLive ? (isCrypto ? 'LIVE 24/7' : 'LIVE NSE') : (interval === '1d' ? 'DAILY' : 'INTRADAY')}
         </span>
 
         {/* Real-time LTP */}
         <span>
           LTP:{' '}
           <strong style={{ color: '#FFFFFF', fontSize: '0.76rem' }}>
-            {numLtp != null ? `₹${numLtp.toFixed(2)}` : '—'}
+            {numLtp != null ? `${currSym}${numLtp.toFixed(2)}` : '—'}
           </strong>
         </span>
 
@@ -134,17 +138,17 @@ export default function ChartBottomStats({
         {/* Open, High, Low */}
         {stats.open != null && (
           <span style={{ color: '#64748B' }}>
-            O: <strong style={{ color: '#CBD5E1' }}>₹{stats.open.toFixed(2)}</strong>
+            O: <strong style={{ color: '#CBD5E1' }}>{currSym}{stats.open.toFixed(2)}</strong>
           </span>
         )}
         {stats.high != null && (
           <span style={{ color: '#64748B' }}>
-            H: <strong style={{ color: '#10B981' }}>₹{stats.high.toFixed(2)}</strong>
+            H: <strong style={{ color: '#10B981' }}>{currSym}{stats.high.toFixed(2)}</strong>
           </span>
         )}
         {stats.low != null && (
           <span style={{ color: '#64748B' }}>
-            L: <strong style={{ color: '#EF5350' }}>₹{stats.low.toFixed(2)}</strong>
+            L: <strong style={{ color: '#EF5350' }}>{currSym}{stats.low.toFixed(2)}</strong>
           </span>
         )}
       </div>

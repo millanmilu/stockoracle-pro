@@ -5,13 +5,24 @@ const useStore = create(
   persist(
     (set, get) => ({
       // ── Navigation ──────────────────────────────────────────────────────────
-      selectedSymbol: 'RELIANCE',
+      selectedSymbol: 'BTC',
+      selectedInterval: '1m',
       predictionData: null,
       trainingStatus: null,
       theme: 'dark',
       activeView: 'Live Chart',
 
       setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
+      setSelectedInterval: (iv) =>
+        set((s) => {
+          const updatedPrices = { ...s.livePrices };
+          Object.keys(updatedPrices).forEach((k) => {
+            if (updatedPrices[k]) {
+              updatedPrices[k] = { ...updatedPrices[k], liveCandle: undefined };
+            }
+          });
+          return { selectedInterval: iv, livePrices: updatedPrices };
+        }),
       setPredictionData: (data)   => set({ predictionData: data }),
       setTrainingStatus: (status) => set({ trainingStatus: status }),
       setTheme: (theme) => {
@@ -33,7 +44,20 @@ const useStore = create(
       setWsLiveData: (val) => set({ wsLiveData: val }),
       livePrices: {},   // { RELIANCE: { price: 1420, change_pct: 0.5 } }
       setLivePrice: (ticker, payload) =>
-        set((s) => ({ livePrices: { ...s.livePrices, [ticker]: payload } })),
+        set((s) => {
+          const prev = s.livePrices[ticker] || {};
+          const liveCandle = payload.liveCandle !== undefined ? payload.liveCandle : prev.liveCandle;
+          return {
+            livePrices: {
+              ...s.livePrices,
+              [ticker]: {
+                ...prev,
+                ...payload,
+                liveCandle,
+              },
+            },
+          };
+        }),
 
       // ── Price Alerts ────────────────────────────────────────────────────────
       priceAlerts: [],  // [{ id, ticker, condition: 'above'|'below', threshold }]

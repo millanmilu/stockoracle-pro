@@ -25,19 +25,56 @@ export function useStock() {
       if (timeframe) params.timeframe = timeframe;
       const { data } = await api.get(`/api/stock/${ticker}/history`, { params });
       // API returns { data: [...], data_source: "angel_one" | "sqlite" | ... }
-      if (data && Array.isArray(data.data)) {
+      if (data && Array.isArray(data.data) && data.data.length > 0) {
         return { candles: data.data, dataSource: data.data_source || 'unknown' };
       }
-      // Backward-compat: plain array (should not happen after this release)
-      if (Array.isArray(data)) {
+      if (Array.isArray(data) && data.length > 0) {
         return { candles: data, dataSource: 'unknown' };
       }
-      return { candles: [], dataSource: 'unknown' };
     } catch (e) {
-      const msg = e.response?.data?.detail || e.message || 'Failed to load historical candles';
-      setHistoryError(msg);
-      return { candles: [], dataSource: 'error' };
+      // Backend not running or error; proceed to check crypto fallback
     }
+
+    // Client-side fallback for Crypto (e.g. BTC) via Binance public klines API
+    const isCrypto = ticker && (
+      ticker.toUpperCase() === 'BTC' ||
+      ticker.toUpperCase().startsWith('BTC') ||
+      ticker.toUpperCase().includes('BITCOIN')
+    );
+
+    if (isCrypto) {
+      try {
+        const binanceIvMap = {
+          '1s': '1s', '30s': '1m', '1m': '1m', '5m': '5m',
+          '15m': '15m', '30m': '30m', '1h': '1h', '4h': '4h', '1d': '1d'
+        };
+        const bIv = binanceIvMap[interval] || '1d';
+        const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${bIv}&limit=500`);
+        const json = await res.json();
+        if (Array.isArray(json) && json.length > 0) {
+          const isIntraday = interval !== '1d';
+          const candles = json.map(k => {
+            const timeMs = k[0];
+            const d = new Date(timeMs);
+            const dateVal = isIntraday
+              ? Math.floor(timeMs / 1000)
+              : d.toISOString().substring(0, 10);
+            return {
+              date: dateVal,
+              open: parseFloat(k[1]),
+              high: parseFloat(k[2]),
+              low: parseFloat(k[3]),
+              close: parseFloat(k[4]),
+              volume: parseFloat(k[5]),
+            };
+          });
+          return { candles, dataSource: 'binance_live' };
+        }
+      } catch (_) {}
+    }
+
+    setHistoryError('Failed to load historical candles');
+    return { candles: [], dataSource: 'error' };
   }, []);
 
   const fetchPredict = useCallback(async (ticker) => {

@@ -522,35 +522,38 @@ def save_stock_universe(records: list[dict]):
     ]
     with get_db_session() as session:
         dialect = session.bind.dialect.name if session.bind else "sqlite"
-        if dialect == "sqlite":
-            stmt = sqlite_insert(StockUniverse).values(rows)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["ticker"],
-                set_={
-                    "name": stmt.excluded.name,
-                    "symbol": stmt.excluded.symbol,
-                    "token": stmt.excluded.token,
-                    "exchange": stmt.excluded.exchange,
-                    "updated_at": stmt.excluded.updated_at,
-                }
-            )
-            session.execute(stmt)
-        elif dialect == "postgresql":
-            stmt = pg_insert(StockUniverse).values(rows)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["ticker"],
-                set_={
-                    "name": stmt.excluded.name,
-                    "symbol": stmt.excluded.symbol,
-                    "token": stmt.excluded.token,
-                    "exchange": stmt.excluded.exchange,
-                    "updated_at": stmt.excluded.updated_at,
-                }
-            )
-            session.execute(stmt)
-        else:
-            for r in rows:
-                session.merge(StockUniverse(**r))
+        chunk_size = 500
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i:i + chunk_size]
+            if dialect == "sqlite":
+                stmt = sqlite_insert(StockUniverse).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["ticker"],
+                    set_={
+                        "name": stmt.excluded.name,
+                        "symbol": stmt.excluded.symbol,
+                        "token": stmt.excluded.token,
+                        "exchange": stmt.excluded.exchange,
+                        "updated_at": stmt.excluded.updated_at,
+                    }
+                )
+                session.execute(stmt)
+            elif dialect == "postgresql":
+                stmt = pg_insert(StockUniverse).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["ticker"],
+                    set_={
+                        "name": stmt.excluded.name,
+                        "symbol": stmt.excluded.symbol,
+                        "token": stmt.excluded.token,
+                        "exchange": stmt.excluded.exchange,
+                        "updated_at": stmt.excluded.updated_at,
+                    }
+                )
+                session.execute(stmt)
+            else:
+                for r in chunk:
+                    session.merge(StockUniverse(**r))
 
 
 POPULAR_NSE_FALLBACKS = [

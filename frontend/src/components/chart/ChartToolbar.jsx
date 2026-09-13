@@ -1,18 +1,49 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, X, Clock, Maximize2, Minimize2, RotateCcw, Activity } from 'lucide-react';
-import { INTERVALS, POPULAR_STOCKS } from '../../utils/chartHelpers';
+import { INTERVALS, POPULAR_STOCKS, isCryptoSymbol } from '../../utils/chartHelpers';
 
 /**
  * Real-time Candle Countdown Hook
- * Calculates exact time remaining until active candle closes, anchored to NSE 09:15 IST.
+ * Calculates exact time remaining until active candle closes, anchored to NSE 09:15 IST
+ * or 24/7 continuous session for Cryptocurrencies.
  * Updates accurately every 1000ms.
  */
-function useCandleCountdown(interval) {
+function useCandleCountdown(interval, selectedSymbol) {
   const [remaining, setRemaining] = useState({ text: '--:--', isLive: false });
 
   useEffect(() => {
     function tick() {
       const nowMs = Date.now();
+      const isCrypto = isCryptoSymbol(selectedSymbol);
+
+      if (isCrypto) {
+        if (interval === '1d') {
+          const secInDay = Math.floor(nowMs / 1000) % 86400;
+          const diffSec = 86400 - secInDay;
+          const h = Math.floor(diffSec / 3600);
+          const m = Math.floor((diffSec % 3600) / 60);
+          const s = diffSec % 60;
+          setRemaining({
+            text: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+            isLive: true,
+          });
+          return;
+        }
+        const bucketSizes = {
+          '1s': 1, '30s': 30, '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400
+        };
+        const bSec = bucketSizes[interval] || 60;
+        const nowSec = Math.floor(nowMs / 1000);
+        const diffSec = bSec - (nowSec % bSec);
+        const m = Math.floor(diffSec / 60);
+        const s = diffSec % 60;
+        const formatted = diffSec >= 3600
+          ? `${String(Math.floor(diffSec / 3600)).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+          : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        setRemaining({ text: formatted, isLive: true });
+        return;
+      }
+
       const istDate = new Date(nowMs + 5.5 * 3600 * 1000);
       const istDayOfWeek = istDate.getUTCDay(); // 0=Sun, 6=Sat
       const isWeekend = istDayOfWeek === 0 || istDayOfWeek === 6;
@@ -114,8 +145,11 @@ export default function ChartToolbar({
   searchStocks = null,
   activeIndicatorCount = 0,
   onOpenIndicators = () => {},
+  livePrice = null,
+  liveChange = null,
+  isLive = false,
 }) {
-  const countdown = useCandleCountdown(interval);
+  const countdown = useCandleCountdown(interval, selectedSymbol);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -193,7 +227,9 @@ export default function ChartToolbar({
             title="Search Stock (NSE)"
           >
             <Search size={13} style={{ color: '#818CF8' }} />
-            <span>{selectedSymbol || 'STOCK'}</span>
+            <span style={{ color: selectedSymbol === 'BTC' ? '#F59E0B' : '#FFFFFF' }}>
+              {selectedSymbol === 'BTC' ? '₿ BTC / USD' : (selectedSymbol || 'STOCK')}
+            </span>
             <span style={{ fontSize: '0.65rem', color: '#94A3B8' }}>▾</span>
           </button>
 
@@ -219,7 +255,7 @@ export default function ChartToolbar({
                 <input
                   ref={searchInputRef}
                   type="text"
-                  placeholder="Search NSE stock (e.g. RELIANCE, TCS)..."
+                  placeholder="Search stock or crypto (e.g. BTC, RELIANCE)..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   style={{
@@ -304,7 +340,7 @@ export default function ChartToolbar({
                 {(!searchQuery.trim() || (!isSearching && searchResults.length === 0)) && (
                   <div>
                     <div style={{ fontSize: '0.62rem', color: '#64748B', fontWeight: 700, padding: '4px 8px', letterSpacing: '0.05em' }}>
-                      POPULAR NSE TICKERS
+                      POPULAR WATCHLIST
                     </div>
                     {POPULAR_STOCKS
                       .filter((s) => !searchQuery || s.toLowerCase().includes(searchQuery.toLowerCase()))
@@ -320,18 +356,28 @@ export default function ChartToolbar({
                             borderRadius: 4,
                             fontSize: '0.74rem',
                             fontWeight: 700,
-                            color: selectedSymbol === sym ? '#818CF8' : '#E2E8F0',
-                            backgroundColor: selectedSymbol === sym ? 'rgba(99,102,241,0.2)' : 'transparent',
+                            color: selectedSymbol === sym ? (sym === 'BTC' ? '#F59E0B' : '#818CF8') : '#E2E8F0',
+                            backgroundColor: selectedSymbol === sym ? (sym === 'BTC' ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.2)') : 'transparent',
                             cursor: 'pointer',
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
                           }}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.12)'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === sym ? 'rgba(99,102,241,0.2)' : 'transparent'}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = sym === 'BTC' ? 'rgba(245,158,11,0.15)' : 'rgba(99,102,241,0.12)'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === sym ? (sym === 'BTC' ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.2)') : 'transparent'}
                         >
-                          <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{sym}</span>
-                          <span style={{ fontSize: '0.62rem', color: '#64748B' }}>NSE</span>
+                          <span style={{ fontFamily: 'JetBrains Mono, monospace', color: sym === 'BTC' ? '#F59E0B' : undefined }}>
+                            {sym === 'BTC' ? '₿ BTC / USD' : sym}
+                          </span>
+                          <span style={{
+                            fontSize: '0.62rem',
+                            padding: '1px 5px',
+                            borderRadius: 3,
+                            background: sym === 'BTC' ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.06)',
+                            color: sym === 'BTC' ? '#F59E0B' : '#64748B'
+                          }}>
+                            {sym === 'BTC' ? 'CRYPTO' : 'NSE'}
+                          </span>
                         </div>
                       ))}
                   </div>
@@ -343,40 +389,89 @@ export default function ChartToolbar({
 
         <div style={{ width: 1, height: 16, background: 'rgba(255,255,255,0.12)' }} />
 
-        {/* Timeframe Interval Dropdown */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          background: 'rgba(99, 102, 241, 0.1)',
-          border: '1px solid rgba(99, 102, 241, 0.3)',
-          borderRadius: 5,
-          padding: '2px 7px',
-          height: 25,
-        }}>
-          <Clock size={12} style={{ color: '#818CF8', flexShrink: 0 }} />
-          <select
-            value={interval}
-            onChange={(e) => onIntervalChange(e.target.value)}
-            style={{
-              background: 'transparent',
-              color: '#818CF8',
-              border: 'none',
-              fontSize: '0.72rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-              outline: 'none',
-              fontFamily: 'JetBrains Mono, monospace',
-              padding: 0,
-            }}
-            title="All Resolutions Dropdown"
-          >
-            {INTERVALS.map(iv => (
-              <option key={iv.value} value={iv.value} style={{ background: '#0B0F1C', color: '#E2E8F0' }}>
-                {iv.label}
-              </option>
-            ))}
-          </select>
+        {/* Quick Timeframe Chips + Dropdown */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          {[
+            { label: '⚡1s', value: '1s', title: '1-Second Live Candles (Instant formation)' },
+            { label: '1m', value: '1m', title: '1-Minute Candles' },
+            { label: '5m', value: '5m', title: '5-Minute Candles' },
+            { label: '15m', value: '15m', title: '15-Minute Candles' },
+            { label: '1H', value: '1h', title: '1-Hour Candles' },
+            { label: '1D', value: '1d', title: 'Daily Candles' },
+          ].map(chip => (
+            <button
+              key={chip.value}
+              onClick={() => onIntervalChange(chip.value)}
+              title={chip.title}
+              style={{
+                background: interval === chip.value
+                  ? (chip.value === '1s' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(99, 102, 241, 0.28)')
+                  : 'transparent',
+                border: interval === chip.value
+                  ? (chip.value === '1s' ? '1px solid rgba(245, 158, 11, 0.6)' : '1px solid rgba(99, 102, 241, 0.6)')
+                  : '1px solid transparent',
+                borderRadius: 4,
+                padding: '2px 6px',
+                fontSize: '0.72rem',
+                fontWeight: interval === chip.value ? 800 : 600,
+                color: interval === chip.value
+                  ? (chip.value === '1s' ? '#FBBF24' : '#A5B4FC')
+                  : '#94A3B8',
+                cursor: 'pointer',
+                fontFamily: 'JetBrains Mono, monospace',
+                transition: 'all 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                if (interval !== chip.value) {
+                  e.currentTarget.style.backgroundColor = 'rgba(255, 255, 255, 0.06)';
+                  e.currentTarget.style.color = '#E2E8F0';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (interval !== chip.value) {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.color = '#94A3B8';
+                }
+              }}
+            >
+              {chip.label}
+            </button>
+          ))}
+
+          {/* Timeframe Interval Dropdown for remaining resolutions */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(99, 102, 241, 0.2)',
+            borderRadius: 4,
+            padding: '2px 4px',
+            height: 24,
+          }}>
+            <select
+              value={interval}
+              onChange={(e) => onIntervalChange(e.target.value)}
+              style={{
+                background: 'transparent',
+                color: '#818CF8',
+                border: 'none',
+                fontSize: '0.68rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                outline: 'none',
+                fontFamily: 'JetBrains Mono, monospace',
+                padding: 0,
+              }}
+              title="More Timeframes"
+            >
+              {INTERVALS.map(iv => (
+                <option key={iv.value} value={iv.value} style={{ background: '#0B0F1C', color: '#E2E8F0' }}>
+                  {iv.label}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Real-Time Candle Countdown Timer Badge */}
@@ -454,12 +549,50 @@ export default function ChartToolbar({
         </button>
       </div>
 
-      {/* Right: Reset Zoom, Fullscreen */}
+      {/* Right: Live Stream Badge, Reset Zoom, Fullscreen */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        {/* Reset Zoom / Auto Fit */}
+        {/* Live Stream Pulse Badge */}
+        <div
+          title={isLive ? "Continuous real-time market WebSocket feed active" : "Waiting for live feed..."}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            background: isLive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(100, 116, 139, 0.12)',
+            border: `1px solid ${isLive ? 'rgba(16, 185, 129, 0.4)' : 'rgba(100, 116, 139, 0.25)'}`,
+            borderRadius: 4,
+            padding: '2px 7px',
+            height: 24,
+            fontSize: '0.68rem',
+            fontWeight: 800,
+            fontFamily: 'JetBrains Mono, monospace',
+            color: isLive ? '#34D399' : '#94A3B8',
+            letterSpacing: '0.04em',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            backgroundColor: isLive ? '#10B981' : '#64748B',
+            boxShadow: isLive ? '0 0 6px rgba(16, 185, 129, 0.85)' : 'none',
+            display: 'inline-block',
+          }} />
+          <span>{isLive ? 'LIVE' : 'IDLE'}</span>
+          {livePrice != null && (
+            <span style={{ color: '#F1F5F9', fontWeight: 800, marginLeft: 2 }}>
+              {isCryptoSymbol(selectedSymbol)
+                ? `$${Number(livePrice).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : `₹${Number(livePrice).toFixed(2)}`}
+            </span>
+          )}
+        </div>
+
+        {/* Reset Zoom / Focus Latest Bars */}
         <button
           onClick={onResetZoom}
-          title="Reset Zoom / Fit Content"
+          title="Focus Latest Candles"
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -475,7 +608,7 @@ export default function ChartToolbar({
           }}
         >
           <RotateCcw size={12} style={{ color: '#818CF8' }} />
-          <span>Reset Zoom</span>
+          <span>Focus</span>
         </button>
 
         {/* Fullscreen Toggle */}

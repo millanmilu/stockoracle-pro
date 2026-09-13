@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useMemo } from 'react';
 import { createChart, CrosshairMode } from 'lightweight-charts';
 import { Eye, EyeOff, X } from 'lucide-react';
-import { CHART_OPTIONS, CANDLE_STYLE } from '../../utils/chartHelpers';
+import { CHART_OPTIONS, CANDLE_STYLE, isCryptoSymbol, subscribeLiveTick } from '../../utils/chartHelpers';
 import { INDICATOR_DEFINITIONS } from './indicatorDefinitions';
 
 /**
@@ -18,12 +18,12 @@ function formatVolume(vol) {
 /**
  * Format indicator value for display in the legend badge
  */
-function formatIndicatorValue(def, candle) {
+function formatIndicatorValue(def, candle, currSym = '₹') {
   if (!candle || !def) return '—';
   if (def.type === 'overlay') {
     const val = candle[def.field];
     if (val == null || isNaN(Number(val))) return '—';
-    return `₹${Number(val).toFixed(2)}`;
+    return `${currSym}${Number(val).toFixed(2)}`;
   }
   if (def.type === 'overlay_multi') {
     if (def.subLines && def.subLines.length >= 3) {
@@ -96,6 +96,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     candlesRef.current = candles;
   }, [candles]);
 
+
   // Filter active indicators to only include overlays (not oscillators like RSI/MACD which live in sub-panes)
   const overlayIndicators = useMemo(() => {
     return activeIndicators
@@ -104,6 +105,9 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   }, [activeIndicators]);
 
   // Update top-left legend in DOM at 0ms latency
+  const isCrypto = isCryptoSymbol(selectedSymbol);
+  const currSym = isCrypto ? '$' : '₹';
+
   const updateLegend = useCallback((candle) => {
     if (!candle) return;
     const o = Number(candle.open);
@@ -112,17 +116,17 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     const c = Number(candle.close);
     const v = Number(candle.volume || 0);
 
-    if (openRef.current && !isNaN(o)) openRef.current.textContent = `₹${o.toFixed(2)}`;
-    if (highRef.current && !isNaN(h)) highRef.current.textContent = `₹${h.toFixed(2)}`;
-    if (lowRef.current && !isNaN(l)) lowRef.current.textContent = `₹${l.toFixed(2)}`;
-    if (closeRef.current && !isNaN(c)) closeRef.current.textContent = `₹${c.toFixed(2)}`;
+    if (openRef.current && !isNaN(o)) openRef.current.textContent = `${currSym}${o.toFixed(2)}`;
+    if (highRef.current && !isNaN(h)) highRef.current.textContent = `${currSym}${h.toFixed(2)}`;
+    if (lowRef.current && !isNaN(l)) lowRef.current.textContent = `${currSym}${l.toFixed(2)}`;
+    if (closeRef.current && !isNaN(c)) closeRef.current.textContent = `${currSym}${c.toFixed(2)}`;
 
     const diff = c - o;
     const chgPct = o > 0 ? (diff / o) * 100 : 0;
     const isUp = diff >= 0;
     const sign = isUp ? '+' : '';
     if (chgRef.current && !isNaN(diff)) {
-      chgRef.current.textContent = `${sign}₹${diff.toFixed(2)} (${sign}${chgPct.toFixed(2)}%)`;
+      chgRef.current.textContent = `${sign}${currSym}${diff.toFixed(2)} (${sign}${chgPct.toFixed(2)}%)`;
       chgRef.current.style.color = isUp ? '#26A69A' : '#EF5350';
     }
     if (volRef.current) {
@@ -142,10 +146,10 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     overlayIndicators.forEach((ind) => {
       const el = indicatorValRefs.current[ind.id];
       if (el) {
-        el.textContent = formatIndicatorValue(ind, candle);
+        el.textContent = formatIndicatorValue(ind, candle, currSym);
       }
     });
-  }, [overlayIndicators]);
+  }, [overlayIndicators, currSym]);
 
   // Reset legend to latest candle or active candle
   const resetLegendToLatest = useCallback(() => {
@@ -155,38 +159,87 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     }
   }, [activeCandleRef, updateLegend]);
 
+  // Latest-callback refs: the chart is created ONCE and must NEVER be destroyed
+  // just because a legend-updating callback identity changed (e.g. an indicator
+  // was toggled). Handlers read the fresh version via refs instead.
+  const updateLegendRef = useRef(updateLegend);
+  updateLegendRef.current = updateLegend;
+  const resetLegendRef = useRef(resetLegendToLatest);
+  resetLegendRef.current = resetLegendToLatest;
+  const crosshairMoveRef = useRef(onCrosshairMove);
+  crosshairMoveRef.current = onCrosshairMove;
+  const visibleRangeRef = useRef(onVisibleRangeChange);
+  visibleRangeRef.current = onVisibleRangeChange;
+
   // Expose imperative methods to parent controller
   useImperativeHandle(ref, () => ({
     fitContent: () => {
       if (chartInstanceRef.current) {
         try {
-          chartInstanceRef.current.timeScale().fitContent();
+          const totalBars = candlesRef.current?.length || 0;
+          if (totalBars > 0) {
+            const visibleCount = Math.min(totalBars, 80);
+            chartInstanceRef.current.timeScale().setVisibleLogicalRange({
+              from: totalBars - visibleCount,
+              to: totalBars + 4,
+            });
+          } else {
+            chartInstanceRef.current.timeScale().fitContent();
+          }
         } catch {}
       }
     },
     updateActiveCandle: (candle) => {
-      if (candleSeriesRef.current && candle) {
+      if (candleSeriesRef.current && candle && candle.time) {
         try {
+          const lastCandle = candlesRef.current && candlesRef.current.length > 0
+            ? candlesRef.current[candlesRef.current.length - 1]
+            : null;
+
+          // Guard against mixing time types (e.g. string 'YYYY-MM-DD' vs numeric epoch seconds)
+          if (lastCandle) {
+            const lastIsStr = typeof lastCandle.time === 'string';
+            const curIsStr = typeof candle.time === 'string';
+            if (lastIsStr !== curIsStr) {
+              return;
+            }
+            if (candle.time < lastCandle.time) {
+              return;
+            }
+          }
+
+          const o = Number(candle.open);
+          const c = Number(candle.close);
+          const h = Math.max(Number(candle.high), o, c);
+          const l = Math.min(Number(candle.low), o, c);
+
           candleSeriesRef.current.update({
             time: candle.time,
-            open: Number(candle.open),
-            high: Number(candle.high),
-            low: Number(candle.low),
-            close: Number(candle.close),
+            open: o,
+            high: h,
+            low: l,
+            close: c,
           });
           if (volumeSeriesRef.current && candle.volume != null) {
             volumeSeriesRef.current.update({
               time: candle.time,
               value: Number(candle.volume || 0),
-              color: candle.close >= candle.open ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
+              color: c >= o ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
             });
           }
           if (candlesRef.current) {
             const lastIdx = candlesRef.current.length - 1;
             if (lastIdx >= 0 && candlesRef.current[lastIdx].time === candle.time) {
-              candlesRef.current[lastIdx] = { ...candlesRef.current[lastIdx], ...candle };
+              candlesRef.current[lastIdx] = { ...candlesRef.current[lastIdx], ...candle, open: o, high: h, low: l, close: c };
             } else if (lastIdx >= 0 && candle.time > candlesRef.current[lastIdx].time) {
-              candlesRef.current.push({ ...candle });
+              candlesRef.current.push({ ...candle, open: o, high: h, low: l, close: c });
+              if (!isHoveringRef.current) {
+                try {
+                  chartInstanceRef.current?.timeScale().scrollToRealtime();
+                } catch {}
+              }
+            } else if (lastIdx < 0) {
+              candlesRef.current = [{ ...candle, open: o, high: h, low: l, close: c }];
             }
           }
           if (!isHoveringRef.current) {
@@ -229,6 +282,12 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     getChart: () => chartInstanceRef.current,
   }), [updateLegend, resetLegendToLatest, activeCandleRef]);
 
+  // NOTE: There is deliberately NO subscribeLiveTick consumer in ChartCanvas.
+  // LiveChartView is the single tick consumer: it runs spike protection,
+  // market-hours and session-bucket rollover logic, then calls
+  // chartCanvasRef.current?.updateActiveCandle(). A second raw subscriber here
+  // would double-apply ticks (double volume, spike leaks, bucket drift).
+
   // 1. Initialize Lightweight Charts instance
   useEffect(() => {
     if (!containerRef.current) return;
@@ -258,6 +317,34 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         ...CHART_OPTIONS.timeScale,
         timeVisible: interval !== '1d',
         secondsVisible: interval === '1s' || interval === '30s',
+        tickMarkFormatter: (time) => {
+          if (typeof time === 'number') {
+            const d = new Date(time * 1000);
+            return d.toLocaleTimeString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false,
+            });
+          }
+          return String(time);
+        },
+      },
+      localization: {
+        dateFormat: 'yyyy-MM-dd',
+        timeFormatter: (time) => {
+          if (typeof time === 'number') {
+            const d = new Date(time * 1000);
+            return d.toLocaleTimeString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+              hour: '2-digit',
+              minute: '2-digit',
+              second: (interval === '1s' || interval === '30s') ? '2-digit' : undefined,
+              hour12: false,
+            });
+          }
+          return String(time);
+        },
       },
     });
 
@@ -267,8 +354,13 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       priceFormat: {
         type: 'price',
         precision: 2,
-        minMove: 0.05,
+        minMove: isCrypto ? 0.01 : 0.05,
       },
+      lastValueVisible: true,
+      priceLineVisible: true,
+      priceLineWidth: 1,
+      priceLineColor: '#818CF8',
+      priceLineStyle: 2,
     });
 
     // Volume Series
@@ -296,8 +388,8 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         if (syncedHairlineRef.current) {
           syncedHairlineRef.current.style.display = 'none';
         }
-        resetLegendToLatest();
-        onCrosshairMove({ x: null, time: null, source: 'main' });
+        resetLegendRef.current();
+        crosshairMoveRef.current({ x: null, time: null, source: 'main' });
         return;
       }
 
@@ -306,7 +398,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       const vData = param.seriesData?.get(volumeSeries);
 
       // Broadcast position to sub-panes
-      onCrosshairMove({ x: param.point.x, time: param.time, source: 'main' });
+      crosshairMoveRef.current({ x: param.point.x, time: param.time, source: 'main' });
 
       if (cData) {
         const hoveredCandle = candlesRef.current.find((c) => c.time === param.time);
@@ -319,13 +411,13 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           close: cData.close,
           volume: vData?.value ?? hoveredCandle?.volume,
         };
-        updateLegend(merged);
+        updateLegendRef.current(merged);
       }
     });
 
     // TimeScale Range Synchronization
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
-      if (range) onVisibleRangeChange(range, 'main');
+      if (range) visibleRangeRef.current(range, 'main');
     });
 
     // Resize Observer
@@ -335,10 +427,17 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
           chart.applyOptions({ width, height });
-          if (!hasFittedInitial) {
+          if (!hasFittedInitial && candlesRef.current && candlesRef.current.length > 0) {
             hasFittedInitial = true;
             requestAnimationFrame(() => {
-              try { chart.timeScale().fitContent(); } catch {}
+              try {
+                const totalBars = candlesRef.current.length;
+                const visibleCount = Math.min(totalBars, 80);
+                chart.timeScale().setVisibleLogicalRange({
+                  from: totalBars - visibleCount,
+                  to: totalBars + 4,
+                });
+              } catch {}
             });
           }
         }
@@ -354,7 +453,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       volumeSeriesRef.current = null;
       indicatorSeriesRef.current = {};
     };
-  }, [interval, updateLegend, resetLegendToLatest, onVisibleRangeChange, onCrosshairMove]);
+  }, [interval]);
 
   // Update timeScale options when interval changes
   useEffect(() => {
@@ -391,18 +490,24 @@ const ChartCanvas = forwardRef(function ChartCanvas({
 
       candleSeriesRef.current.setData(formattedCandles);
       volumeSeriesRef.current.setData(formattedVolumes);
+      candlesRef.current = formattedCandles;
 
-      chartInstanceRef.current?.timeScale().fitContent();
-      requestAnimationFrame(() => {
-        try { chartInstanceRef.current?.timeScale().fitContent(); } catch {}
-      });
+      const totalBars = formattedCandles.length;
+      if (totalBars > 0) {
+        const visibleCount = Math.min(totalBars, 80);
+        chartInstanceRef.current?.timeScale().setVisibleLogicalRange({
+          from: totalBars - visibleCount,
+          to: totalBars + 4,
+        });
+        chartInstanceRef.current?.priceScale('right').applyOptions({ autoScale: true });
+      }
 
       // Seed initial legend values
-      resetLegendToLatest();
+      resetLegendRef.current();
     } catch (err) {
       console.warn('Error setting chart data:', err);
     }
-  }, [candles, resetLegendToLatest]);
+  }, [candles]);
 
   // Dynamically manage and render Indicator Overlays
   useEffect(() => {
@@ -513,8 +618,8 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       }
     });
 
-    resetLegendToLatest();
-  }, [activeIndicators, hiddenIndicators, overlayIndicators, candles, resetLegendToLatest]);
+    resetLegendRef.current();
+  }, [activeIndicators, hiddenIndicators, overlayIndicators, candles]);
 
   return (
     <div

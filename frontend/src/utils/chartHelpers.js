@@ -10,15 +10,33 @@ export function parseNum(val) {
   return isNaN(n) ? NaN : n;
 }
 
+// ── Lightweight 60-FPS Live Tick Bus (Bypasses React render cycles for TradingView smoothness) ──
+const liveTickListeners = new Set();
+
+export const subscribeLiveTick = (listener) => {
+  liveTickListeners.add(listener);
+  return () => liveTickListeners.delete(listener);
+};
+
+export const emitLiveTick = (tick) => {
+  liveTickListeners.forEach((fn) => {
+    try {
+      fn(tick);
+    } catch (_) {}
+  });
+};
+
 export function toChartTime(dateStr, isIntraday) {
   if (!dateStr) return null;
+  if (typeof dateStr === 'number') {
+    const ms = dateStr > 1000000000000 ? dateStr : dateStr * 1000;
+    if (!isIntraday) {
+      return new Date(ms).toISOString().substring(0, 10);
+    }
+    return Math.floor(ms / 1000);
+  }
   const str = String(dateStr).trim();
   if (!isIntraday) return str.substring(0, 10);
-
-  // If already a numeric unix timestamp (seconds or milliseconds)
-  if (typeof dateStr === 'number') {
-    return dateStr > 1000000000000 ? Math.floor(dateStr / 1000) : Math.floor(dateStr);
-  }
 
   let normalized = str.replace(' ', 'T');
   // Indian market equity intraday timestamps without offset are strictly in IST (+05:30)
@@ -49,7 +67,13 @@ export function addBusinessDays(dateStr, days) {
   return d.toISOString().split('T')[0];
 }
 
-export const POPULAR_STOCKS = ['RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'WIPRO', 'NIFTY50', 'BANKNIFTY'];
+export function isCryptoSymbol(symbol) {
+  if (!symbol) return false;
+  const s = String(symbol).toUpperCase().trim();
+  return s === 'BTC' || s.startsWith('BTC') || s.includes('BITCOIN') || s.includes('ETH') || s.endsWith('USDT');
+}
+
+export const POPULAR_STOCKS = ['BTC', 'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'WIPRO', 'NIFTY50', 'BANKNIFTY'];
 
 export const INTERVALS = [
   { label: '1s (1 sec)', value: '1s' },
@@ -116,6 +140,7 @@ export const CANDLE_STYLE = {
   borderVisible: true,
   borderUpColor: '#26A69A',
   borderDownColor: '#EF5350',
+  wickVisible: true,
   wickUpColor: '#26A69A',
   wickDownColor: '#EF5350',
 };
@@ -129,18 +154,7 @@ export const CANDLE_STYLE = {
  * @param {number} nowMs     timestamp in milliseconds
  * @returns {number} bucket start as an epoch-seconds timestamp
  */
-export function getSessionBucketStart(interval, nowMs) {
-  if (interval === '4h') {
-    // 4h sessions: 09:15 and 13:15 IST
-    const DAY = 86400;
-    const IST_OFFSET = 5.5 * 3600;
-    const nowSec = Math.floor(nowMs / 1000);
-    const dayStartSec = Math.floor((nowSec + IST_OFFSET) / DAY) * DAY - IST_OFFSET;
-    const morningStart = dayStartSec + (9 * 3600 + 15 * 60); // 09:15 IST
-    const afternoonStart = dayStartSec + (13 * 3600 + 15 * 60); // 13:15 IST
-    return nowSec >= afternoonStart ? afternoonStart : morningStart;
-  }
-
+export function getSessionBucketStart(interval, nowMs, isCrypto = false) {
   const bucketSize = ({
     '1s': 1,
     '30s': 30,
@@ -149,11 +163,27 @@ export function getSessionBucketStart(interval, nowMs) {
     '15m': 900,
     '30m': 1800,
     '1h': 3600,
-  })[interval] || 300;
+    '4h': 14400,
+  })[interval] || 60;
+
+  const nowSec = Math.floor(nowMs / 1000);
+
+  if (isCrypto) {
+    return Math.floor(nowSec / bucketSize) * bucketSize;
+  }
+
+  if (interval === '4h') {
+    // 4h sessions: 09:15 and 13:15 IST
+    const DAY = 86400;
+    const IST_OFFSET = 5.5 * 3600;
+    const dayStartSec = Math.floor((nowSec + IST_OFFSET) / DAY) * DAY - IST_OFFSET;
+    const morningStart = dayStartSec + (9 * 3600 + 15 * 60); // 09:15 IST
+    const afternoonStart = dayStartSec + (13 * 3600 + 15 * 60); // 13:15 IST
+    return nowSec >= afternoonStart ? afternoonStart : morningStart;
+  }
 
   const DAY = 86400;
   const IST_OFFSET = 5.5 * 3600; // seconds (UTC + 05:30)
-  const nowSec = Math.floor(nowMs / 1000);
   // Epoch second of 09:15 IST on the current IST day
   const anchor = Math.floor((nowSec + IST_OFFSET) / DAY) * DAY - IST_OFFSET + (9 * 3600 + 15 * 60);
   return anchor + Math.floor((nowSec - anchor) / bucketSize) * bucketSize;

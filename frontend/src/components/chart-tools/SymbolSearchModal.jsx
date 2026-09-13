@@ -99,22 +99,32 @@ export default function SymbolSearchModal({
 
         {(!filter.trim() || (searchResults.length === 0 && !isSearching)) && (
           <div>
-            <div style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, padding: '4px 8px', letterSpacing: '0.05em' }}>POPULAR NSE TICKERS</div>
+            <div style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, padding: '4px 8px', letterSpacing: '0.05em' }}>POPULAR WATCHLIST</div>
             {filteredPopular.map((sym) => (
               <div
                 key={sym}
                 onClick={() => { onSelect(sym); onFilterChange(''); }}
                 style={{
                   padding: '7px 10px', borderRadius: 4, fontSize: '0.75rem', fontWeight: 700,
-                  color: selectedSymbol === sym ? '#818CF8' : '#E2E8F0',
-                  backgroundColor: selectedSymbol === sym ? 'rgba(99,102,241,0.2)' : 'transparent',
+                  color: selectedSymbol === sym ? (sym === 'BTC' ? '#F59E0B' : '#818CF8') : '#E2E8F0',
+                  backgroundColor: selectedSymbol === sym ? (sym === 'BTC' ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.2)') : 'transparent',
                   cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(99,102,241,0.12)'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === sym ? 'rgba(99,102,241,0.2)' : 'transparent'}
+                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = sym === 'BTC' ? 'rgba(245,158,11,0.15)' : 'rgba(99,102,241,0.12)'}
+                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === sym ? (sym === 'BTC' ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.2)') : 'transparent'}
               >
-                <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{sym}</span>
-                <span style={{ fontSize: '0.65rem', color: '#64748B' }}>NSE</span>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', color: sym === 'BTC' ? '#F59E0B' : undefined }}>
+                  {sym === 'BTC' ? '₿ BTC / USD' : sym}
+                </span>
+                <span style={{
+                  fontSize: '0.65rem',
+                  padding: '1px 5px',
+                  borderRadius: 3,
+                  background: sym === 'BTC' ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.06)',
+                  color: sym === 'BTC' ? '#F59E0B' : '#64748B'
+                }}>
+                  {sym === 'BTC' ? 'CRYPTO' : 'NSE'}
+                </span>
               </div>
             ))}
           </div>

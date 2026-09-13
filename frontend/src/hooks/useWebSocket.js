@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import useStore from '../store/useStore';
 import { getWsUrl } from '../utils/api';
-import { POPULAR_STOCKS } from '../utils/chartHelpers';
+import { POPULAR_STOCKS, emitLiveTick } from '../utils/chartHelpers';
 
 export function useWebSocket(onMessage) {
   const wsRef = useRef(null);
@@ -94,10 +94,17 @@ export function useWebSocket(onMessage) {
             const data = JSON.parse(e.data);
             if (data && data.type !== 'pong') {
               if (data.ticker && data.price != null) {
+                const isCrypto = data.ticker === 'BTC' || data.ticker.startsWith('BTC') || data.ticker.includes('BITCOIN');
+                // If direct Binance WebSocket is actively connected for crypto, let Binance stream take priority
+                if (isCrypto && cryptoWsRef.current && cryptoWsRef.current.readyState === WebSocket.OPEN) {
+                  return;
+                }
                 setLivePrice(data.ticker, data);
                 if (data.is_live) {
                   setWsLiveData(true);
                 }
+                // 60-FPS tick bus: chart consumers subscribe directly (render-free path)
+                emitLiveTick(data);
               }
               if (onMessageRef.current) {
                 onMessageRef.current(data);
@@ -122,6 +129,192 @@ export function useWebSocket(onMessage) {
       setWsConnected(false);
     };
   }, [setWsConnected, setWsLiveData, setLivePrice]);
+
+  // Direct client-side stream for Crypto (e.g. BTC) via Binance combined WebSocket
+  const cryptoWsRef = useRef(null);
+  const selectedInterval = useStore((s) => s.selectedInterval || '1m');
+
+  useEffect(() => {
+    const isCrypto = selectedSymbol && (
+      selectedSymbol.toUpperCase() === 'BTC' ||
+      selectedSymbol.toUpperCase().startsWith('BTC') ||
+      selectedSymbol.toUpperCase().includes('BITCOIN')
+    );
+
+    if (!isCrypto) {
+      if (cryptoWsRef.current) {
+        try { cryptoWsRef.current.close(); } catch (_) {}
+        cryptoWsRef.current = null;
+      }
+      return;
+    }
+
+    let active = true;
+    let ws = null;
+    let reconnectTimer = null;
+
+    // Map StockOracle interval to Binance kline stream interval
+    const binanceKlineMap = {
+      '1s': '1s',
+      '30s': '1s',
+      '1m': '1m',
+      '5m': '5m',
+      '15m': '15m',
+      '30m': '30m',
+      '1h': '1h',
+      '4h': '4h',
+      '1d': '1d',
+    };
+    const bInterval = binanceKlineMap[selectedInterval] || '1m';
+
+    // Store state of latest 24h ticker metrics so kline ticks retain 24h context
+    let latest24h = {
+      open: null,
+      high: null,
+      low: null,
+      prevClose: null,
+      changePct: 0.0,
+      vol: 0,
+    };
+
+    const connectCryptoWs = () => {
+      if (!active) return;
+      try {
+        const streamUrl = `wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/btcusdt@kline_${bInterval}/btcusdt@aggTrade`;
+        ws = new WebSocket(streamUrl);
+        cryptoWsRef.current = ws;
+
+        ws.onmessage = (e) => {
+          if (!active) return;
+          try {
+            const msg = JSON.parse(e.data);
+            const stream = msg.stream || '';
+            const data = msg.data;
+            if (!data) return;
+
+            if (stream.includes('@aggTrade')) {
+              // High-frequency sub-second trade tick (TradingView-grade fluid animation)
+              const tradePrice = parseFloat(data.p);
+              const tradeQty = parseFloat(data.q);
+              if (!isNaN(tradePrice) && tradePrice > 0) {
+                emitLiveTick({
+                  ticker: selectedSymbol.toUpperCase(),
+                  price: tradePrice,
+                  volume: !isNaN(tradeQty) ? tradeQty : 0,
+                  time: data.T,
+                });
+              }
+            } else if (stream.includes('@ticker')) {
+              // 24h rolling stats
+              const ltp = parseFloat(data.c);
+              const dayOpen = parseFloat(data.o);
+              const dayHigh = parseFloat(data.h);
+              const dayLow = parseFloat(data.l);
+              const prevClose = parseFloat(data.x || data.o);
+              const changePct = parseFloat(data.P);
+              const vol = parseFloat(data.v);
+
+              latest24h = {
+                open: !isNaN(dayOpen) ? dayOpen : ltp,
+                high: !isNaN(dayHigh) ? dayHigh : ltp,
+                low: !isNaN(dayLow) ? dayLow : ltp,
+                prevClose: !isNaN(prevClose) ? prevClose : ltp,
+                changePct: !isNaN(changePct) ? changePct : 0.0,
+                vol: !isNaN(vol) ? vol : 0,
+              };
+
+              if (!isNaN(ltp) && ltp > 0) {
+                const existingCandle = useStore.getState().livePrices?.[selectedSymbol.toUpperCase()]?.liveCandle;
+                const tickPayload = {
+                  ticker: selectedSymbol.toUpperCase(),
+                  price: ltp,
+                  open: latest24h.open,
+                  high: latest24h.high,
+                  low: latest24h.low,
+                  close: latest24h.prevClose,
+                  change_pct: latest24h.changePct,
+                  volume: latest24h.vol,
+                  is_live: true,
+                  liveCandle: existingCandle,
+                };
+                setLivePrice(selectedSymbol.toUpperCase(), tickPayload);
+                setWsLiveData(true);
+                emitLiveTick(tickPayload);
+                onMessageRef.current?.(tickPayload);
+              }
+            } else if (stream.includes('@kline')) {
+              // Real-time active candle (kline)
+              const k = data.k;
+              if (k) {
+                const openTimeMs = k.t;
+                const isIntraday = selectedInterval !== '1d';
+                const chartTime = isIntraday
+                  ? Math.floor(openTimeMs / 1000)
+                  : new Date(openTimeMs).toISOString().substring(0, 10);
+
+                const cClose = parseFloat(k.c);
+                const cOpen = parseFloat(k.o);
+                const cHigh = parseFloat(k.h);
+                const cLow = parseFloat(k.l);
+                const cVol = parseFloat(k.v);
+
+                if (!isNaN(cClose) && cClose > 0) {
+                  const liveCandle = {
+                    time: chartTime,
+                    open: !isNaN(cOpen) ? cOpen : cClose,
+                    high: !isNaN(cHigh) ? cHigh : cClose,
+                    low: !isNaN(cLow) ? cLow : cClose,
+                    close: cClose,
+                    volume: !isNaN(cVol) ? cVol : 0,
+                    isClosed: Boolean(k.x),
+                  };
+
+                  const tickPayload = {
+                    ticker: selectedSymbol.toUpperCase(),
+                    price: cClose,
+                    open: latest24h.open || cOpen,
+                    high: Math.max(latest24h.high || cHigh, cHigh),
+                    low: Math.min(latest24h.low || cLow, cLow),
+                    close: latest24h.prevClose || cOpen,
+                    change_pct: latest24h.changePct,
+                    volume: latest24h.vol || cVol,
+                    is_live: true,
+                    liveCandle,
+                  };
+
+                  setLivePrice(selectedSymbol.toUpperCase(), tickPayload);
+                  setWsLiveData(true);
+                  emitLiveTick(tickPayload);
+                  onMessageRef.current?.(tickPayload);
+                }
+              }
+            }
+          } catch (_) {}
+        };
+
+        ws.onerror = () => {
+          try { ws.close(); } catch (_) {}
+        };
+
+        ws.onclose = () => {
+          if (active) {
+            reconnectTimer = setTimeout(connectCryptoWs, 3000);
+          }
+        };
+      } catch (_) {}
+    };
+
+    connectCryptoWs();
+
+    return () => {
+      active = false;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) {
+        try { ws.close(); } catch (_) {}
+      }
+      cryptoWsRef.current = null;
+    };
+  }, [selectedSymbol, selectedInterval, setLivePrice, setWsLiveData]);
 
   return connected;
 }
