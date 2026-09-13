@@ -1,4 +1,28 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+
+/**
+ * useWindowSize — simple hook to track viewport width for responsive layout.
+ * Uses ResizeObserver on body (consistent with ChartCanvas pattern) for accuracy.
+ */
+function useWindowSize() {
+  const [width, setWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    let rafId = null;
+    const handler = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        setWidth(window.innerWidth);
+        rafId = null;
+      });
+    };
+    window.addEventListener('resize', handler, { passive: true });
+    return () => {
+      window.removeEventListener('resize', handler);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, []);
+  return width;
+}
 import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
 import ChartToolbar from './chart/ChartToolbar';
@@ -6,6 +30,7 @@ import ChartCanvas from './chart/ChartCanvas';
 import ChartBottomStats from './chart/ChartBottomStats';
 import IndicatorModal from './chart/IndicatorModal';
 import OscillatorPane from './chart/OscillatorPane';
+import VolumePane from './chart/VolumePane';
 import DrawingTools from './chart-tools/DrawingTools';
 import ChartSettingsModal from './ChartSettingsModal';
 import { DEFAULT_ACTIVE_INDICATORS } from './chart/indicatorDefinitions';
@@ -20,12 +45,17 @@ export default function LiveChartView() {
   const selectedSymbol = useStore(s => s.selectedSymbol || 'RELIANCE');
   const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
   const wsLiveData = useStore(s => s.wsLiveData);
+  const wsConnected = useStore(s => s.wsConnected);
   const storeLiveTick = useStore(s => s.livePrices?.[selectedSymbol]);
 
   const { fetchHistory, searchStocks, preloadStock } = useStock();
 
   const selectedInterval = useStore(s => s.selectedInterval || '1m');
   const setSelectedInterval = useStore(s => s.setSelectedInterval);
+
+  const windowWidth = useWindowSize();
+  const isMobile = windowWidth < 640;
+  const isTablet = windowWidth >= 640 && windowWidth < 1024;
 
   const [interval, setIntervalState] = useState(() => selectedInterval || '1m');
   const setInterval = (newIv) => {
@@ -53,10 +83,13 @@ export default function LiveChartView() {
   const [chartType, setChartType] = useState('candlestick');
   const [priceScaleMode, setPriceScaleMode] = useState('normal');
   const [invertScale, setInvertScale] = useState(false);
-  const [showDrawingTools, setShowDrawingTools] = useState(true);
+  // Auto-collapse drawing tools on tablet/mobile (user can re-open)
+  const [showDrawingTools, setShowDrawingTools] = useState(() => window.innerWidth >= 1024);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showVolume, setShowVolume] = useState(true);
+  const [volumeHeight, setVolumeHeight] = useState(132);
   const [timezone, setTimezone] = useState('Asia/Kolkata');
+
 
   const activeCandleRef = useRef(null);
   const chartCanvasRef = useRef(null);
@@ -68,6 +101,7 @@ export default function LiveChartView() {
   const pendingTickRef = useRef({ rafId: null, ltp: null });
   const rsiPaneRef = useRef(null);
   const macdPaneRef = useRef(null);
+  const volumePaneRef = useRef(null);
   const isSyncingRangeRef = useRef(false);
   const containerRef = useRef(null);
   const lastVerifiedPriceRef = useRef(null);
@@ -387,6 +421,9 @@ export default function LiveChartView() {
       if (source !== 'macd') {
         macdPaneRef.current?.setVisibleLogicalRange(range);
       }
+      if (source !== 'volume') {
+        volumePaneRef.current?.setVisibleLogicalRange(range);
+      }
     } finally {
       requestAnimationFrame(() => {
         isSyncingRangeRef.current = false;
@@ -404,6 +441,9 @@ export default function LiveChartView() {
     }
     if (source !== 'macd') {
       macdPaneRef.current?.setSyncedCrosshair({ x, time, source });
+    }
+    if (source !== 'volume') {
+      volumePaneRef.current?.setSyncedCrosshair({ x, time, source });
     }
   }, []);
 
@@ -463,8 +503,8 @@ export default function LiveChartView() {
         backgroundColor: '#090C15',
         overflow: 'hidden',
         boxSizing: 'border-box',
-        padding: 6,
-        gap: 6,
+        padding: isMobile ? 3 : 6,
+        gap: isMobile ? 3 : 6,
       }}
     >
       {/* 1. Header Toolbar */}
@@ -480,6 +520,8 @@ export default function LiveChartView() {
         showDrawingTools={showDrawingTools}
         onToggleDrawingTools={() => setShowDrawingTools((prev) => !prev)}
         onOpenSettings={() => setShowSettingsModal(true)}
+        showVolume={showVolume}
+        onToggleVolume={() => setShowVolume((prev) => !prev)}
         onResetZoom={handleResetZoom}
         isFullscreen={isFullscreen}
         onToggleFullscreen={handleToggleFullscreen}
@@ -489,9 +531,24 @@ export default function LiveChartView() {
         livePrice={curPrice}
         liveChange={dayChange}
         isLive={isLive}
+        wsConnected={wsConnected}
+        isMobile={isMobile}
+        isTablet={isTablet}
       />
 
-      {/* 2. Main Terminal Viewport (Left Drawing Tools + Chart Canvas + Sub-panes) */}
+      {/* 2. OHLC / Market Information Row */}
+      <ChartBottomStats
+        isLive={isLive}
+        curPrice={curPrice}
+        dayChange={dayChange}
+        candles={candles}
+        activeCandleRef={activeCandleRef}
+        interval={interval}
+        dataSource={dataSource}
+        selectedSymbol={selectedSymbol}
+      />
+
+      {/* 3. Main Terminal Viewport (Left Drawing Tools + Chart Canvas + Sub-panes) */}
       <div
         style={{
           flex: 1,
@@ -514,6 +571,7 @@ export default function LiveChartView() {
           onOpenSettings={() => setShowSettingsModal(true)}
           isOpen={showDrawingTools}
           onToggleOpen={() => setShowDrawingTools((prev) => !prev)}
+          isMobile={isMobile}
         />
 
         {/* Center/Right Chart Column (Canvas + Oscillators) */}
@@ -588,6 +646,17 @@ export default function LiveChartView() {
             />
           </div>
 
+          <VolumePane
+            ref={volumePaneRef}
+            candles={candles}
+            height={volumeHeight}
+            onHeightChange={setVolumeHeight}
+            isHidden={!showVolume}
+            onToggleHide={() => setShowVolume(false)}
+            onVisibleRangeChange={handleVisibleRangeChange}
+            onCrosshairMove={handleCrosshairMove}
+          />
+
           {/* Synchronized Oscillator Sub-Pane (RSI) */}
           {activeIndicators.includes('rsi') && (
             <OscillatorPane
@@ -617,18 +686,6 @@ export default function LiveChartView() {
           )}
         </div>
       </div>
-
-      {/* 3. Footer Session Summary Bar */}
-      <ChartBottomStats
-        isLive={isLive}
-        curPrice={curPrice}
-        dayChange={dayChange}
-        candles={candles}
-        activeCandleRef={activeCandleRef}
-        interval={interval}
-        dataSource={dataSource}
-        selectedSymbol={selectedSymbol}
-      />
 
       {/* 4. Indicator Library Modal */}
       <IndicatorModal

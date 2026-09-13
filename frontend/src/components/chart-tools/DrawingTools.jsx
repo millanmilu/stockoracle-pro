@@ -32,9 +32,15 @@ export default function DrawingTools({
   onOpenSettings,
   isOpen = true,
   onToggleOpen = () => {},
+  isMobile = false,
 }) {
   const isCrypto = symbol ? (String(symbol).toUpperCase().startsWith('BTC') || String(symbol).toUpperCase().includes('BITCOIN') || String(symbol).toUpperCase().endsWith('USDT')) : false;
   const currSym = isCrypto ? '$' : '₹';
+  // Compact dimensions for mobile — 34px wide toolbar, 28×28 buttons, 13px icons
+  const toolbarWidth = isMobile ? 34 : 44;
+  const btnSize = isMobile ? 28 : 32;
+  const iconSize = isMobile ? 13 : 16;
+
 
   // Tool & State Management
   const [activeTool, setActiveTool] = useState('crosshair');
@@ -747,7 +753,7 @@ export default function DrawingTools({
     <>
       {/* ── TradingView-Style Left Vertical Drawing Toolbar ── */}
       <div style={{
-        width: 44,
+        width: toolbarWidth,
         height: '100%',
         maxHeight: '100%',
         backgroundColor: '#0F131D',
@@ -770,14 +776,14 @@ export default function DrawingTools({
           onClick={() => setActiveTool('crosshair')}
           title="Crosshair (Select / Move / Pan)"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'crosshair' ? '#2962FF' : 'transparent',
             color: activeTool === 'crosshair' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Crosshair size={16} />
+          <Crosshair size={iconSize} />
         </button>
 
         {/* 2. Trend Line */}
@@ -788,14 +794,14 @@ export default function DrawingTools({
           }}
           title="Trend Line"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'trendline' ? '#2962FF' : 'transparent',
             color: activeTool === 'trendline' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <TrendingUp size={16} />
+          <TrendingUp size={iconSize} />
         </button>
 
         {/* 3. Trend Ray (Ray Line) */}
@@ -806,14 +812,14 @@ export default function DrawingTools({
           }}
           title="Trend Ray (Extends to future)"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'ray' ? '#2962FF' : 'transparent',
             color: activeTool === 'ray' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <ArrowUpRight size={16} />
+          <ArrowUpRight size={iconSize} />
         </button>
 
         {/* 4. Horizontal Support/Resistance Line */}
@@ -824,14 +830,14 @@ export default function DrawingTools({
           }}
           title="Horizontal Support/Resistance Line"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'horizontal_line' ? '#2962FF' : 'transparent',
             color: activeTool === 'horizontal_line' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Minus size={16} />
+          <Minus size={iconSize} />
         </button>
 
         {/* 5. Parallel Channel */}
@@ -842,14 +848,14 @@ export default function DrawingTools({
           }}
           title="Parallel Channel"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'parallel_channel' ? '#2962FF' : 'transparent',
             color: activeTool === 'parallel_channel' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Layers size={16} />
+          <Layers size={iconSize} />
         </button>
 
         {/* 6. Long Position (Risk:Reward) */}
@@ -860,7 +866,7 @@ export default function DrawingTools({
           }}
           title="Long Position (Risk:Reward Tool)"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'long_position' ? '#10B981' : 'transparent',
             color: activeTool === 'long_position' ? '#FFFFFF' : '#10B981',
@@ -878,7 +884,7 @@ export default function DrawingTools({
           }}
           title="Short Position (Risk:Reward Tool)"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'short_position' ? '#EF5350' : 'transparent',
             color: activeTool === 'short_position' ? '#FFFFFF' : '#EF5350',
@@ -896,14 +902,14 @@ export default function DrawingTools({
           }}
           title="Fibonacci Retracement"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'fibonacci' ? '#2962FF' : 'transparent',
             color: activeTool === 'fibonacci' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <AlignJustify size={16} />
+          <AlignJustify size={iconSize} />
         </button>
 
         {/* 9. Rectangle / Supply & Demand Zone */}
@@ -914,7 +920,7 @@ export default function DrawingTools({
           }}
           title="Rectangle Zone"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'rectangle' ? '#2962FF' : 'transparent',
             color: activeTool === 'rectangle' ? '#FFFFFF' : '#94A3B8',
@@ -932,14 +938,14 @@ export default function DrawingTools({
           }}
           title="Freehand Brush"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'brush' ? '#2962FF' : 'transparent',
             color: activeTool === 'brush' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Brush size={16} />
+          <Brush size={iconSize} />
         </button>
 
         {/* 11. Text Note */}
@@ -950,14 +956,14 @@ export default function DrawingTools({
           }}
           title="Text Note ('T')"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'text' ? '#2962FF' : 'transparent',
             color: activeTool === 'text' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Type size={16} />
+          <Type size={iconSize} />
         </button>
 
         {/* 12. Stickers */}
@@ -968,14 +974,14 @@ export default function DrawingTools({
           }}
           title="Emojis & Stickers"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'smile' ? '#2962FF' : 'transparent',
             color: activeTool === 'smile' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Smile size={16} />
+          <Smile size={iconSize} />
         </button>
 
         {/* 13. Ruler / Measure */}
@@ -986,14 +992,14 @@ export default function DrawingTools({
           }}
           title="Ruler (Measure Price & Bars)"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: activeTool === 'ruler' ? '#2962FF' : 'transparent',
             color: activeTool === 'ruler' ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Ruler size={16} />
+          <Ruler size={iconSize} />
         </button>
 
         <div style={{ width: 22, height: 1, backgroundColor: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
@@ -1007,14 +1013,14 @@ export default function DrawingTools({
           }}
           title={magnetMode ? 'Magnet Mode ON (Snapping to Candles)' : 'Magnet Mode OFF'}
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: magnetMode ? '#2962FF' : 'transparent',
             color: magnetMode ? '#FFFFFF' : '#94A3B8',
             cursor: 'pointer',
           }}
         >
-          <Magnet size={16} />
+          <Magnet size={iconSize} />
         </button>
 
         {/* 15. Undo / Redo Buttons */}
@@ -1023,7 +1029,7 @@ export default function DrawingTools({
           disabled={undoStack.length === 0}
           title="Undo Drawing (Ctrl+Z)"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: 'transparent',
             color: undoStack.length > 0 ? '#94A3B8' : '#475569',
@@ -1038,7 +1044,7 @@ export default function DrawingTools({
           disabled={redoStack.length === 0}
           title="Redo Drawing (Ctrl+Y)"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: 'transparent',
             color: redoStack.length > 0 ? '#94A3B8' : '#475569',
@@ -1056,7 +1062,7 @@ export default function DrawingTools({
           }}
           title={lockAllDrawings ? 'Drawings Locked' : 'Lock All Drawings'}
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: lockAllDrawings ? '#F59E0B' : 'transparent',
             color: lockAllDrawings ? '#000000' : '#94A3B8',
@@ -1071,7 +1077,7 @@ export default function DrawingTools({
           onClick={() => setHideAllDrawings(!hideAllDrawings)}
           title={hideAllDrawings ? 'Show Drawings' : 'Hide Drawings'}
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: hideAllDrawings ? '#EF5350' : 'transparent',
             color: hideAllDrawings ? '#FFFFFF' : '#94A3B8',
@@ -1086,7 +1092,7 @@ export default function DrawingTools({
           onClick={handleClearAll}
           title="Remove All Drawings"
           style={{
-            width: 32, height: 32, borderRadius: 5, border: 'none',
+            width: btnSize, height: btnSize, borderRadius: 5, border: 'none',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             backgroundColor: 'transparent',
             color: '#94A3B8',
@@ -1229,10 +1235,10 @@ export default function DrawingTools({
           style={{
             position: 'absolute',
             top: 0,
-            left: isOpen ? 44 : 0,
+            left: isOpen ? toolbarWidth : 0,
             right: 0,
             bottom: 0,
-            width: isOpen ? 'calc(100% - 44px)' : '100%',
+            width: isOpen ? `calc(100% - ${toolbarWidth}px)` : '100%',
             height: '100%',
             zIndex: 45,
             pointerEvents: activeTool !== 'crosshair' ? 'all' : (selectedDrawingId ? 'all' : 'none'),
