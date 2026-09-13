@@ -747,31 +747,66 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           try { s.setData(data); } catch {}
         });
 
-      // ── Supertrend — direction-colored segments ───────────────────────────
+      // ── Supertrend — clean continuous line with reversal signal markers ───
       } else if (def.type === 'overlay_supertrend') {
-        let stList = currentSeriesMap[id];
-        if (!stList) {
-          // Two series: one green (bullish), one red (bearish)
-          const bullSeries = chart.addLineSeries({ color: '#10B981', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'ST Bull' });
-          const bearSeries = chart.addLineSeries({ color: '#EF5350', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'ST Bear' });
-          stList = [bullSeries, bearSeries];
-          currentSeriesMap[id] = stList;
+        let stSeries = currentSeriesMap[id];
+        if (!stSeries) {
+          stSeries = chart.addLineSeries({
+            color: '#10B981',
+            lineWidth: 2,
+            priceLineVisible: false,
+            lastValueVisible: true,
+            title: 'Supertrend',
+          });
+          currentSeriesMap[id] = stSeries;
         }
-        stList.forEach(s => s.applyOptions({ visible: !isHidden }));
-        const bullData = [], bearData = [];
-        candles.forEach(c => {
-          if (c[def.field] == null || isNaN(Number(c[def.field]))) return;
-          const pt = { time: c.time, value: Number(c[def.field]) };
-          const dir = Number(c[def.dirField]);
-          if (dir === 1) { bullData.push(pt); } else { bearData.push(pt); }
-        });
-        try { stList[0].setData(bullData); stList[1].setData(bearData); } catch {}
+        stSeries.applyOptions({ visible: !isHidden });
 
-      // ── Parabolic SAR — directional dots (markers) ────────────────────────
+        // Continuous data for Supertrend line
+        const stData = candles
+          .filter((c) => c[def.field] != null && !isNaN(Number(c[def.field])))
+          .map((c) => ({ time: c.time, value: Number(c[def.field]) }));
+        try { stSeries.setData(stData); } catch {}
+
+        // Set series color according to latest candle trend direction
+        if (candles.length > 0) {
+          const latestCandle = candles[candles.length - 1];
+          const latestDir = Number(latestCandle[def.dirField]);
+          stSeries.applyOptions({ color: latestDir === -1 ? '#EF5350' : '#10B981' });
+        }
+
+        // Reversal buy/sell signal markers at exact trend flips
+        const markers = [];
+        let prevDir = null;
+        candles.forEach((c) => {
+          if (c[def.field] == null || isNaN(Number(c[def.field])) || c[def.dirField] == null) return;
+          const dir = Number(c[def.dirField]);
+          if (prevDir !== null && dir !== prevDir) {
+            markers.push({
+              time: c.time,
+              position: dir === 1 ? 'belowBar' : 'aboveBar',
+              color: dir === 1 ? '#10B981' : '#EF5350',
+              shape: dir === 1 ? 'arrowUp' : 'arrowDown',
+              text: dir === 1 ? 'BUY' : 'SELL',
+              size: 1,
+            });
+          }
+          prevDir = dir;
+        });
+        try { stSeries.setMarkers(markers); } catch {}
+
+      // ── Parabolic SAR — clean amber dotted trailing stop line ─────────────
       } else if (def.type === 'overlay_psar') {
         let psarSeries = currentSeriesMap[id];
         if (!psarSeries) {
-          psarSeries = chart.addLineSeries({ color: 'transparent', lineWidth: 0, priceLineVisible: false, lastValueVisible: false, title: 'PSAR' });
+          psarSeries = chart.addLineSeries({
+            color: '#F59E0B',
+            lineWidth: 1,
+            lineStyle: 1, // Dotted
+            priceLineVisible: false,
+            lastValueVisible: true,
+            title: 'PSAR',
+          });
           currentSeriesMap[id] = psarSeries;
         }
         psarSeries.applyOptions({ visible: !isHidden });
@@ -779,17 +814,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           .filter(c => c[def.field] != null && !isNaN(Number(c[def.field])))
           .map(c => ({ time: c.time, value: Number(c[def.field]) }));
         try { psarSeries.setData(psarData); } catch {}
-        // Markers: green circle below (bullish) or red circle above (bearish)
-        const markers = candles
-          .filter(c => c[def.field] != null && !isNaN(Number(c[def.field])))
-          .map(c => ({
-            time: c.time,
-            position: Number(c[def.dirField]) === 1 ? 'belowBar' : 'aboveBar',
-            color: Number(c[def.dirField]) === 1 ? '#10B981' : '#EF5350',
-            shape: 'circle',
-            size: 0.6,
-          }));
-        try { psarSeries.setMarkers(markers); } catch {}
+
 
       // ── Ichimoku Cloud — 5 lines ──────────────────────────────────────────
       } else if (def.type === 'overlay_ichimoku') {

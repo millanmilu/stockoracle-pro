@@ -669,12 +669,13 @@ export default function LiveChartView() {
               oscType={osc.oscType || osc.id}
               candles={candles}
               isHidden={hiddenIndicators.includes(osc.id)}
-              onToggleHide={handleToggleHideIndicator}
+              onToggleHide={() => handleToggleHideIndicator(osc.id)}
               onClose={() => handleRemoveIndicator(osc.id)}
               onVisibleRangeChange={handleVisibleRangeChange}
               onCrosshairMove={handleCrosshairMove}
             />
           ))}
+
 
         </div>
       </div>

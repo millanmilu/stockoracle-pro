@@ -25,7 +25,7 @@ const OSC_CONFIG = {
   cmf:        { label: 'CMF (20)',       color: '#38BDF8', hasSignal: false, hasBands: null,     zeroLine: true  },
 };
 
-const OscillatorPane = forwardRef(function OscillatorPane({
+export default forwardRef(function OscillatorPane({
   oscType = 'rsi',
   candles = [],
   isHidden = false,
@@ -153,11 +153,24 @@ const OscillatorPane = forwardRef(function OscillatorPane({
 
     const refs = {};
 
-    // Main line series
-    refs.main = chart.addLineSeries({
-      color: cfg.color, lineWidth: 1.5,
-      priceFormat: { type: 'price', precision: oscType === 'obv' ? 0 : (oscType === 'cmf' ? 4 : 1), minMove: oscType === 'obv' ? 1 : (oscType === 'cmf' ? 0.0001 : 0.1) },
-    });
+    // Main line or histogram series
+    if (oscType === 'elder_ray') {
+      refs.main = chart.addHistogramSeries({
+        color: 'rgba(16,185,129,0.75)',
+        title: 'Bull Power',
+        priceFormat: { type: 'price', precision: 2, minMove: 0.05 },
+      });
+      refs.signal = chart.addHistogramSeries({
+        color: 'rgba(239,83,80,0.75)',
+        title: 'Bear Power',
+        priceFormat: { type: 'price', precision: 2, minMove: 0.05 },
+      });
+    } else {
+      refs.main = chart.addLineSeries({
+        color: cfg.color, lineWidth: 1.5,
+        priceFormat: { type: 'price', precision: oscType === 'obv' ? 0 : (oscType === 'cmf' ? 4 : 1), minMove: oscType === 'obv' ? 1 : (oscType === 'cmf' ? 0.0001 : 0.1) },
+      });
+    }
 
     // Add reference bands
     if (cfg.hasBands) {
@@ -173,20 +186,19 @@ const OscillatorPane = forwardRef(function OscillatorPane({
       refs.main.createPriceLine({ price: 0, color: 'rgba(255,255,255,0.25)', lineWidth: 1, lineStyle: 1, axisLabelVisible: false });
     }
 
-    // Signal line (stoch D, MACD signal, ADX DI+, elder bear)
-    if (cfg.hasSignal) {
+    // Signal line (stoch D, MACD signal, ADX DI+)
+    if (cfg.hasSignal && oscType !== 'elder_ray') {
       if (oscType === 'macd') {
         refs.signal = chart.addLineSeries({ color: '#F97316', lineWidth: 1.5, title: 'Signal' });
         refs.hist = chart.addHistogramSeries({ priceFormat: { type: 'volume' } });
       } else if (oscType === 'adx') {
         refs.signal = chart.addLineSeries({ color: '#10B981', lineWidth: 1, title: '+DI' });
         refs.signal2 = chart.addLineSeries({ color: '#EF5350', lineWidth: 1, title: '-DI' });
-      } else if (oscType === 'elder_ray') {
-        refs.signal = chart.addHistogramSeries({ title: 'Bear' });
       } else {
         refs.signal = chart.addLineSeries({ color: '#F97316', lineWidth: 1, lineStyle: 2, title: 'Signal' });
       }
     }
+
 
     // CMF histogram
     if (oscType === 'cmf') {
@@ -374,5 +386,3 @@ const OscillatorPane = forwardRef(function OscillatorPane({
     </div>
   );
 });
-
-export default OscillatorPane;
