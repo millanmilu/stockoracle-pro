@@ -800,6 +800,164 @@ def evaluate_custom_formula(df: pd.DataFrame, formula: str) -> pd.Series:
     return result
 
 
+# ── Stochastic RSI ────────────────────────────────────────────────────────────
+def calculate_stoch_rsi(
+    series: pd.Series,
+    rsi_period: int = 14,
+    stoch_period: int = 14,
+    k_period: int = 3,
+    d_period: int = 3
+) -> Dict[str, pd.Series]:
+    """
+    Stochastic RSI — Applies Stochastic formula on RSI values.
+    Returns %K and %D smoothed lines in 0-100 range.
+    """
+    rsi = calculate_rsi(series, rsi_period)
+    rsi_min = rsi.rolling(window=stoch_period, min_periods=1).min()
+    rsi_max = rsi.rolling(window=stoch_period, min_periods=1).max()
+    denom = (rsi_max - rsi_min).replace(0.0, np.nan)
+    stoch_k_raw = ((rsi - rsi_min) / denom * 100.0).fillna(50.0)
+    stoch_k = stoch_k_raw.rolling(window=k_period, min_periods=1).mean().fillna(50.0)
+    stoch_d = stoch_k.rolling(window=d_period, min_periods=1).mean().fillna(50.0)
+    return {"stoch_rsi_k": stoch_k, "stoch_rsi_d": stoch_d}
+
+
+# ── Chaikin Money Flow (CMF) ──────────────────────────────────────────────────
+def calculate_cmf(df: pd.DataFrame, period: int = 20) -> pd.Series:
+    """
+    Chaikin Money Flow — measures buying/selling pressure (-1 to +1).
+    CMF = Sum(MFV, N) / Sum(Volume, N)
+    Money Flow Volume = ((Close - Low) - (High - Close)) / (High - Low) * Volume
+    """
+    hl_range = (df["high"] - df["low"]).replace(0.0, np.nan)
+    mf_multiplier = ((df["close"] - df["low"]) - (df["high"] - df["close"])) / hl_range
+    mf_multiplier = mf_multiplier.fillna(0.0)
+    vol = df["volume"].fillna(0.0) if "volume" in df.columns else pd.Series(0.0, index=df.index)
+    mf_volume = mf_multiplier * vol
+    cmf = (
+        mf_volume.rolling(window=period, min_periods=1).sum() /
+        vol.rolling(window=period, min_periods=1).sum().replace(0.0, np.nan)
+    )
+    return cmf.fillna(0.0)
+
+
+# ── Elder Ray Index ────────────────────────────────────────────────────────────
+def calculate_elder_ray(df: pd.DataFrame, ema_period: int = 13) -> Dict[str, pd.Series]:
+    """
+    Elder Ray Index — measures bull/bear power relative to EMA.
+    Bull Power = High - EMA(Close)
+    Bear Power = Low  - EMA(Close)
+    """
+    ema = calculate_ema(df["close"], ema_period)
+    bull_power = df["high"] - ema
+    bear_power = df["low"] - ema
+    return {
+        "elder_bull": bull_power.fillna(0.0),
+        "elder_bear": bear_power.fillna(0.0),
+    }
+
+
+# ── Parabolic SAR ─────────────────────────────────────────────────────────────
+def calculate_psar(
+    df: pd.DataFrame,
+    start: float = 0.02,
+    increment: float = 0.02,
+    maximum: float = 0.20
+) -> Dict[str, pd.Series]:
+    """
+    Parabolic SAR — trailing stop-and-reverse indicator.
+    Returns psar values and direction (1=bullish, -1=bearish).
+    """
+    high = df["high"].to_numpy(dtype=np.float64)
+    low = df["low"].to_numpy(dtype=np.float64)
+    n = len(high)
+    psar = np.empty(n, dtype=np.float64)
+    direction = np.ones(n, dtype=np.float64)
+
+    if n < 2:
+        return {
+            "psar": pd.Series(df["close"].values, index=df.index),
+            "psar_dir": pd.Series(np.ones(n), index=df.index),
+        }
+
+    # Initial state: assume bullish
+    bull = True
+    af = start
+    ep = high[0]
+    psar[0] = low[0]
+    direction[0] = 1.0
+
+    for i in range(1, n):
+        prev_psar = psar[i - 1]
+        if bull:
+            psar[i] = prev_psar + af * (ep - prev_psar)
+            psar[i] = min(psar[i], low[i - 1], low[max(0, i - 2)])
+            if low[i] < psar[i]:
+                bull = False
+                psar[i] = ep
+                ep = low[i]
+                af = start
+                direction[i] = -1.0
+            else:
+                direction[i] = 1.0
+                if high[i] > ep:
+                    ep = high[i]
+                    af = min(af + increment, maximum)
+        else:
+            psar[i] = prev_psar - af * (prev_psar - ep)
+            psar[i] = max(psar[i], high[i - 1], high[max(0, i - 2)])
+            if high[i] > psar[i]:
+                bull = True
+                psar[i] = ep
+                ep = high[i]
+                af = start
+                direction[i] = 1.0
+            else:
+                direction[i] = -1.0
+                if low[i] < ep:
+                    ep = low[i]
+                    af = min(af + increment, maximum)
+
+    return {
+        "psar": pd.Series(psar, index=df.index),
+        "psar_dir": pd.Series(direction, index=df.index),
+    }
+
+
+# ── ADX with +DI / -DI lines ─────────────────────────────────────────────────
+def calculate_adx_full(df: pd.DataFrame, period: int = 14) -> Dict[str, pd.Series]:
+    """
+    Full ADX — returns ADX line, +DI and -DI directional index lines.
+    """
+    high = df["high"]
+    low = df["low"]
+    close = df["close"]
+
+    upmove = high.diff().fillna(0.0)
+    downmove = (low.shift(1) - low).fillna(0.0)
+
+    pos_dm = pd.Series(np.where((upmove > downmove) & (upmove > 0.0), upmove, 0.0), index=df.index)
+    neg_dm = pd.Series(np.where((downmove > upmove) & (downmove > 0.0), downmove, 0.0), index=df.index)
+
+    tr1 = high - low
+    tr2 = (high - close.shift(1).fillna(close)).abs()
+    tr3 = (low - close.shift(1).fillna(close)).abs()
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    tr_smooth = tr.rolling(window=period, min_periods=1).sum()
+    pos_sm = pos_dm.rolling(window=period, min_periods=1).sum()
+    neg_sm = neg_dm.rolling(window=period, min_periods=1).sum()
+
+    plus_di = (100.0 * pos_sm / (tr_smooth + 1e-9)).fillna(0.0)
+    minus_di = (100.0 * neg_sm / (tr_smooth + 1e-9)).fillna(0.0)
+    dx = (100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-9)).fillna(0.0)
+    adx = dx.rolling(window=period, min_periods=1).mean().fillna(0.0)
+
+    return {"adx": adx, "plus_di": plus_di, "minus_di": minus_di}
+
+
+
+
 # ── Master Technical Indicator Enrichment Pipeline ───────────────────────────
 def enrich_stock_dataframe(
     df: pd.DataFrame,
@@ -909,7 +1067,32 @@ def enrich_stock_dataframe(
     df["ichimoku_senkou_b"] = ichimoku["ichimoku_senkou_b"]
     df["ichimoku_chikou"] = ichimoku["ichimoku_chikou"]
 
-    # 12. Candlestick Patterns with Trend Context
+    # 12. Stochastic RSI
+    stoch_rsi = calculate_stoch_rsi(df["close"])
+    df["stoch_rsi_k"] = stoch_rsi["stoch_rsi_k"]
+    df["stoch_rsi_d"] = stoch_rsi["stoch_rsi_d"]
+
+    # 13. Chaikin Money Flow
+    df["cmf"] = calculate_cmf(df)
+
+    # 14. Elder Ray Index
+    elder = calculate_elder_ray(df)
+    df["elder_bull"] = elder["elder_bull"]
+    df["elder_bear"] = elder["elder_bear"]
+
+    # 15. Parabolic SAR
+    psar_data = calculate_psar(df)
+    df["psar"] = psar_data["psar"]
+    df["psar_dir"] = psar_data["psar_dir"]
+
+    # 16. Full ADX with +DI / -DI
+    adx_full = calculate_adx_full(df)
+    df["adx"] = adx_full["adx"]
+    df["plus_di"] = adx_full["plus_di"]
+    df["minus_di"] = adx_full["minus_di"]
+
+    # 17. Candlestick Patterns with Trend Context
+
     df = detect_candlestick_patterns(df)
 
     # 13. Divergence Detection

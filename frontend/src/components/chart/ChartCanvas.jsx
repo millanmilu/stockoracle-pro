@@ -25,6 +25,23 @@ function formatIndicatorValue(def, candle, currSym = '₹') {
     if (val == null || isNaN(Number(val))) return '—';
     return `${currSym}${Number(val).toFixed(2)}`;
   }
+  if (def.type === 'overlay_supertrend') {
+    const val = candle[def.field];
+    if (val == null || isNaN(Number(val))) return '—';
+    const isBull = Number(candle[def.dirField]) === 1;
+    return `${isBull ? '▲' : '▼'} ${currSym}${Number(val).toFixed(2)}`;
+  }
+  if (def.type === 'overlay_psar') {
+    const val = candle[def.field];
+    if (val == null || isNaN(Number(val))) return '—';
+    return `${currSym}${Number(val).toFixed(2)}`;
+  }
+  if (def.type === 'overlay_ichimoku') {
+    const t = candle.ichimoku_tenkan;
+    const k = candle.ichimoku_kijun;
+    if (t == null || isNaN(Number(t))) return '—';
+    return `T:${Number(t).toFixed(1)} K:${Number(k || 0).toFixed(1)}`;
+  }
   if (def.type === 'overlay_multi') {
     if (def.subLines && def.subLines.length >= 3) {
       const u = candle[def.subLines[0].field];
@@ -41,6 +58,12 @@ function formatIndicatorValue(def, candle, currSym = '₹') {
     return `B:${Number(m).toFixed(1)} U:${Number(u).toFixed(1)} L:${Number(l).toFixed(1)}`;
   }
   if (def.type === 'levels') {
+    if (def.id === 'fibonacci') {
+      const f50 = candle.fib_500;
+      const f61 = candle.fib_618;
+      if (f50 == null || isNaN(Number(f50))) return '—';
+      return `50%:${Number(f50).toFixed(1)} 61.8%:${Number(f61).toFixed(1)}`;
+    }
     const p = candle.pivot;
     const r1 = candle.r1;
     const s1 = candle.s1;
@@ -50,6 +73,7 @@ function formatIndicatorValue(def, candle, currSym = '₹') {
   const generic = candle[def.field];
   return generic != null && !isNaN(Number(generic)) ? Number(generic).toFixed(2) : '—';
 }
+
 
 /**
  * Creates primary price series based on chart type
@@ -170,8 +194,6 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   const containerRef = useRef(null);
   const chartInstanceRef = useRef(null);
   const candleSeriesRef = useRef(null);
-  const volumeSeriesRef = useRef(null);
-  const volumeMaSeriesRef = useRef(null);
   const syncedHairlineRef = useRef(null);
   const indicatorSeriesRef = useRef({}); // id -> series or array of series
   const chartTypeRef = useRef(chartType);
@@ -194,7 +216,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   }, [candles]);
 
 
-  // Filter active indicators to only include overlays (not oscillators like RSI/MACD which live in sub-panes)
+  // Filter active indicators to only include overlays (not oscillators which live in sub-panes)
   const overlayIndicators = useMemo(() => {
     return activeIndicators
       .map(id => INDICATOR_DEFINITIONS.find(item => item.id === id))
@@ -326,23 +348,6 @@ const ChartCanvas = forwardRef(function ChartCanvas({
             });
           }
 
-          if (volumeSeriesRef.current && candle.volume != null) {
-            const volVal = Number(candle.volume || 0);
-            volumeSeriesRef.current.update({
-              time: candle.time,
-              value: volVal,
-              color: c >= o ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
-            });
-            if (volumeMaSeriesRef.current && candlesRef.current && candlesRef.current.length > 0) {
-              const maPeriod = 20;
-              const recent = candlesRef.current.slice(-maPeriod);
-              const avgVol = recent.reduce((sum, item) => sum + Number(item.volume || 0), 0) / Math.max(1, recent.length);
-              volumeMaSeriesRef.current.update({
-                time: candle.time,
-                value: avgVol,
-              });
-            }
-          }
           if (candlesRef.current) {
             const lastIdx = candlesRef.current.length - 1;
             if (lastIdx >= 0 && candlesRef.current[lastIdx].time === candle.time) {
@@ -397,7 +402,14 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     },
     getChart: () => chartInstanceRef.current,
     getCandleSeries: () => candleSeriesRef.current,
-    getVolumeSeries: () => volumeSeriesRef.current,
+    getPriceCoordinate: (price) => {
+      if (!candleSeriesRef.current || price == null) return null;
+      try {
+        return candleSeriesRef.current.priceToCoordinate(Number(price));
+      } catch {
+        return null;
+      }
+    },
   }), [updateLegend, resetLegendToLatest, activeCandleRef]);
 
   // NOTE: There is deliberately NO subscribeLiveTick consumer in ChartCanvas.
@@ -471,33 +483,8 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     // Primary Price Series (Candles / Hollow / Bars / Line / Area / Baseline)
     const candleSeries = createPrimarySeries(chart, chartType, isCrypto);
 
-    // Volume Series
-    const volumeSeries = chart.addHistogramSeries({
-      priceFormat: { type: 'volume' },
-      priceScaleId: 'volume_scale',
-    });
-
-    chart.priceScale('volume_scale').applyOptions({
-      scaleMargins: {
-        top: 0.82,
-        bottom: 0,
-      },
-    });
-
-    // Volume MA (20) Line Series
-    const volumeMaSeries = chart.addLineSeries({
-      color: '#F59E0B',
-      lineWidth: 1,
-      priceFormat: { type: 'volume' },
-      priceScaleId: 'volume_scale',
-      lastValueVisible: false,
-      priceLineVisible: false,
-    });
-
     chartInstanceRef.current = chart;
     candleSeriesRef.current = candleSeries;
-    volumeSeriesRef.current = volumeSeries;
-    volumeMaSeriesRef.current = volumeMaSeries;
     indicatorSeriesRef.current = {};
 
     // Crosshair Move Event: Synchronize to sub-panes and update legend
@@ -515,7 +502,6 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       isHoveringRef.current = true;
       const curPrimary = candleSeriesRef.current;
       const cData = curPrimary ? param.seriesData?.get(curPrimary) : null;
-      const vData = volumeSeriesRef.current ? param.seriesData?.get(volumeSeriesRef.current) : null;
 
       // Broadcast position to sub-panes
       crosshairMoveRef.current({ x: param.point.x, time: param.time, source: 'main' });
@@ -533,7 +519,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           high: h,
           low: l,
           close: c,
-          volume: vData?.value ?? hoveredCandle?.volume,
+          volume: hoveredCandle?.volume,
         };
         updateLegendRef.current(merged);
       }
@@ -574,7 +560,6 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       chart.remove();
       chartInstanceRef.current = null;
       candleSeriesRef.current = null;
-      volumeSeriesRef.current = null;
       indicatorSeriesRef.current = {};
     };
   }, [interval]);
@@ -593,7 +578,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
 
   // Load Historical Candles into Series
   useEffect(() => {
-    if (!candleSeriesRef.current || !volumeSeriesRef.current || !Array.isArray(candles) || candles.length === 0) {
+    if (!candleSeriesRef.current || !Array.isArray(candles) || candles.length === 0) {
       return;
     }
 
@@ -606,29 +591,10 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         close: Number(c.close),
       }));
 
-      const formattedVolumes = candles.map((c) => ({
-        time: c.time,
-        value: Number(c.volume || 0),
-        color: Number(c.close) >= Number(c.open) ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
-      }));
-
       if (['line', 'area', 'baseline'].includes(chartTypeRef.current)) {
         candleSeriesRef.current.setData(candles.map(c => ({ time: c.time, value: Number(c.close) })));
       } else {
         candleSeriesRef.current.setData(formattedCandles);
-      }
-      volumeSeriesRef.current.setData(formattedVolumes);
-
-      if (volumeMaSeriesRef.current && formattedCandles.length > 0) {
-        const maPeriod = volumeMA || 20;
-        const maData = [];
-        for (let i = 0; i < formattedCandles.length; i++) {
-          const start = Math.max(0, i - maPeriod + 1);
-          const slice = formattedCandles.slice(start, i + 1);
-          const avgVol = slice.reduce((sum, item) => sum + Number(item.volume || 0), 0) / Math.max(1, slice.length);
-          maData.push({ time: formattedCandles[i].time, value: avgVol });
-        }
-        volumeMaSeriesRef.current.setData(maData);
       }
 
       candlesRef.current = formattedCandles;
@@ -648,7 +614,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     } catch (err) {
       console.warn('Error setting chart data:', err);
     }
-  }, [candles, volumeMA]);
+  }, [candles]);
 
   // Dynamic Chart Type Switcher (Candles, Hollow, Bar, Line, Area, Baseline)
   useEffect(() => {
@@ -708,17 +674,6 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     }
   }, [priceScaleMode, invertScale]);
 
-  // Toggle Volume Visibility
-  useEffect(() => {
-    if (!volumeSeriesRef.current) return;
-    try {
-      volumeSeriesRef.current.applyOptions({ visible: showVolume });
-      if (volumeMaSeriesRef.current) {
-        volumeMaSeriesRef.current.applyOptions({ visible: showVolume });
-      }
-    } catch (err) {}
-  }, [showVolume]);
-
   // Dynamically manage and render Indicator Overlays
   useEffect(() => {
     const chart = chartInstanceRef.current;
@@ -731,9 +686,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       if (!activeIndicators.includes(id)) {
         const item = currentSeriesMap[id];
         if (Array.isArray(item)) {
-          item.forEach((s) => {
-            try { chart.removeSeries(s); } catch {}
-          });
+          item.forEach((s) => { try { chart.removeSeries(s); } catch {} });
         } else if (item) {
           try { chart.removeSeries(item); } catch {}
         }
@@ -746,83 +699,117 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       const id = def.id;
       const isHidden = hiddenIndicators.includes(id);
 
+      // ── Standard single-line overlay ──────────────────────────────────────
       if (def.type === 'overlay') {
         let series = currentSeriesMap[id];
         if (!series) {
           series = chart.addLineSeries({
-            color: def.color,
-            lineWidth: def.lineWidth || 1.5,
-            priceLineVisible: false,
-            lastValueVisible: true,
-            title: def.shortName,
+            color: def.color, lineWidth: def.lineWidth || 1.5,
+            priceLineVisible: false, lastValueVisible: true, title: def.shortName,
           });
           currentSeriesMap[id] = series;
         }
-
         series.applyOptions({ visible: !isHidden });
-
         const data = candles
           .filter((c) => c[def.field] != null && !isNaN(Number(c[def.field])))
-          .map((c) => ({
-            time: c.time,
-            value: Number(c[def.field]),
-          }));
-
+          .map((c) => ({ time: c.time, value: Number(c[def.field]) }));
         try { series.setData(data); } catch {}
+
+      // ── Multi-line overlay (BB, KC, Donchian) ─────────────────────────────
       } else if (def.type === 'overlay_multi') {
-        // e.g. Bollinger Bands
         let seriesList = currentSeriesMap[id];
         if (!seriesList) {
           seriesList = def.subLines.map((sub) =>
-            chart.addLineSeries({
-              color: sub.color,
-              lineWidth: 1,
-              lineStyle: sub.style || 0,
-              priceLineVisible: false,
-              lastValueVisible: false,
-              title: `${def.shortName} ${sub.label}`,
-            })
+            chart.addLineSeries({ color: sub.color, lineWidth: 1, lineStyle: sub.style || 0, priceLineVisible: false, lastValueVisible: false, title: `${def.shortName} ${sub.label}` })
           );
           currentSeriesMap[id] = seriesList;
         }
-
         seriesList.forEach((s, idx) => {
           s.applyOptions({ visible: !isHidden });
           const sub = def.subLines[idx];
-          const data = candles
-            .filter((c) => c[sub.field] != null && !isNaN(Number(c[sub.field])))
-            .map((c) => ({
-              time: c.time,
-              value: Number(c[sub.field]),
-            }));
+          const data = candles.filter((c) => c[sub.field] != null && !isNaN(Number(c[sub.field]))).map((c) => ({ time: c.time, value: Number(c[sub.field]) }));
           try { s.setData(data); } catch {}
         });
+
+      // ── Levels overlay (Pivot Points, Fibonacci) ───────────────────────────
       } else if (def.type === 'levels') {
-        // e.g. Pivot Points
         let seriesList = currentSeriesMap[id];
         if (!seriesList) {
           seriesList = def.levels.map((lvl) =>
-            chart.addLineSeries({
-              color: lvl.color,
-              lineWidth: 1,
-              lineStyle: 2,
-              priceLineVisible: false,
-              lastValueVisible: true,
-              title: lvl.label,
-            })
+            chart.addLineSeries({ color: lvl.color, lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: true, title: lvl.label })
           );
           currentSeriesMap[id] = seriesList;
         }
-
         seriesList.forEach((s, idx) => {
           s.applyOptions({ visible: !isHidden });
           const lvl = def.levels[idx];
+          const data = candles.filter((c) => c[lvl.field] != null && !isNaN(Number(c[lvl.field]))).map((c) => ({ time: c.time, value: Number(c[lvl.field]) }));
+          try { s.setData(data); } catch {}
+        });
+
+      // ── Supertrend — direction-colored segments ───────────────────────────
+      } else if (def.type === 'overlay_supertrend') {
+        let stList = currentSeriesMap[id];
+        if (!stList) {
+          // Two series: one green (bullish), one red (bearish)
+          const bullSeries = chart.addLineSeries({ color: '#10B981', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'ST Bull' });
+          const bearSeries = chart.addLineSeries({ color: '#EF5350', lineWidth: 2, priceLineVisible: false, lastValueVisible: false, title: 'ST Bear' });
+          stList = [bullSeries, bearSeries];
+          currentSeriesMap[id] = stList;
+        }
+        stList.forEach(s => s.applyOptions({ visible: !isHidden }));
+        const bullData = [], bearData = [];
+        candles.forEach(c => {
+          if (c[def.field] == null || isNaN(Number(c[def.field]))) return;
+          const pt = { time: c.time, value: Number(c[def.field]) };
+          const dir = Number(c[def.dirField]);
+          if (dir === 1) { bullData.push(pt); } else { bearData.push(pt); }
+        });
+        try { stList[0].setData(bullData); stList[1].setData(bearData); } catch {}
+
+      // ── Parabolic SAR — directional dots (markers) ────────────────────────
+      } else if (def.type === 'overlay_psar') {
+        let psarSeries = currentSeriesMap[id];
+        if (!psarSeries) {
+          psarSeries = chart.addLineSeries({ color: 'transparent', lineWidth: 0, priceLineVisible: false, lastValueVisible: false, title: 'PSAR' });
+          currentSeriesMap[id] = psarSeries;
+        }
+        psarSeries.applyOptions({ visible: !isHidden });
+        const psarData = candles
+          .filter(c => c[def.field] != null && !isNaN(Number(c[def.field])))
+          .map(c => ({ time: c.time, value: Number(c[def.field]) }));
+        try { psarSeries.setData(psarData); } catch {}
+        // Markers: green circle below (bullish) or red circle above (bearish)
+        const markers = candles
+          .filter(c => c[def.field] != null && !isNaN(Number(c[def.field])))
+          .map(c => ({
+            time: c.time,
+            position: Number(c[def.dirField]) === 1 ? 'belowBar' : 'aboveBar',
+            color: Number(c[def.dirField]) === 1 ? '#10B981' : '#EF5350',
+            shape: 'circle',
+            size: 0.6,
+          }));
+        try { psarSeries.setMarkers(markers); } catch {}
+
+      // ── Ichimoku Cloud — 5 lines ──────────────────────────────────────────
+      } else if (def.type === 'overlay_ichimoku') {
+        let ichiList = currentSeriesMap[id];
+        if (!ichiList) {
+          ichiList = def.subLines.map((sub) =>
+            chart.addLineSeries({
+              color: sub.color, lineWidth: sub.label.includes('Senkou') ? 1 : 1.5,
+              lineStyle: sub.label === 'Chikou' ? 2 : 0,
+              priceLineVisible: false, lastValueVisible: false, title: sub.label,
+            })
+          );
+          currentSeriesMap[id] = ichiList;
+        }
+        ichiList.forEach((s, idx) => {
+          s.applyOptions({ visible: !isHidden });
+          const sub = def.subLines[idx];
           const data = candles
-            .filter((c) => c[lvl.field] != null && !isNaN(Number(c[lvl.field])))
-            .map((c) => ({
-              time: c.time,
-              value: Number(c[lvl.field]),
-            }));
+            .filter(c => c[sub.field] != null && !isNaN(Number(c[sub.field])))
+            .map(c => ({ time: c.time, value: Number(c[sub.field]) }));
           try { s.setData(data); } catch {}
         });
       }
@@ -858,7 +845,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         }}
       />
 
-      {/* 2. Unified Top-Left Legend HUD (TradingView Style) */}
+      {/* Active overlay indicator controls remain available over the chart. */}
       <div
         style={{
           position: 'absolute',
@@ -872,48 +859,6 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           maxWidth: 'calc(100% - 90px)',
         }}
       >
-        {/* Row 1: Symbol, Interval, Time, OHLC, % Change, Volume */}
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: 6,
-            padding: '3px 8px',
-            borderRadius: 4,
-            backgroundColor: 'rgba(11, 15, 28, 0.88)',
-            backdropFilter: 'blur(6px)',
-            border: '1px solid rgba(255, 255, 255, 0.06)',
-            fontSize: '0.72rem',
-            fontFamily: 'JetBrains Mono, monospace',
-            color: '#94A3B8',
-          }}
-        >
-          <span style={{ color: '#818CF8', fontWeight: 800 }}>{selectedSymbol}</span>
-          <span
-            style={{
-              padding: '1px 4px',
-              borderRadius: 3,
-              backgroundColor: 'rgba(99, 102, 241, 0.15)',
-              color: '#A5B4FC',
-              fontSize: '0.66rem',
-              fontWeight: 700,
-            }}
-          >
-            {interval.toUpperCase()}
-          </span>
-          <span ref={timeRef} style={{ color: '#64748B' }}>—</span>
-          <span style={{ color: '#475569' }}>•</span>
-          <span>O <strong ref={openRef} style={{ color: '#E2E8F0' }}>—</strong></span>
-          <span>H <strong ref={highRef} style={{ color: '#26A69A' }}>—</strong></span>
-          <span>L <strong ref={lowRef} style={{ color: '#EF5350' }}>—</strong></span>
-          <span>C <strong ref={closeRef} style={{ color: '#FFFFFF' }}>—</strong></span>
-          <span ref={chgRef} style={{ fontWeight: 800, color: '#26A69A' }}>—</span>
-          <span style={{ color: '#475569' }}>•</span>
-          <span>Vol <strong ref={volRef} style={{ color: '#CBD5E1' }}>—</strong></span>
-        </div>
-
-        {/* Row 2+: Active Overlay Indicators with Live Hover Readouts & Controls */}
         {overlayIndicators.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
             {overlayIndicators.map((ind) => {

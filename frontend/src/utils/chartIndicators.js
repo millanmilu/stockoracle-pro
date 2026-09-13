@@ -507,7 +507,181 @@ export function calculateSupertrend(candles, period = 10, multiplier = 3) {
     result.push({
       time: c.time,
       value: Number((trend === 1 ? lowerBand : upperBand).toFixed(2)),
+      direction: trend, // 1=bullish green, -1=bearish red
     });
   }
   return result;
 }
+
+// ── Stochastic RSI ────────────────────────────────────────────────────────────
+export function calculateStochRSI(candles, rsiPeriod = 14, stochPeriod = 14, kPeriod = 3, dPeriod = 3) {
+  if (!candles || candles.length <= rsiPeriod) return { k: [], d: [] };
+  const rsi = calculateRSI(candles, rsiPeriod);
+  if (rsi.length === 0) return { k: [], d: [] };
+
+  // Build RSI value array aligned with candle indices
+  const rsiVals = rsi.map(r => r.value);
+  const kArr = [];
+
+  for (let i = 0; i < rsiVals.length; i++) {
+    const start = Math.max(0, i - stochPeriod + 1);
+    const window = rsiVals.slice(start, i + 1);
+    const min = Math.min(...window);
+    const max = Math.max(...window);
+    const denom = max - min;
+    kArr.push(denom === 0 ? 50 : ((rsiVals[i] - min) / denom) * 100);
+  }
+
+  // Smooth %K with k_period SMA
+  const kSmoothed = [];
+  for (let i = 0; i < kArr.length; i++) {
+    const start = Math.max(0, i - kPeriod + 1);
+    const sum = kArr.slice(start, i + 1).reduce((a, b) => a + b, 0);
+    kSmoothed.push(sum / (i - start + 1));
+  }
+
+  // %D = SMA of %K
+  const dArr = [];
+  for (let i = 0; i < kSmoothed.length; i++) {
+    const start = Math.max(0, i - dPeriod + 1);
+    const sum = kSmoothed.slice(start, i + 1).reduce((a, b) => a + b, 0);
+    dArr.push(sum / (i - start + 1));
+  }
+
+  const k = rsi.map((r, i) => ({ time: r.time, value: Number(kSmoothed[i].toFixed(2)) }));
+  const d = rsi.map((r, i) => ({ time: r.time, value: Number(dArr[i].toFixed(2)) }));
+  return { k, d };
+}
+
+// ── Chaikin Money Flow (CMF) ──────────────────────────────────────────────────
+export function calculateCMF(candles, period = 20) {
+  if (!candles || candles.length === 0) return [];
+  const result = [];
+  const mfvArr = candles.map(c => {
+    const hl = Number(c.high) - Number(c.low);
+    if (hl === 0) return 0;
+    const mfm = ((Number(c.close) - Number(c.low)) - (Number(c.high) - Number(c.close))) / hl;
+    return mfm * Number(c.volume || 0);
+  });
+  const volArr = candles.map(c => Number(c.volume || 0));
+
+  for (let i = 0; i < candles.length; i++) {
+    const start = Math.max(0, i - period + 1);
+    let sumMFV = 0, sumVol = 0;
+    for (let j = start; j <= i; j++) {
+      sumMFV += mfvArr[j];
+      sumVol += volArr[j];
+    }
+    result.push({
+      time: candles[i].time,
+      value: Number((sumVol === 0 ? 0 : sumMFV / sumVol).toFixed(4)),
+    });
+  }
+  return result;
+}
+
+// ── Elder Ray Index ────────────────────────────────────────────────────────────
+export function calculateElderRay(candles, emaPeriod = 13) {
+  if (!candles || candles.length < emaPeriod) return { bull: [], bear: [] };
+  const ema = calculateEMA(candles, emaPeriod);
+  const emaMap = new Map(ema.map(e => [e.time, e.value]));
+  const bull = [];
+  const bear = [];
+  candles.forEach(c => {
+    const emaVal = emaMap.get(c.time);
+    if (emaVal == null) return;
+    bull.push({ time: c.time, value: Number((Number(c.high) - emaVal).toFixed(2)) });
+    bear.push({ time: c.time, value: Number((Number(c.low) - emaVal).toFixed(2)) });
+  });
+  return { bull, bear };
+}
+
+// ── Parabolic SAR ─────────────────────────────────────────────────────────────
+export function calculatePSAR(candles, start = 0.02, increment = 0.02, max = 0.2) {
+  if (!candles || candles.length < 2) return [];
+  const result = [];
+  let bull = true;
+  let af = start;
+  let ep = Number(candles[0].high);
+  let psar = Number(candles[0].low);
+
+  result.push({ time: candles[0].time, value: Number(psar.toFixed(2)), direction: 1 });
+
+  for (let i = 1; i < candles.length; i++) {
+    const prevLow = Number(candles[Math.max(0, i - 1)].low);
+    const prevLow2 = Number(candles[Math.max(0, i - 2)].low);
+    const prevHigh = Number(candles[Math.max(0, i - 1)].high);
+    const prevHigh2 = Number(candles[Math.max(0, i - 2)].high);
+    const curHigh = Number(candles[i].high);
+    const curLow = Number(candles[i].low);
+
+    if (bull) {
+      psar = psar + af * (ep - psar);
+      psar = Math.min(psar, prevLow, prevLow2);
+      if (curLow < psar) {
+        bull = false;
+        psar = ep;
+        ep = curLow;
+        af = start;
+        result.push({ time: candles[i].time, value: Number(psar.toFixed(2)), direction: -1 });
+      } else {
+        if (curHigh > ep) { ep = curHigh; af = Math.min(af + increment, max); }
+        result.push({ time: candles[i].time, value: Number(psar.toFixed(2)), direction: 1 });
+      }
+    } else {
+      psar = psar - af * (psar - ep);
+      psar = Math.max(psar, prevHigh, prevHigh2);
+      if (curHigh > psar) {
+        bull = true;
+        psar = ep;
+        ep = curHigh;
+        af = start;
+        result.push({ time: candles[i].time, value: Number(psar.toFixed(2)), direction: 1 });
+      } else {
+        if (curLow < ep) { ep = curLow; af = Math.min(af + increment, max); }
+        result.push({ time: candles[i].time, value: Number(psar.toFixed(2)), direction: -1 });
+      }
+    }
+  }
+  return result;
+}
+
+// ── ADX + DI ──────────────────────────────────────────────────────────────────
+export function calculateADX(candles, period = 14) {
+  if (!candles || candles.length < period) return { adx: [], plusDI: [], minusDI: [] };
+  const trArr = [], pmArr = [], nmArr = [];
+
+  for (let i = 0; i < candles.length; i++) {
+    const h = Number(candles[i].high), l = Number(candles[i].low), c = Number(candles[i].close);
+    const pc = i > 0 ? Number(candles[i - 1].close) : c;
+    const ph = i > 0 ? Number(candles[i - 1].high) : h;
+    const pl = i > 0 ? Number(candles[i - 1].low) : l;
+    trArr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+    const up = h - ph, dn = pl - l;
+    pmArr.push(up > dn && up > 0 ? up : 0);
+    nmArr.push(dn > up && dn > 0 ? dn : 0);
+  }
+
+  const adx = [], plusDI = [], minusDI = [];
+  for (let i = 0; i < candles.length; i++) {
+    const s = Math.max(0, i - period + 1);
+    let trSum = 0, pmSum = 0, nmSum = 0;
+    for (let j = s; j <= i; j++) { trSum += trArr[j]; pmSum += pmArr[j]; nmSum += nmArr[j]; }
+    const pdi = trSum > 0 ? (pmSum / trSum) * 100 : 0;
+    const ndi = trSum > 0 ? (nmSum / trSum) * 100 : 0;
+    const dx = (pdi + ndi) > 0 ? (Math.abs(pdi - ndi) / (pdi + ndi)) * 100 : 0;
+    plusDI.push({ time: candles[i].time, value: Number(pdi.toFixed(2)) });
+    minusDI.push({ time: candles[i].time, value: Number(ndi.toFixed(2)) });
+    adx.push({ time: candles[i].time, value: Number(dx.toFixed(2)) });
+  }
+
+  // Smooth ADX with period SMA
+  const adxSmoothed = adx.map((a, i) => {
+    const s = Math.max(0, i - period + 1);
+    const sum = adx.slice(s, i + 1).reduce((acc, v) => acc + v.value, 0);
+    return { time: a.time, value: Number((sum / (i - s + 1)).toFixed(2)) };
+  });
+
+  return { adx: adxSmoothed, plusDI, minusDI };
+}
+

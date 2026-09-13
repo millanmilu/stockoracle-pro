@@ -1,11 +1,35 @@
-import React, { useState, useMemo } from 'react';
-import { Search, X, Check, Activity, Trash2 } from 'lucide-react';
-import { INDICATOR_DEFINITIONS, INDICATOR_CATEGORIES } from './indicatorDefinitions';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Activity, Check, Search, Trash2, X } from 'lucide-react';
+import { INDICATOR_CATEGORIES, INDICATOR_DEFINITIONS } from './indicatorDefinitions';
 
-/**
- * IndicatorModal — TradingView-style Indicator Library Modal
- * Fast searchable catalog to toggle overlays, oscillators, and key levels.
- */
+const shell = {
+  width: 'min(600px, calc(100vw - 24px))',
+  height: 'min(74vh, 640px)',
+  maxHeight: '74vh',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+  background: '#0E1322',
+  border: '1px solid rgba(148, 163, 184, 0.2)',
+  borderRadius: 8,
+  boxShadow: '0 24px 48px rgba(0, 0, 0, 0.78)',
+  fontFamily: 'JetBrains Mono, monospace',
+};
+
+const iconButton = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 28,
+  height: 28,
+  padding: 0,
+  border: 0,
+  borderRadius: 4,
+  background: 'transparent',
+  color: '#64748B',
+  cursor: 'pointer',
+};
+
 export default function IndicatorModal({
   isOpen = false,
   onClose = () => {},
@@ -15,352 +39,126 @@ export default function IndicatorModal({
 }) {
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const searchInputRef = useRef(null);
 
   const filtered = useMemo(() => {
-    return INDICATOR_DEFINITIONS.filter((ind) => {
-      const matchesCat = activeCategory === 'all' || ind.category === activeCategory;
-      const query = search.trim().toLowerCase();
-      const matchesSearch =
-        !query ||
-        ind.name.toLowerCase().includes(query) ||
-        ind.shortName.toLowerCase().includes(query) ||
-        ind.description.toLowerCase().includes(query);
-      return matchesCat && matchesSearch;
+    const query = search.trim().toLowerCase();
+    return INDICATOR_DEFINITIONS.filter((indicator) => {
+      const matchesCategory = activeCategory === 'all' || indicator.category === activeCategory;
+      const matchesSearch = !query || [indicator.name, indicator.shortName, indicator.description]
+        .some(value => value.toLowerCase().includes(query));
+      return matchesCategory && matchesSearch;
     });
-  }, [search, activeCategory]);
+  }, [activeCategory, search]);
+
+  useEffect(() => {
+    setHighlightedIndex(0);
+  }, [activeCategory, search]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        onClose();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+      } else if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setHighlightedIndex(index => Math.min(index + 1, Math.max(0, filtered.length - 1)));
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setHighlightedIndex(index => Math.max(0, index - 1));
+      } else if (event.key === 'Enter' && filtered[highlightedIndex]) {
+        event.preventDefault();
+        onToggleIndicator(filtered[highlightedIndex].id);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [filtered, highlightedIndex, isOpen, onClose, onToggleIndicator]);
 
   if (!isOpen) return null;
 
   return (
     <div
+      role="presentation"
+      onClick={onClose}
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(5, 7, 13, 0.78)',
-        backdropFilter: 'blur(6px)',
         zIndex: 9999,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 16,
+        padding: 12,
+        background: 'rgba(5, 7, 13, 0.78)',
+        backdropFilter: 'blur(6px)',
       }}
-      onClick={onClose}
     >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 580,
-          maxHeight: '85vh',
-          backgroundColor: '#0E1322',
-          border: '1px solid rgba(99, 102, 241, 0.28)',
-          borderRadius: 10,
-          boxShadow: '0 24px 48px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.04)',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          fontFamily: 'JetBrains Mono, monospace',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Modal Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px 18px',
-            borderBottom: '1px solid rgba(99, 102, 241, 0.16)',
-            background: 'linear-gradient(180deg, #131A2E 0%, #0E1322 100%)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Activity size={18} style={{ color: '#818CF8' }} />
-            <span style={{ fontSize: '0.92rem', fontWeight: 800, color: '#F1F5F9', letterSpacing: '-0.01em' }}>
-              Technical Indicators & Studies
-            </span>
-            {activeIndicators.length > 0 && (
-              <span
-                style={{
-                  fontSize: '0.68rem',
-                  fontWeight: 800,
-                  backgroundColor: 'rgba(99, 102, 241, 0.25)',
-                  color: '#A5B4FC',
-                  padding: '2px 7px',
-                  borderRadius: 10,
-                  border: '1px solid rgba(99, 102, 241, 0.35)',
-                }}
-              >
-                {activeIndicators.length} Active
-              </span>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#64748B',
-              cursor: 'pointer',
-              padding: 4,
-              display: 'flex',
-              alignItems: 'center',
-              borderRadius: 4,
-              transition: 'color 0.15s',
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = '#F1F5F9')}
-            onMouseLeave={(e) => (e.currentTarget.style.color = '#64748B')}
-          >
-            <X size={18} />
-          </button>
-        </div>
+      <div role="dialog" aria-modal="true" aria-label="Technical Indicators and Studies" onClick={event => event.stopPropagation()} style={shell}>
+        <header style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 42, padding: '0 12px', borderBottom: '1px solid rgba(148,163,184,0.14)', background: '#111827' }}>
+          <Activity size={16} color="#38BDF8" />
+          <strong style={{ color: '#F1F5F9', fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap' }}>Technical Indicators &amp; Studies</strong>
+          <span style={{ padding: '2px 6px', border: '1px solid rgba(56,189,248,0.25)', borderRadius: 8, color: '#7DD3FC', background: 'rgba(56,189,248,0.1)', fontSize: 10, whiteSpace: 'nowrap' }}>{activeIndicators.length} Active</span>
+          <button type="button" onClick={onClose} title="Close indicators" aria-label="Close indicators" style={{ ...iconButton, marginLeft: 'auto' }} onMouseEnter={event => { event.currentTarget.style.color = '#F8FAFC'; }} onMouseLeave={event => { event.currentTarget.style.color = '#64748B'; }}><X size={16} /></button>
+        </header>
 
-        {/* Search Bar */}
-        <div style={{ padding: '12px 18px 8px 18px' }}>
-          <div
-            style={{
-              position: 'relative',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <Search size={14} style={{ position: 'absolute', left: 12, color: '#64748B' }} />
+        <div style={{ padding: '8px 12px 5px' }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={13} color="#64748B" style={{ position: 'absolute', left: 10, top: 10 }} />
             <input
-              type="text"
-              placeholder="Search indicators (e.g. RSI, SMA, Bollinger, VWAP)..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              ref={searchInputRef}
+              type="search"
               autoFocus
-              style={{
-                width: '100%',
-                padding: '8px 12px 8px 34px',
-                backgroundColor: '#080B14',
-                border: '1px solid rgba(99, 102, 241, 0.22)',
-                borderRadius: 6,
-                color: '#F8FAFC',
-                fontSize: '0.78rem',
-                outline: 'none',
-                fontFamily: 'JetBrains Mono, monospace',
-                boxSizing: 'border-box',
-              }}
+              value={search}
+              onChange={event => setSearch(event.target.value)}
+              placeholder="Search indicators (e.g. RSI, SMA, Bollinger, VWAP)..."
+              style={{ width: '100%', height: 34, boxSizing: 'border-box', padding: '0 30px', border: '1px solid rgba(148,163,184,0.18)', borderRadius: 5, outline: 0, background: '#080B14', color: '#F8FAFC', font: '12px JetBrains Mono, monospace' }}
             />
-            {search && (
-              <button
-                onClick={() => setSearch('')}
-                style={{
-                  position: 'absolute',
-                  right: 10,
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#64748B',
-                  cursor: 'pointer',
-                  padding: 2,
-                }}
-              >
-                <X size={13} />
-              </button>
-            )}
+            {search && <button type="button" onClick={() => setSearch('')} title="Clear search" aria-label="Clear search" style={{ ...iconButton, position: 'absolute', right: 3, top: 3, width: 28, height: 28 }}><X size={13} /></button>}
           </div>
         </div>
 
-        {/* Category Tabs */}
-        <div
-          style={{
-            display: 'flex',
-            gap: 6,
-            padding: '4px 18px 10px 18px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-            overflowX: 'auto',
-          }}
-        >
-          {INDICATOR_CATEGORIES.map((cat) => {
-            const isSelected = activeCategory === cat.id;
-            return (
-              <button
-                key={cat.id}
-                onClick={() => setActiveCategory(cat.id)}
-                style={{
-                  padding: '4px 10px',
-                  borderRadius: 5,
-                  fontSize: '0.70rem',
-                  fontWeight: 700,
-                  border: 'none',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.22)' : 'rgba(255, 255, 255, 0.03)',
-                  color: isSelected ? '#818CF8' : '#94A3B8',
-                  outline: isSelected ? '1px solid rgba(99, 102, 241, 0.45)' : 'none',
-                  transition: 'all 0.15s',
-                }}
-              >
-                {cat.label}
-              </button>
-            );
+        <nav aria-label="Indicator categories" style={{ display: 'flex', gap: 4, padding: '2px 12px 7px', borderBottom: '1px solid rgba(148,163,184,0.12)', overflowX: 'auto', scrollbarWidth: 'none' }}>
+          {INDICATOR_CATEGORIES.map(category => {
+            const selected = activeCategory === category.id;
+            return <button key={category.id} type="button" onClick={() => setActiveCategory(category.id)} style={{ height: 26, padding: '0 8px', border: `1px solid ${selected ? 'rgba(56,189,248,0.32)' : 'transparent'}`, borderRadius: 4, background: selected ? 'rgba(56,189,248,0.12)' : 'rgba(255,255,255,0.03)', color: selected ? '#7DD3FC' : '#94A3B8', cursor: 'pointer', font: '600 10px JetBrains Mono, monospace', whiteSpace: 'nowrap' }}>{category.label.replace(' & MAs', '').replace(' & Pivots', '')}</button>;
+          })}
+        </nav>
+
+        <div className="indicator-modal-list" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '6px 12px 8px', scrollbarWidth: 'thin', scrollbarColor: 'rgba(100,116,139,0.5) transparent' }}>
+          {filtered.length === 0 ? <div style={{ padding: '28px 8px', color: '#64748B', fontSize: 12, textAlign: 'center' }}>No indicators matching &quot;{search}&quot;</div> : filtered.map((indicator, index) => {
+            const active = activeIndicators.includes(indicator.id);
+            const highlighted = index === highlightedIndex;
+            return <div
+              key={indicator.id}
+              role="option"
+              aria-selected={active}
+              title={indicator.description}
+              onClick={() => onToggleIndicator(indicator.id)}
+              onMouseEnter={() => setHighlightedIndex(index)}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 54, marginBottom: 4, padding: '6px 8px', border: `1px solid ${active ? 'rgba(56,189,248,0.28)' : highlighted ? 'rgba(148,163,184,0.2)' : 'rgba(255,255,255,0.05)'}`, borderRadius: 5, background: active ? 'rgba(56,189,248,0.08)' : highlighted ? 'rgba(148,163,184,0.06)' : 'rgba(15,23,42,0.52)', cursor: 'pointer' }}
+            >
+              <span style={{ width: 16, height: 16, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1px solid ${active ? '#38BDF8' : 'rgba(100,116,139,0.5)'}`, borderRadius: 3, background: active ? '#0891B2' : 'transparent' }}>{active && <Check size={12} color="#fff" strokeWidth={3} />}</span>
+              <span style={{ width: 7, height: 7, flexShrink: 0, borderRadius: '50%', background: indicator.color }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <strong style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#F1F5F9', fontSize: 12, fontWeight: 650 }}>{indicator.name}</strong>
+                  <span style={{ flexShrink: 0, padding: '2px 4px', borderRadius: 3, background: 'rgba(255,255,255,0.06)', color: '#94A3B8', fontSize: 9 }}>{indicator.badge}</span>
+                </div>
+                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2, color: '#64748B', fontSize: 10 }}>{indicator.description}</div>
+              </div>
+              <span style={{ flexShrink: 0, padding: '3px 6px', borderRadius: 4, color: active ? '#7DD3FC' : '#94A3B8', background: active ? 'rgba(56,189,248,0.12)' : 'transparent', fontSize: 9, fontWeight: 700 }}>{active ? 'ACTIVE' : '+ ADD'}</span>
+            </div>;
           })}
         </div>
 
-        {/* Indicators List */}
-        <div
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '8px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
-          }}
-        >
-          {filtered.length === 0 ? (
-            <div style={{ padding: '32px 0', textAlign: 'center', color: '#64748B', fontSize: '0.80rem' }}>
-              No indicators matching "{search}"
-            </div>
-          ) : (
-            filtered.map((ind) => {
-              const isActive = activeIndicators.includes(ind.id);
-              return (
-                <div
-                  key={ind.id}
-                  onClick={() => onToggleIndicator(ind.id)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '9px 12px',
-                    borderRadius: 6,
-                    backgroundColor: isActive ? 'rgba(99, 102, 241, 0.12)' : 'rgba(15, 23, 42, 0.5)',
-                    border: `1px solid ${isActive ? 'rgba(99, 102, 241, 0.35)' : 'rgba(255, 255, 255, 0.04)'}`,
-                    cursor: 'pointer',
-                    transition: 'all 0.15s',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isActive) e.currentTarget.style.backgroundColor = 'rgba(99, 102, 241, 0.06)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) e.currentTarget.style.backgroundColor = 'rgba(15, 23, 42, 0.5)';
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    {/* Checkbox indicator */}
-                    <div
-                      style={{
-                        width: 17,
-                        height: 17,
-                        borderRadius: 4,
-                        border: `1px solid ${isActive ? '#818CF8' : 'rgba(100, 116, 139, 0.4)'}`,
-                        backgroundColor: isActive ? '#6366F1' : 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                      }}
-                    >
-                      {isActive && <Check size={12} style={{ color: '#fff', strokeWidth: 3 }} />}
-                    </div>
-
-                    {/* Color dot */}
-                    <div
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: '50%',
-                        backgroundColor: ind.color,
-                        flexShrink: 0,
-                      }}
-                    />
-
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span style={{ fontSize: '0.78rem', fontWeight: 800, color: '#F1F5F9' }}>
-                          {ind.name}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: '0.60rem',
-                            fontWeight: 700,
-                            padding: '1px 5px',
-                            borderRadius: 3,
-                            backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                            color: '#94A3B8',
-                          }}
-                        >
-                          {ind.badge}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: '0.68rem', color: '#64748B', marginTop: 2 }}>
-                        {ind.description}
-                      </div>
-                    </div>
-                  </div>
-
-                  <span
-                    style={{
-                      fontSize: '0.68rem',
-                      fontWeight: 700,
-                      color: isActive ? '#818CF8' : '#475569',
-                      padding: '2px 8px',
-                      borderRadius: 4,
-                      backgroundColor: isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {isActive ? 'ACTIVE' : '+ ADD'}
-                  </span>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* Modal Footer */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '10px 18px',
-            borderTop: '1px solid rgba(99, 102, 241, 0.14)',
-            backgroundColor: '#0A0D18',
-          }}
-        >
-          <button
-            onClick={onClearAll}
-            disabled={activeIndicators.length === 0}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              background: 'transparent',
-              border: 'none',
-              color: activeIndicators.length > 0 ? '#EF5350' : '#475569',
-              fontSize: '0.70rem',
-              fontWeight: 700,
-              cursor: activeIndicators.length > 0 ? 'pointer' : 'default',
-              fontFamily: 'JetBrains Mono, monospace',
-            }}
-          >
-            <Trash2 size={13} />
-            Clear All ({activeIndicators.length})
-          </button>
-
-          <button
-            onClick={onClose}
-            style={{
-              padding: '6px 16px',
-              borderRadius: 5,
-              backgroundColor: '#6366F1',
-              color: '#fff',
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              border: 'none',
-              cursor: 'pointer',
-              fontFamily: 'JetBrains Mono, monospace',
-              transition: 'background 0.15s',
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#4F46E5')}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '#6366F1')}
-          >
-            Done
-          </button>
-        </div>
+        <footer style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, padding: '0 12px', borderTop: '1px solid rgba(148,163,184,0.14)', background: '#0A0D18' }}>
+          <button type="button" onClick={onClearAll} disabled={activeIndicators.length === 0} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: 0, border: 0, background: 'transparent', color: activeIndicators.length ? '#F87171' : '#475569', cursor: activeIndicators.length ? 'pointer' : 'default', font: '600 11px JetBrains Mono, monospace' }}><Trash2 size={13} />Clear All ({activeIndicators.length})</button>
+          <button type="button" onClick={onClose} style={{ height: 30, padding: '0 12px', border: 0, borderRadius: 4, background: '#0EA5E9', color: '#082F49', cursor: 'pointer', font: '700 11px JetBrains Mono, monospace' }}>Done</button>
+        </footer>
       </div>
     </div>
   );

@@ -459,32 +459,21 @@ def save_intraday_candles(ticker: str, interval: str, df: pd.DataFrame) -> None:
 
     with get_db_session() as session:
         dialect = session.bind.dialect.name if session.bind else "sqlite"
-        if dialect == "sqlite":
-            stmt = sqlite_insert(IntradayCandle).values(rows)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["ticker", "interval", "timestamp"],
-                set_={
-                    "open": stmt.excluded.open,
-                    "high": stmt.excluded.high,
-                    "low": stmt.excluded.low,
-                    "close": stmt.excluded.close,
-                    "volume": stmt.excluded.volume,
-                }
-            )
-            session.execute(stmt)
-        elif dialect == "postgresql":
-            stmt = pg_insert(IntradayCandle).values(rows)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["ticker", "interval", "timestamp"],
-                set_={
-                    "open": stmt.excluded.open,
-                    "high": stmt.excluded.high,
-                    "low": stmt.excluded.low,
-                    "close": stmt.excluded.close,
-                    "volume": stmt.excluded.volume,
-                }
-            )
-            session.execute(stmt)
+        if dialect in ("sqlite", "postgresql"):
+            insert = sqlite_insert if dialect == "sqlite" else pg_insert
+            for i in range(0, len(rows), 500):
+                stmt = insert(IntradayCandle).values(rows[i:i + 500])
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["ticker", "interval", "timestamp"],
+                    set_={
+                        "open": stmt.excluded.open,
+                        "high": stmt.excluded.high,
+                        "low": stmt.excluded.low,
+                        "close": stmt.excluded.close,
+                        "volume": stmt.excluded.volume,
+                    }
+                )
+                session.execute(stmt)
         else:
             for r in rows:
                 existing = session.execute(
@@ -522,7 +511,8 @@ def save_stock_universe(records: list[dict]):
     ]
     with get_db_session() as session:
         dialect = session.bind.dialect.name if session.bind else "sqlite"
-        chunk_size = 500
+        # Keep SQLite multi-row inserts below its bind-variable limit.
+        chunk_size = 100
         for i in range(0, len(rows), chunk_size):
             chunk = rows[i:i + chunk_size]
             if dialect == "sqlite":
@@ -1712,8 +1702,11 @@ def execute_screener_sql_query(
     try:
         # Convert positional ? placeholders to named :p0, :p1 for SQLAlchemy portability across SQLite & PostgreSQL
         named_where = where_clause
-        bind_params = {}
-        if params:
+        if isinstance(params, dict):
+            bind_params = params
+        else:
+            bind_params = {}
+        if params and not isinstance(params, dict):
             for i, p in enumerate(params):
                 named_where = named_where.replace("?", f":p{i}", 1)
                 bind_params[f"p{i}"] = p

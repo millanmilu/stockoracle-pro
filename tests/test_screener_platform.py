@@ -17,6 +17,7 @@ from backend.data.database import (
     delete_user_screen_query
 )
 from backend.data.fundamentals_deep import get_deep_financials
+from backend.analysis.market_heatmap import compute_market_heatmap_data
 
 
 @pytest.fixture(autouse=True)
@@ -73,6 +74,17 @@ def test_screener_precomputed_sql_execution():
     top_stock = res["results"][0]
     assert top_stock["roce_pct"] > 20
     assert top_stock["pe_ratio"] < 35
+
+
+def test_market_heatmap_serializes_seeded_metrics():
+    """Heatmap serialization remains compatible with the screener metric model."""
+    result = compute_market_heatmap_data(universe="NIFTY 50", metric="change_1d_pct")
+
+    assert result["market_breadth"]["total_stocks"] > 0
+    assert result["sectors"]
+    stock = result["sectors"][0]["stocks"][0]
+    assert stock["ticker"]
+    assert "name" in stock
 
 
 def test_ai_screener_natural_language_translation():

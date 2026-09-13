@@ -84,11 +84,11 @@ export default function ChartBottomStats({
       borderRadius: 6,
       fontSize: '0.72rem',
       color: '#94A3B8',
-      height: 26,
+      minHeight: 30,
       flexShrink: 0,
       fontFamily: 'JetBrains Mono, monospace',
     }}>
-      {/* Left: Live Status Badge + LTP + Change */}
+      {/* Left: Live Status Badge + Symbol + OHLC */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         {/* Status Indicator Badge */}
         <span
@@ -117,13 +117,7 @@ export default function ChartBottomStats({
           {isLive ? (isCrypto ? 'LIVE 24/7' : 'LIVE NSE') : (interval === '1d' ? 'DAILY' : 'INTRADAY')}
         </span>
 
-        {/* Real-time LTP */}
-        <span>
-          LTP:{' '}
-          <strong style={{ color: '#FFFFFF', fontSize: '0.76rem' }}>
-            {numLtp != null ? `${currSym}${numLtp.toFixed(2)}` : '—'}
-          </strong>
-        </span>
+        <span style={{ color: '#CBD5E1', fontWeight: 700 }}>{selectedSymbol} · {interval.toUpperCase()}</span>
 
         {/* Change % */}
         {numChg != null && (
@@ -151,6 +145,9 @@ export default function ChartBottomStats({
             L: <strong style={{ color: '#EF5350' }}>{currSym}{stats.low.toFixed(2)}</strong>
           </span>
         )}
+        <span style={{ color: '#64748B' }}>
+          C: <strong style={{ color: '#FFFFFF' }}>{numLtp != null ? `${currSym}${numLtp.toFixed(2)}` : '—'}</strong>
+        </span>
       </div>
 
       {/* Right: Traded Volume + Data Feed Badge */}

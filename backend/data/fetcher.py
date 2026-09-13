@@ -5,6 +5,7 @@ import requests
 import pyotp
 import pandas as pd
 import numpy as np
+from threading import Lock
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -332,48 +333,50 @@ def _call_api(fn, *args, retries: int = 2, retry_delay: float = 1.5, **kwargs):
 SCRIP_MASTER_URL = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 _scrip_map: Dict[str, dict] = {}
 _scrip_map_failed = False   # Prevents infinite retry loops on total failure
+_scrip_load_lock = Lock()
 
 
 def _load_scrip_master(force: bool = False):
     """Downloads the ScripMaster JSON and indexes NSE equity symbols."""
     global _scrip_map, _scrip_map_failed
 
-    if _scrip_map and not force:          # Already loaded
-        return
-    if _scrip_map_failed and not force:
-        return              # Already failed, wait for explicit retry
+    with _scrip_load_lock:
+        if _scrip_map and not force:          # Already loaded
+            return
+        if _scrip_map_failed and not force:
+            return              # Already failed, wait for explicit retry
 
-    logger.info("Downloading Angel One ScripMaster ...")
-    try:
-        response = requests.get(SCRIP_MASTER_URL, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        records_to_save = []
-        for item in data:
-            if item.get("exch_seg") == "NSE":
-                sym = item.get("symbol", "").strip()
-                name = item.get("name", "").strip()
-                t_clean = sym.removesuffix("-EQ").strip()
+        logger.info("Downloading Angel One ScripMaster ...")
+        try:
+            response = requests.get(SCRIP_MASTER_URL, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            records_to_save = []
+            for item in data:
+                if item.get("exch_seg") == "NSE":
+                    sym = item.get("symbol", "").strip()
+                    name = item.get("name", "").strip()
+                    t_clean = sym.removesuffix("-EQ").strip()
 
-                _scrip_map[sym] = item
-                _scrip_map[t_clean] = item
-                if name:
-                    _scrip_map[name] = item
+                    _scrip_map[sym] = item
+                    _scrip_map[t_clean] = item
+                    if name:
+                        _scrip_map[name] = item
 
-                records_to_save.append({
-                    "ticker": t_clean,
-                    "name": name or t_clean,
-                    "symbol": sym,
-                    "token": item.get("token", ""),
-                    "exchange": item.get("exch_seg", "NSE"),
-                })
+                    records_to_save.append({
+                        "ticker": t_clean,
+                        "name": name or t_clean,
+                        "symbol": sym,
+                        "token": item.get("token", ""),
+                        "exchange": item.get("exch_seg", "NSE"),
+                    })
 
-        save_stock_universe(records_to_save)
-        logger.info("ScripMaster loaded — %d NSE equity symbols indexed.", len(records_to_save))
-        _scrip_map_failed = False
-    except Exception as e:
-        logger.error("Error downloading ScripMaster: %s", e, exc_info=True)
-        _scrip_map_failed = True
+            save_stock_universe(records_to_save)
+            logger.info("ScripMaster loaded — %d NSE equity symbols indexed.", len(records_to_save))
+            _scrip_map_failed = False
+        except Exception as e:
+            logger.error("Error downloading ScripMaster: %s", e, exc_info=True)
+            _scrip_map_failed = True
 
 
 ALIAS_TOKEN_MAP = {

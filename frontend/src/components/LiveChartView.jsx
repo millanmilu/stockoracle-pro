@@ -27,14 +27,15 @@ import useStore from '../store/useStore';
 import { useStock } from '../hooks/useStock';
 import ChartToolbar from './chart/ChartToolbar';
 import ChartCanvas from './chart/ChartCanvas';
-import ChartBottomStats from './chart/ChartBottomStats';
+import CandleCountdown from './chart/CandleCountdown';
 import IndicatorModal from './chart/IndicatorModal';
 import OscillatorPane from './chart/OscillatorPane';
 import VolumePane from './chart/VolumePane';
 import DrawingTools from './chart-tools/DrawingTools';
 import ChartSettingsModal from './ChartSettingsModal';
-import { DEFAULT_ACTIVE_INDICATORS } from './chart/indicatorDefinitions';
+import { DEFAULT_ACTIVE_INDICATORS, INDICATOR_DEFINITIONS } from './chart/indicatorDefinitions';
 import { toChartTime, getSessionBucketStart, isCryptoSymbol, subscribeLiveTick } from '../utils/chartHelpers';
+
 
 /**
  * LiveChartView — Rebuilt Clean Master Controller
@@ -48,7 +49,7 @@ export default function LiveChartView() {
   const wsConnected = useStore(s => s.wsConnected);
   const storeLiveTick = useStore(s => s.livePrices?.[selectedSymbol]);
 
-  const { fetchHistory, searchStocks, preloadStock } = useStock();
+  const { fetchHistory, preloadStock } = useStock();
 
   const selectedInterval = useStore(s => s.selectedInterval || '1m');
   const setSelectedInterval = useStore(s => s.setSelectedInterval);
@@ -91,6 +92,15 @@ export default function LiveChartView() {
   const [timezone, setTimezone] = useState('Asia/Kolkata');
 
 
+  // Filter active indicators to all oscillator sub-panes (RSI, MACD, Stoch, CCI, etc.)
+  const activeOscillators = useMemo(() => {
+    return activeIndicators
+      .map(id => INDICATOR_DEFINITIONS.find(item => item.id === id))
+      .filter(item => item && item.type === 'oscillator');
+  }, [activeIndicators]);
+
+
+
   const activeCandleRef = useRef(null);
   const chartCanvasRef = useRef(null);
   // Latest-value refs so the live-tick listener NEVER needs re-subscription
@@ -99,9 +109,10 @@ export default function LiveChartView() {
   const symbolRef = useRef(selectedSymbol);
   const readyRef = useRef({ loading: true, hasCandles: false });
   const pendingTickRef = useRef({ rafId: null, ltp: null });
-  const rsiPaneRef = useRef(null);
-  const macdPaneRef = useRef(null);
+  // General oscillator pane refs — keyed by oscType (e.g. 'rsi', 'macd', 'stoch', 'cci', etc.)
+  const oscPaneRefs = useRef({});
   const volumePaneRef = useRef(null);
+
   const isSyncingRangeRef = useRef(false);
   const containerRef = useRef(null);
   const lastVerifiedPriceRef = useRef(null);
@@ -410,24 +421,18 @@ export default function LiveChartView() {
   const handleVisibleRangeChange = useCallback((range, source) => {
     if (isSyncingRangeRef.current || !range) return;
     isSyncingRangeRef.current = true;
-
     try {
       if (source !== 'main') {
         chartCanvasRef.current?.setVisibleLogicalRange(range);
       }
-      if (source !== 'rsi') {
-        rsiPaneRef.current?.setVisibleLogicalRange(range);
-      }
-      if (source !== 'macd') {
-        macdPaneRef.current?.setVisibleLogicalRange(range);
-      }
+      Object.entries(oscPaneRefs.current).forEach(([oscType, paneRef]) => {
+        if (source !== oscType) paneRef?.setVisibleLogicalRange(range);
+      });
       if (source !== 'volume') {
         volumePaneRef.current?.setVisibleLogicalRange(range);
       }
     } finally {
-      requestAnimationFrame(() => {
-        isSyncingRangeRef.current = false;
-      });
+      requestAnimationFrame(() => { isSyncingRangeRef.current = false; });
     }
   }, []);
 
@@ -436,16 +441,14 @@ export default function LiveChartView() {
     if (source !== 'main') {
       chartCanvasRef.current?.setSyncedCrosshair({ x, time, source });
     }
-    if (source !== 'rsi') {
-      rsiPaneRef.current?.setSyncedCrosshair({ x, time, source });
-    }
-    if (source !== 'macd') {
-      macdPaneRef.current?.setSyncedCrosshair({ x, time, source });
-    }
+    Object.entries(oscPaneRefs.current).forEach(([oscType, paneRef]) => {
+      if (source !== oscType) paneRef?.setSyncedCrosshair({ x, time, source });
+    });
     if (source !== 'volume') {
       volumePaneRef.current?.setSyncedCrosshair({ x, time, source });
     }
   }, []);
+
 
   // Preload all timeframes and backfill DB for initial symbol
   useEffect(() => {
@@ -525,7 +528,6 @@ export default function LiveChartView() {
         onResetZoom={handleResetZoom}
         isFullscreen={isFullscreen}
         onToggleFullscreen={handleToggleFullscreen}
-        searchStocks={searchStocks}
         activeIndicatorCount={activeIndicators.length}
         onOpenIndicators={() => setShowIndicatorModal(true)}
         livePrice={curPrice}
@@ -536,19 +538,7 @@ export default function LiveChartView() {
         isTablet={isTablet}
       />
 
-      {/* 2. OHLC / Market Information Row */}
-      <ChartBottomStats
-        isLive={isLive}
-        curPrice={curPrice}
-        dayChange={dayChange}
-        candles={candles}
-        activeCandleRef={activeCandleRef}
-        interval={interval}
-        dataSource={dataSource}
-        selectedSymbol={selectedSymbol}
-      />
-
-      {/* 3. Main Terminal Viewport (Left Drawing Tools + Chart Canvas + Sub-panes) */}
+      {/* 2. Main Terminal Viewport (Left Drawing Tools + Chart Canvas + Sub-panes) */}
       <div
         style={{
           flex: 1,
@@ -644,6 +634,13 @@ export default function LiveChartView() {
               onVisibleRangeChange={handleVisibleRangeChange}
               onCrosshairMove={handleCrosshairMove}
             />
+            <CandleCountdown
+              chartRef={chartCanvasRef}
+              activeCandleRef={activeCandleRef}
+              selectedSymbol={selectedSymbol}
+              interval={interval}
+              currentPrice={curPrice}
+            />
           </div>
 
           <VolumePane
@@ -657,37 +654,32 @@ export default function LiveChartView() {
             onCrosshairMove={handleCrosshairMove}
           />
 
-          {/* Synchronized Oscillator Sub-Pane (RSI) */}
-          {activeIndicators.includes('rsi') && (
+          {/* Synchronized Dynamic Oscillator Sub-Panes */}
+          {activeOscillators.map((osc) => (
             <OscillatorPane
-              ref={rsiPaneRef}
-              type="rsi"
+              key={osc.id}
+              ref={(el) => {
+                const key = osc.oscType || osc.id;
+                if (el) {
+                  oscPaneRefs.current[key] = el;
+                } else {
+                  delete oscPaneRefs.current[key];
+                }
+              }}
+              oscType={osc.oscType || osc.id}
               candles={candles}
-              isHidden={hiddenIndicators.includes('rsi')}
+              isHidden={hiddenIndicators.includes(osc.id)}
               onToggleHide={handleToggleHideIndicator}
-              onClose={() => handleRemoveIndicator('rsi')}
+              onClose={() => handleRemoveIndicator(osc.id)}
               onVisibleRangeChange={handleVisibleRangeChange}
               onCrosshairMove={handleCrosshairMove}
             />
-          )}
+          ))}
 
-          {/* Synchronized Oscillator Sub-Pane (MACD) */}
-          {activeIndicators.includes('macd') && (
-            <OscillatorPane
-              ref={macdPaneRef}
-              type="macd"
-              candles={candles}
-              isHidden={hiddenIndicators.includes('macd')}
-              onToggleHide={handleToggleHideIndicator}
-              onClose={() => handleRemoveIndicator('macd')}
-              onVisibleRangeChange={handleVisibleRangeChange}
-              onCrosshairMove={handleCrosshairMove}
-            />
-          )}
         </div>
       </div>
 
-      {/* 4. Indicator Library Modal */}
+      {/* 3. Indicator Library Modal */}
       <IndicatorModal
         isOpen={showIndicatorModal}
         onClose={() => setShowIndicatorModal(false)}

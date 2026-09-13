@@ -35,6 +35,10 @@ _CHART_COLUMNS = [
     "keltner_upper", "keltner_middle", "keltner_lower",
     "donchian_upper", "donchian_middle", "donchian_lower",
     "pivot", "r1", "s1", "r2", "s2", "atr",
+    "fib_236", "fib_382", "fib_500", "fib_618",
+    "ichimoku_tenkan", "ichimoku_kijun", "ichimoku_senkou_a", "ichimoku_senkou_b", "ichimoku_chikou",
+    "stoch_rsi_k", "stoch_rsi_d", "cmf", "elder_bull", "elder_bear",
+    "psar", "psar_dir", "adx", "plus_di", "minus_di",
     "market_regime", "bullish_divergence", "bearish_divergence",
     "pattern_hammer", "pattern_hanging_man", "pattern_shooting_star",
     "pattern_inverted_hammer", "pattern_doji", "pattern_bullish_engulfing",
@@ -46,12 +50,17 @@ _PRICE_COLS = {
     "open", "high", "low", "close", "vwap", "bb_upper", "bb_middle", "bb_lower",
     "pivot", "r1", "s1", "r2", "s2", "supertrend", "sma_20", "sma_50", "sma_200",
     "ema_9", "ema_21", "atr", "keltner_upper", "keltner_middle", "keltner_lower",
-    "donchian_upper", "donchian_middle", "donchian_lower"
+    "donchian_upper", "donchian_middle", "donchian_lower",
+    "fib_236", "fib_382", "fib_500", "fib_618",
+    "ichimoku_tenkan", "ichimoku_kijun", "ichimoku_senkou_a", "ichimoku_senkou_b", "ichimoku_chikou",
+    "psar", "elder_bull", "elder_bear"
 }
 _INDICATOR_COLS = {
     "rsi", "macd", "macd_signal", "macd_hist", "stoch_k", "stoch_d",
-    "cci", "williams_r", "roc", "mfi"
+    "cci", "williams_r", "roc", "mfi", "adx", "plus_di", "minus_di",
+    "stoch_rsi_k", "stoch_rsi_d", "cmf"
 }
+
 
 
 def _trim_and_round(df, full: bool):
