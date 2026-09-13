@@ -6,6 +6,8 @@ import ChartCanvas from './chart/ChartCanvas';
 import ChartBottomStats from './chart/ChartBottomStats';
 import IndicatorModal from './chart/IndicatorModal';
 import OscillatorPane from './chart/OscillatorPane';
+import DrawingTools from './chart-tools/DrawingTools';
+import ChartSettingsModal from './ChartSettingsModal';
 import { DEFAULT_ACTIVE_INDICATORS } from './chart/indicatorDefinitions';
 import { toChartTime, getSessionBucketStart, isCryptoSymbol, subscribeLiveTick } from '../utils/chartHelpers';
 
@@ -48,6 +50,13 @@ export default function LiveChartView() {
   const [hiddenIndicators, setHiddenIndicators] = useState([]);
   const [indicatorValues, setIndicatorValues] = useState({});
   const [showIndicatorModal, setShowIndicatorModal] = useState(false);
+  const [chartType, setChartType] = useState('candlestick');
+  const [priceScaleMode, setPriceScaleMode] = useState('normal');
+  const [invertScale, setInvertScale] = useState(false);
+  const [showDrawingTools, setShowDrawingTools] = useState(true);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showVolume, setShowVolume] = useState(true);
+  const [timezone, setTimezone] = useState('Asia/Kolkata');
 
   const activeCandleRef = useRef(null);
   const chartCanvasRef = useRef(null);
@@ -464,6 +473,13 @@ export default function LiveChartView() {
         onSelectSymbol={handleSelectSymbol}
         interval={interval}
         onIntervalChange={handleIntervalChange}
+        chartType={chartType}
+        onChartTypeChange={setChartType}
+        priceScaleMode={priceScaleMode}
+        onPriceScaleModeChange={setPriceScaleMode}
+        showDrawingTools={showDrawingTools}
+        onToggleDrawingTools={() => setShowDrawingTools((prev) => !prev)}
+        onOpenSettings={() => setShowSettingsModal(true)}
         onResetZoom={handleResetZoom}
         isFullscreen={isFullscreen}
         onToggleFullscreen={handleToggleFullscreen}
@@ -475,101 +491,131 @@ export default function LiveChartView() {
         isLive={isLive}
       />
 
-      {/* 2. Main Chart Viewport Area */}
+      {/* 2. Main Terminal Viewport (Left Drawing Tools + Chart Canvas + Sub-panes) */}
       <div
         style={{
           flex: 1,
-          position: 'relative',
+          display: 'flex',
           width: '100%',
           minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
+          position: 'relative',
           overflow: 'hidden',
           borderRadius: 6,
         }}
       >
-        <div style={{ flex: 1, position: 'relative', width: '100%', minHeight: 0, overflow: 'hidden' }}>
-          {loading && candles.length === 0 && (
-            <div style={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              zIndex: 20,
-              backgroundColor: 'rgba(9, 12, 21, 0.7)',
-              color: '#818CF8',
-              fontFamily: 'JetBrains Mono, monospace',
-              fontSize: '0.85rem',
-              gap: 8,
-            }}>
-              <div className="spinner" style={{ width: 16, height: 16 }} />
-              Loading {selectedSymbol} Candles...
-            </div>
+        {/* Left Vertical Drawing Toolbar & Coordinate-Synced SVG Drawing Layer */}
+        <DrawingTools
+          chartRef={{ current: chartCanvasRef.current?.getChart() }}
+          candleRef={{ current: chartCanvasRef.current?.getCandleSeries() }}
+          candles={candles}
+          symbol={selectedSymbol}
+          interval={interval}
+          chartReady={!loading && candles.length > 0}
+          onOpenSettings={() => setShowSettingsModal(true)}
+          isOpen={showDrawingTools}
+          onToggleOpen={() => setShowDrawingTools((prev) => !prev)}
+        />
+
+        {/* Center/Right Chart Column (Canvas + Oscillators) */}
+        <div
+          style={{
+            flex: 1,
+            position: 'relative',
+            minWidth: 0,
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ flex: 1, position: 'relative', width: '100%', minHeight: 0, overflow: 'hidden' }}>
+            {loading && candles.length === 0 && (
+              <div style={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 20,
+                backgroundColor: 'rgba(9, 12, 21, 0.7)',
+                color: '#818CF8',
+                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: '0.85rem',
+                gap: 8,
+              }}>
+                <div className="spinner" style={{ width: 16, height: 16 }} />
+                Loading {selectedSymbol} Candles...
+              </div>
+            )}
+
+            {error && (
+              <div style={{
+                position: 'absolute',
+                top: 12,
+                right: 12,
+                zIndex: 20,
+                backgroundColor: 'rgba(239, 83, 80, 0.15)',
+                border: '1px solid rgba(239, 83, 80, 0.3)',
+                borderRadius: 4,
+                padding: '4px 10px',
+                color: '#EF5350',
+                fontSize: '0.72rem',
+                fontFamily: 'JetBrains Mono, monospace',
+              }}>
+                {error}
+              </div>
+            )}
+
+            <ChartCanvas
+              ref={chartCanvasRef}
+              candles={candles}
+              activeCandleRef={activeCandleRef}
+              interval={interval}
+              selectedSymbol={selectedSymbol}
+              chartType={chartType}
+              priceScaleMode={priceScaleMode}
+              invertScale={invertScale}
+              showVolume={showVolume}
+              timezone={timezone}
+              livePrice={curPrice}
+              liveChange={dayChange}
+              activeIndicators={activeIndicators}
+              hiddenIndicators={hiddenIndicators}
+              onToggleHideIndicator={handleToggleHideIndicator}
+              onRemoveIndicator={handleRemoveIndicator}
+              onVisibleRangeChange={handleVisibleRangeChange}
+              onCrosshairMove={handleCrosshairMove}
+            />
+          </div>
+
+          {/* Synchronized Oscillator Sub-Pane (RSI) */}
+          {activeIndicators.includes('rsi') && (
+            <OscillatorPane
+              ref={rsiPaneRef}
+              type="rsi"
+              candles={candles}
+              isHidden={hiddenIndicators.includes('rsi')}
+              onToggleHide={handleToggleHideIndicator}
+              onClose={() => handleRemoveIndicator('rsi')}
+              onVisibleRangeChange={handleVisibleRangeChange}
+              onCrosshairMove={handleCrosshairMove}
+            />
           )}
 
-          {error && (
-            <div style={{
-              position: 'absolute',
-              top: 12,
-              right: 12,
-              zIndex: 20,
-              backgroundColor: 'rgba(239, 83, 80, 0.15)',
-              border: '1px solid rgba(239, 83, 80, 0.3)',
-              borderRadius: 4,
-              padding: '4px 10px',
-              color: '#EF5350',
-              fontSize: '0.72rem',
-              fontFamily: 'JetBrains Mono, monospace',
-            }}>
-              {error}
-            </div>
+          {/* Synchronized Oscillator Sub-Pane (MACD) */}
+          {activeIndicators.includes('macd') && (
+            <OscillatorPane
+              ref={macdPaneRef}
+              type="macd"
+              candles={candles}
+              isHidden={hiddenIndicators.includes('macd')}
+              onToggleHide={handleToggleHideIndicator}
+              onClose={() => handleRemoveIndicator('macd')}
+              onVisibleRangeChange={handleVisibleRangeChange}
+              onCrosshairMove={handleCrosshairMove}
+            />
           )}
-
-          <ChartCanvas
-            ref={chartCanvasRef}
-            candles={candles}
-            activeCandleRef={activeCandleRef}
-            interval={interval}
-            selectedSymbol={selectedSymbol}
-            livePrice={curPrice}
-            liveChange={dayChange}
-            activeIndicators={activeIndicators}
-            hiddenIndicators={hiddenIndicators}
-            onToggleHideIndicator={handleToggleHideIndicator}
-            onRemoveIndicator={handleRemoveIndicator}
-            onVisibleRangeChange={handleVisibleRangeChange}
-            onCrosshairMove={handleCrosshairMove}
-          />
         </div>
-
-        {/* Synchronized Oscillator Sub-Pane (RSI) */}
-        {activeIndicators.includes('rsi') && (
-          <OscillatorPane
-            ref={rsiPaneRef}
-            type="rsi"
-            candles={candles}
-            isHidden={hiddenIndicators.includes('rsi')}
-            onToggleHide={handleToggleHideIndicator}
-            onClose={() => handleRemoveIndicator('rsi')}
-            onVisibleRangeChange={handleVisibleRangeChange}
-            onCrosshairMove={handleCrosshairMove}
-          />
-        )}
-
-        {/* Synchronized Oscillator Sub-Pane (MACD) */}
-        {activeIndicators.includes('macd') && (
-          <OscillatorPane
-            ref={macdPaneRef}
-            type="macd"
-            candles={candles}
-            isHidden={hiddenIndicators.includes('macd')}
-            onToggleHide={handleToggleHideIndicator}
-            onClose={() => handleRemoveIndicator('macd')}
-            onVisibleRangeChange={handleVisibleRangeChange}
-            onCrosshairMove={handleCrosshairMove}
-          />
-        )}
       </div>
 
       {/* 3. Footer Session Summary Bar */}
@@ -591,6 +637,20 @@ export default function LiveChartView() {
         activeIndicators={activeIndicators}
         onToggleIndicator={handleToggleIndicator}
         onClearAll={handleClearAllIndicators}
+      />
+
+      {/* 5. Chart Settings Modal */}
+      <ChartSettingsModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        chartRef={{ current: chartCanvasRef.current?.getChart() }}
+        candleSeriesRef={{ current: chartCanvasRef.current?.getCandleSeries() }}
+        onApplySettings={(newSettings) => {
+          if (newSettings.chartType) setChartType(newSettings.chartType);
+          if (newSettings.priceScaleMode) setPriceScaleMode(newSettings.priceScaleMode);
+          if (newSettings.invertScale !== undefined) setInvertScale(newSettings.invertScale);
+          if (newSettings.timezone) setTimezone(newSettings.timezone);
+        }}
       />
     </div>
   );

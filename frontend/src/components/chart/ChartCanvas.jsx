@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useMemo } from 'react';
-import { createChart, CrosshairMode } from 'lightweight-charts';
+import { createChart, CrosshairMode, PriceScaleMode } from 'lightweight-charts';
 import { Eye, EyeOff, X } from 'lucide-react';
 import { CHART_OPTIONS, CANDLE_STYLE, isCryptoSymbol, subscribeLiveTick } from '../../utils/chartHelpers';
 import { INDICATOR_DEFINITIONS } from './indicatorDefinitions';
@@ -52,6 +52,94 @@ function formatIndicatorValue(def, candle, currSym = '₹') {
 }
 
 /**
+ * Creates primary price series based on chart type
+ */
+function createPrimarySeries(chart, type, isCrypto) {
+  const minMove = isCrypto ? 0.01 : 0.05;
+  if (type === 'hollow') {
+    return chart.addCandlestickSeries({
+      ...CANDLE_STYLE,
+      upColor: 'transparent',
+      borderUpColor: '#26A69A',
+      wickUpColor: '#26A69A',
+      downColor: '#EF5350',
+      borderDownColor: '#EF5350',
+      wickDownColor: '#EF5350',
+      priceFormat: { type: 'price', precision: 2, minMove },
+      lastValueVisible: true,
+      priceLineVisible: true,
+      priceLineWidth: 1,
+      priceLineColor: '#818CF8',
+      priceLineStyle: 2,
+    });
+  }
+  if (type === 'bar') {
+    return chart.addBarSeries({
+      upColor: '#26A69A',
+      downColor: '#EF5350',
+      priceFormat: { type: 'price', precision: 2, minMove },
+      lastValueVisible: true,
+      priceLineVisible: true,
+      priceLineWidth: 1,
+      priceLineColor: '#818CF8',
+      priceLineStyle: 2,
+    });
+  }
+  if (type === 'line') {
+    return chart.addLineSeries({
+      color: '#38BDF8',
+      lineWidth: 2,
+      priceFormat: { type: 'price', precision: 2, minMove },
+      lastValueVisible: true,
+      priceLineVisible: true,
+      priceLineWidth: 1,
+      priceLineColor: '#38BDF8',
+      priceLineStyle: 2,
+    });
+  }
+  if (type === 'area') {
+    return chart.addAreaSeries({
+      topColor: 'rgba(56, 189, 248, 0.35)',
+      bottomColor: 'rgba(56, 189, 248, 0.01)',
+      lineColor: '#38BDF8',
+      lineWidth: 2,
+      priceFormat: { type: 'price', precision: 2, minMove },
+      lastValueVisible: true,
+      priceLineVisible: true,
+      priceLineWidth: 1,
+      priceLineColor: '#38BDF8',
+      priceLineStyle: 2,
+    });
+  }
+  if (type === 'baseline') {
+    return chart.addBaselineSeries({
+      baseValue: { type: 'price', price: 0 },
+      topLineColor: '#26A69A',
+      topFillColor1: 'rgba(38, 166, 154, 0.28)',
+      topFillColor2: 'rgba(38, 166, 154, 0.05)',
+      bottomLineColor: '#EF5350',
+      bottomFillColor1: 'rgba(239, 83, 80, 0.05)',
+      bottomFillColor2: 'rgba(239, 83, 80, 0.28)',
+      priceFormat: { type: 'price', precision: 2, minMove },
+      lastValueVisible: true,
+      priceLineVisible: true,
+      priceLineWidth: 1,
+      priceLineStyle: 2,
+    });
+  }
+  // Default 'candlestick'
+  return chart.addCandlestickSeries({
+    ...CANDLE_STYLE,
+    priceFormat: { type: 'price', precision: 2, minMove },
+    lastValueVisible: true,
+    priceLineVisible: true,
+    priceLineWidth: 1,
+    priceLineColor: '#818CF8',
+    priceLineStyle: 2,
+  });
+}
+
+/**
  * ChartCanvas — TradingView-Grade High Performance Candlestick Chart
  * Features:
  * - Smooth pan, scroll-wheel zoom, magnet crosshair
@@ -64,6 +152,12 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   activeCandleRef,
   interval = '1d',
   selectedSymbol = 'RELIANCE',
+  chartType = 'candlestick',
+  priceScaleMode = 'normal',
+  invertScale = false,
+  showVolume = true,
+  volumeMA = 20,
+  timezone = 'Asia/Kolkata',
   livePrice = null,
   liveChange = null,
   activeIndicators = [],
@@ -77,8 +171,11 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   const chartInstanceRef = useRef(null);
   const candleSeriesRef = useRef(null);
   const volumeSeriesRef = useRef(null);
+  const volumeMaSeriesRef = useRef(null);
   const syncedHairlineRef = useRef(null);
   const indicatorSeriesRef = useRef({}); // id -> series or array of series
+  const chartTypeRef = useRef(chartType);
+  chartTypeRef.current = chartType;
 
   // DOM refs for zero-latency legend updates without triggering React re-renders
   const openRef = useRef(null);
@@ -213,19 +310,38 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           const h = Math.max(Number(candle.high), o, c);
           const l = Math.min(Number(candle.low), o, c);
 
-          candleSeriesRef.current.update({
-            time: candle.time,
-            open: o,
-            high: h,
-            low: l,
-            close: c,
-          });
+          const isLineType = ['line', 'area', 'baseline'].includes(chartTypeRef.current);
+          if (isLineType) {
+            candleSeriesRef.current.update({
+              time: candle.time,
+              value: c,
+            });
+          } else {
+            candleSeriesRef.current.update({
+              time: candle.time,
+              open: o,
+              high: h,
+              low: l,
+              close: c,
+            });
+          }
+
           if (volumeSeriesRef.current && candle.volume != null) {
+            const volVal = Number(candle.volume || 0);
             volumeSeriesRef.current.update({
               time: candle.time,
-              value: Number(candle.volume || 0),
+              value: volVal,
               color: c >= o ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
             });
+            if (volumeMaSeriesRef.current && candlesRef.current && candlesRef.current.length > 0) {
+              const maPeriod = 20;
+              const recent = candlesRef.current.slice(-maPeriod);
+              const avgVol = recent.reduce((sum, item) => sum + Number(item.volume || 0), 0) / Math.max(1, recent.length);
+              volumeMaSeriesRef.current.update({
+                time: candle.time,
+                value: avgVol,
+              });
+            }
           }
           if (candlesRef.current) {
             const lastIdx = candlesRef.current.length - 1;
@@ -280,6 +396,8 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       }
     },
     getChart: () => chartInstanceRef.current,
+    getCandleSeries: () => candleSeriesRef.current,
+    getVolumeSeries: () => volumeSeriesRef.current,
   }), [updateLegend, resetLegendToLatest, activeCandleRef]);
 
   // NOTE: There is deliberately NO subscribeLiveTick consumer in ChartCanvas.
@@ -319,9 +437,10 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         secondsVisible: interval === '1s' || interval === '30s',
         tickMarkFormatter: (time) => {
           if (typeof time === 'number') {
+            const tz = timezone || 'Asia/Kolkata';
             const d = new Date(time * 1000);
             return d.toLocaleTimeString('en-IN', {
-              timeZone: 'Asia/Kolkata',
+              timeZone: tz,
               hour: '2-digit',
               minute: '2-digit',
               hour12: false,
@@ -334,9 +453,10 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         dateFormat: 'yyyy-MM-dd',
         timeFormatter: (time) => {
           if (typeof time === 'number') {
+            const tz = timezone || 'Asia/Kolkata';
             const d = new Date(time * 1000);
             return d.toLocaleTimeString('en-IN', {
-              timeZone: 'Asia/Kolkata',
+              timeZone: tz,
               hour: '2-digit',
               minute: '2-digit',
               second: (interval === '1s' || interval === '30s') ? '2-digit' : undefined,
@@ -348,20 +468,8 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       },
     });
 
-    // Candlestick Series
-    const candleSeries = chart.addCandlestickSeries({
-      ...CANDLE_STYLE,
-      priceFormat: {
-        type: 'price',
-        precision: 2,
-        minMove: isCrypto ? 0.01 : 0.05,
-      },
-      lastValueVisible: true,
-      priceLineVisible: true,
-      priceLineWidth: 1,
-      priceLineColor: '#818CF8',
-      priceLineStyle: 2,
-    });
+    // Primary Price Series (Candles / Hollow / Bars / Line / Area / Baseline)
+    const candleSeries = createPrimarySeries(chart, chartType, isCrypto);
 
     // Volume Series
     const volumeSeries = chart.addHistogramSeries({
@@ -376,9 +484,20 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       },
     });
 
+    // Volume MA (20) Line Series
+    const volumeMaSeries = chart.addLineSeries({
+      color: '#F59E0B',
+      lineWidth: 1,
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume_scale',
+      lastValueVisible: false,
+      priceLineVisible: false,
+    });
+
     chartInstanceRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
+    volumeMaSeriesRef.current = volumeMaSeries;
     indicatorSeriesRef.current = {};
 
     // Crosshair Move Event: Synchronize to sub-panes and update legend
@@ -394,21 +513,26 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       }
 
       isHoveringRef.current = true;
-      const cData = param.seriesData?.get(candleSeries);
-      const vData = param.seriesData?.get(volumeSeries);
+      const curPrimary = candleSeriesRef.current;
+      const cData = curPrimary ? param.seriesData?.get(curPrimary) : null;
+      const vData = volumeSeriesRef.current ? param.seriesData?.get(volumeSeriesRef.current) : null;
 
       // Broadcast position to sub-panes
       crosshairMoveRef.current({ x: param.point.x, time: param.time, source: 'main' });
 
       if (cData) {
         const hoveredCandle = candlesRef.current.find((c) => c.time === param.time);
+        const o = cData.open !== undefined ? cData.open : hoveredCandle?.open;
+        const h = cData.high !== undefined ? cData.high : hoveredCandle?.high;
+        const l = cData.low !== undefined ? cData.low : hoveredCandle?.low;
+        const c = cData.close !== undefined ? cData.close : (cData.value !== undefined ? cData.value : hoveredCandle?.close);
         const merged = {
           ...(hoveredCandle || {}),
           time: param.time,
-          open: cData.open,
-          high: cData.high,
-          low: cData.low,
-          close: cData.close,
+          open: o,
+          high: h,
+          low: l,
+          close: c,
           volume: vData?.value ?? hoveredCandle?.volume,
         };
         updateLegendRef.current(merged);
@@ -488,8 +612,25 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         color: Number(c.close) >= Number(c.open) ? 'rgba(38,166,154,0.45)' : 'rgba(239,83,80,0.45)',
       }));
 
-      candleSeriesRef.current.setData(formattedCandles);
+      if (['line', 'area', 'baseline'].includes(chartTypeRef.current)) {
+        candleSeriesRef.current.setData(candles.map(c => ({ time: c.time, value: Number(c.close) })));
+      } else {
+        candleSeriesRef.current.setData(formattedCandles);
+      }
       volumeSeriesRef.current.setData(formattedVolumes);
+
+      if (volumeMaSeriesRef.current && formattedCandles.length > 0) {
+        const maPeriod = volumeMA || 20;
+        const maData = [];
+        for (let i = 0; i < formattedCandles.length; i++) {
+          const start = Math.max(0, i - maPeriod + 1);
+          const slice = formattedCandles.slice(start, i + 1);
+          const avgVol = slice.reduce((sum, item) => sum + Number(item.volume || 0), 0) / Math.max(1, slice.length);
+          maData.push({ time: formattedCandles[i].time, value: avgVol });
+        }
+        volumeMaSeriesRef.current.setData(maData);
+      }
+
       candlesRef.current = formattedCandles;
 
       const totalBars = formattedCandles.length;
@@ -507,7 +648,76 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     } catch (err) {
       console.warn('Error setting chart data:', err);
     }
-  }, [candles]);
+  }, [candles, volumeMA]);
+
+  // Dynamic Chart Type Switcher (Candles, Hollow, Bar, Line, Area, Baseline)
+  useEffect(() => {
+    const chart = chartInstanceRef.current;
+    if (!chart) return;
+
+    try {
+      const range = chart.timeScale().getVisibleLogicalRange();
+      if (candleSeriesRef.current) {
+        chart.removeSeries(candleSeriesRef.current);
+      }
+      const newSeries = createPrimarySeries(chart, chartType, isCrypto);
+      candleSeriesRef.current = newSeries;
+
+      if (candlesRef.current && candlesRef.current.length > 0) {
+        if (['line', 'area', 'baseline'].includes(chartType)) {
+          newSeries.setData(candlesRef.current.map(c => ({
+            time: c.time,
+            value: Number(c.close),
+          })));
+        } else {
+          newSeries.setData(candlesRef.current.map(c => ({
+            time: c.time,
+            open: Number(c.open),
+            high: Number(c.high),
+            low: Number(c.low),
+            close: Number(c.close),
+          })));
+        }
+      }
+
+      if (range) {
+        chart.timeScale().setVisibleLogicalRange(range);
+      }
+    } catch (err) {
+      console.warn('Error switching chart type:', err);
+    }
+  }, [chartType, isCrypto]);
+
+  // Apply Price Scale Mode (Normal, Logarithmic, Percentage) & Invert
+  useEffect(() => {
+    if (!chartInstanceRef.current) return;
+    try {
+      const mode = priceScaleMode === 'log'
+        ? PriceScaleMode.Logarithmic
+        : priceScaleMode === 'percentage'
+          ? PriceScaleMode.Percentage
+          : PriceScaleMode.Normal;
+
+      chartInstanceRef.current.priceScale('right').applyOptions({
+        mode,
+        invertScale: !!invertScale,
+        autoScale: true,
+      });
+    } catch (err) {
+      console.warn('Error applying price scale mode:', err);
+    }
+  }, [priceScaleMode, invertScale]);
+
+  // Toggle Volume Visibility
+  useEffect(() => {
+    if (!volumeSeriesRef.current) return;
+    try {
+      volumeSeriesRef.current.applyOptions({ visible: showVolume });
+      if (volumeMaSeriesRef.current) {
+        volumeMaSeriesRef.current.applyOptions({ visible: showVolume });
+      }
+    } catch (err) {}
+  }, [showVolume]);
 
   // Dynamically manage and render Indicator Overlays
   useEffect(() => {

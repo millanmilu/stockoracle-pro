@@ -1,6 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, X, Clock, Maximize2, Minimize2, RotateCcw, Activity } from 'lucide-react';
+import { Search, X, Clock, Maximize2, Minimize2, RotateCcw, Activity, Settings, PenTool, BarChart2, ChevronDown, Check } from 'lucide-react';
 import { INTERVALS, POPULAR_STOCKS, isCryptoSymbol } from '../../utils/chartHelpers';
+
+const CHART_TYPE_LABELS = {
+  candlestick: 'Candles',
+  hollow: 'Hollow',
+  bar: 'Bars',
+  line: 'Line',
+  area: 'Area',
+  baseline: 'Baseline',
+};
 
 /**
  * Real-time Candle Countdown Hook
@@ -148,13 +157,35 @@ export default function ChartToolbar({
   livePrice = null,
   liveChange = null,
   isLive = false,
+  chartType = 'candlestick',
+  onChartTypeChange = () => {},
+  priceScaleMode = 'normal',
+  onPriceScaleModeChange = () => {},
+  showDrawingTools = true,
+  onToggleDrawingTools = () => {},
+  onOpenSettings = () => {},
 }) {
   const countdown = useCandleCountdown(interval, selectedSymbol);
   const [showSearchModal, setShowSearchModal] = useState(false);
+  const [showChartTypeMenu, setShowChartTypeMenu] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const searchInputRef = useRef(null);
+  const chartTypeMenuRef = useRef(null);
+
+  // Close chart type menu on outside click
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (chartTypeMenuRef.current && !chartTypeMenuRef.current.contains(e.target)) {
+        setShowChartTypeMenu(false);
+      }
+    }
+    if (showChartTypeMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+      return () => document.removeEventListener('mousedown', handleClickOutside);
+    }
+  }, [showChartTypeMenu]);
 
   // Debounced server search when typing in modal
   useEffect(() => {
@@ -547,10 +578,183 @@ export default function ChartToolbar({
             </span>
           )}
         </button>
+
+        {/* Chart Type Selector Dropdown */}
+        <div ref={chartTypeMenuRef} style={{ position: 'relative' }}>
+          <button
+            onClick={() => setShowChartTypeMenu(prev => !prev)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '2px 7px',
+              height: 25,
+              borderRadius: 5,
+              background: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: '#CBD5E1',
+              fontSize: '0.72rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              fontFamily: 'JetBrains Mono, monospace',
+            }}
+            title="Chart Type"
+          >
+            <BarChart2 size={13} style={{ color: '#818CF8' }} />
+            <span>{CHART_TYPE_LABELS[chartType] || 'Candles'}</span>
+            <ChevronDown size={11} style={{ color: '#64748B' }} />
+          </button>
+          {showChartTypeMenu && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 4px)',
+                left: 0,
+                backgroundColor: '#0F172A',
+                border: '1px solid rgba(99, 102, 241, 0.3)',
+                borderRadius: 6,
+                padding: 4,
+                zIndex: 120,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
+                minWidth: 140,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+              }}
+            >
+              {[
+                { id: 'candlestick', label: 'Candlesticks' },
+                { id: 'hollow', label: 'Hollow Candles' },
+                { id: 'bar', label: 'Bars' },
+                { id: 'line', label: 'Line' },
+                { id: 'area', label: 'Area' },
+                { id: 'baseline', label: 'Baseline' },
+              ].map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    onChartTypeChange(item.id);
+                    setShowChartTypeMenu(false);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '4px 8px',
+                    borderRadius: 4,
+                    border: 'none',
+                    background: chartType === item.id ? 'rgba(99, 102, 241, 0.2)' : 'transparent',
+                    color: chartType === item.id ? '#818CF8' : '#94A3B8',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: 'JetBrains Mono, monospace',
+                  }}
+                >
+                  <span>{item.label}</span>
+                  {chartType === item.id && <Check size={12} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Drawing Tools Toggle Button */}
+        <button
+          onClick={onToggleDrawingTools}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '2px 7px',
+            height: 25,
+            borderRadius: 5,
+            background: showDrawingTools ? 'rgba(99, 102, 241, 0.2)' : 'rgba(255,255,255,0.03)',
+            border: `1px solid ${showDrawingTools ? 'rgba(99, 102, 241, 0.4)' : 'rgba(255,255,255,0.08)'}`,
+            color: showDrawingTools ? '#818CF8' : '#94A3B8',
+            fontSize: '0.7rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+          title={showDrawingTools ? 'Hide Drawing Toolbar' : 'Show Drawing Toolbar'}
+        >
+          <PenTool size={12} />
+          <span>Draw</span>
+        </button>
+
+        {/* Scale Mode Selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: 'rgba(255,255,255,0.03)', padding: 1, borderRadius: 5, border: '1px solid rgba(255,255,255,0.08)' }}>
+          <button
+            onClick={() => onPriceScaleModeChange('normal')}
+            style={{
+              padding: '2px 6px',
+              borderRadius: 3,
+              border: 'none',
+              background: priceScaleMode === 'normal' ? '#2563EB' : 'transparent',
+              color: priceScaleMode === 'normal' ? '#FFF' : '#64748B',
+              fontSize: '0.65rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+            title="Auto / Normal Scale"
+          >
+            Auto
+          </button>
+          <button
+            onClick={() => onPriceScaleModeChange('log')}
+            style={{
+              padding: '2px 6px',
+              borderRadius: 3,
+              border: 'none',
+              background: priceScaleMode === 'log' ? '#2563EB' : 'transparent',
+              color: priceScaleMode === 'log' ? '#FFF' : '#64748B',
+              fontSize: '0.65rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+            title="Logarithmic Scale"
+          >
+            Log
+          </button>
+          <button
+            onClick={() => onPriceScaleModeChange('percentage')}
+            style={{
+              padding: '2px 6px',
+              borderRadius: 3,
+              border: 'none',
+              background: priceScaleMode === 'percentage' ? '#2563EB' : 'transparent',
+              color: priceScaleMode === 'percentage' ? '#FFF' : '#64748B',
+              fontSize: '0.65rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+            title="Percentage Scale"
+          >
+            %
+          </button>
+        </div>
       </div>
 
-      {/* Right: Live Stream Badge, Reset Zoom, Fullscreen */}
+      {/* Right: Live Stream Badge, Settings, Reset Zoom, Fullscreen */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {/* Chart Settings Button */}
+        <button
+          onClick={onOpenSettings}
+          style={{
+            padding: '4px 6px',
+            borderRadius: 5,
+            border: '1px solid rgba(255,255,255,0.08)',
+            background: 'rgba(255,255,255,0.03)',
+            color: '#94A3B8',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+          title="Chart Settings"
+        >
+          <Settings size={13} style={{ color: '#818CF8' }} />
+        </button>
         {/* Live Stream Pulse Badge */}
         <div
           title={isLive ? "Continuous real-time market WebSocket feed active" : "Waiting for live feed..."}

@@ -29,8 +29,13 @@ export default function DrawingTools({
   symbol, 
   interval, 
   chartReady, 
-  onOpenSettings 
+  onOpenSettings,
+  isOpen = true,
+  onToggleOpen = () => {},
 }) {
+  const isCrypto = symbol ? (String(symbol).toUpperCase().startsWith('BTC') || String(symbol).toUpperCase().includes('BITCOIN') || String(symbol).toUpperCase().endsWith('USDT')) : false;
+  const currSym = isCrypto ? '$' : '₹';
+
   // Tool & State Management
   const [activeTool, setActiveTool] = useState('crosshair');
   const [drawings, setDrawings] = useState([]);
@@ -140,10 +145,10 @@ export default function DrawingTools({
       const cY = candleRef.current.priceToCoordinate(c);
 
       const candidates = [
-        { price: h, y: hY, label: `HIGH ₹${h.toFixed(2)}` },
-        { price: l, y: lY, label: `LOW ₹${l.toFixed(2)}` },
-        { price: c, y: cY, label: `CLOSE ₹${c.toFixed(2)}` },
-        { price: o, y: oY, label: `OPEN ₹${o.toFixed(2)}` },
+        { price: h, y: hY, label: `HIGH ${currSym}${h.toFixed(2)}` },
+        { price: l, y: lY, label: `LOW ${currSym}${l.toFixed(2)}` },
+        { price: c, y: cY, label: `CLOSE ${currSym}${c.toFixed(2)}` },
+        { price: o, y: oY, label: `OPEN ${currSym}${o.toFixed(2)}` },
       ].filter(pt => pt.y != null && !isNaN(pt.y));
 
       if (!candidates.length) return null;
@@ -406,7 +411,7 @@ export default function DrawingTools({
       setSelectedDrawingId(hLine.id);
       setChartLocked(false);
       if (!stayInDrawMode) setActiveTool('crosshair');
-      toast.success(`Support/Resistance Line at ₹${chartPt.price?.toFixed(2)}`);
+      toast.success(`Support/Resistance Line at ${currSym}${chartPt.price?.toFixed(2)}`);
       return;
     }
 
@@ -426,7 +431,7 @@ export default function DrawingTools({
       setSelectedDrawingId(hRay.id);
       setChartLocked(false);
       if (!stayInDrawMode) setActiveTool('crosshair');
-      toast.success(`Horizontal Ray placed at ₹${chartPt.price?.toFixed(2)}`);
+      toast.success(`Horizontal Ray placed at ${currSym}${chartPt.price?.toFixed(2)}`);
       return;
     }
 
@@ -747,7 +752,7 @@ export default function DrawingTools({
         maxHeight: '100%',
         backgroundColor: '#0F131D',
         borderRight: '1px solid rgba(255, 255, 255, 0.08)',
-        display: 'flex',
+        display: isOpen ? 'flex' : 'none',
         flexDirection: 'column',
         alignItems: 'center',
         padding: '6px 0',
@@ -1224,13 +1229,13 @@ export default function DrawingTools({
           style={{
             position: 'absolute',
             top: 0,
-            left: 44,
+            left: isOpen ? 44 : 0,
             right: 0,
             bottom: 0,
-            width: 'calc(100% - 44px)',
+            width: isOpen ? 'calc(100% - 44px)' : '100%',
             height: '100%',
             zIndex: 45,
-            pointerEvents: activeTool !== 'crosshair' ? 'all' : 'none',
+            pointerEvents: activeTool !== 'crosshair' ? 'all' : (selectedDrawingId ? 'all' : 'none'),
             cursor: activeTool === 'crosshair' ? 'default' : 'crosshair',
             touchAction: 'none',
           }}
@@ -1273,7 +1278,7 @@ export default function DrawingTools({
                     fill="#131722" stroke={d.color || '#38BDF8'} strokeWidth={1}
                   />
                   <text x={12} y={pt1.y - 6} fill={d.color || '#38BDF8'} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace">
-                    ₹{d.startPrice?.toFixed(2)}
+                    {currSym}{d.startPrice?.toFixed(2)}
                   </text>
                 </g>
               );
@@ -1310,7 +1315,7 @@ export default function DrawingTools({
                     fill="#131722" stroke={d.color || '#38BDF8'} strokeWidth={1}
                   />
                   <text x={pt1.x + 12} y={pt1.y - 6} fill={d.color || '#38BDF8'} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace">
-                    ₹{d.startPrice?.toFixed(2)}
+                    {currSym}{d.startPrice?.toFixed(2)}
                   </text>
                 </g>
               );
@@ -1587,7 +1592,7 @@ export default function DrawingTools({
                     x={startX + 12} y={entryY + 4}
                     fill="#FFF" fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace"
                   >
-                    R:R {rrRatio.toFixed(2)} · TP +₹{targetDelta.toFixed(1)} (+{targetPct.toFixed(1)}%) · SL -₹{stopDelta.toFixed(1)} (-{stopPct.toFixed(1)}%)
+                    R:R {rrRatio.toFixed(2)} · TP +{currSym}{targetDelta.toFixed(1)} (+{targetPct.toFixed(1)}%) · SL -{currSym}{stopDelta.toFixed(1)} (-{stopPct.toFixed(1)}%)
                   </text>
 
                   {/* Target Handle */}

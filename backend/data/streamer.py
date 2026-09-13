@@ -33,6 +33,18 @@ from backend.data.market_calendar import is_market_open
 
 logger = logging.getLogger("stockoracle.streamer")
 
+# Throttled INFO logging for idle/wait states (otherwise invisible at debug level)
+_LAST_WAIT_LOG: Dict[str, float] = {}
+
+
+def _log_wait_state(reason: str, interval: float = 300.0):
+    """Log an idle-state reason at INFO, at most once per interval."""
+    now = time.monotonic()
+    if now - _LAST_WAIT_LOG.get(reason, 0.0) >= interval:
+        _LAST_WAIT_LOG[reason] = now
+        logger.info("Streamer idle: %s", reason)
+
+
 _RECONNECT_BASE_DELAY = 2.0
 _RECONNECT_MAX_DELAY = 60.0
 _STALE_TICK_SECONDS = 10.0          # no ticks for this long → let polling take over
@@ -185,16 +197,29 @@ async def run_streamer_loop(manager, status: dict, tick_writer):
 
     while True:
         try:
-            from SmartApi import SmartWebSocketV2  # deferred: optional at import time
+            try:
+                from SmartApi import SmartWebSocketV2  # deferred: optional at import time
+            except ImportError:
+                status["connected"] = False
+                status["last_error"] = "smartapi-python too old (no SmartWebSocketV2)"
+                _log_wait_state(
+                    "streaming unavailable: installed smartapi-python has no SmartWebSocketV2 — "
+                    "REST polling (~1s cadence) is active. Upgrade with: pip install -U smartapi-python",
+                    interval=900.0,
+                )
+                await asyncio.sleep(30.0)
+                continue
 
             token_records = await _resolve_tokens(manager)
             if not token_records:
                 status["connected"] = False
+                _log_wait_state("no client subscriptions yet (waiting for a chart view)")
                 await asyncio.sleep(5.0)
                 continue
 
             if not (await asyncio.to_thread(ensure_session)) or not smartApi:
                 status["connected"] = False
+                _log_wait_state("broker session unavailable — REST polling only")
                 await asyncio.sleep(10.0)
                 continue
 
@@ -203,6 +228,7 @@ async def run_streamer_loop(manager, status: dict, tick_writer):
             if not (jwt_token and feed_token):
                 status["last_error"] = "jwt/feed token unavailable"
                 status["connected"] = False
+                _log_wait_state("jwt/feed tokens not captured at login — streaming disabled, REST polling active")
                 await asyncio.sleep(10.0)
                 continue
 
@@ -225,49 +251,60 @@ async def run_streamer_loop(manager, status: dict, tick_writer):
             sw.on_error = bridge.on_error
             sw.on_close = bridge.on_close
 
-            # SmartWebSocketV2 spawns its own reader thread inside .connect();
-            # subscription is issued from the on_open callback.
-            await asyncio.to_thread(sw.connect)
-
             reconnect_delay = _RECONNECT_BASE_DELAY
-            logger.info("Streamer feed running (%d token groups).", len(desired))
+            logger.info("Streamer feed starting (%d token groups).", len(desired))
 
-            # Supervision loop: refresh token set, detect stale feed
-            while True:
-                await asyncio.sleep(_TOKEN_REFRESH_SECONDS)
+            async def _supervise():
+                """Watches the open feed: resubscribes when client subscriptions
+                change, forces reconnect on stale/dropped feed."""
+                nonlocal token_records
+                while True:
+                    await asyncio.sleep(_TOKEN_REFRESH_SECONDS)
 
-                # Re-resolve subscriptions when clients add tickers
-                fresh_records = await _resolve_tokens(manager)
-                fresh_keys = set(fresh_records.keys())
-                if fresh_keys and fresh_keys != set(token_records.keys()):
-                    token_records = fresh_records
-                    desired = []
-                    ticker_map = {}
-                    for (exch, token), rec in list(token_records.items())[:_MAX_STREAM_TOKENS]:
-                        ticker_map[(exch, token)] = rec.get("symbol", "").replace("-EQ", "")
-                        desired.append({"exchangeType": exch, "tokens": [token]})
-                    bridge.set_token_map(ticker_map)
-                    bridge._subscribe_payload = desired
-                    try:
-                        await asyncio.to_thread(sw.subscribe, bridge._correlation_id, bridge._mode, desired)
-                        logger.info("Streamer resubscribed: %d token groups.", len(desired))
-                    except Exception as exc:
-                        logger.debug("Resubscribe failed — forcing reconnect: %s", exc)
+                    # Re-resolve subscriptions when clients add tickers
+                    fresh_records = await _resolve_tokens(manager)
+                    fresh_keys = set(fresh_records.keys())
+                    if fresh_keys and fresh_keys != set(token_records.keys()):
+                        token_records = fresh_records
+                        new_desired = []
+                        new_map = {}
+                        for (exch, token), rec in list(token_records.items())[:_MAX_STREAM_TOKENS]:
+                            new_map[(exch, token)] = rec.get("symbol", "").replace("-EQ", "")
+                            new_desired.append({"exchangeType": exch, "tokens": [token]})
+                        bridge.set_token_map(new_map)
+                        bridge._subscribe_payload = new_desired
+                        try:
+                            await asyncio.to_thread(sw.subscribe, bridge._correlation_id, bridge._mode, new_desired)
+                            logger.info("Streamer resubscribed: %d token groups.", len(new_desired))
+                        except Exception as exc:
+                            logger.warning("Streamer resubscribe failed — forcing reconnect: %s", exc)
+                            break
+
+                    # Stale feed detection: let polling take over quietly
+                    last_tick = status.get("last_tick_at", 0.0)
+                    market_open = is_market_open()
+                    if status.get("connected") and market_open and last_tick and (time.time() - last_tick) > _STALE_TICK_SECONDS * 6:
+                        logger.warning("Streamer feed stale (%.0fs without ticks) — reconnecting.", time.time() - last_tick)
+                        try:
+                            await asyncio.to_thread(sw.close_connection)
+                        except Exception:
+                            pass
                         break
 
-                # Stale feed detection: let polling take over quietly
-                last_tick = status.get("last_tick_at", 0.0)
-                market_open = is_market_open()
-                if status.get("connected") and market_open and last_tick and (time.time() - last_tick) > _STALE_TICK_SECONDS * 6:
-                    logger.warning("Streamer feed stale (%.0fs without ticks) — reconnecting.", time.time() - last_tick)
-                    try:
-                        await asyncio.to_thread(sw.close_connection)
-                    except Exception:
-                        pass
-                    break
+                    if not status.get("connected") and market_open:
+                        break  # socket dropped — reconnect from outer loop
 
-                if not status.get("connected") and market_open:
-                    break  # socket dropped — reconnect from outer loop
+            supervisor = asyncio.create_task(_supervise())
+            # Retrieve supervisor exceptions to avoid 'never retrieved' warnings
+            supervisor.add_done_callback(lambda t: t.cancelled() or t.exception())
+
+            # SmartWebSocketV2.connect() BLOCKS until the socket closes, so it
+            # must run in a worker thread while the supervisor watches in
+            # parallel. Subscription is issued from the on_open callback.
+            try:
+                await asyncio.to_thread(sw.connect)
+            finally:
+                supervisor.cancel()
 
         except asyncio.CancelledError:
             status["connected"] = False
@@ -275,7 +312,7 @@ async def run_streamer_loop(manager, status: dict, tick_writer):
         except Exception as exc:
             status["last_error"] = str(exc)[:200]
             status["connected"] = False
-            logger.debug("Streamer connection attempt failed: %s", exc)
+            _log_wait_state(f"connection attempt failed: {exc}", interval=300.0)
 
         status["connected"] = False
         await asyncio.sleep(reconnect_delay)
