@@ -1017,3 +1017,25 @@ input, select, textarea { font-family: inherit; font-size: 0.78rem; }
   .pro-right-panel { display: none; }
   .pro-search-input { width: 140px !important; }
 }
+
+/* Search inputs that ship their own clear button (e.g. the Indicators & Studies
+   modal) must not also render the UA-native ✕ that Chromium/WebKit draws on
+   input[type="search"] — otherwise two clear controls overlap. */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration,
+input[type="search"]::-webkit-search-results-button,
+input[type="search"]::-webkit-search-results-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+/* Indicators & Studies modal list. The component sets the Firefox-only
+   `scrollbar-width`/`scrollbar-color` inline, so WebKit needs this to match. */
+.indicator-modal-list::-webkit-scrollbar { width: 8px; }
+.indicator-modal-list::-webkit-scrollbar-track { background: transparent; }
+.indicator-modal-list::-webkit-scrollbar-thumb {
+  background: rgba(100, 116, 139, 0.45);
+  border-radius: 4px;
+}
+.indicator-modal-list::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.65); }

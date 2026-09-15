@@ -8,7 +8,12 @@ from backend.data.database import (
 from backend.data.options import (
     calculate_black_scholes_greeks, _compute_max_pain, _get_pcr_sentiment
 )
-from backend.data.fundamentals import _parse_number
+from backend.data.fundamentals import _parse_number, _normalize_pct_field
+from backend.data.fundamentals_deep import (
+    _calculate_altman_z_score,
+    _calculate_intrinsic_dcf,
+    _calculate_piotroski_f_score,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -95,3 +100,78 @@ def test_fundamentals_number_parser():
     assert _parse_number("-3.14 %") == -3.14
     assert _parse_number("N/A") is None
     assert _parse_number("") is None
+
+
+def test_dividend_yield_normalization_fraction_vs_percent():
+    """Newer yfinance may return an already-percent dividendYield (>1)."""
+    assert _normalize_pct_field(0.035) == 3.5  # fraction → percent
+    assert _normalize_pct_field(3.5) == 3.5  # already percent → untouched
+    assert _normalize_pct_field(0.0) == 0.0
+    assert _normalize_pct_field(None) is None
+    assert _normalize_pct_field("N/A") is None
+
+
+def test_altman_z_score_insufficient_data_returns_null():
+    """Missing statements must yield null score, never a fake Safe Zone."""
+    empty = _calculate_altman_z_score([], [])
+    assert empty["z_score"] is None
+    assert empty["zone"] == "Insufficient Data"
+
+    # Missing market-cap anchor must also refuse to score.
+    partial = _calculate_altman_z_score(
+        [{"Sales": 1000.0, "Operating Profit": 200.0}],
+        [{"Reserves": 500.0, "Total Assets": 2000.0, "Total Liabilities": 1000.0}],
+        mcap_cr=None,
+    )
+    assert partial["z_score"] is None
+    assert partial["zone"] == "Insufficient Data"
+
+    # Fully reported inputs still score normally.
+    full = _calculate_altman_z_score(
+        [{"Sales": 1000.0, "Operating Profit": 200.0}],
+        [{"Reserves": 500.0, "Total Assets": 2000.0, "Total Liabilities": 1000.0}],
+        mcap_cr=3000.0,
+    )
+    assert full["z_score"] is not None
+    assert full["zone"] in ("Safe Zone", "Grey Zone", "Distress Zone")
+
+
+def test_piotroski_insufficient_data_returns_null():
+    """Fewer than 2 annual statements must not fabricate a 6/9 PASS baseline."""
+    result = _calculate_piotroski_f_score([{"Net Profit": 100.0}], [], [])
+    assert result["score"] is None
+    assert result["rating"] == "INSUFFICIENT DATA"
+    assert len(result["criteria"]) == 9
+    assert all(c.get("passed") is None for c in result["criteria"])
+
+    # Two years of real data still scores 0-9.
+    annual = [
+        {"Net Profit": 80.0, "Sales": 900.0, "OPM %": 14.0},
+        {"Net Profit": 100.0, "Sales": 1000.0, "OPM %": 15.0},
+    ]
+    bs = [
+        {"Total Assets": 1900.0, "Borrowings": 200.0, "Equity Capital": 100.0, "Other Liabilities": 300.0},
+        {"Total Assets": 2000.0, "Borrowings": 190.0, "Equity Capital": 100.0, "Other Liabilities": 300.0},
+    ]
+    cf = [{}, {"Cash from Operating Activity": 150.0}]
+    scored = _calculate_piotroski_f_score(annual, bs, cf)
+    assert scored["score"] is not None
+    assert 0 <= scored["score"] <= 9
+
+
+def test_dcf_without_cmp_returns_null_margin_not_fake_verdict():
+    """DCF without a real CMP must not anchor on ₹1000 or emit a fake verdict."""
+    annual = [
+        {"Sales": 800.0}, {"Sales": 850.0}, {"Sales": 900.0},
+        {"Sales": 950.0}, {"Sales": 1000.0},
+    ]
+    result = _calculate_intrinsic_dcf("TEST", annual, [], eps=50.0, bvps=200.0, cmp=None)
+    assert result["current_market_price"] is None
+    assert result["margin_of_safety_pct"] is None
+    assert result["valuation_verdict"] == "INSUFFICIENT DATA"
+    assert result["dcf_fair_value"] is not None
+
+    # Without a real EPS anchor there is no honest valuation at all.
+    no_eps = _calculate_intrinsic_dcf("TEST", annual, [], eps=None, bvps=None, cmp=1500.0)
+    assert no_eps["dcf_fair_value"] is None
+    assert no_eps["valuation_verdict"] == "INSUFFICIENT DATA"

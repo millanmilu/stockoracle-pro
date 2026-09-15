@@ -166,7 +166,13 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const [sortField, setSortField] = useState('idx');
   const [sortAsc, setSortAsc] = useState(true);
 
+  // Request-id guard: quick ticker switches must not let a stale response
+  // overwrite the current ticker's state.
+  const fetchSeqRef = React.useRef(0);
+
   const fetchData = async () => {
+    const seq = ++fetchSeqRef.current;
+    const alive = () => fetchSeqRef.current === seq;
     setLoading(true);
     setError(null);
     try {
@@ -174,6 +180,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         api.get(`/api/stock/${ticker}/fundamentals`),
         api.get(`/api/stock/${ticker}/financials`)
       ]);
+      if (!alive()) return;
 
       if (res1.status === 'fulfilled' && res1.value?.data) {
         setData(res1.value.data);
@@ -196,9 +203,10 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         setError('Fundamental research data temporarily unavailable.');
       }
     } catch {
+      if (!alive()) return;
       setError('Fundamental research data temporarily unavailable.');
     } finally {
-      setLoading(false);
+      if (alive()) setLoading(false);
     }
   };
 
@@ -306,20 +314,21 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     return enrichedQuarters;
   }, [enrichedQuarters, qTimeframe]);
 
-  // Aggregate summary metrics for quarterly results
+  // Aggregate summary metrics for quarterly results — computed over the
+  // timeframe-filtered quarters so the selector affects KPIs and charts alike.
   const summaryStats = useMemo(() => {
-    if (!enrichedQuarters || enrichedQuarters.length === 0) return null;
+    if (!displayedQuarters || displayedQuarters.length === 0) return null;
 
-    const validRevQoQ = enrichedQuarters.map(q => q.revQoQ).filter(v => v != null);
-    const validProfitQoQ = enrichedQuarters.map(q => q.profitQoQ).filter(v => v != null);
-    const validEpsQoQ = enrichedQuarters.map(q => q.epsQoQ).filter(v => v != null);
+    const validRevQoQ = displayedQuarters.map(q => q.revQoQ).filter(v => v != null);
+    const validProfitQoQ = displayedQuarters.map(q => q.profitQoQ).filter(v => v != null);
+    const validEpsQoQ = displayedQuarters.map(q => q.epsQoQ).filter(v => v != null);
 
     const avgRevQoQ = validRevQoQ.length ? (validRevQoQ.reduce((a, b) => a + b, 0) / validRevQoQ.length) : null;
     const avgProfitQoQ = validProfitQoQ.length ? (validProfitQoQ.reduce((a, b) => a + b, 0) / validProfitQoQ.length) : null;
     const avgEpsQoQ = validEpsQoQ.length ? (validEpsQoQ.reduce((a, b) => a + b, 0) / validEpsQoQ.length) : null;
 
-    const latest = enrichedQuarters[enrichedQuarters.length - 1];
-    const prev = enrichedQuarters.length >= 2 ? enrichedQuarters[enrichedQuarters.length - 2] : null;
+    const latest = displayedQuarters[displayedQuarters.length - 1];
+    const prev = displayedQuarters.length >= 2 ? displayedQuarters[displayedQuarters.length - 2] : null;
 
     let trendVerdict = "Stable Trajectory";
     let trendPositive = true;
@@ -348,7 +357,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       latest,
       prev,
     };
-  }, [enrichedQuarters]);
+  }, [displayedQuarters]);
 
   // Quarterly Table Sorting Logic
   const sortedTableData = useMemo(() => {
@@ -453,8 +462,8 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   }));
 
   const cagr = deepData?.ratios_cagr || {};
-  const piotroski = deepData?.piotroski_f_score || { score: 6, rating: 'MODERATE (Stable)', criteria: [] };
-  const altman = deepData?.altman_z_score || { z_score: 3.0, zone: 'Safe Zone' };
+  const piotroski = deepData?.piotroski_f_score || { score: null, rating: 'INSUFFICIENT DATA', summary: 'Piotroski Score — insufficient data to evaluate.', criteria: [] };
+  const altman = deepData?.altman_z_score || { z_score: null, zone: 'Insufficient Data', description: 'Altman Z-Score not computable — required statements unavailable.' };
   const dcf = deepData?.dcf_valuation || {};
   const ratioTrends = deepData?.ratio_trends || [];
   const corpCal = deepData?.corporate_calendar || {};
@@ -471,7 +480,8 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   const roeVal = data?.roe ?? deepData?.roe ?? (ratioTrends.length ? ratioTrends[ratioTrends.length - 1]?.roe : null);
   const deVal = data?.debt_to_equity ?? deepData?.debt_to_equity ?? (ratioTrends.length ? ratioTrends[ratioTrends.length - 1]?.debt_to_equity : null);
   const promoterVal = data?.promoter_holding ?? deepData?.promoter_holding ?? (shareholding.length ? shareholding[shareholding.length - 1]?.promoter : null);
-  const mcapVal = data?.market_cap ?? deepData?.market_cap;
+  // Prefer the numeric market-cap (₹ Cr) field; fall back to the legacy display string.
+  const mcapVal = data?.market_cap_cr ?? deepData?.market_cap_cr ?? data?.market_cap ?? deepData?.market_cap;
   const divYieldVal = data?.dividend_yield ?? deepData?.dividend_yield ?? corpCal?.dividend_yield_pct;
 
   // ── DUPONT 3-STAGE DECOMPOSITION CALCULATIONS ──
@@ -504,13 +514,18 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
   }, [annualPl, balanceSheet]);
 
   // ── DYNAMIC LIVE DCF VALUATION SANDBOX ──
+  // Zero-fake-data rule: no ₹1000 CMP anchor. Missing CMP → margin-of-safety
+  // and CMP-relative coloring render "—", while the EPS-anchored fair value
+  // from the sandbox sliders still displays. Missing EPS → no honest fair
+  // value either (fair value "—", sliders still interactive).
   const liveDcf = useMemo(() => {
-    const cmp = data?.current_price || deepData?.current_price || (peers.find(p => p.name?.includes(ticker))?.price) || 1000.0;
+    const cmpRaw = data?.current_price ?? deepData?.current_price ?? (peers.find(p => p.name?.includes(ticker))?.price) ?? null;
+    const cmp = cmpRaw != null && !isNaN(Number(cmpRaw)) && Number(cmpRaw) > 0 ? Number(cmpRaw) : null;
     const epsRaw = deepData?.eps ?? data?.eps ?? (annualPl.length ? annualPl[annualPl.length - 1]?.['EPS in Rs'] : null);
     const eps = epsRaw != null && !isNaN(Number(epsRaw)) ? Number(epsRaw) : null;
     const bvps = deepData?.book_value != null && !isNaN(Number(deepData.book_value)) ? Number(deepData.book_value) : null;
 
-    const baseFcf = eps != null && eps > 0 ? Math.max(1.0, eps * 0.85) : Math.max(1.0, (cmp * 0.035) * 0.85);
+    const baseFcf = eps != null && eps > 0 ? Math.max(1.0, eps * 0.85) : null;
     const g = dcfGrowthRate / 100.0;
     const w = Math.max(0.06, dcfWacc / 100.0);
     const tg = Math.min(w - 0.01, dcfTerminalGrowth / 100.0);
@@ -519,24 +534,28 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     let fcfT = baseFcf;
     const projected = [];
 
-    for (let yr = 1; yr <= 5; yr++) {
-      fcfT *= (1.0 + g);
-      const df = 1.0 / Math.pow(1.0 + w, yr);
-      const pv = fcfT * df;
-      pvSum += pv;
-      projected.push({
-        year: `FY+${yr}`,
-        fcf: Number(fcfT.toFixed(2)),
-        pv: Number(pv.toFixed(2)),
-        discountFactor: Number(df.toFixed(3))
-      });
+    if (baseFcf != null) {
+      for (let yr = 1; yr <= 5; yr++) {
+        fcfT *= (1.0 + g);
+        const df = 1.0 / Math.pow(1.0 + w, yr);
+        const pv = fcfT * df;
+        pvSum += pv;
+        projected.push({
+          year: `FY+${yr}`,
+          fcf: Number(fcfT.toFixed(2)),
+          pv: Number(pv.toFixed(2)),
+          discountFactor: Number(df.toFixed(3))
+        });
+      }
     }
 
-    const terminalVal = (fcfT * (1.0 + tg)) / Math.max(0.01, (w - tg));
-    const pvTerminal = terminalVal / Math.pow(1.0 + w, 5);
-    const fairValue = Number((pvSum + pvTerminal).toFixed(2));
+    const terminalVal = baseFcf != null ? (fcfT * (1.0 + tg)) / Math.max(0.01, (w - tg)) : 0;
+    const pvTerminal = baseFcf != null ? terminalVal / Math.pow(1.0 + w, 5) : 0;
+    const fairValue = baseFcf != null ? Number((pvSum + pvTerminal).toFixed(2)) : null;
 
-    const marginOfSafetyPct = cmp > 0 ? Number((((fairValue - cmp) / cmp) * 100).toFixed(1)) : 0;
+    const marginOfSafetyPct = (cmp != null && fairValue != null && fairValue !== 0)
+      ? Number((((fairValue - cmp) / cmp) * 100).toFixed(1))
+      : null;
     const grahamNumber = (eps != null && bvps != null && eps > 0 && bvps > 0)
       ? Number(Math.sqrt(22.5 * eps * bvps).toFixed(2))
       : null;
@@ -553,7 +572,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
       tgSteps.forEach(tgStep => {
         const wFrac = wStep / 100.0;
         const tgFrac = tgStep / 100.0;
-        if (wFrac <= tgFrac) {
+        if (wFrac <= tgFrac || baseFcf == null) {
           row[`tg_${tgStep}`] = null;
           return;
         }
@@ -620,7 +639,9 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
     );
   }
 
-  if (error || !data) {
+  // Graceful degradation: render whenever EITHER endpoint succeeded so working
+  // tabs stay usable during a partial outage. Full error only when both failed.
+  if (error || (!data && !deepData)) {
     return (
       <div style={{ padding: '36px 20px', textAlign: 'center', color: '#94A3B8' }}>
         <BookOpen size={32} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
@@ -656,16 +677,16 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
               <ShieldCheck size={16} color="#10B981" />
               <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#10B981' }}>Piotroski Quality F-Score</span>
             </div>
-            <span style={{ fontSize: '1.1rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: piotroski.score >= 7 ? '#10B981' : piotroski.score >= 4 ? '#F59E0B' : '#EF5350' }}>
-              {piotroski.score}/9
+            <span style={{ fontSize: '1.1rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: piotroski.score == null ? '#94A3B8' : piotroski.score >= 7 ? '#10B981' : piotroski.score >= 4 ? '#F59E0B' : '#EF5350' }}>
+              {piotroski.score != null ? `${piotroski.score}/9` : '—'}
             </span>
           </div>
-          <div style={{ fontSize: '0.64rem', color: '#94A3B8', marginBottom: 8 }}>Rating: <strong style={{ color: piotroski.score >= 7 ? '#10B981' : '#F59E0B' }}>{piotroski.rating}</strong></div>
+          <div style={{ fontSize: '0.64rem', color: '#94A3B8', marginBottom: 8 }}>Rating: <strong style={{ color: piotroski.score == null ? '#94A3B8' : piotroski.score >= 7 ? '#10B981' : '#F59E0B' }}>{piotroski.rating}</strong></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {(piotroski.criteria || []).slice(0, 3).map((c, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.62rem', color: '#CBD5E1' }}>
                 <span>{c.name}</span>
-                <span style={{ color: c.passed ? '#10B981' : '#EF5350', fontWeight: 700 }}>{c.passed ? '✓ PASS' : '✗ FAIL'}</span>
+                <span style={{ color: c.passed == null ? '#64748B' : c.passed ? '#10B981' : '#EF5350', fontWeight: 700 }}>{c.passed == null ? '— N/A' : c.passed ? '✓ PASS' : '✗ FAIL'}</span>
               </div>
             ))}
           </div>
@@ -681,11 +702,11 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
               <Scale size={16} color="#818CF8" />
               <span style={{ fontSize: '0.76rem', fontWeight: 800, color: '#818CF8' }}>Altman Z-Score Solvency</span>
             </div>
-            <span style={{ fontSize: '1.1rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: altman.z_score >= 2.99 ? '#10B981' : altman.z_score >= 1.81 ? '#F59E0B' : '#EF5350' }}>
-              {altman.z_score}
+            <span style={{ fontSize: '1.1rem', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: altman.z_score == null ? '#94A3B8' : altman.z_score >= 2.99 ? '#10B981' : altman.z_score >= 1.81 ? '#F59E0B' : '#EF5350' }}>
+              {altman.z_score != null ? altman.z_score : '—'}
             </span>
           </div>
-          <div style={{ fontSize: '0.64rem', color: '#94A3B8', marginBottom: 8 }}>Zone: <strong style={{ color: altman.z_score >= 2.99 ? '#10B981' : '#F59E0B' }}>{altman.zone}</strong></div>
+          <div style={{ fontSize: '0.64rem', color: '#94A3B8', marginBottom: 8 }}>Zone: <strong style={{ color: altman.z_score == null ? '#94A3B8' : altman.z_score >= 2.99 ? '#10B981' : '#F59E0B' }}>{altman.zone}</strong></div>
           <p style={{ fontSize: '0.62rem', color: '#94A3B8', margin: 0, lineHeight: 1.35 }}>
             {altman.description || 'Solvency gauge measuring liquidity, cumulative profitability, and asset coverage to quantify bankruptcy buffer.'}
           </p>
@@ -814,50 +835,76 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
         </div>
       </div>
 
-      {/* ── Executive Moats & Watchlist Flags ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 10 }}>
-        {/* Green Flags */}
-        <div style={{ ...cardStyle, border: '1px solid rgba(16,185,129,0.25)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.76rem', fontWeight: 800, color: '#10B981', marginBottom: 8 }}>
-            <CheckCircle2 size={16} /> Business Moats & Fundamental Strengths
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.70rem', color: '#CBD5E1' }}>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <span style={{ color: '#10B981' }}>•</span>
-              <span>Capital Return Superiority: ROCE of <strong>{roceVal != null ? `${roceVal}%` : 'High'}</strong> substantially exceeds weighted cost of capital (WACC).</span>
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <span style={{ color: '#10B981' }}>•</span>
-              <span>Healthy Balance Sheet: Debt-to-Equity well maintained at <strong>{deVal != null ? deVal : '0.4'}</strong>.</span>
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <span style={{ color: '#10B981' }}>•</span>
-              <span>Audited Solvency: Altman Z-Score of <strong>{altman.z_score}</strong> provides strong bankruptcy buffer.</span>
-            </div>
-          </div>
-        </div>
+      {/* ── Executive Moats & Watchlist Flags (computed from reported ratios) ── */}
+      {(() => {
+        const moats = [];
+        const risks = [];
+        const num = (v) => (v != null && !isNaN(Number(v)) ? Number(v) : null);
+        const roce = num(roceVal);
+        const de = num(deVal);
+        const sales3y = num(cagr?.sales_growth?.['3y']);
+        const profit3y = num(cagr?.profit_growth?.['3y']);
+        const lastNP = annualPl.length ? num(annualPl[annualPl.length - 1]['Net Profit']) : null;
+        const lastCFO = cashFlow.length ? num(cashFlow[cashFlow.length - 1]['Cash from Operating Activity']) : null;
 
-        {/* Red Flags / Watchlist */}
-        <div style={{ ...cardStyle, border: '1px solid rgba(245,158,11,0.25)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.76rem', fontWeight: 800, color: '#F59E0B', marginBottom: 8 }}>
-            <AlertTriangle size={16} /> Risk Factors & Valuation Watchlist
+        if (roce != null && roce > 15) moats.push(<>Capital Return Superiority: ROCE of <strong>{roce}%</strong> exceeds cost of capital.</>);
+        if (de != null && de < 0.5) moats.push(<>Conservative Balance Sheet: Debt-to-Equity of <strong>{de}</strong>.</>);
+        if (sales3y != null && sales3y > 0) moats.push(<>Revenue Compounding: <strong>{sales3y >= 0 ? '+' : ''}{sales3y}%</strong> sales CAGR (3Y).</>);
+        if (profit3y != null && profit3y > 10) moats.push(<>Profit Compounding: <strong>+{profit3y}%</strong> profit CAGR (3Y).</>);
+        if (lastCFO != null && lastNP != null && lastNP > 0 && lastCFO >= lastNP) moats.push(<>High Cash Conversion: operating cash flow covers accounting net profit.</>);
+        if (piotroski.score != null && piotroski.score >= 7) moats.push(<>Elite Quality Audit: Piotroski score of <strong>{piotroski.score}/9</strong>.</>);
+        if (altman.z_score != null && altman.zone === 'Safe Zone') moats.push(<>Audited Solvency: Altman Z-Score of <strong>{altman.z_score}</strong> (Safe Zone).</>);
+        if (promoterVal != null && num(promoterVal) >= 50) moats.push(<>High Insider Conviction: promoter stake of <strong>{promoterVal}%</strong>.</>);
+
+        if (de != null && de > 1) risks.push(<>Elevated Leverage: Debt-to-Equity of <strong>{de}</strong> exceeds 1.0.</>);
+        if (roce != null && roce < 10) risks.push(<>Weak Capital Efficiency: ROCE of <strong>{roce}%</strong> below 10%.</>);
+        if (profit3y != null && profit3y < 0) risks.push(<>Contracting Profits: 3Y profit CAGR of <strong>{profit3y}%</strong>.</>);
+        if (sales3y != null && sales3y < 0) risks.push(<>Shrinking Revenue: 3Y sales CAGR of <strong>{sales3y}%</strong>.</>);
+        if (piotroski.score != null && piotroski.score < 5) risks.push(<>Quality Warning: Piotroski score of <strong>{piotroski.score}/9</strong>.</>);
+        if (altman.z_score != null && altman.zone !== 'Safe Zone') risks.push(<>Solvency Watch: Altman Z-Score of <strong>{altman.z_score}</strong> ({altman.zone}).</>);
+        if (ownershipDelta?.dFii != null && ownershipDelta.dFii < -0.5) risks.push(<>FII Outflow: foreign holding fell <strong>{ownershipDelta.dFii}pp</strong> last quarter.</>);
+        if (peVal != null && num(peVal) > 40) risks.push(<>Rich Valuation: P/E of <strong>{peVal}</strong> demands flawless execution.</>);
+
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 10 }}>
+            <div style={{ ...cardStyle, border: '1px solid rgba(16,185,129,0.25)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.76rem', fontWeight: 800, color: '#10B981', marginBottom: 8 }}>
+                <CheckCircle2 size={16} /> Business Moats & Fundamental Strengths
+              </div>
+              {moats.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.70rem', color: '#CBD5E1' }}>
+                  {moats.map((m, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 6 }}>
+                      <span style={{ color: '#10B981' }}>•</span>
+                      <span>{m}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.68rem', color: '#64748B' }}>No significant strength flags from reported data.</div>
+              )}
+            </div>
+
+            <div style={{ ...cardStyle, border: '1px solid rgba(245,158,11,0.25)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.76rem', fontWeight: 800, color: '#F59E0B', marginBottom: 8 }}>
+                <AlertTriangle size={16} /> Risk Factors & Valuation Watchlist
+              </div>
+              {risks.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.70rem', color: '#CBD5E1' }}>
+                  {risks.map((r, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 6 }}>
+                      <span style={{ color: '#F59E0B' }}>•</span>
+                      <span>{r}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.68rem', color: '#64748B' }}>No significant risk flags from reported data.</div>
+              )}
+            </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.70rem', color: '#CBD5E1' }}>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <span style={{ color: '#F59E0B' }}>•</span>
-              <span>Valuation Multiple: Stock trades at P/E of <strong>{peVal != null ? peVal : '—'}</strong> and P/B of <strong>{pbVal != null ? pbVal : '—'}</strong>.</span>
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <span style={{ color: '#F59E0B' }}>•</span>
-              <span>Margin Sensitivity: Sequential operating profit margin trajectory requires tracking against commodity cycles.</span>
-            </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <span style={{ color: '#F59E0B' }}>•</span>
-              <span>Piotroski Focus: Category efficiency points must maintain positive momentum in upcoming filings.</span>
-            </div>
-          </div>
-        </div>
-      </div>
+        );
+      })()}
     </div>
   );
 
@@ -866,7 +913,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {enrichedQuarters.length > 0 ? (
+        {displayedQuarters.length > 0 ? (
           <>
             {/* Top KPI row */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
@@ -889,7 +936,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                 <div style={{ ...valueStyle, color: (summaryStats?.avgRevQoQ || 0) >= 0 ? '#10B981' : '#EF5350', marginTop: 4 }}>
                   {summaryStats?.avgRevQoQ != null ? `${summaryStats.avgRevQoQ >= 0 ? '+' : ''}${summaryStats.avgRevQoQ.toFixed(1)}%` : '—'}
                 </div>
-                <div style={{ fontSize: '0.62rem', color: '#94A3B8', marginTop: 6 }}>Mean sequential top-line momentum across {enrichedQuarters.length} quarters</div>
+                <div style={{ fontSize: '0.62rem', color: '#94A3B8', marginTop: 6 }}>Mean sequential top-line momentum across {displayedQuarters.length} quarters</div>
               </div>
 
               <div style={cardStyle}>
@@ -930,7 +977,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                 </div>
               </div>
               <ResponsiveContainer width="100%" height={230}>
-                <ComposedChart data={enrichedQuarters} margin={{ top: 10, right: 15, bottom: 0, left: -10 }}>
+                <ComposedChart data={displayedQuarters} margin={{ top: 10, right: 15, bottom: 0, left: -10 }}>
                   <defs>
                     <linearGradient id="qRevGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#818CF8" stopOpacity={0.9} />
@@ -960,7 +1007,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                   Quarter-on-Quarter (QoQ) Growth %
                 </div>
                 <ResponsiveContainer width="100%" height={190}>
-                  <BarChart data={enrichedQuarters} margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
+                  <BarChart data={displayedQuarters} margin={{ top: 10, right: 10, bottom: 0, left: -20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                     <XAxis dataKey="period" tick={{ fontSize: 9, fill: '#94A3B8' }} tickLine={false} />
                     <YAxis tick={{ fontSize: 9, fill: '#94A3B8' }} tickLine={false} tickFormatter={v => `${v}%`} />
@@ -968,7 +1015,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                     <Tooltip contentStyle={{ background: '#0F172A', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 8, color: '#F0F0FF', fontSize: '0.72rem' }} formatter={(v, n) => [`${v != null ? `${v >= 0 ? '+' : ''}${v}%` : '—'}`, n]} />
                     <Bar dataKey="revQoQ" name="Revenue QoQ %" fill="#6366F1" radius={[3, 3, 0, 0]} />
                     <Bar dataKey="profitQoQ" name="Profit QoQ %" radius={[3, 3, 0, 0]}>
-                      {enrichedQuarters.map((entry, idx) => (
+                      {displayedQuarters.map((entry, idx) => (
                         <Cell key={idx} fill={(entry.profitQoQ || 0) >= 0 ? '#10B981' : '#EF5350'} />
                       ))}
                     </Bar>
@@ -989,7 +1036,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                   )}
                 </div>
                 <ResponsiveContainer width="100%" height={190}>
-                  <LineChart data={enrichedQuarters} margin={{ top: 10, right: 15, bottom: 0, left: -20 }}>
+                  <LineChart data={displayedQuarters} margin={{ top: 10, right: 15, bottom: 0, left: -20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                     <XAxis dataKey="period" tick={{ fontSize: 9, fill: '#94A3B8' }} tickLine={false} />
                     <YAxis tick={{ fontSize: 9, fill: '#94A3B8' }} tickLine={false} tickFormatter={v => `₹${v}`} />
@@ -1402,29 +1449,40 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
             <div style={{ ...cardStyle, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <div style={{ fontSize: '0.78rem', color: '#818CF8', fontWeight: 800, alignSelf: 'flex-start', marginBottom: 6 }}>Latest Ownership Distribution</div>
-              <ResponsiveContainer width="100%" height={180}>
-                <PieChart>
-                  <Pie
-                    data={[
-                      { name: 'Promoters', value: shareholding[shareholding.length - 1]?.promoter || 0 },
-                      { name: 'FIIs', value: shareholding[shareholding.length - 1]?.fii || 0 },
-                      { name: 'DIIs', value: shareholding[shareholding.length - 1]?.dii || 0 },
-                      { name: 'Public', value: shareholding[shareholding.length - 1]?.public || 0 },
-                    ]}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={65}
-                    label={({ name, value }) => `${name} ${value}%`}
-                  >
-                    {['#10B981', '#818CF8', '#F59E0B', '#64748B'].map((c, i) => (
-                      <Cell key={i} fill={c} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
+              {(() => {
+                const latest = shareholding[shareholding.length - 1] || {};
+                const COLORS = { Promoters: '#10B981', FIIs: '#818CF8', DIIs: '#F59E0B', Public: '#64748B' };
+                // Skip null slices so missing holders never render as 0% wedges.
+                const pieData = [
+                  { name: 'Promoters', value: latest.promoter },
+                  { name: 'FIIs', value: latest.fii },
+                  { name: 'DIIs', value: latest.dii },
+                  { name: 'Public', value: latest.public },
+                ].filter(s => s.value != null && !isNaN(Number(s.value)));
+                if (pieData.length === 0) {
+                  return <div style={{ fontSize: '0.72rem', color: '#64748B', padding: '40px 0' }}>—</div>;
+                }
+                return (
+                  <ResponsiveContainer width="100%" height={180}>
+                    <PieChart>
+                      <Pie
+                        data={pieData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={65}
+                        label={({ name, value }) => `${name} ${value}%`}
+                      >
+                        {pieData.map((s, i) => (
+                          <Cell key={i} fill={COLORS[s.name] || '#94A3B8'} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                );
+              })()}
             </div>
           </div>
         </>
@@ -1553,7 +1611,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
           value={liveDcf.fairValue}
           unit=" ₹"
           colorFn={() => '#10B981'}
-          sub={`Margin of Safety: ${liveDcf.marginOfSafetyPct >= 0 ? '+' : ''}${liveDcf.marginOfSafetyPct}%`}
+          sub={liveDcf.marginOfSafetyPct != null ? `Margin of Safety: ${liveDcf.marginOfSafetyPct >= 0 ? '+' : ''}${liveDcf.marginOfSafetyPct}%` : (liveDcf.cmp == null ? 'CMP unavailable — comparison hidden' : 'EPS unavailable — cannot value')}
         />
         <RatioCard
           label="Benjamin Graham Value"
@@ -1574,7 +1632,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
           value={liveDcf.cmp}
           unit=" ₹"
           colorFn={() => '#F8FAFC'}
-          sub={liveDcf.marginOfSafetyPct >= 0 ? 'Trading at Intrinsic Discount' : 'Trading at Intrinsic Premium'}
+          sub={liveDcf.marginOfSafetyPct == null ? 'No CMP comparison available' : (liveDcf.marginOfSafetyPct >= 0 ? 'Trading at Intrinsic Discount' : 'Trading at Intrinsic Premium')}
         />
       </div>
 
@@ -1668,11 +1726,11 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
 
         {/* PV Decomposition Strip */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 12, paddingTop: 10, borderTop: '1px solid rgba(255,255,255,0.06)', fontSize: '0.70rem', color: '#94A3B8' }}>
-          <span>5-Year PV of FCFs: <strong style={{ color: '#818CF8' }}>₹{liveDcf.pvSum}</strong></span>
+          <span>5-Year PV of FCFs: <strong style={{ color: '#818CF8' }}>{liveDcf.fairValue != null ? `₹${liveDcf.pvSum}` : '—'}</strong></span>
           <span>•</span>
-          <span>Discounted Terminal Value (Terminal Rate: <strong style={{ color: '#10B981' }}>{dcfTerminalGrowth.toFixed(1)}%</strong>): <strong style={{ color: '#10B981' }}>₹{liveDcf.pvTerminal}</strong></span>
+          <span>Discounted Terminal Value (Terminal Rate: <strong style={{ color: '#10B981' }}>{dcfTerminalGrowth.toFixed(1)}%</strong>): <strong style={{ color: '#10B981' }}>{liveDcf.fairValue != null ? `₹${liveDcf.pvTerminal}` : '—'}</strong></span>
           <span>•</span>
-          <span>Implied Fair Value: <strong style={{ color: '#F8FAFC', fontSize: '0.86rem' }}>₹{liveDcf.fairValue}</strong></span>
+          <span>Implied Fair Value: <strong style={{ color: '#F8FAFC', fontSize: '0.86rem' }}>{liveDcf.fairValue != null ? `₹${liveDcf.fairValue}` : '—'}</strong></span>
         </div>
       </div>
 
@@ -1756,27 +1814,29 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                         return (
                           <td
                             key={tg}
-                            title="Mathematically undefined when WACC ≤ Terminal Growth Rate"
+                            title={liveDcf.fairValue == null ? 'EPS unavailable — cannot value under this scenario' : 'Mathematically undefined when WACC ≤ Terminal Growth Rate'}
                             style={{ padding: '9px 12px', textAlign: 'right', color: '#64748B', borderBottom: '1px solid rgba(255,255,255,0.04)', cursor: 'help' }}
                           >
                             —
                           </td>
                         );
                       }
-                      const diffPct = liveDcf.cmp > 0 ? ((val - liveDcf.cmp) / liveDcf.cmp) * 100 : 0;
+                      const diffPct = liveDcf.cmp != null && liveDcf.cmp > 0 ? ((val - liveDcf.cmp) / liveDcf.cmp) * 100 : null;
                       const isSelectedCell = isSelectedWacc && Math.abs(tg - dcfTerminalGrowth) < 0.25;
 
                       const bgColor = isSelectedCell
                         ? 'rgba(99,102,241,0.45)'
-                        : diffPct > 15
-                          ? 'rgba(16,185,129,0.14)'
-                          : diffPct < -15
-                            ? 'rgba(239,83,80,0.14)'
-                            : 'rgba(245,158,11,0.12)';
+                        : diffPct == null
+                          ? 'rgba(148,163,184,0.10)'
+                          : diffPct > 15
+                            ? 'rgba(16,185,129,0.14)'
+                            : diffPct < -15
+                              ? 'rgba(239,83,80,0.14)'
+                              : 'rgba(245,158,11,0.12)';
 
                       const textColor = isSelectedCell
                         ? '#FFFFFF'
-                        : diffPct > 15 ? '#10B981' : diffPct < -15 ? '#EF5350' : '#F59E0B';
+                        : diffPct == null ? '#94A3B8' : diffPct > 15 ? '#10B981' : diffPct < -15 ? '#EF5350' : '#F59E0B';
 
                       return (
                         <td key={tg} style={{ padding: '9px 12px', textAlign: 'right', borderBottom: '1px solid rgba(255,255,255,0.04)', whiteSpace: 'nowrap', background: bgColor, color: textColor, fontWeight: isSelectedCell ? 900 : 700, border: isSelectedCell ? '1px solid #818CF8' : 'none' }}>
@@ -1791,7 +1851,7 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
           </table>
         </div>
         <div style={{ marginTop: 8, fontSize: '0.60rem', color: '#64748B', fontStyle: 'italic' }}>
-          * Highlighted cell denotes active sandbox parameters. Colors reflect intrinsic upside/downside vs CMP (₹{liveDcf.cmp}).
+          * Highlighted cell denotes active sandbox parameters. {liveDcf.cmp != null ? `Colors reflect intrinsic upside/downside vs CMP (₹${liveDcf.cmp}).` : 'CMP unavailable — cells shown without upside/downside coloring.'}
         </div>
       </div>
     </div>
@@ -1836,11 +1896,11 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                   {deepData.sector}
                 </span>
               )}
-              <span style={{ fontSize: '0.64rem', background: piotroski.score >= 7 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)', color: piotroski.score >= 7 ? '#10B981' : '#F59E0B', border: `1px solid ${piotroski.score >= 7 ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.35)'}`, padding: '2px 8px', borderRadius: 5, fontWeight: 800 }}>
-                Piotroski: {piotroski.score}/9
+              <span style={{ fontSize: '0.64rem', background: piotroski.score == null ? 'rgba(148,163,184,0.12)' : piotroski.score >= 7 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)', color: piotroski.score == null ? '#94A3B8' : piotroski.score >= 7 ? '#10B981' : '#F59E0B', border: `1px solid ${piotroski.score == null ? 'rgba(148,163,184,0.3)' : piotroski.score >= 7 ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.35)'}`, padding: '2px 8px', borderRadius: 5, fontWeight: 800 }}>
+                Piotroski: {piotroski.score != null ? `${piotroski.score}/9` : '—'}
               </span>
-              <span style={{ fontSize: '0.64rem', background: altman.z_score >= 2.99 ? 'rgba(16,185,129,0.12)' : 'rgba(239,83,80,0.12)', color: altman.z_score >= 2.99 ? '#10B981' : '#EF5350', border: `1px solid ${altman.z_score >= 2.99 ? 'rgba(16,185,129,0.3)' : 'rgba(239,83,80,0.3)'}`, padding: '2px 8px', borderRadius: 5, fontWeight: 800 }}>
-                Z-Score: {altman.z_score}
+              <span style={{ fontSize: '0.64rem', background: altman.z_score == null ? 'rgba(148,163,184,0.12)' : altman.z_score >= 2.99 ? 'rgba(16,185,129,0.12)' : 'rgba(239,83,80,0.12)', color: altman.z_score == null ? '#94A3B8' : altman.z_score >= 2.99 ? '#10B981' : '#EF5350', border: `1px solid ${altman.z_score == null ? 'rgba(148,163,184,0.3)' : altman.z_score >= 2.99 ? 'rgba(16,185,129,0.3)' : 'rgba(239,83,80,0.3)'}`, padding: '2px 8px', borderRadius: 5, fontWeight: 800 }}>
+                Z-Score: {altman.z_score != null ? altman.z_score : '—'}
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3, fontSize: '0.63rem', color: '#64748B' }}>
@@ -2026,15 +2086,15 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
               </button>
             </div>
             <p style={{ fontSize: '0.72rem', color: '#94A3B8', marginBottom: 14 }}>
-              Score: <strong style={{ color: piotroski.score >= 7 ? '#10B981' : '#F59E0B' }}>{piotroski.score}/9 ({piotroski.rating})</strong>
+              Score: <strong style={{ color: piotroski.score == null ? '#94A3B8' : piotroski.score >= 7 ? '#10B981' : '#F59E0B' }}>{piotroski.score != null ? `${piotroski.score}/9 (${piotroski.rating})` : piotroski.rating}</strong>
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {piotroski.criteria?.length > 0 ? (
                 piotroski.criteria.map((c, idx) => (
-                  <div key={idx} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${c.passed ? 'rgba(16,185,129,0.22)' : 'rgba(239,83,80,0.22)'}`, borderRadius: 8, padding: '8px 12px' }}>
+                  <div key={idx} style={{ background: 'rgba(255,255,255,0.03)', border: `1px solid ${c.passed == null ? 'rgba(148,163,184,0.25)' : c.passed ? 'rgba(16,185,129,0.22)' : 'rgba(239,83,80,0.22)'}`, borderRadius: 8, padding: '8px 12px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
                       <strong style={{ fontSize: '0.76rem', color: '#F8FAFC' }}>{idx + 1}. {c.name}</strong>
-                      <span style={{ fontSize: '0.66rem', fontWeight: 800, color: c.passed ? '#10B981' : '#EF5350' }}>{c.passed ? '✓ PASS (+1)' : '✗ FAIL (0)'}</span>
+                      <span style={{ fontSize: '0.66rem', fontWeight: 800, color: c.passed == null ? '#94A3B8' : c.passed ? '#10B981' : '#EF5350' }}>{c.passed == null ? '— NOT EVALUABLE' : c.passed ? '✓ PASS (+1)' : '✗ FAIL (0)'}</span>
                     </div>
                     <div style={{ fontSize: '0.66rem', color: '#94A3B8' }}>{c.detail}</div>
                   </div>

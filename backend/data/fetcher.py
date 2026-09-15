@@ -65,6 +65,8 @@ _feed_token: Optional[str] = None
 # Angel One error codes that indicate an expired / invalid session
 _AUTH_ERROR_CODES = {"AB1010", "AG8002", "AB1004"}
 _full_backfill_done: set = set()
+_broker_rate_limited_until = 0.0
+_BROKER_RATE_LIMIT_COOLDOWN = 30.0
 
 
 def get_session_status() -> bool:
@@ -287,6 +289,11 @@ def _call_api(fn, *args, retries: int = 2, retry_delay: float = 1.5, **kwargs):
       • Session reset + re-login on authentication errors (AB1010, AG8002, etc.).
     Returns the raw API response dict, or None on failure.
     """
+    global _broker_rate_limited_until
+
+    if time.time() < _broker_rate_limited_until:
+        return None
+
     for attempt in range(retries + 1):
         try:
             result = fn(*args, **kwargs)
@@ -306,17 +313,20 @@ def _call_api(fn, *args, retries: int = 2, retry_delay: float = 1.5, **kwargs):
                         time.sleep(retry_delay)
                         continue
 
-                # Rate-limit error — wait longer before retrying
-                if "rate" in msg.lower() or "too many" in msg.lower():
-                    logger.warning("Rate limit hit — waiting %.1fs before retry...", retry_delay * 2)
-                    time.sleep(retry_delay * 2)
-                    if attempt < retries:
-                        continue
+                # Stop immediately on rate limits; retries amplify broker throttling.
+                if _is_rate_limit_error(msg):
+                    _broker_rate_limited_until = time.time() + _BROKER_RATE_LIMIT_COOLDOWN
+                    logger.warning("Angel One rate limit hit; pausing broker calls for %.0fs.", _BROKER_RATE_LIMIT_COOLDOWN)
+                    return None
 
             return result
 
         except Exception as e:
             err_str = str(e).lower()
+            if _is_rate_limit_error(err_str):
+                _broker_rate_limited_until = time.time() + _BROKER_RATE_LIMIT_COOLDOWN
+                logger.warning("Angel One rate limit hit; pausing broker calls for %.0fs.", _BROKER_RATE_LIMIT_COOLDOWN)
+                return None
             # Network-level errors — retry with backoff
             if attempt < retries:
                 wait = retry_delay * (attempt + 1)
@@ -327,6 +337,11 @@ def _call_api(fn, *args, retries: int = 2, retry_delay: float = 1.5, **kwargs):
                 return None
 
     return None
+
+
+def _is_rate_limit_error(message: str) -> bool:
+    normalized = str(message).lower()
+    return any(term in normalized for term in ("rate", "too many", "access denied", "exceeding access rate"))
 
 
 # ── ScripMaster Token Mapping ──
@@ -383,6 +398,10 @@ ALIAS_TOKEN_MAP = {
     "TATAMOTORS": {"symbol": "TMPV-EQ", "token": "3456", "exch_seg": "NSE", "name": "Tata Motors Ltd"},
     "TATAMTRDVR": {"symbol": "TMPV-EQ", "token": "3456", "exch_seg": "NSE", "name": "Tata Motors Ltd"},
     "TMPV": {"symbol": "TMPV-EQ", "token": "3456", "exch_seg": "NSE", "name": "Tata Motors Ltd"},
+    # Index aliases — frontend uses NIFTY50 but Angel ScripMaster lists it as NIFTY (token 26000)
+    "NIFTY50": {"symbol": "NIFTY", "token": "26000", "exch_seg": "NSE", "name": "NIFTY 50"},
+    "NIFTY_50": {"symbol": "NIFTY", "token": "26000", "exch_seg": "NSE", "name": "NIFTY 50"},
+    "NIFTY-50": {"symbol": "NIFTY", "token": "26000", "exch_seg": "NSE", "name": "NIFTY 50"},
 }
 
 
@@ -1409,6 +1428,7 @@ def backfill_5y_history(ticker: str) -> Optional[pd.DataFrame]:
 
 
 _preloaded_stocks = set()
+_preloading_stocks = set()
 
 def preload_all_stock_timeframes(ticker: str) -> dict:
     """
@@ -1417,33 +1437,30 @@ def preload_all_stock_timeframes(ticker: str) -> dict:
     2. Pre-fetches and in-memory caches full history for 1h, 4h, 15m, 5m, 30m, 1m intervals.
     """
     t = ticker.upper().strip()
-    if t in _preloaded_stocks:
+    if t in _preloaded_stocks or t in _preloading_stocks:
         return {"status": "already_preloaded", "ticker": t}
-    _preloaded_stocks.add(t)
+    _preloading_stocks.add(t)
 
     logger.info("Preloading all timeframes and backfilling DB for %s...", t)
 
-    # 1. Daily full backfill into database (SQLite historical_prices)
     try:
-        backfill_full_history(t)
-    except Exception as exc:
-        logger.warning("Error backfilling daily history for %s: %s", t, exc)
-
-    # 2. Intraday timeframes (cached in-memory for instant switching)
-    timeframes_to_cache = [
-        ("365D", "1h"),
-        ("365D", "4h"),
-        ("90D", "15m"),
-        ("60D", "5m"),
-        ("90D", "30m"),
-        ("30D", "1m"),
-    ]
-    for period, iv in timeframes_to_cache:
+        # 1. Daily full backfill into database (SQLite historical_prices)
         try:
-            fetch_stock_data(t, period=period, interval=iv)
+            backfill_full_history(t)
         except Exception as exc:
-            logger.debug("Error pre-caching %s %s for %s: %s", iv, period, t, exc)
+            logger.warning("Error backfilling daily history for %s: %s", t, exc)
 
-    logger.info("✅ Finished preloading all timeframes for %s.", t)
-    return {"status": "success", "ticker": t}
+        # 2. Intraday timeframes (cached in-memory for instant switching)
+        timeframes_to_cache = [("365D", "1h"), ("90D", "15m"), ("60D", "5m"), ("30D", "1m")]
+        for period, iv in timeframes_to_cache:
+            try:
+                fetch_stock_data(t, period=period, interval=iv)
+            except Exception as exc:
+                logger.debug("Error pre-caching %s %s for %s: %s", iv, period, t, exc)
+
+        _preloaded_stocks.add(t)
+        logger.info("✅ Finished preloading all timeframes for %s.", t)
+        return {"status": "success", "ticker": t}
+    finally:
+        _preloading_stocks.discard(t)
 

@@ -3,10 +3,14 @@ StockOracle Pro — Market Data & History API Router
 """
 import hashlib
 import logging
+import math
 import xml.etree.ElementTree as ET
 from urllib.parse import quote_plus
 from urllib.request import Request as UrllibRequest, urlopen
 from typing import Optional
+
+import numpy as np
+import pandas as pd
 
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Request
 from fastapi.responses import JSONResponse, Response
@@ -63,8 +67,52 @@ _INDICATOR_COLS = {
 
 
 
+def _sanitize_json_value(v):
+    """Convert NaN / ±Inf / numpy scalars to JSON-safe python values (None)."""
+    if v is None:
+        return None
+    # pandas NA / NaT
+    try:
+        if v is pd.NA or v is pd.NaT:
+            return None
+    except Exception:
+        pass
+    if isinstance(v, float):
+        if math.isnan(v) or math.isinf(v):
+            return None
+        return v
+    if isinstance(v, (np.floating,)):
+        f = float(v)
+        if math.isnan(f) or math.isinf(f):
+            return None
+        return f
+    if isinstance(v, (np.integer,)):
+        return int(v)
+    if isinstance(v, (np.bool_,)):
+        return bool(v)
+    if isinstance(v, (np.ndarray,)):
+        return v.tolist()
+    # pandas Timestamp → ISO string
+    if isinstance(v, pd.Timestamp):
+        if pd.isna(v):
+            return None
+        return v.isoformat()
+    try:
+        if pd.isna(v):
+            return None
+    except Exception:
+        pass
+    return v
+
+
 def _trim_and_round(df, full: bool):
-    """Return a trimmed, rounded dict-list suitable for JSON serialization."""
+    """Return a trimmed, rounded dict-list suitable for JSON serialization.
+
+    Invariants preserved: no candle rows are dropped here (AGENTS.md §2).
+    NaN / ±Inf from displaced indicators (e.g. Ichimoku senkou/chikou) are
+    converted to None so Starlette JSONResponse (allow_nan=False) never raises
+    "Out of range float values are not JSON compliant".
+    """
     if not full:
         keep = [c for c in _CHART_COLUMNS if c in df.columns]
         df = df[keep]
@@ -77,7 +125,16 @@ def _trim_and_round(df, full: bool):
             round_map[col] = 4
     if round_map:
         df = df.round(round_map)
-    return df.to_dict(orient="records")
+    # Replace ±Inf with NaN first, then sanitize every value to JSON-safe types
+    try:
+        df = df.replace([np.inf, -np.inf], np.nan)
+    except Exception:
+        pass
+    records = df.to_dict(orient="records")
+    for row in records:
+        for k, v in list(row.items()):
+            row[k] = _sanitize_json_value(v)
+    return records
 
 
 @router.get("/stock/{ticker}/info")

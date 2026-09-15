@@ -336,6 +336,7 @@ def get_corporate_actions(ticker: str):
 class ScreenerQueryRequest(BaseModel):
     formula_query: Optional[str] = "ROCE > 15 AND DebtToEquity < 1.0"
     universe: Optional[str] = "NIFTY_500"
+    tickers: Optional[List[str]] = None
     sort_by: Optional[str] = "market_cap_cr"
     sort_dir: Optional[str] = "DESC"
     limit: Optional[int] = 50
@@ -351,6 +352,7 @@ class ScreenerBacktestRequest(BaseModel):
     initial_capital: Optional[float] = 1000000.0
     holding_period_days: Optional[int] = 20
     backtest_horizon_days: Optional[int] = 250
+    stt_rate: Optional[float] = 0.001
 
 
 class UserScreenSaveRequest(BaseModel):
@@ -395,9 +397,26 @@ def execute_screener_query_endpoint(req: ScreenerQueryRequest):
     if not parsed["success"]:
         raise HTTPException(status_code=400, detail=parsed["error"])
 
+    where_clause = parsed["where_clause"]
+    params = dict(parsed["params"])
+
+    # Optional index-universe scoping: safe ticker IN-list with strict sanitization.
+    universe_tickers = None
+    if req.tickers:
+        import re as _re
+        universe_tickers = sorted({
+            t.upper().strip() for t in req.tickers
+            if isinstance(t, str) and _re.fullmatch(r"[A-Z0-9.\-]{1,25}", t.upper().strip())
+        })[:200]
+        if universe_tickers:
+            placeholders = ", ".join(f":u_{i}" for i in range(len(universe_tickers)))
+            for i, t in enumerate(universe_tickers):
+                params[f"u_{i}"] = t
+            where_clause = f"({where_clause}) AND ticker IN ({placeholders})"
+
     sql_res = execute_screener_sql_query(
-        where_clause=parsed["where_clause"],
-        params=parsed["params"],
+        where_clause=where_clause,
+        params=params,
         sort_by=req.sort_by or "market_cap_cr",
         sort_dir=req.sort_dir or "DESC",
         limit=req.limit or 50,
@@ -407,6 +426,7 @@ def execute_screener_query_endpoint(req: ScreenerQueryRequest):
     return {
         "formula_query": formula,
         "ast": parsed["ast"],
+        "universe_tickers": universe_tickers,
         "total": sql_res["total"],
         "count": sql_res["count"],
         "results": sql_res["results"]
@@ -432,11 +452,14 @@ def parse_ai_screener_query_endpoint(req: AIScreenerParseRequest):
 def run_screener_backtest_endpoint(req: ScreenerBacktestRequest):
     """Simulates point-in-time screen basket rebalancing and benchmarks vs NIFTY 50."""
     from backend.research.screener_backtest import run_screener_backtest
+    stt = req.stt_rate if req.stt_rate is not None else 0.001
+    stt = max(0.0, min(float(stt), 0.02))
     return run_screener_backtest(
         formula_query=req.formula_query or "ROCE > 15 AND DebtToEquity < 0.8",
         initial_capital=req.initial_capital or 1000000.0,
         holding_period_days=req.holding_period_days or 20,
-        backtest_horizon_days=req.backtest_horizon_days or 250
+        backtest_horizon_days=req.backtest_horizon_days or 250,
+        stt_rate=stt
     )
 
 

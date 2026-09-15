@@ -21,6 +21,44 @@ from backend.shared.cache import cache_get, cache_set
 
 logger = logging.getLogger("StockOracle.Data.Fundamentals")
 _CACHE_TTL = 4 * 3600  # 4 hours
+_RETRYABLE_STATUS = {403, 429, 500, 502, 503, 504}
+
+
+def _normalize_pct_field(value, digits: int = 2) -> Optional[float]:
+    """Normalizes a yfinance fraction-or-percent field into a percent number.
+
+    Newer yfinance versions sometimes return an already-percent value (e.g.
+    3.5 for 3.5%) instead of a fraction (0.035). Values with abs > 1 are
+    treated as already-percent; anything else is scaled by 100.
+    """
+    if value is None:
+        return None
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    import math
+    if not math.isfinite(v):
+        return None
+    if abs(v) > 1.0:
+        return round(v, digits)
+    return round(v * 100.0, digits)
+
+
+def _screener_get(url: str, headers: Dict[str, str], timeout: int):
+    """GETs a Screener.in page with one retry (1.5s backoff) on 403/5xx/timeouts."""
+    import requests
+    try:
+        resp = requests.get(url, headers=headers, timeout=timeout)
+    except requests.RequestException as exc:
+        logger.debug("Screener request failed for %s: %s — retrying once", url, exc)
+        time.sleep(1.5)
+        return requests.get(url, headers=headers, timeout=timeout)
+    if resp.status_code in _RETRYABLE_STATUS:
+        logger.debug("Screener returned %s for %s — retrying once", resp.status_code, url)
+        time.sleep(1.5)
+        return requests.get(url, headers=headers, timeout=timeout)
+    return resp
 
 
 def _parse_number(text: str) -> Optional[float]:
@@ -65,15 +103,16 @@ def _fetch_yfinance_fallback(ticker: str) -> Dict[str, Any]:
         pe = info.get("trailingPE") or info.get("forwardPE")
         pb = info.get("priceToBook")
         eps = info.get("trailingEps")
-        roe = round(info.get("returnOnEquity", 0) * 100.0, 2) if info.get("returnOnEquity") else None
-        roa = round(info.get("returnOnAssets", 0) * 100.0, 2) if info.get("returnOnAssets") else None
+        roe = _normalize_pct_field(info.get("returnOnEquity"), digits=2)
+        roa = _normalize_pct_field(info.get("returnOnAssets"), digits=2)
         de = round(info.get("debtToEquity", 0) / 100.0, 2) if info.get("debtToEquity") else None
-        promoter = round(info.get("heldPercentInsiders", 0) * 100.0, 2) if info.get("heldPercentInsiders") else None
-        fii = round(info.get("heldPercentInstitutions", 0) * 100.0, 2) if info.get("heldPercentInstitutions") else None
-        div_yield = round(info.get("dividendYield", 0) * 100.0, 2) if info.get("dividendYield") else None
+        promoter = _normalize_pct_field(info.get("heldPercentInsiders"), digits=2)
+        fii = _normalize_pct_field(info.get("heldPercentInstitutions"), digits=2)
+        div_yield = _normalize_pct_field(info.get("dividendYield"), digits=2)
 
         return {
             "market_cap": str(mcap_cr) if mcap_cr else None,
+            "market_cap_cr": mcap_cr,
             "pe_ratio": round(pe, 2) if pe else None,
             "pb_ratio": round(pb, 2) if pb else None,
             "eps": round(eps, 2) if eps else None,
@@ -106,6 +145,9 @@ def get_fundamentals(ticker: str) -> dict:
     empty = {
         "ticker": ticker,
         "market_cap": None,
+        "market_cap_cr": None,
+        "current_price": None,
+        "book_value": None,
         "pe_ratio": None,
         "pb_ratio": None,
         "eps": None,
@@ -135,10 +177,10 @@ def get_fundamentals(ticker: str) -> dict:
             )
         }
 
-        resp = requests.get(url, headers=headers, timeout=8)
+        resp = _screener_get(url, headers=headers, timeout=8)
         if resp.status_code == 404:
             url = f"https://www.screener.in/company/{ticker}/"
-            resp = requests.get(url, headers=headers, timeout=6)
+            resp = _screener_get(url, headers=headers, timeout=6)
 
         data = dict(empty)
 
@@ -159,11 +201,16 @@ def get_fundamentals(ticker: str) -> dict:
                     val_num = _parse_number(val_text)
 
                     if "market cap" in name:
-                        data["market_cap"] = val_text
+                        data["market_cap"] = val_text.rstrip(".")
+                        if val_num is not None:
+                            data["market_cap_cr"] = val_num
+                    elif "current price" in name:
+                        data["current_price"] = val_num
                     elif "stock p/e" in name or name == "p/e":
                         data["pe_ratio"] = val_num
                     elif "book value" in name:
-                        data["pb_ratio"] = val_num
+                        # Screener "Book Value" is per-share (Rs), NOT a P/B ratio.
+                        data["book_value"] = val_num
                     elif "roce" in name:
                         data["roce"] = val_num
                     elif "roe" in name:
@@ -174,6 +221,13 @@ def get_fundamentals(ticker: str) -> dict:
                         data["debt_to_equity"] = val_num
                     elif "dividend yield" in name:
                         data["dividend_yield"] = val_num
+
+            # P/B is a derived ratio: CMP / Book Value per share.
+            if data.get("pb_ratio") is None:
+                _bv = data.get("book_value")
+                _cmp = data.get("current_price")
+                if _bv and _cmp and _bv > 0 and _cmp > 0:
+                    data["pb_ratio"] = round(_cmp / _bv, 2)
 
             # 2. Quarterly Results
             q_section = soup.find("section", id="quarters")
@@ -204,11 +258,13 @@ def get_fundamentals(ticker: str) -> dict:
                     prev_rev = None
                     prev_profit = None
 
-                    for i, period in enumerate(periods[-8:]):
-                        idx = len(periods) - 8 + i
-                        rev = sales_vals[idx] if idx < len(sales_vals) else None
-                        profit = profit_vals[idx] if idx < len(profit_vals) else None
-                        eps = eps_vals[idx] if idx < len(eps_vals) else None
+                    # Offset-safe slice: handles tickers with fewer than 8 quarters.
+                    _q_offset = max(0, len(periods) - 8)
+                    for i, period in enumerate(periods[_q_offset:]):
+                        idx = _q_offset + i
+                        rev = sales_vals[idx] if 0 <= idx < len(sales_vals) else None
+                        profit = profit_vals[idx] if 0 <= idx < len(profit_vals) else None
+                        eps = eps_vals[idx] if 0 <= idx < len(eps_vals) else None
 
                         rev_qoq = round(((rev - prev_rev) / abs(prev_rev)) * 100, 2) if (rev is not None and prev_rev and prev_rev != 0) else None
                         profit_qoq = round(((profit - prev_profit) / abs(prev_profit)) * 100, 2) if (profit is not None and prev_profit and prev_profit != 0) else None
@@ -224,14 +280,20 @@ def get_fundamentals(ticker: str) -> dict:
                         prev_rev = rev
                         prev_profit = profit
 
+                    data["quarterly_results"] = quarterly
+
             # Fill any missing top ratios from yfinance fallback if Screener was incomplete
-            missing_ratio_keys = [k for k in ["pe_ratio", "pb_ratio", "roce", "roe", "debt_to_equity", "promoter_holding", "dividend_yield", "market_cap"] if data.get(k) is None]
-            if missing_ratio_keys:
+            missing_ratio_keys = [k for k in ["pe_ratio", "pb_ratio", "roce", "roe", "debt_to_equity", "promoter_holding", "dividend_yield", "market_cap", "market_cap_cr"] if data.get(k) is None]
+            yf_data = None
+            if missing_ratio_keys or data.get("current_price") is None:
                 yf_data = _fetch_yfinance_fallback(ticker)
                 if yf_data:
                     for k in missing_ratio_keys:
                         if yf_data.get(k) is not None:
                             data[k] = yf_data[k]
+                    # Map yfinance CMP onto current_price when Screener lacked it.
+                    if data.get("current_price") is None and yf_data.get("cmp") is not None:
+                        data["current_price"] = yf_data.get("cmp")
 
         # Calculate EPS from PE & CMP if missing
         if data.get("eps") is None and data.get("pe_ratio") and data["pe_ratio"] > 0:

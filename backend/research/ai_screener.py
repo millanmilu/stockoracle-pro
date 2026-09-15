@@ -79,15 +79,22 @@ Rules:
         logger.warning("AI screener query generation error: %s", exc)
 
     # 2. Heuristic fallback screen if AI is unconfigured, rate-limited, or returned invalid syntax
+    # NOTE: short tokens use word boundaries — naive substring checks misfire
+    # ("it" in "with", "pe" in "performance").
+    import re as _re
+
+    def _has(pattern: str) -> bool:
+        return _re.search(pattern, p_lower) is not None
+
     p_lower = prompt.lower()
     parts = []
-    if "it" in p_lower or "tech" in p_lower:
+    if _has(r"\bit\b") or _has(r"\btech\b") or _has(r"\btechnology\b"):
         parts.append("sector == 'IT'")
-    elif "bank" in p_lower or "financial" in p_lower:
+    elif _has(r"\bbanks?\b") or _has(r"\bfinancial\b") or _has(r"\bfinance\b"):
         parts.append("sector == 'Banking / Finance'")
-    elif "auto" in p_lower:
+    elif _has(r"\bauto\b") or _has(r"\bautomobile\b"):
         parts.append("sector == 'Automobile'")
-    elif "energy" in p_lower or "power" in p_lower:
+    elif _has(r"\benergy\b") or _has(r"\bpower\b"):
         parts.append("sector == 'Energy / Oil & Gas'")
 
     if "roce" in p_lower or "quality" in p_lower:
@@ -100,7 +107,7 @@ Rules:
         parts.append("RSI14 > 70")
     if "volume" in p_lower or "breakout" in p_lower:
         parts.append("VolumeRatio20D > 1.3")
-    if "undervalued" in p_lower or "cheap" in p_lower or "pe" in p_lower:
+    if "undervalued" in p_lower or "cheap" in p_lower or _has(r"\bpe\b") or _has(r"\bp/e\b"):
         parts.append("PE < 25")
 
     fallback_formula = " AND ".join(parts) if parts else "ROCE > 18 AND DebtToEquity < 0.5 AND RSI14 < 45"

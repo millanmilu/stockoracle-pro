@@ -5,6 +5,7 @@ export default function ScreenerHeaderBar({
   filtersOpen,
   onToggleFilters,
   queryMode,
+  dataAsOf,
   onExportCsv,
   onOpenSaveModal,
   onOpenBacktestModal
@@ -57,6 +58,9 @@ export default function ScreenerHeaderBar({
           </div>
           <div style={{ fontSize: '0.68rem', color: '#64748B', marginTop: 2, fontWeight: 500 }}>
             Real-time multi-factor quantitative scanning • Live WebSocket ticks • 100% True Backtesting
+            {dataAsOf && (
+              <span style={{ color: '#94A3B8' }}> • Metrics as of <strong style={{ color: '#A5B4FC' }}>{dataAsOf}</strong></span>
+            )}
           </div>
         </div>
       </div>

@@ -29,8 +29,15 @@ def calculate_dcf_valuation(
 
     fund = get_fundamentals(ticker) or {}
     eps = float(fund.get("eps") or 45.0)
-    bvps = float(fund.get("pb_ratio") or 1.0)
-    bvps_val = cmp / bvps if bvps > 0 else cmp * 0.4
+    # Prefer Book Value per share directly; fall back to CMP / P-B ratio.
+    _book = fund.get("book_value")
+    _pb = fund.get("pb_ratio")
+    if _book and float(_book) > 0:
+        bvps_val = float(_book)
+    elif _pb and float(_pb) > 0:
+        bvps_val = cmp / float(_pb)
+    else:
+        bvps_val = cmp * 0.4
 
     # 1. Base Free Cash Flow Estimate (Normalized from Net Profit / EPS)
     base_fcf_per_share = max(1.0, eps * 0.85)

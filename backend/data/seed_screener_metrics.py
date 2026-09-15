@@ -1,6 +1,6 @@
 """
 StockOracle Pro — Screener Daily Metrics Precomputation & Master Seeder
-Populates screener_daily_metrics table with 75+ liquid NSE stocks across Large, Mid, and Small caps.
+Populates screener_daily_metrics table with 51 liquid NSE stocks across Large, Mid, and Small caps.
 """
 import logging
 from backend.data.database import upsert_screener_daily_metric

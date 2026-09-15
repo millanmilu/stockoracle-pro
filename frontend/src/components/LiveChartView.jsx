@@ -29,6 +29,8 @@ import ChartToolbar from './chart/ChartToolbar';
 import ChartCanvas from './chart/ChartCanvas';
 import CandleCountdown from './chart/CandleCountdown';
 import IndicatorModal from './chart/IndicatorModal';
+import IndicatorParamsModal from './chart/IndicatorParamsModal';
+import AIDashboard from './chart/AIDashboard';
 import OscillatorPane from './chart/OscillatorPane';
 import VolumePane from './chart/VolumePane';
 import DrawingTools from './chart-tools/DrawingTools';
@@ -69,11 +71,17 @@ export default function LiveChartView() {
   const [dataSource, setDataSource] = useState('angel_one');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Advanced Indicators State
+  // Advanced Indicators State — persisted ids are validated against the catalog so
+  // a renamed/removed definition can never inflate the active count or bind to
+  // nothing on the chart.
   const [activeIndicators, setActiveIndicators] = useState(() => {
     try {
       const saved = localStorage.getItem('stockoracle_indicators');
-      return saved ? JSON.parse(saved) : DEFAULT_ACTIVE_INDICATORS;
+      if (!saved) return DEFAULT_ACTIVE_INDICATORS;
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return DEFAULT_ACTIVE_INDICATORS;
+      const known = new Set(INDICATOR_DEFINITIONS.map((item) => item.id));
+      return parsed.filter((id) => known.has(id));
     } catch {
       return DEFAULT_ACTIVE_INDICATORS;
     }
@@ -81,11 +89,15 @@ export default function LiveChartView() {
   const [hiddenIndicators, setHiddenIndicators] = useState([]);
   const [indicatorValues, setIndicatorValues] = useState({});
   const [showIndicatorModal, setShowIndicatorModal] = useState(false);
+  const [indicatorSettings, setIndicatorSettings] = useState(null); // { id, name, engineId, params }
+  const [indicatorParamOverrides, setIndicatorParamOverrides] = useState({});
   const [chartType, setChartType] = useState('candlestick');
   const [priceScaleMode, setPriceScaleMode] = useState('normal');
   const [invertScale, setInvertScale] = useState(false);
   // Auto-collapse drawing tools on tablet/mobile (user can re-open)
   const [showDrawingTools, setShowDrawingTools] = useState(() => window.innerWidth >= 1024);
+  // Shared drawing-tool selection — the top Draw menu and the left rail stay in sync
+  const [activeDrawingTool, setActiveDrawingTool] = useState('crosshair');
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [showVolume, setShowVolume] = useState(true);
   const [volumeHeight, setVolumeHeight] = useState(132);
@@ -99,10 +111,31 @@ export default function LiveChartView() {
       .filter(item => item && item.type === 'oscillator');
   }, [activeIndicators]);
 
+  // AI indicators (AIDashboard strip)
+  const showAIDashboard = useMemo(() => {
+    return activeIndicators.some((id) => {
+      const def = INDICATOR_DEFINITIONS.find((item) => item.id === id);
+      return def && def.type === 'ai';
+    });
+  }, [activeIndicators]);
+
 
 
   const activeCandleRef = useRef(null);
   const chartCanvasRef = useRef(null);
+  // Stable drawing-layer refs — DrawingTools needs the SAME ref objects across
+  // renders. Passing `{{ current: ... }}` inline would snapshot null on first
+  // render and never update (ref changes don't re-render), breaking
+  // coordinateToLogical / priceToCoordinate, magnet snapping and drag edits.
+  const drawingChartRef = useRef(null);
+  const drawingCandleRef = useRef(null);
+  // Main price-pane wrapper: DrawingTools sizes its SVG overlay to this box so
+  // drawings map 1:1 to chart pixels on scroll/zoom (never stretched over
+  // volume/oscillator panes).
+  const mainChartWrapRef = useRef(null);
+  const [, setDrawingRefsTick] = useState(0);
+  // Last exchange-candle time published to state (crypto liveCandle path)
+  const liveCandleTimeRef = useRef(null);
   // Latest-value refs so the live-tick listener NEVER needs re-subscription
   // (ticks flow outside React renders — see processLiveTick below)
   const intervalRef = useRef(interval);
@@ -131,6 +164,7 @@ export default function LiveChartView() {
     setLoading(true);
     setError(null);
     activeCandleRef.current = null;
+    liveCandleTimeRef.current = null;
     lastVerifiedPriceRef.current = null;
     recentPricesRef.current = [];
     spikeCountRef.current = 0;
@@ -216,6 +250,36 @@ export default function LiveChartView() {
   useEffect(() => {
     intervalRef.current = interval;
   }, [interval]);
+  // Sync the stable drawing refs from the ChartCanvas imperative handle once
+  // the chart instance exists. Polls briefly after load since ref assignment
+  // itself never triggers a render.
+  useEffect(() => {
+    if (loading || candles.length === 0) {
+      drawingChartRef.current = null;
+      drawingCandleRef.current = null;
+      return;
+    }
+    let attempts = 0;
+    const sync = () => {
+      try {
+        const chart = chartCanvasRef.current?.getChart?.() || null;
+        const series = chartCanvasRef.current?.getCandleSeries?.() || null;
+        if (chart && drawingChartRef.current !== chart) {
+          drawingChartRef.current = chart;
+          setDrawingRefsTick((t) => t + 1);
+        }
+        if (series && drawingCandleRef.current !== series) {
+          drawingCandleRef.current = series;
+          setDrawingRefsTick((t) => t + 1);
+        }
+        if ((!chart || !series) && attempts < 20) {
+          attempts += 1;
+          setTimeout(sync, 250);
+        }
+      } catch {}
+    };
+    sync();
+  }, [loading, candles, interval, selectedSymbol]);
   useEffect(() => {
     symbolRef.current = selectedSymbol;
   }, [selectedSymbol]);
@@ -275,6 +339,17 @@ export default function LiveChartView() {
         };
         activeCandleRef.current = liveCandle;
         chartCanvasRef.current?.updateActiveCandle(liveCandle);
+        // Publish new exchange bars to state on rollover so panes recompute.
+        if (liveCandleTimeRef.current !== formattedTime) {
+          liveCandleTimeRef.current = formattedTime;
+          try {
+            setCandles((prev) => {
+              if (!Array.isArray(prev) || prev.length === 0) return [liveCandle];
+              if (prev[prev.length - 1].time === liveCandle.time) return prev;
+              return [...prev, liveCandle];
+            });
+          } catch {}
+        }
         return;
       }
     }
@@ -324,6 +399,18 @@ export default function LiveChartView() {
       };
       activeCandleRef.current = newCandle;
       chartCanvasRef.current?.updateActiveCandle(newCandle);
+      // Publish the new bucket to React state so overlay/oscillator/volume
+      // panes recompute their series (they derive from the `candles` prop).
+      // One render per bucket rollover — the per-tick path stays render-free.
+      // The SAME object reference is stored: ticks mutate it in place, so
+      // future recomputes always see fresh OHLC without extra renders.
+      try {
+        setCandles((prev) => {
+          if (!Array.isArray(prev) || prev.length === 0) return [newCandle];
+          if (prev[prev.length - 1].time === newCandle.time) return prev;
+          return [...prev, newCandle];
+        });
+      } catch {}
     }
   }, []);
 
@@ -416,6 +503,26 @@ export default function LiveChartView() {
     setActiveIndicators((prev) => prev.filter((item) => item !== id));
     setHiddenIndicators((prev) => prev.filter((item) => item !== id));
   }, []);
+
+  const handleOpenIndicatorSettings = useCallback((indicator) => {
+    if (!indicator?.engineId && !indicator?.params) return;
+    setIndicatorSettings(indicator);
+  }, []);
+
+  const handleSaveIndicatorParams = useCallback((id, overrides) => {
+    setIndicatorParamOverrides((prev) => {
+      const next = { ...prev, [id]: overrides };
+      return next;
+    });
+  }, []);
+
+  // Resolve an indicator definition with user parameter overrides applied.
+  const resolveDefinition = useCallback((indicator) => {
+    if (!indicator) return indicator;
+    const overrides = indicatorParamOverrides[indicator.id];
+    if (!overrides || Object.keys(overrides).length === 0) return indicator;
+    return { ...indicator, params: { ...(indicator.params || {}), ...overrides } };
+  }, [indicatorParamOverrides]);
 
   // Synchronized Visible Logical Range with loop guard across all stacked panes
   const handleVisibleRangeChange = useCallback((range, source) => {
@@ -522,6 +629,8 @@ export default function LiveChartView() {
         onPriceScaleModeChange={setPriceScaleMode}
         showDrawingTools={showDrawingTools}
         onToggleDrawingTools={() => setShowDrawingTools((prev) => !prev)}
+        activeDrawingTool={activeDrawingTool}
+        onSelectDrawingTool={(id) => { setActiveDrawingTool(id); setShowDrawingTools(true); }}
         onOpenSettings={() => setShowSettingsModal(true)}
         showVolume={showVolume}
         onToggleVolume={() => setShowVolume((prev) => !prev)}
@@ -538,6 +647,15 @@ export default function LiveChartView() {
         isTablet={isTablet}
       />
 
+      {/* AI Signal Dashboard Strip */}
+      {showAIDashboard && (
+        <AIDashboard
+          candles={candles}
+          symbol={selectedSymbol}
+          interval={interval}
+        />
+      )}
+
       {/* 2. Main Terminal Viewport (Left Drawing Tools + Chart Canvas + Sub-panes) */}
       <div
         style={{
@@ -552,8 +670,8 @@ export default function LiveChartView() {
       >
         {/* Left Vertical Drawing Toolbar & Coordinate-Synced SVG Drawing Layer */}
         <DrawingTools
-          chartRef={{ current: chartCanvasRef.current?.getChart() }}
-          candleRef={{ current: chartCanvasRef.current?.getCandleSeries() }}
+          chartRef={drawingChartRef}
+          candleRef={drawingCandleRef}
           candles={candles}
           symbol={selectedSymbol}
           interval={interval}
@@ -561,7 +679,10 @@ export default function LiveChartView() {
           onOpenSettings={() => setShowSettingsModal(true)}
           isOpen={showDrawingTools}
           onToggleOpen={() => setShowDrawingTools((prev) => !prev)}
+          activeTool={activeDrawingTool}
+          onActiveToolChange={setActiveDrawingTool}
           isMobile={isMobile}
+          mainPaneRef={mainChartWrapRef}
         />
 
         {/* Center/Right Chart Column (Canvas + Oscillators) */}
@@ -576,7 +697,7 @@ export default function LiveChartView() {
             overflow: 'hidden',
           }}
         >
-          <div style={{ flex: 1, position: 'relative', width: '100%', minHeight: 0, overflow: 'hidden' }}>
+          <div ref={mainChartWrapRef} style={{ flex: 1, position: 'relative', width: '100%', minHeight: 0, overflow: 'hidden' }}>
             {loading && candles.length === 0 && (
               <div style={{
                 position: 'absolute',
@@ -629,6 +750,7 @@ export default function LiveChartView() {
               liveChange={dayChange}
               activeIndicators={activeIndicators}
               hiddenIndicators={hiddenIndicators}
+              indicatorOverrides={indicatorParamOverrides}
               onToggleHideIndicator={handleToggleHideIndicator}
               onRemoveIndicator={handleRemoveIndicator}
               onVisibleRangeChange={handleVisibleRangeChange}
@@ -655,26 +777,30 @@ export default function LiveChartView() {
           />
 
           {/* Synchronized Dynamic Oscillator Sub-Panes */}
-          {activeOscillators.map((osc) => (
-            <OscillatorPane
-              key={osc.id}
-              ref={(el) => {
-                const key = osc.oscType || osc.id;
-                if (el) {
-                  oscPaneRefs.current[key] = el;
-                } else {
-                  delete oscPaneRefs.current[key];
-                }
-              }}
-              oscType={osc.oscType || osc.id}
-              candles={candles}
-              isHidden={hiddenIndicators.includes(osc.id)}
-              onToggleHide={() => handleToggleHideIndicator(osc.id)}
-              onClose={() => handleRemoveIndicator(osc.id)}
-              onVisibleRangeChange={handleVisibleRangeChange}
-              onCrosshairMove={handleCrosshairMove}
-            />
-          ))}
+          {activeOscillators.map((osc) => {
+            const resolved = resolveDefinition(osc);
+            return (
+              <OscillatorPane
+                key={osc.id}
+                ref={(el) => {
+                  const key = osc.oscType || osc.id;
+                  if (el) {
+                    oscPaneRefs.current[key] = el;
+                  } else {
+                    delete oscPaneRefs.current[key];
+                  }
+                }}
+                oscType={osc.oscType || osc.id}
+                definition={resolved}
+                candles={candles}
+                isHidden={hiddenIndicators.includes(osc.id)}
+                onToggleHide={() => handleToggleHideIndicator(osc.id)}
+                onClose={() => handleRemoveIndicator(osc.id)}
+                onVisibleRangeChange={handleVisibleRangeChange}
+                onCrosshairMove={handleCrosshairMove}
+              />
+            );
+          })}
 
 
         </div>
@@ -685,8 +811,20 @@ export default function LiveChartView() {
         isOpen={showIndicatorModal}
         onClose={() => setShowIndicatorModal(false)}
         activeIndicators={activeIndicators}
+        hiddenIndicators={hiddenIndicators}
         onToggleIndicator={handleToggleIndicator}
+        onToggleHideIndicator={handleToggleHideIndicator}
+        onRemoveIndicator={handleRemoveIndicator}
         onClearAll={handleClearAllIndicators}
+        onOpenSettings={handleOpenIndicatorSettings}
+      />
+
+      {/* 4. Indicator Parameter Settings Modal */}
+      <IndicatorParamsModal
+        indicator={indicatorSettings}
+        overrides={indicatorSettings ? indicatorParamOverrides[indicatorSettings.id] || {} : {}}
+        onClose={() => setIndicatorSettings(null)}
+        onSave={handleSaveIndicatorParams}
       />
 
       {/* 5. Chart Settings Modal */}

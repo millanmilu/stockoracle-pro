@@ -1,32 +1,141 @@
-import React, { useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import React, { useEffect, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
 import { createChart, CrosshairMode } from 'lightweight-charts';
 import { Eye, EyeOff, X } from 'lucide-react';
+import { calculateById } from '../../utils/indicatorEngine';
 
 /**
  * OscillatorPane — Universal Sub-Pane for All Oscillator Types
  * Synchronized with the main price chart via visible logical range and crosshair.
  *
+ * Values are either read directly from server-computed candle fields
+ * (`definition.field` / `signalField`), or computed client-side via the modular
+ * engine (`definition.engineId` + `definition.params`).
+ *
  * Supported oscType values:
- *   rsi | macd | stoch | stoch_rsi | cci | williams_r | mfi | obv | adx | atr | elder_ray | cmf
+ *   rsi | macd | stoch | stoch_rsi | cci | williams_r | mfi | obv | adx | atr |
+ *   elder_ray | cmf | roc | momentum | trix | hist_vol | std_dev | bb_width |
+ *   choppiness | rel_volume | volume_delta | cvd
  */
 
 const OSC_CONFIG = {
-  rsi:        { label: 'RSI (14)',        color: '#A855F7', hasSignal: false, hasBands: [70, 30], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: false },
-  macd:       { label: 'MACD (12,26,9)', color: '#06B6D4', hasSignal: true,  hasBands: null,     zeroLine: true  },
-  stoch:      { label: 'Stoch (14,3)',   color: '#3B82F6', hasSignal: true,  hasBands: [80, 20], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: false },
-  stoch_rsi:  { label: 'StochRSI',      color: '#60A5FA', hasSignal: true,  hasBands: [80, 20], bandColors: ['rgba(239,83,80,0.4)','rgba(16,185,129,0.4)'], zeroLine: false },
-  cci:        { label: 'CCI (20)',       color: '#F97316', hasSignal: false, hasBands: [100,-100],bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: true  },
-  williams_r: { label: 'Williams %R',   color: '#EC4899', hasSignal: false, hasBands: [-20,-80], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: false },
-  mfi:        { label: 'MFI (14)',       color: '#06B6D4', hasSignal: false, hasBands: [80, 20], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: false },
-  obv:        { label: 'OBV',           color: '#10B981', hasSignal: false, hasBands: null,     zeroLine: true  },
-  adx:        { label: 'ADX (14)',       color: '#FBBF24', hasSignal: true,  hasBands: [[25,'rgba(251,191,36,0.3)']], zeroLine: false },
-  atr:        { label: 'ATR (14)',       color: '#FB923C', hasSignal: false, hasBands: null,     zeroLine: false },
-  elder_ray:  { label: 'Elder Ray',     color: '#34D399', hasSignal: true,  hasBands: null,     zeroLine: true  },
-  cmf:        { label: 'CMF (20)',       color: '#38BDF8', hasSignal: false, hasBands: null,     zeroLine: true  },
+  rsi:          { label: 'RSI (14)',         color: '#A855F7', hasSignal: false, hasBands: [70, 30], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: false },
+  macd:         { label: 'MACD (12,26,9)',   color: '#06B6D4', hasSignal: true,  hasBands: null,     zeroLine: true  },
+  stoch:        { label: 'Stoch (14,3)',     color: '#3B82F6', hasSignal: true,  hasBands: [80, 20], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: false },
+  stoch_rsi:    { label: 'StochRSI',         color: '#60A5FA', hasSignal: true,  hasBands: [80, 20], bandColors: ['rgba(239,83,80,0.4)','rgba(16,185,129,0.4)'], zeroLine: false },
+  cci:          { label: 'CCI (20)',         color: '#F97316', hasSignal: false, hasBands: [100,-100], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: true  },
+  williams_r:   { label: 'Williams %R',      color: '#EC4899', hasSignal: false, hasBands: [-20,-80], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: false },
+  mfi:          { label: 'MFI (14)',         color: '#06B6D4', hasSignal: false, hasBands: [80, 20], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: false },
+  obv:          { label: 'OBV',              color: '#10B981', hasSignal: false, hasBands: null,     zeroLine: true  },
+  adx:          { label: 'ADX (14)',         color: '#FBBF24', hasSignal: true,  hasBands: [[25,'rgba(251,191,36,0.3)']], zeroLine: false },
+  atr:          { label: 'ATR (14)',         color: '#FB923C', hasSignal: false, hasBands: null,     zeroLine: false },
+  elder_ray:    { label: 'Elder Ray',        color: '#34D399', hasSignal: true,  hasBands: null,     zeroLine: true  },
+  cmf:          { label: 'CMF (20)',         color: '#38BDF8', hasSignal: false, hasBands: null,     zeroLine: true  },
+  roc:          { label: 'ROC (10)',         color: '#14B8A6', hasSignal: false, hasBands: null,     zeroLine: true  },
+  momentum:     { label: 'Momentum (10)',    color: '#F59E0B', hasSignal: false, hasBands: null,     zeroLine: true  },
+  trix:         { label: 'TRIX (15)',        color: '#C084FC', hasSignal: false, hasBands: null,     zeroLine: true  },
+  hist_vol:     { label: 'Hist Vol %',       color: '#38BDF8', hasSignal: false, hasBands: null,     zeroLine: false },
+  std_dev:      { label: 'StdDev (20)',      color: '#94A3B8', hasSignal: false, hasBands: null,     zeroLine: false },
+  bb_width:     { label: 'BB Width %',       color: '#818CF8', hasSignal: false, hasBands: null,     zeroLine: false },
+  choppiness:   { label: 'Choppiness (14)',  color: '#F472B6', hasSignal: false, hasBands: [61.8, 38.2], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: false },
+  rel_volume:   { label: 'Rel Volume (20)',  color: '#34D399', hasSignal: false, hasBands: [[1,'rgba(255,255,255,0.3)']], zeroLine: false },
+  volume_delta: { label: 'Vol Delta (est)',  color: '#F87171', hasSignal: false, hasBands: null,     zeroLine: true  },
+  cvd:          { label: 'CVD (est)',        color: '#E879F9', hasSignal: false, hasBands: null,     zeroLine: true  },
 };
+
+const fmt = (v, d = 2) => (v != null && !isNaN(Number(v))) ? Number(v).toFixed(d) : '—';
+
+function arr(points) {
+  if (!points) return [];
+  if (Array.isArray(points)) return points;
+  if (Array.isArray(points.main)) return points.main;
+  return [];
+}
+
+function fieldPoints(candles, field) {
+  if (!field) return [];
+  return candles
+    .filter((c) => c[field] != null && !isNaN(Number(c[field])))
+    .map((c) => ({ time: c.time, value: Number(c[field]) }));
+}
+
+/**
+ * Resolve the full series data for an oscillator. Returns
+ * { main, signal, signal2, hist } arrays of { time, value, color? }.
+ * Prefers server fields, falls back to the client engine.
+ */
+function resolveSeries(oscType, definition, candles) {
+  if (!candles?.length) return { main: [], signal: [], signal2: [], hist: [] };
+
+  const def = definition || {};
+  const engineId = def.engineId;
+
+  // Try engine first for engine-backed oscillators (single source of truth for
+  // the new catalog) when no server field is present.
+  let engine = null;
+  if (engineId) {
+    const res = calculateById(engineId, candles, def.params || {});
+    if (res.valid && res.points) engine = res.points;
+  }
+
+  switch (oscType) {
+    case 'macd': {
+      if (engine) {
+        return {
+          main: arr(engine.macd),
+          signal: arr(engine.signal),
+          hist: arr(engine.histogram || engine.hist),
+        };
+      }
+      return {
+        main: fieldPoints(candles, def.field || 'macd'),
+        signal: fieldPoints(candles, def.signalField || 'macd_signal'),
+        hist: fieldPoints(candles, def.histField || 'macd_hist'),
+      };
+    }
+    case 'stoch':
+    case 'stoch_rsi': {
+      if (engine && engine.k) {
+        return { main: arr(engine.k), signal: arr(engine.d) };
+      }
+      const kField = oscType === 'stoch' ? (def.field || 'stoch_k') : (def.field || 'stoch_rsi_k');
+      const dField = oscType === 'stoch' ? (def.signalField || 'stoch_d') : (def.signalField || 'stoch_rsi_d');
+      return { main: fieldPoints(candles, kField), signal: fieldPoints(candles, dField) };
+    }
+    case 'adx': {
+      if (engine && engine.adx) {
+        return { main: arr(engine.adx), signal: arr(engine.plusDI), signal2: arr(engine.minusDI) };
+      }
+      return {
+        main: fieldPoints(candles, def.field || 'adx'),
+        signal: fieldPoints(candles, def.plusDIField || 'plus_di'),
+        signal2: fieldPoints(candles, def.minusDIField || 'minus_di'),
+      };
+    }
+    case 'elder_ray': {
+      return {
+        main: fieldPoints(candles, def.field || 'elder_bull'),
+        signal: fieldPoints(candles, def.signalField || 'elder_bear'),
+      };
+    }
+    case 'cmf': {
+      const main = engine ? arr(engine) : fieldPoints(candles, def.field || 'cmf');
+      return { main, hist: main };
+    }
+    case 'rsi': case 'mfi': case 'cci': case 'williams_r': case 'obv': case 'atr':
+    case 'roc': case 'momentum': case 'trix': case 'hist_vol': case 'std_dev':
+    case 'bb_width': case 'choppiness': case 'rel_volume': case 'volume_delta':
+    case 'cvd': {
+      const main = engine ? arr(engine) : fieldPoints(candles, def.field || oscType);
+      return { main };
+    }
+    default:
+      return { main: engine ? arr(engine) : fieldPoints(candles, def.field || oscType) };
+  }
+}
 
 export default forwardRef(function OscillatorPane({
   oscType = 'rsi',
+  definition = null,
   candles = [],
   isHidden = false,
   onToggleHide = () => {},
@@ -51,10 +160,8 @@ export default forwardRef(function OscillatorPane({
 
   const updateLegend = useCallback((candle) => {
     if (!candle) return;
-    const fmt = (v, d = 2) => (v != null && !isNaN(Number(v))) ? Number(v).toFixed(d) : '—';
-
     if (oscType === 'rsi' || oscType === 'mfi') {
-      const v = candle[oscType === 'rsi' ? 'rsi' : 'mfi'];
+      const v = candle[oscType];
       if (val1Ref.current) {
         val1Ref.current.textContent = fmt(v);
         const n = Number(v);
@@ -102,8 +209,13 @@ export default forwardRef(function OscillatorPane({
         val1Ref.current.textContent = fmt(candle.cmf, 4);
         val1Ref.current.style.color = Number(candle.cmf) >= 0 ? '#10B981' : '#EF5350';
       }
+    } else {
+      // Engine-only oscillators
+      const data = resolveSeries(oscType, definition, [candle]);
+      const last = data.main[data.main.length - 1];
+      if (val1Ref.current) val1Ref.current.textContent = fmt(last?.value);
     }
-  }, [oscType, cfg.color]);
+  }, [oscType, cfg.color, definition]);
 
   const resetLegendToLatest = useCallback(() => {
     const latest = candlesRef.current.length > 0 ? candlesRef.current[candlesRef.current.length - 1] : null;
@@ -155,21 +267,12 @@ export default forwardRef(function OscillatorPane({
 
     // Main line or histogram series
     if (oscType === 'elder_ray') {
-      refs.main = chart.addHistogramSeries({
-        color: 'rgba(16,185,129,0.75)',
-        title: 'Bull Power',
-        priceFormat: { type: 'price', precision: 2, minMove: 0.05 },
-      });
-      refs.signal = chart.addHistogramSeries({
-        color: 'rgba(239,83,80,0.75)',
-        title: 'Bear Power',
-        priceFormat: { type: 'price', precision: 2, minMove: 0.05 },
-      });
+      refs.main = chart.addHistogramSeries({ color: 'rgba(16,185,129,0.75)', title: 'Bull Power', priceFormat: { type: 'price', precision: 2, minMove: 0.05 } });
+      refs.signal = chart.addHistogramSeries({ color: 'rgba(239,83,80,0.75)', title: 'Bear Power', priceFormat: { type: 'price', precision: 2, minMove: 0.05 } });
     } else {
-      refs.main = chart.addLineSeries({
-        color: cfg.color, lineWidth: 1.5,
-        priceFormat: { type: 'price', precision: oscType === 'obv' ? 0 : (oscType === 'cmf' ? 4 : 1), minMove: oscType === 'obv' ? 1 : (oscType === 'cmf' ? 0.0001 : 0.1) },
-      });
+      const precision = oscType === 'obv' || oscType === 'cvd' || oscType === 'volume_delta' ? 0 : oscType === 'cmf' || oscType === 'trix' ? 4 : oscType === 'roc' || oscType === 'momentum' ? 2 : 1;
+      const minMove = precision === 0 ? 1 : precision === 4 ? 0.0001 : 0.1;
+      refs.main = chart.addLineSeries({ color: cfg.color, lineWidth: 1.5, priceFormat: { type: 'price', precision, minMove } });
     }
 
     // Add reference bands
@@ -199,14 +302,15 @@ export default forwardRef(function OscillatorPane({
       }
     }
 
-
     // CMF histogram
     if (oscType === 'cmf') {
       refs.hist = chart.addHistogramSeries({ priceFormat: { type: 'price', precision: 4, minMove: 0.0001 } });
     }
 
-    // OBV — line only (main line)
-    // ATR — line only (main line)
+    // Volume delta histogram overlaid (single histogram for delta)
+    if (oscType === 'volume_delta') {
+      refs.main = chart.addHistogramSeries({ priceFormat: { type: 'price', precision: 0, minMove: 1 } });
+    }
 
     seriesRefs.current = refs;
 
@@ -237,80 +341,62 @@ export default forwardRef(function OscillatorPane({
   }, [oscType]);
 
   // Data update
+  const seriesData = useMemo(() => resolveSeries(oscType, definition, candles), [oscType, definition, candles]);
+
   useEffect(() => {
     if (!chartRef.current || !candles || candles.length === 0) return;
     const refs = seriesRefs.current;
-    const filter = (field) => candles.filter(c => c[field] != null && !isNaN(Number(c[field]))).map(c => ({ time: c.time, value: Number(c[field]) }));
+    const { main, signal, signal2, hist } = seriesData;
 
     try {
-      if (oscType === 'rsi')        { refs.main?.setData(filter('rsi')); }
-      else if (oscType === 'mfi')   { refs.main?.setData(filter('mfi')); }
-      else if (oscType === 'cci')   { refs.main?.setData(filter('cci')); }
-      else if (oscType === 'williams_r') { refs.main?.setData(filter('williams_r')); }
-      else if (oscType === 'obv')   { refs.main?.setData(filter('obv')); }
-      else if (oscType === 'atr')   { refs.main?.setData(filter('atr')); }
-      else if (oscType === 'cmf') {
-        refs.main?.setData(filter('cmf'));
+      const set = (series, data) => { if (series) { try { series.setData(Array.isArray(data) ? data : []); } catch {} } };
+
+      if (oscType === 'elder_ray') {
+        set(refs.main, main.map((p) => ({ time: p.time, value: p.value, color: 'rgba(16,185,129,0.7)' })));
+        set(refs.signal, signal.map((p) => ({ time: p.time, value: p.value, color: 'rgba(239,83,80,0.7)' })));
+      } else if (oscType === 'macd') {
+        set(refs.main, main);
+        set(refs.signal, signal);
         if (refs.hist) {
-          const histData = candles.filter(c => c.cmf != null && !isNaN(Number(c.cmf))).map(c => ({
-            time: c.time, value: Number(c.cmf),
-            color: Number(c.cmf) >= 0 ? 'rgba(16,185,129,0.55)' : 'rgba(239,83,80,0.55)',
-          }));
-          refs.hist.setData(histData);
+          set(refs.hist, hist.map((p) => ({ time: p.time, value: p.value, color: Number(p.value) >= 0 ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)' })));
         }
-      }
-      else if (oscType === 'stoch') {
-        refs.main?.setData(filter('stoch_k'));
-        refs.signal?.setData(filter('stoch_d'));
-      }
-      else if (oscType === 'stoch_rsi') {
-        refs.main?.setData(filter('stoch_rsi_k'));
-        refs.signal?.setData(filter('stoch_rsi_d'));
-      }
-      else if (oscType === 'macd') {
-        refs.main?.setData(filter('macd'));
-        refs.signal?.setData(filter('macd_signal'));
+      } else if (oscType === 'cmf') {
+        set(refs.main, main);
         if (refs.hist) {
-          const histData = candles.filter(c => c.macd_hist != null && !isNaN(Number(c.macd_hist))).map(c => ({
-            time: c.time, value: Number(c.macd_hist),
-            color: Number(c.macd_hist) >= 0 ? 'rgba(38,166,154,0.7)' : 'rgba(239,83,80,0.7)',
-          }));
-          refs.hist.setData(histData);
+          set(refs.hist, hist.map((p) => ({ time: p.time, value: p.value, color: Number(p.value) >= 0 ? 'rgba(16,185,129,0.55)' : 'rgba(239,83,80,0.55)' })));
         }
-      }
-      else if (oscType === 'adx') {
-        refs.main?.setData(filter('adx'));
-        refs.signal?.setData(filter('plus_di'));
-        refs.signal2?.setData(filter('minus_di'));
-      }
-      else if (oscType === 'elder_ray') {
-        const bullData = candles.filter(c => c.elder_bull != null && !isNaN(Number(c.elder_bull))).map(c => ({
-          time: c.time, value: Number(c.elder_bull), color: 'rgba(16,185,129,0.7)',
-        }));
-        refs.main?.setData(bullData);
-        if (refs.signal) {
-          const bearData = candles.filter(c => c.elder_bear != null && !isNaN(Number(c.elder_bear))).map(c => ({
-            time: c.time, value: Number(c.elder_bear), color: 'rgba(239,83,80,0.7)',
-          }));
-          refs.signal.setData(bearData);
-        }
+      } else if (oscType === 'volume_delta') {
+        set(refs.main, main.map((p) => ({ time: p.time, value: p.value, color: Number(p.value) >= 0 ? 'rgba(16,185,129,0.7)' : 'rgba(239,83,80,0.7)' })));
+      } else if (oscType === 'cvd') {
+        set(refs.main, main);
+      } else if (oscType === 'adx') {
+        set(refs.main, main);
+        set(refs.signal, signal);
+        set(refs.signal2, signal2);
+      } else {
+        set(refs.main, main);
+        set(refs.signal, signal);
       }
 
       // Visibility
       Object.values(refs).forEach(s => { try { s?.applyOptions({ visible: !isHidden }); } catch {} });
       resetLegendToLatest();
     } catch {}
-  }, [candles, oscType, isHidden, resetLegendToLatest]);
+  }, [seriesData, oscType, isHidden, resetLegendToLatest]);
 
   // Legend HUD content based on oscType
   const renderLegend = () => {
     const dot = <div style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: cfg.color, flexShrink: 0 }} />;
-    if (oscType === 'rsi' || oscType === 'mfi' || oscType === 'atr' || oscType === 'obv' || oscType === 'cci' || oscType === 'williams_r' || oscType === 'cmf') {
-      return <>
-        {dot}
+    const single = (showDot = true) => (
+      <>
+        {showDot && dot}
         <span style={{ fontWeight: 700, color: '#94A3B8' }}>{cfg.label}</span>
         <span ref={val1Ref} style={{ fontWeight: 800, color: cfg.color, minWidth: 40 }}>—</span>
-      </>;
+      </>
+    );
+
+    if (oscType === 'rsi' || oscType === 'mfi' || oscType === 'atr' || oscType === 'obv' || oscType === 'cci' || oscType === 'williams_r' || oscType === 'cmf') {
+      return single();
     }
     if (oscType === 'macd') {
       return <>
@@ -355,7 +441,8 @@ export default forwardRef(function OscillatorPane({
         <strong ref={val2Ref} style={{ color: '#EF5350' }}>—</strong>
       </>;
     }
-    return <>{dot}<span ref={val1Ref} style={{ color: cfg.color }}>—</span></>;
+    // Engine-only oscillators (roc, momentum, trix, hist_vol, std_dev, bb_width, choppiness, rel_volume, volume_delta, cvd)
+    return single();
   };
 
   return (

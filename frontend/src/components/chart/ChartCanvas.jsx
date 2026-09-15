@@ -3,6 +3,8 @@ import { createChart, CrosshairMode, PriceScaleMode } from 'lightweight-charts';
 import { Eye, EyeOff, X } from 'lucide-react';
 import { CHART_OPTIONS, CANDLE_STYLE, isCryptoSymbol, subscribeLiveTick } from '../../utils/chartHelpers';
 import { INDICATOR_DEFINITIONS } from './indicatorDefinitions';
+import { calculateById } from '../../utils/indicatorEngine';
+import { detectSMC } from '../../utils/marketStructure';
 
 /**
  * Format volume into readable K / L / Cr
@@ -18,10 +20,10 @@ function formatVolume(vol) {
 /**
  * Format indicator value for display in the legend badge
  */
-function formatIndicatorValue(def, candle, currSym = '₹') {
+function formatIndicatorValue(def, candle, currSym = '₹', engineValue = null) {
   if (!candle || !def) return '—';
   if (def.type === 'overlay') {
-    const val = candle[def.field];
+    const val = def.field ? candle[def.field] : engineValue;
     if (val == null || isNaN(Number(val))) return '—';
     return `${currSym}${Number(val).toFixed(2)}`;
   }
@@ -70,8 +72,32 @@ function formatIndicatorValue(def, candle, currSym = '₹') {
     if (p == null || isNaN(Number(p))) return '—';
     return `P:${Number(p).toFixed(1)} R1:${Number(r1).toFixed(1)} S1:${Number(s1).toFixed(1)}`;
   }
-  const generic = candle[def.field];
+  const generic = def.field ? candle[def.field] : engineValue;
   return generic != null && !isNaN(Number(generic)) ? Number(generic).toFixed(2) : '—';
+}
+
+/**
+ * Resolve the display data for a single overlay indicator. Prefers server
+ * computed fields when present; otherwise computes the series client-side
+ * from the modular engine (`engineId`).
+ */
+function resolveOverlayData(def, candles) {
+  const colField = def.field;
+  if (colField) {
+    return candles
+      .filter((c) => c[colField] != null && !isNaN(Number(c[colField])))
+      .map((c) => ({ time: c.time, value: Number(c[colField]) }));
+  }
+  if (def.engineId) {
+    const result = calculateById(def.engineId, candles, def.params || {});
+    if (!result.valid || !result.points) return [];
+    const arr = result.points.main || result.points;
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((p) => p && p.value != null && !isNaN(Number(p.value)))
+      .map((p) => ({ time: p.time, value: Number(p.value) }));
+  }
+  return [];
 }
 
 
@@ -186,6 +212,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   liveChange = null,
   activeIndicators = [],
   hiddenIndicators = [],
+  indicatorOverrides = {},
   onToggleHideIndicator = () => {},
   onRemoveIndicator = () => {},
   onVisibleRangeChange = () => {},
@@ -196,6 +223,8 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   const candleSeriesRef = useRef(null);
   const syncedHairlineRef = useRef(null);
   const indicatorSeriesRef = useRef({}); // id -> series or array of series
+  const smcSeriesRef = useRef({}); // id -> SMC marker/price-line series group
+  const engineValueRef = useRef({}); // id -> last computed engine value (legend)
   const chartTypeRef = useRef(chartType);
   chartTypeRef.current = chartType;
 
@@ -216,12 +245,36 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   }, [candles]);
 
 
-  // Filter active indicators to only include overlays (not oscillators which live in sub-panes)
+  // Filter active indicators to only include overlays (not oscillators which live in sub-panes),
+  // applying per-indicator parameter overrides so custom params reflect in rendering.
   const overlayIndicators = useMemo(() => {
     return activeIndicators
-      .map(id => INDICATOR_DEFINITIONS.find(item => item.id === id))
-      .filter(item => item && item.type !== 'oscillator');
-  }, [activeIndicators]);
+      .map(id => {
+        const def = INDICATOR_DEFINITIONS.find(item => item.id === id);
+        if (!def) return null;
+        const overrides = indicatorOverrides[id];
+        if (overrides && Object.keys(overrides).length) {
+          return { ...def, params: { ...(def.params || {}), ...overrides } };
+        }
+        return def;
+      })
+      .filter(item => item && !['oscillator', 'smc', 'ai', 'custom'].includes(item.type));
+  }, [activeIndicators, indicatorOverrides]);
+
+  // Market Structure / SMC overlays are rendered separately from the price legend.
+  const smcIndicators = useMemo(() => {
+    return activeIndicators
+      .map(id => {
+        const def = INDICATOR_DEFINITIONS.find(item => item.id === id);
+        if (!def) return null;
+        const overrides = indicatorOverrides[id];
+        if (overrides && Object.keys(overrides).length) {
+          return { ...def, params: { ...(def.params || {}), ...overrides } };
+        }
+        return def;
+      })
+      .filter(item => item && item.type === 'smc');
+  }, [activeIndicators, indicatorOverrides]);
 
   // Update top-left legend in DOM at 0ms latency
   const isCrypto = isCryptoSymbol(selectedSymbol);
@@ -265,7 +318,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     overlayIndicators.forEach((ind) => {
       const el = indicatorValRefs.current[ind.id];
       if (el) {
-        el.textContent = formatIndicatorValue(ind, candle, currSym);
+        el.textContent = formatIndicatorValue(ind, candle, currSym, engineValueRef.current[ind.id]);
       }
     });
   }, [overlayIndicators, currSym]);
@@ -561,6 +614,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       chartInstanceRef.current = null;
       candleSeriesRef.current = null;
       indicatorSeriesRef.current = {};
+      smcSeriesRef.current = {};
     };
   }, [interval]);
 
@@ -577,6 +631,9 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   }, [interval]);
 
   // Load Historical Candles into Series
+  // Incremental live-bar appends (same first bar, small growth) must NOT
+  // steal the viewport — only full reloads re-fit the visible range.
+  const candlesMetaRef = useRef({ firstTime: null, length: 0 });
   useEffect(() => {
     if (!candleSeriesRef.current || !Array.isArray(candles) || candles.length === 0) {
       return;
@@ -597,10 +654,24 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         candleSeriesRef.current.setData(formattedCandles);
       }
 
-      candlesRef.current = formattedCandles;
+      candlesRef.current = candles.map((c, i) => ({
+        ...c,
+        time: formattedCandles[i].time,
+        open: formattedCandles[i].open,
+        high: formattedCandles[i].high,
+        low: formattedCandles[i].low,
+        close: formattedCandles[i].close,
+      }));
 
       const totalBars = formattedCandles.length;
-      if (totalBars > 0) {
+      const prev = candlesMetaRef.current;
+      const isIncrementalAppend =
+        prev.firstTime != null &&
+        formattedCandles[0].time === prev.firstTime &&
+        totalBars >= prev.length &&
+        totalBars - prev.length <= 2;
+      candlesMetaRef.current = { firstTime: formattedCandles[0].time, length: totalBars };
+      if (!isIncrementalAppend && totalBars > 0) {
         const visibleCount = Math.min(totalBars, 80);
         chartInstanceRef.current?.timeScale().setVisibleLogicalRange({
           from: totalBars - visibleCount,
@@ -694,6 +765,15 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       }
     });
 
+    // Remove SMC overlays that are no longer active
+    Object.keys(smcSeriesRef.current).forEach((id) => {
+      if (!activeIndicators.includes(id)) {
+        const group = smcSeriesRef.current[id];
+        (group?.lineSeries || []).forEach((s) => { try { chart.removeSeries(s); } catch {} });
+        delete smcSeriesRef.current[id];
+      }
+    });
+
     // 2. Add or update active overlay indicators
     overlayIndicators.forEach((def) => {
       const id = def.id;
@@ -710,9 +790,8 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           currentSeriesMap[id] = series;
         }
         series.applyOptions({ visible: !isHidden });
-        const data = candles
-          .filter((c) => c[def.field] != null && !isNaN(Number(c[def.field])))
-          .map((c) => ({ time: c.time, value: Number(c[def.field]) }));
+        const data = resolveOverlayData(def, candles);
+        if (data.length) engineValueRef.current[id] = data[data.length - 1].value;
         try { series.setData(data); } catch {}
 
       // ── Multi-line overlay (BB, KC, Donchian) ─────────────────────────────
@@ -840,8 +919,61 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       }
     });
 
+    // 3. Render Market Structure / SMC overlays
+    smcIndicators.forEach((def) => {
+      const id = def.id;
+      const isHidden = hiddenIndicators.includes(id);
+      let group = smcSeriesRef.current[id];
+      if (!group) {
+        group = { lineSeries: [] };
+        smcSeriesRef.current[id] = group;
+      }
+
+      const items = detectSMC(def.smcType, candles, def.params || {});
+      const lines = [];
+
+      // Translate zone descriptors and point levels into horizontal price lines.
+      items.forEach((item) => {
+        if (item.top != null && item.bottom != null) {
+          const zoneColor = item.color || def.color;
+          lines.push({ price: item.top, color: zoneColor, label: item.label, lineWidth: 1, lineStyle: 2 });
+          lines.push({ price: item.bottom, color: zoneColor, label: undefined, lineWidth: 1, lineStyle: 2 });
+        } else if (item.price != null && isFinite(Number(item.price))) {
+          lines.push({ price: item.price, color: item.color || def.color, label: item.label, lineWidth: 1, lineStyle: 2 });
+        }
+      });
+
+      // Reconcile price-line series count
+      const lineSeries = group.lineSeries;
+      while (lineSeries.length > lines.length) {
+        const s = lineSeries.pop();
+        try { chart.removeSeries(s); } catch {}
+      }
+      while (lineSeries.length < lines.length) {
+        const s = chart.addLineSeries({ color: '#888', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+        lineSeries.push(s);
+      }
+      lineSeries.forEach((s, idx) => {
+        const cfgLine = lines[idx];
+        if (!cfgLine) return;
+        s.applyOptions({ color: cfgLine.color, lineWidth: cfgLine.lineWidth, lineStyle: cfgLine.lineStyle, lastValueVisible: !!cfgLine.label });
+        s.applyOptions({ visible: !isHidden });
+        try {
+          s.setData([
+            { time: candles[0].time, value: cfgLine.price },
+            { time: candles[candles.length - 1].time, value: cfgLine.price },
+          ]);
+        } catch {}
+        if (cfgLine.label) {
+          try {
+            s.setMarkers([{ time: candles[candles.length - 1].time, position: 'inBar', color: cfgLine.color, shape: 'circle', text: cfgLine.label, size: 1 }]);
+          } catch {}
+        }
+      });
+    });
+
     resetLegendRef.current();
-  }, [activeIndicators, hiddenIndicators, overlayIndicators, candles]);
+  }, [activeIndicators, hiddenIndicators, overlayIndicators, smcIndicators, candles]);
 
   return (
     <div

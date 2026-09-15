@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { isCryptoSymbol } from '../../utils/chartHelpers';
+import { isCryptoSymbol, getSessionBucketStart } from '../../utils/chartHelpers';
 
 const INTERVAL_SECONDS = {
   '1s': 1,
@@ -44,7 +44,10 @@ function getSessionState(interval, selectedSymbol, activeCandle) {
     }
   }
   if (end <= now) {
-    return { end: (Math.floor(now / (duration * 1000)) + 1) * duration * 1000, closed: false };
+    // Fall back to the live session grid (09:15-anchored for NSE) — NOT the
+    // epoch grid, which disagrees with session buckets for 30m/1h/4h.
+    const bucketStart = getSessionBucketStart(interval, now, crypto);
+    return { end: (bucketStart + duration) * 1000, closed: false };
   }
   return { end, closed: false };
 }

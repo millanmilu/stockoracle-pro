@@ -1,10 +1,13 @@
 import React from 'react';
-import { UNIVERSES, SECTORS } from '../../constants/screenerConfig';
+import { INDEX_CONSTITUENTS, SECTORS } from '../../constants/screenerConfig';
 import { Sliders, Terminal, RefreshCw, Play, RotateCcw } from 'lucide-react';
+
+const ALL_UNIVERSE = 'ALL NSE';
 
 export default function ScreenerFilters({
   universe = 'ALL NSE',
   setUniverse,
+  onUniverseChange,
   selectedSector = 'ALL',
   setSelectedSector,
   marketCapCat = 'ALL',
@@ -120,16 +123,16 @@ export default function ScreenerFilters({
         </div>
       </div>
 
-      {/* Index Universe Selector */}
+      {/* Index Universe Selector (server-side scoped; counts = covered stocks) */}
       <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4, alignItems: 'center' }}>
         <span style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, textTransform: 'uppercase', marginRight: 2 }}>Universe:</span>
-        {UNIVERSES.slice(0, 10).map((u) => {
+        {[{ id: ALL_UNIVERSE, count: null }, ...Object.keys(INDEX_CONSTITUENTS).map((id) => ({ id, count: INDEX_CONSTITUENTS[id].length }))].map((u) => {
           const isActive = universe === u.id;
           return (
             <button
               key={u.id}
               type="button"
-              onClick={() => setUniverse(u.id)}
+              onClick={() => (onUniverseChange || setUniverse)(u.id)}
               style={{
                 padding: '3px 9px', borderRadius: 12,
                 background: isActive ? 'linear-gradient(135deg, #6366F1, #8B5CF6)' : 'rgba(255,255,255,0.03)',
@@ -139,7 +142,7 @@ export default function ScreenerFilters({
                 cursor: 'pointer', whiteSpace: 'nowrap'
               }}
             >
-              {u.icon} {u.id}
+              {u.id}{u.count != null ? ` (${u.count})` : ''}
             </button>
           );
         })}

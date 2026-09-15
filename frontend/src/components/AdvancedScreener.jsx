@@ -14,6 +14,9 @@ import ScreenerFlyoutDrawer from './screener/ScreenerFlyoutDrawer';
 import ScreenerBulkBar from './screener/ScreenerBulkBar';
 import ScreenerBacktestModal from './screener/ScreenerBacktestModal';
 import ScreenerSaveModal from './screener/ScreenerSaveModal';
+import { INDEX_CONSTITUENTS } from '../constants/screenerConfig';
+
+const ALL_UNIVERSE = 'ALL NSE';
 
 const getWsUrl = () => {
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
@@ -77,9 +80,10 @@ export default function AdvancedScreener() {
   const [selectedTickers, setSelectedTickers] = useState(new Set());
   const [inspectedStock, setInspectedStock] = useState(null);
 
-  // WebSocket Live Ticks
+  // WebSocket Live Ticks (single persistent connection — see effects below)
   const [liveTicks, setLiveTicks] = useState({});
   const wsRef = useRef(null);
+  const pendingTickersRef = useRef(null);
 
   // Modal States
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -105,8 +109,9 @@ export default function AdvancedScreener() {
     init();
   }, []);
 
-  // 2. Build Formula from Sliders
-  const buildVisualFormula = useCallback(() => {
+  // 2. Build Formula from Sliders (sectorOverride avoids stale-state on sector-chart clicks)
+  const buildVisualFormula = useCallback((sectorOverride = null) => {
+    const sector = sectorOverride ?? selectedSector;
     let parts = [
       `ROCE > ${minRoce}`,
       `ROE > ${minRoe}`,
@@ -120,7 +125,7 @@ export default function AdvancedScreener() {
       `VolumeRatio20D > ${minVolRatio}`,
       `AIConsensus > ${minAiScore}`
     ];
-    if (selectedSector !== 'ALL') parts.push(`Sector == '${selectedSector}'`);
+    if (sector !== 'ALL') parts.push(`Sector == '${sector}'`);
     if (marketCapCat !== 'ALL') parts.push(`MarketCapCat == '${marketCapCat}'`);
     return parts.join(' AND ');
   }, [minRoce, minRoe, maxPe, maxPb, maxDebt, minSalesGrowth, minProfitGrowth, minRsi, maxRsi, minVolRatio, minAiScore, selectedSector, marketCapCat]);
@@ -132,13 +137,17 @@ export default function AdvancedScreener() {
     }
   }, [queryMode, buildVisualFormula]);
 
-  // 3. Run Screen API
-  const runScreen = async (query = null) => {
+  // 3. Run Screen API (tickersOverride scopes to an index universe server-side)
+  const runScreen = async (query = null, tickersOverride = undefined) => {
     setLoading(true);
     const activeQuery = query || (queryMode === 'formula' ? formulaQuery : buildVisualFormula());
+    const activeTickers = tickersOverride !== undefined
+      ? tickersOverride
+      : (universe !== ALL_UNIVERSE && INDEX_CONSTITUENTS[universe] ? INDEX_CONSTITUENTS[universe] : null);
     try {
       const { data } = await api.post('/api/screener/query', {
         formula_query: activeQuery || "MarketCap > 0",
+        tickers: activeTickers,
         sort_by: sortColumn || "market_cap_cr",
         sort_dir: sortDirection === 'asc' ? "ASC" : "DESC",
         limit: 1000,
@@ -153,16 +162,19 @@ export default function AdvancedScreener() {
     }
   };
 
-  // 4. WebSocket Feed for Live Price Ticks
-  useEffect(() => {
-    const wsUrl = getWsUrl();
-    const ws = new WebSocket(wsUrl);
+  // 4. WebSocket Feed for Live Price Ticks — one persistent connection for the
+  // tab's lifetime. Query results only re-send the subscribe list on the OPEN
+  // socket (backend replaces the per-connection set, capped at 50 tickers).
+  const connectWs = useCallback(() => {
+    try { wsRef.current?.close(); } catch (_) {}
+    const ws = new WebSocket(getWsUrl());
     wsRef.current = ws;
 
     ws.onopen = () => {
-      if (results.length > 0) {
-        const topTickers = results.slice(0, 50).map(r => r.ticker);
-        ws.send(JSON.stringify({ subscribe: topTickers }));
+      const pending = pendingTickersRef.current;
+      if (pending && pending.length > 0) {
+        try { ws.send(JSON.stringify({ subscribe: pending })); } catch (_) {}
+        pendingTickersRef.current = null;
       }
     };
 
@@ -178,8 +190,33 @@ export default function AdvancedScreener() {
       } catch (_) {}
     };
 
-    return () => ws.close();
-  }, [results]);
+    return ws;
+  }, []);
+
+  useEffect(() => {
+    connectWs();
+    return () => {
+      try { wsRef.current?.close(); } catch (_) {}
+      wsRef.current = null;
+    };
+  }, [connectWs]);
+
+  // Re-subscribe top-50 tickers whenever results change — without reconnecting.
+  useEffect(() => {
+    if (!results || results.length === 0) return;
+    const topTickers = results.slice(0, 50).map(r => r.ticker);
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ subscribe: topTickers })); } catch (_) {}
+    } else if (ws && ws.readyState === WebSocket.CONNECTING) {
+      pendingTickersRef.current = topTickers;
+    } else {
+      // Socket dead/closed (e.g. server was down) — re-establish once and
+      // subscribe on open instead of dropping live ticks silently.
+      pendingTickersRef.current = topTickers;
+      connectWs();
+    }
+  }, [results, connectWs]);
 
   // 5. AI Translate Natural Language
   const handleAiTranslate = async () => {
@@ -253,13 +290,24 @@ export default function AdvancedScreener() {
     toast.success(`Applied: ${name}`);
   };
 
+  // Index universe scoping (server-side via tickers list)
+  const handleUniverseChange = (universeId) => {
+    setUniverse(universeId);
+    setPage(1);
+    const tickers = universeId !== ALL_UNIVERSE && INDEX_CONSTITUENTS[universeId]
+      ? INDEX_CONSTITUENTS[universeId]
+      : null;
+    runScreen(null, tickers);
+  };
+
   // Reset Sliders
   const handleResetFilters = () => {
     setMinRoce(0); setMinRoe(0); setMaxPe(100); setMaxPb(25); setMaxDebt(3.0);
     setMinSalesGrowth(-10); setMinProfitGrowth(-10); setMinRsi(0); setMaxRsi(100);
     setMinVolRatio(0.5); setMinAiScore(30); setSelectedSector('ALL'); setMarketCapCat('ALL');
+    setUniverse(ALL_UNIVERSE);
     setFormulaQuery('MarketCap > 0'); setActivePresetId('all-nse'); setPage(1);
-    runScreen('MarketCap > 0');
+    runScreen('MarketCap > 0', null);
     toast.success('Filters reset to default.');
   };
 
@@ -281,15 +329,28 @@ export default function AdvancedScreener() {
     return list;
   }, [results, searchFilter, sortColumn, sortDirection]);
 
-  // Paginated Rows
+  // Paginated Rows (client-side over the last server query)
   const paginatedRows = useMemo(() => {
     const start = (page - 1) * pageSize;
     return processedResults.slice(start, start + pageSize);
   }, [processedResults, page, pageSize]);
 
+  // Data freshness: latest metrics timestamp across returned rows
+  const dataAsOf = useMemo(() => {
+    let latest = null;
+    results.forEach(r => {
+      if (r.updated_at) {
+        const d = new Date(r.updated_at);
+        if (!isNaN(d) && (!latest || d > latest)) latest = d;
+      }
+    });
+    return latest
+      ? latest.toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })
+      : null;
+  }, [results]);
+
   // Derived KPI Stats
-  const kpiStats = useMemo(() => {
-    let bullish = 0, volumeSurges = 0, oversold = 0, totalScore = 0;
+  const kpiStats = useMemo(() => {    let bullish = 0, volumeSurges = 0, oversold = 0, totalScore = 0;
     processedResults.forEach(r => {
       if (r.ai_signal === 'BUY' || r.ai_signal === 'STRONG BUY') bullish++;
       if ((r.volume_ratio_20d || 1) > 1.3) volumeSurges++;
@@ -342,6 +403,7 @@ export default function AdvancedScreener() {
         filtersOpen={filtersOpen}
         onToggleFilters={() => setFiltersOpen(!filtersOpen)}
         queryMode={queryMode}
+        dataAsOf={dataAsOf}
         onExportCsv={() => handleExportCsv(processedResults)}
         onOpenSaveModal={() => setShowSaveModal(true)}
         onOpenBacktestModal={handleRunBacktest}
@@ -411,13 +473,20 @@ export default function AdvancedScreener() {
       <ScreenerSectorChart
         rows={processedResults}
         selectedSector={selectedSector}
-        onSelectSector={(sec) => { setSelectedSector(sec); if (queryMode === 'visual') runScreen(); }}
+        onSelectSector={(sec) => {
+          setSelectedSector(sec);
+          setPage(1);
+          // Pass sector explicitly — state updates are async, so building
+          // the formula from `selectedSector` here would use the stale value.
+          if (queryMode === 'visual') runScreen(buildVisualFormula(sec));
+        }}
       />
 
       {/* 6. Expandable Filter Drawer */}
       {filtersOpen && (
         <ScreenerFilters
           universe={universe} setUniverse={setUniverse}
+          onUniverseChange={handleUniverseChange}
           selectedSector={selectedSector} setSelectedSector={setSelectedSector}
           marketCapCat={marketCapCat} setMarketCapCat={setMarketCapCat}
           minRoce={minRoce} setMinRoce={setMinRoce}
@@ -523,7 +592,7 @@ export default function AdvancedScreener() {
         />
       </div>
 
-      {/* 9. Server-side Pagination */}
+      {/* 9. Pagination (client-side over the last server query) */}
       <ScreenerPagination
         totalItems={processedResults.length}
         page={page}
