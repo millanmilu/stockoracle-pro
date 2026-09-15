@@ -252,12 +252,6 @@ export default function DrawingTools({
     return n - Math.round(n);
   }, []);
 
-  // Attach stable time identity to a fresh anchor { x, y, logical, price }.
-  const anchorWithTime = useCallback((anchor) => {
-    if (!anchor) return anchor;
-    return { ...anchor, time: timeForLogical(anchor.logical), frac: fracForLogical(anchor.logical) };
-  }, [timeForLogical, fracForLogical]);
-
   // Build a fully-anchored point from a mouse position + chart position.
   // Snapped positions already carry time/frac; raw positions derive them.
   const toAnchor = useCallback((px, py, chartPt) => ({
@@ -278,10 +272,6 @@ export default function DrawingTools({
     }
     return storedLogical;
   }, [timeIndexMap]);
-
-  const chartToCoordStable = useCallback((logical, price, time, frac, fallbackX, fallbackY) => {
-    return chartToCoord(resolvedLogical(logical, time, frac), price, fallbackX, fallbackY);
-  }, [chartToCoord, resolvedLogical]);
 
   // ── 2. True Magnet Snapping Engine ─────────────────────────────────────────
 
@@ -1181,18 +1171,17 @@ export default function DrawingTools({
         const dPixY = finalY - gesture.originY;
 
         const shiftAnchor = (logical, price, time, frac, fx, fy) => {
+          if (logical == null && fx == null) return { logical, price, time, frac, x: fx, y: fy };
           const baseLogical = logical ?? gesture.originLogical;
           const basePrice = price ?? gesture.originPrice;
           const nextLogical = baseLogical != null && Number.isFinite(dLogical) ? baseLogical + dLogical : baseLogical;
           const nextPrice = basePrice != null && Number.isFinite(dPrice) ? basePrice + dPrice : basePrice;
-          const nextTime = nextLogical != null ? (timeIndexMap.has(time) ? undefined : time) : time;
           // Keep time glued: recompute from the shifted logical when possible.
           const resolvedTime = nextLogical != null ? (timeForLogical(nextLogical) ?? time) : time;
           const nextFrac = nextLogical != null ? fracForLogical(nextLogical) : (frac ?? 0);
           const proj = (nextLogical != null && nextPrice != null)
             ? chartToCoord(nextLogical, nextPrice, (fx ?? 0) + dPixX, (fy ?? 0) + dPixY)
             : { x: (fx ?? 0) + dPixX, y: (fy ?? 0) + dPixY };
-          void nextTime;
           return { logical: nextLogical, price: nextPrice, time: resolvedTime, frac: nextFrac, x: proj.x, y: proj.y };
         };
 
@@ -1322,7 +1311,7 @@ export default function DrawingTools({
         };
       });
     }
-  }, [findMagnetSnap, coordToChart, chartToCoord, chartToCoordStable, resolvedLogical, timeForLogical, fracForLogical, timeIndexMap, isFreehandType]);
+  }, [findMagnetSnap, coordToChart, chartToCoord, resolvedLogical, timeForLogical, fracForLogical, timeIndexMap, isFreehandType]);
 
   // Thin event wrapper: capture coordinates synchronously, defer all work to
   // one RAF flush per frame. preventDefault runs here (touch listeners are
@@ -1423,9 +1412,12 @@ export default function DrawingTools({
         const upSnap = findMagnetSnap(up.x, up.y);
         const ux = upSnap ? upSnap.x : up.x;
         const uy = upSnap ? upSnap.y : up.y;
-        b = upSnap
-          ? { x: ux, y: uy, logical: upSnap.logical, price: upSnap.price, time: upSnap.time, frac: upSnap.frac ?? 0 }
-          : { x: ux, y: uy, ...coordToChart(ux, uy), time: timeForLogical(coordToChart(ux, uy).logical), frac: fracForLogical(coordToChart(ux, uy).logical) };
+        if (upSnap) {
+          b = { x: ux, y: uy, logical: upSnap.logical, price: upSnap.price, time: upSnap.time, frac: upSnap.frac ?? 0 };
+        } else {
+          const upt = coordToChart(ux, uy);
+          b = { x: ux, y: uy, ...upt, time: timeForLogical(upt.logical), frac: fracForLogical(upt.logical) };
+        }
       } catch (_) {}
       const moved = a && b
         ? (Math.abs((b.x ?? 0) - (a.x ?? 0)) > 3 || Math.abs((b.y ?? 0) - (a.y ?? 0)) > 3)
