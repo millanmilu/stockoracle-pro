@@ -4,6 +4,9 @@ import {
   PenTool, RotateCcw, Settings, SlidersHorizontal, Zap,
 } from 'lucide-react';
 import { DRAWING_TOOL_GROUPS, getToolSpec } from '../chart-tools/drawingToolCatalog';
+import SymbolSearchModal from '../chart-tools/SymbolSearchModal';
+import { isGoldSymbol, isCryptoSymbol } from '../../utils/chartHelpers';
+import api from '../../utils/api';
 import useStore from '../../store/useStore';
 import { getThemeTokens } from '../../utils/theme';
 
@@ -45,6 +48,7 @@ function Group({ children }) {
 }
 
 export default function ChartToolbar({
+  selectedSymbol = 'RELIANCE', onSelectSymbol = () => {},
   interval = '1d', onIntervalChange = () => {},
   onResetZoom = () => {}, isFullscreen = false, onToggleFullscreen = () => {},
   activeIndicatorCount = 0, onOpenIndicators = () => {}, livePrice = null, isLive = false,
@@ -55,7 +59,31 @@ export default function ChartToolbar({
 }) {
   const [openMenu, setOpenMenu] = useState(null);
   const [openDrawGroup, setOpenDrawGroup] = useState(null);
+  const [symbolFilter, setSymbolFilter] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
   const rootRef = useRef(null);
+
+  // Debounced symbol search
+  useEffect(() => {
+    if (symbolFilter.trim().length > 0) {
+      setIsSearching(true);
+      const timer = setTimeout(async () => {
+        try {
+          const { data } = await api.get('/api/stocks/search', { params: { query: symbolFilter.trim() } });
+          setSearchResults(Array.isArray(data) ? data : (data.results || []));
+        } catch {
+          setSearchResults([]);
+        } finally {
+          setIsSearching(false);
+        }
+      }, 200);
+      return () => clearTimeout(timer);
+    } else {
+      setSearchResults([]);
+      setIsSearching(false);
+    }
+  }, [symbolFilter]);
 
   useEffect(() => {
     const close = event => { if (rootRef.current && !rootRef.current.contains(event.target)) setOpenMenu(null); };
@@ -80,22 +108,64 @@ export default function ChartToolbar({
 
   const theme = useStore(s => s.theme);
   const tk = getThemeTokens(theme);
+  const isCrypto = isCryptoSymbol(selectedSymbol);
+  const isGold = isGoldSymbol(selectedSymbol);
+  const isBtc = !isGold && isCrypto;
+  const currSym = isCrypto ? '$' : '₹';
   const liveState = isLive ? 'LIVE' : (wsConnected ? 'RECONNECTING' : 'OFFLINE');
   const liveColor = isLive ? '#059669' : (wsConnected ? '#D97706' : tk.toolbarMuted);
-  const formatPrice = value => value == null || Number.isNaN(Number(value)) ? '—' : Number(value).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const formatPrice = value => value == null || Number.isNaN(Number(value)) ? '—' : Number(value).toLocaleString(isCrypto ? 'en-US' : 'en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const drawToolLabel = getToolSpec(activeDrawingTool)?.label || 'Draw';
 
   return <div ref={rootRef} style={{ flexShrink: 0, position: 'relative', zIndex: 70, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 5, height: 36, minHeight: 36, padding: isMobile ? '0 6px' : '0 8px', overflow: 'visible', background: tk.toolbarBg, border: `1px solid ${tk.toolbarBorder}`, borderRadius: 7, color: tk.toolbarText, fontFamily: 'Inter, ui-sans-serif, sans-serif' }}>
     <div style={{ display: 'contents' }}>
-      {!isMobile && !isTablet && <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, marginRight: 4 }}><Zap size={15} color="#38BDF8" /><strong style={{ color: tk.toolbarText, fontSize: 13, whiteSpace: 'nowrap' }}>Chart</strong></div>}
-      <div style={{ order: 3, marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5 }}><div title={`${liveState} market feed`} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '0 7px', height: 27, borderRadius: 5, background: `${liveColor}14`, color: liveColor, fontSize: 10, fontWeight: 800, letterSpacing: '0.04em', whiteSpace: 'nowrap' }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: liveColor }} />{liveState}{!isTablet && <span style={{ color: tk.toolbarText, fontSize: 11 }}>{formatPrice(livePrice)}</span>}</div>{!isMobile && <button type="button" onClick={onResetZoom} title="Focus latest candles" aria-label="Focus latest candles" style={{ ...themedIconButton(tk), display: isTablet ? 'none' : 'flex' }}><RotateCcw size={14} /></button>}<button type="button" onClick={onOpenSettings} title="Chart settings" aria-label="Chart settings" style={themedIconButton(tk)}><Settings size={15} /></button><button type="button" onClick={onToggleFullscreen} title="Fullscreen" aria-label="Fullscreen" style={themedIconButton(tk)}>{isFullscreen ? <Maximize2 size={14} /> : <Fullscreen size={14} />}</button></div>
+      {/* Symbol Search Picker Button */}
+      <div style={{ position: 'relative', marginRight: 2 }}>
+        <button
+          type="button"
+          onClick={() => setOpenMenu(openMenu === 'symbol' ? null : 'symbol')}
+          title="Search or switch symbol (XAUUSD, BTC, stocks)"
+          style={{
+            ...compactButton,
+            color: isGold ? '#FACC15' : (isBtc ? '#F59E0B' : tk.toolbarActive),
+            fontWeight: 800,
+            background: isGold ? 'rgba(250,204,21,0.14)' : (isBtc ? 'rgba(245,158,11,0.14)' : 'rgba(56,189,248,0.12)'),
+            border: `1px solid ${isGold ? 'rgba(250,204,21,0.35)' : (isBtc ? 'rgba(245,158,11,0.35)' : 'rgba(56,189,248,0.25)')}`,
+            padding: '3px 8px',
+            borderRadius: 6,
+            gap: 6,
+            fontSize: 12,
+            fontFamily: 'JetBrains Mono, monospace',
+          }}
+        >
+          <span>{isGold ? '🥇' : (isBtc ? '₿' : <Zap size={13} color="#38BDF8" />)}</span>
+          <span>{selectedSymbol}</span>
+          <ChevronDown size={11} style={{ opacity: 0.7 }} />
+        </button>
+
+        <SymbolSearchModal
+          isOpen={openMenu === 'symbol'}
+          onClose={() => setOpenMenu(null)}
+          onSelect={(sym) => {
+            onSelectSymbol?.(sym);
+            setOpenMenu(null);
+          }}
+          filter={symbolFilter}
+          onFilterChange={setSymbolFilter}
+          searchResults={searchResults}
+          isSearching={isSearching}
+          selectedSymbol={selectedSymbol}
+        />
+      </div>
+
+      <div style={{ order: 3, marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5 }}><div title={`${liveState} market feed`} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '0 7px', height: 27, borderRadius: 5, background: `${liveColor}14`, color: liveColor, fontSize: 10, fontWeight: 800, letterSpacing: '0.04em', whiteSpace: 'nowrap' }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: liveColor }} />{liveState}{!isTablet && <span style={{ color: tk.toolbarText, fontSize: 11 }}>{currSym}{formatPrice(livePrice)}</span>}</div>{!isMobile && <button type="button" onClick={onResetZoom} title="Focus latest candles" aria-label="Focus latest candles" style={{ ...themedIconButton(tk), display: isTablet ? 'none' : 'flex' }}><RotateCcw size={14} /></button>}<button type="button" onClick={onOpenSettings} title="Chart settings" aria-label="Chart settings" style={themedIconButton(tk)}><Settings size={15} /></button><button type="button" onClick={onToggleFullscreen} title="Fullscreen" aria-label="Fullscreen" style={themedIconButton(tk)}>{isFullscreen ? <Maximize2 size={14} /> : <Fullscreen size={14} />}</button></div>
     </div>
 
     <div style={{ display: 'contents' }}>
       <Group><div style={{ position: 'relative' }}><button type="button" onClick={() => setOpenMenu(openMenu === 'timeframe' ? null : 'timeframe')} title="Timeframe" style={compactButton}>{TIMEFRAME_OPTIONS.find(item => item.value === interval)?.label || interval}<ChevronDown size={12} /></button>{openMenu === 'timeframe' && <Menu>{TIMEFRAME_OPTIONS.map(item => <MenuItem key={item.value} active={interval === item.value} onClick={() => { onIntervalChange(item.value); setOpenMenu(null); }}>{item.label}</MenuItem>)}</Menu>}</div></Group>
       <Group><div style={{ position: 'relative' }}><button type="button" onClick={() => setOpenMenu(openMenu === 'type' ? null : 'type')} title="Chart type" style={compactButton}><BarChart2 size={14} />{!isMobile && <span>{CHART_TYPES.find(item => item.id === chartType)?.label || 'Candles'}</span>}<ChevronDown size={12} /></button>{openMenu === 'type' && <Menu>{CHART_TYPES.map(item => <MenuItem key={item.id} active={chartType === item.id} onClick={() => { onChartTypeChange(item.id); setOpenMenu(null); }}>{item.label}</MenuItem>)}</Menu>}</div></Group>
       {!isMobile && <Group><button type="button" onClick={onOpenIndicators} title="Technical indicators" style={{ ...compactButton, color: activeIndicatorCount ? tk.toolbarActive : tk.toolbarText, background: activeIndicatorCount ? 'rgba(56,189,248,0.14)' : 'transparent', fontWeight: activeIndicatorCount ? 700 : 400 }}><Activity size={14} />Indicators{activeIndicatorCount > 0 && <span style={countBadge}>{activeIndicatorCount}</span>}</button></Group>}
-      <Group><div style={{ position: 'relative' }}><button type="button" onClick={() => setOpenMenu(openMenu === 'draw' ? null : 'draw')} title={drawToolLabel} style={{ ...compactButton, color: showDrawingTools ? tk.toolbarActive : tk.toolbarText, fontWeight: showDrawingTools ? 700 : 400 }}><PenTool size={14} />{!isMobile && <span style={{ maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis' }}>{drawToolLabel}</span>}<ChevronDown size={12} /></button>{openMenu === 'draw' && <Menu style={{ minWidth: 208 }}><MenuItem active={showDrawingTools} onClick={() => { onToggleDrawingTools(); }}>Drawing rail</MenuItem><div style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} />{DRAWING_TOOL_GROUPS.filter(g => g.id !== 'pointer').map(group => {
+      <Group><div style={{ position: 'relative' }}><button type="button" onClick={() => setOpenMenu(openMenu === 'draw' ? null : 'draw')} title={drawToolLabel} style={{ ...compactButton, color: showDrawingTools ? tk.toolbarActive : tk.toolbarText, fontWeight: showDrawingTools ? 700 : 400 }}><PenTool size={14} />{!isMobile && <span style={{ maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis' }}>{drawToolLabel}</span>}<ChevronDown size={12} /></button>{openMenu === 'draw' && <Menu style={{ minWidth: 208 }}><MenuItem active={showDrawingTools} onClick={() => { onToggleDrawingTools(); }}>Drawing rail</MenuItem><div style={{ height: 1, background: 'var(--border)', margin: '4px 2px' }} />{DRAWING_TOOL_GROUPS.map(group => {
         const groupActive = group.tools.some(t => t.id === activeDrawingTool);
         const expanded = openDrawGroup === group.id;
         return (

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Search, X } from 'lucide-react';
-import { POPULAR_STOCKS } from '../../utils/chartHelpers';
+import { POPULAR_STOCKS, isGoldSymbol } from '../../utils/chartHelpers';
 
 /**
  * TradingView-style symbol search autocomplete modal.
@@ -90,43 +90,70 @@ export default function SymbolSearchModal({
             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === item.ticker ? 'rgba(99,102,241,0.18)' : 'transparent'}
           >
             <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span style={{ fontWeight: 800, color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>{item.ticker}</span>
+              <span style={{
+                fontWeight: 800,
+                color: item.ticker === 'XAUUSD' ? '#FACC15' : (item.ticker === 'BTC' ? '#F59E0B' : '#818CF8'),
+                fontFamily: 'JetBrains Mono, monospace'
+              }}>
+                {item.ticker === 'XAUUSD' ? '🥇 XAUUSD' : (item.ticker === 'BTC' ? '₿ BTC' : item.ticker)}
+              </span>
               <span style={{ fontSize: '0.68rem', color: '#94A3B8', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
             </div>
-            <span style={{ fontSize: '0.62rem', padding: '2px 6px', borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.06)', color: '#64748B' }}>{item.exchange || 'NSE'}</span>
+            <span style={{
+              fontSize: '0.62rem',
+              padding: '2px 6px',
+              borderRadius: 4,
+              backgroundColor: item.exchange === 'COMMODITY' ? 'rgba(250,204,21,0.15)' : (item.exchange === 'CRYPTO' ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.06)'),
+              color: item.exchange === 'COMMODITY' ? '#FACC15' : (item.exchange === 'CRYPTO' ? '#F59E0B' : '#64748B'),
+              fontWeight: 700,
+            }}>
+              {item.exchange || 'NSE'}
+            </span>
           </div>
         ))}
 
         {(!filter.trim() || (searchResults.length === 0 && !isSearching)) && (
           <div>
             <div style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, padding: '4px 8px', letterSpacing: '0.05em' }}>POPULAR WATCHLIST</div>
-            {filteredPopular.map((sym) => (
-              <div
-                key={sym}
-                onClick={() => { onSelect(sym); onFilterChange(''); }}
-                style={{
-                  padding: '7px 10px', borderRadius: 4, fontSize: '0.75rem', fontWeight: 700,
-                  color: selectedSymbol === sym ? (sym === 'BTC' ? '#F59E0B' : '#818CF8') : '#E2E8F0',
-                  backgroundColor: selectedSymbol === sym ? (sym === 'BTC' ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.2)') : 'transparent',
-                  cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = sym === 'BTC' ? 'rgba(245,158,11,0.15)' : 'rgba(99,102,241,0.12)'}
-                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === sym ? (sym === 'BTC' ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.2)') : 'transparent'}
-              >
-                <span style={{ fontFamily: 'JetBrains Mono, monospace', color: sym === 'BTC' ? '#F59E0B' : undefined }}>
-                  {sym === 'BTC' ? '₿ BTC / USD' : sym}
-                </span>
-                <span style={{
-                  fontSize: '0.65rem',
-                  padding: '1px 5px',
-                  borderRadius: 3,
-                  background: sym === 'BTC' ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.06)',
-                  color: sym === 'BTC' ? '#F59E0B' : '#64748B'
-                }}>
-                  {sym === 'BTC' ? 'CRYPTO' : 'NSE'}
-                </span>
-              </div>
-            ))}
+            {filteredPopular.map((sym) => {
+              const isBtc = sym === 'BTC';
+              const isGold = isGoldSymbol(sym);
+              const label = isBtc ? '₿ BTC / USD' : (sym === 'XAUUSD' ? '🥇 XAU/USD (Gold)' : (sym === 'GOLD' ? '🥇 GOLD (Spot)' : sym));
+              const badge = isBtc ? 'CRYPTO' : (isGold ? 'COMMODITY' : 'NSE');
+              const themeColor = isBtc ? '#F59E0B' : (isGold ? '#FACC15' : '#818CF8');
+              const bgActive = isBtc ? 'rgba(245,158,11,0.2)' : (isGold ? 'rgba(250,204,21,0.18)' : 'rgba(99,102,241,0.2)');
+              const bgHover = isBtc ? 'rgba(245,158,11,0.15)' : (isGold ? 'rgba(250,204,21,0.12)' : 'rgba(99,102,241,0.12)');
+              const badgeBg = isBtc ? 'rgba(245,158,11,0.15)' : (isGold ? 'rgba(250,204,21,0.15)' : 'rgba(255,255,255,0.06)');
+
+              return (
+                <div
+                  key={sym}
+                  onClick={() => { onSelect(sym); onFilterChange(''); }}
+                  style={{
+                    padding: '7px 10px', borderRadius: 4, fontSize: '0.75rem', fontWeight: 700,
+                    color: selectedSymbol === sym ? themeColor : '#E2E8F0',
+                    backgroundColor: selectedSymbol === sym ? bgActive : 'transparent',
+                    cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = bgHover}
+                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = selectedSymbol === sym ? bgActive : 'transparent'}
+                >
+                  <span style={{ fontFamily: 'JetBrains Mono, monospace', color: (isBtc || isGold) ? themeColor : undefined }}>
+                    {label}
+                  </span>
+                  <span style={{
+                    fontSize: '0.65rem',
+                    padding: '1px 5px',
+                    borderRadius: 3,
+                    background: badgeBg,
+                    color: themeColor,
+                    fontWeight: 700,
+                  }}>
+                    {badge}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

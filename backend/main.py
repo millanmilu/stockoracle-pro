@@ -43,7 +43,7 @@ configure_logging()
 logger = get_logger("stockoracle.main")
 
 popular_tickers = [
-    "BTC", "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK",
+    "BTC", "XAUUSD", "GOLD", "RELIANCE", "TCS", "HDFCBANK", "INFY", "ICICIBANK",
     "SBIN", "BHARTIARTL", "ITC", "LT", "HUL"
 ]
 

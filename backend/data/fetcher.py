@@ -441,17 +441,45 @@ def get_token_info(ticker: str) -> Optional[dict]:
 
 
 _CRYPTO_TICKERS = {"BTC", "BTC-USD", "BTCUSDT", "BITCOIN", "ETH", "ETHUSDT"}
+# International gold aliases — routed through Binance PAXGUSDT (tokenized 1-oz
+# gold, ~1:1 XAU/USD tracking, 24/7) so XAUUSD/GOLD reuse the crypto pipeline.
+_GOLD_TICKERS = {"XAUUSD", "XAU", "GOLD", "PAXG"}
+
+
+def _is_gold_ticker(ticker: str) -> bool:
+    """True for international-gold aliases (exact 'GOLD' only, so NSE ETFs like GOLDBEES stay equities)."""
+    t = str(ticker).upper().strip()
+    return t in _GOLD_TICKERS or t.startswith("XAU") or t.startswith("PAXG")
+
+
+def _binance_crypto_symbol(ticker: str) -> str:
+    """Maps a ticker to its Binance trading symbol (BTC, gold aliases, or *USDT)."""
+    t = str(ticker).upper().strip()
+    if "BTC" in t or "BITCOIN" in t:
+        return "BTCUSDT"
+    if _is_gold_ticker(t):
+        return "PAXGUSDT"
+    return t if t.endswith("USDT") else f"{t}USDT"
+
 
 def is_crypto_ticker(ticker: str) -> bool:
-    """Returns True if ticker is a cryptocurrency symbol."""
+    """Returns True if the ticker is a 24/7 digital/asset symbol (crypto or international gold)."""
     if not ticker:
         return False
     t = str(ticker).upper().strip()
+    if _is_gold_ticker(t):
+        return True
     return t in _CRYPTO_TICKERS or t.startswith("BTC") or t.startswith("ETH")
 
 
-def _generate_crypto_seed_data(ticker: str, interval: str, is_intraday: bool) -> pd.DataFrame:
-    """Generates realistic baseline crypto OHLCV data if external APIs are completely unreachable."""
+def _generate_crypto_seed_data(ticker: str, interval: str, is_intraday: bool) -> Optional[pd.DataFrame]:
+    """Generates realistic baseline crypto OHLCV data if external APIs are completely unreachable.
+
+    Returns None for gold aliases — fabricated XAU/USD prices are never acceptable
+    (zero-fake-data rule); callers fall through to DB/None paths instead.
+    """
+    if _is_gold_ticker(ticker):
+        return None
     now = datetime.now(_IST)
     n_bars = 180 if not is_intraday else 120
     base_price = 64250.0
@@ -553,7 +581,7 @@ def fetch_crypto_data(ticker: str, period: str = "ALL", interval: str = "1d") ->
         "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d"
     }
     b_interval = binance_interval_map.get(interval_clean, "1d")
-    symbol = "BTCUSDT" if ("BTC" in ticker or "BITCOIN" in ticker) else (ticker if ticker.endswith("USDT") else f"{ticker}USDT")
+    symbol = _binance_crypto_symbol(ticker)
 
     limit = 1000
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={b_interval}&limit={limit}"
@@ -602,6 +630,33 @@ def fetch_crypto_data(ticker: str, period: str = "ALL", interval: str = "1d") ->
                         })
         except Exception as exc2:
             logger.debug("Coinbase crypto fetch failed for %s: %s", ticker, exc2)
+
+    # 3b. Gold aliases: yfinance XAUUSD=X fallback (Binance PAXG primary unreachable)
+    if not rows and _is_gold_ticker(ticker):
+        try:
+            import yfinance as yf
+            _yf_iv = {"1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h", "4h": "1h", "1d": "1d"}.get(interval_clean, "1d")
+            _yf_df = yf.download("XAUUSD=X", period=("5d" if is_intraday else "2y"), interval=_yf_iv, progress=False, auto_adjust=False)
+            if _yf_df is not None and not _yf_df.empty:
+                if isinstance(_yf_df.columns, pd.MultiIndex):
+                    _yf_df.columns = _yf_df.columns.get_level_values(0)
+                _yf_df = _yf_df.reset_index()
+                _ts_col = "Datetime" if "Datetime" in _yf_df.columns else ("Date" if "Date" in _yf_df.columns else _yf_df.columns[0])
+                for _, _r in _yf_df.iterrows():
+                    _dt = pd.to_datetime(_r[_ts_col])
+                    if _dt.tzinfo is None:
+                        _dt = _dt.replace(tzinfo=timezone.utc)
+                    _ds = _dt.astimezone(_IST).strftime("%Y-%m-%d" if not is_intraday else "%Y-%m-%d %H:%M:%S")
+                    rows.append({
+                        "date": _ds,
+                        "open": float(_r.get("Open", 0) or 0),
+                        "high": float(_r.get("High", 0) or 0),
+                        "low": float(_r.get("Low", 0) or 0),
+                        "close": float(_r.get("Close", 0) or 0),
+                        "volume": float(_r.get("Volume", 0) or 0),
+                    })
+        except Exception as yf_exc:
+            logger.debug("yfinance XAUUSD fallback failed for %s: %s", ticker, yf_exc)
 
     if rows:
         df = pd.DataFrame(rows)
@@ -653,7 +708,7 @@ def fetch_crypto_live_ticker(ticker: str) -> Optional[dict]:
     import urllib.request
 
     ticker = ticker.upper().strip()
-    symbol = "BTCUSDT" if ("BTC" in ticker or "BITCOIN" in ticker) else (ticker if ticker.endswith("USDT") else f"{ticker}USDT")
+    symbol = _binance_crypto_symbol(ticker)
     url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
 
     try:
@@ -671,7 +726,7 @@ def fetch_crypto_live_ticker(ticker: str) -> Optional[dict]:
 
                 return {
                     "ticker": ticker,
-                    "company_name": "Bitcoin (BTC / USD)",
+                    "company_name": "Gold (XAU/USD)" if _is_gold_ticker(ticker) else "Bitcoin (BTC / USD)",
                     "current_price": ltp,
                     "open": open_p,
                     "day_high": high_p,
@@ -697,7 +752,7 @@ def fetch_crypto_info(ticker: str) -> Optional[dict]:
     if fresh is not None:
         return fresh
 
-    symbol = "BTCUSDT" if ("BTC" in ticker or "BITCOIN" in ticker) else (ticker if ticker.endswith("USDT") else f"{ticker}USDT")
+    symbol = _binance_crypto_symbol(ticker)
     url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
 
     info = None
@@ -716,7 +771,7 @@ def fetch_crypto_info(ticker: str) -> Optional[dict]:
 
                 info = {
                     "ticker": ticker,
-                    "company_name": "Bitcoin (BTC / USD)",
+                    "company_name": "Gold (XAU/USD)" if _is_gold_ticker(ticker) else "Bitcoin (BTC / USD)",
                     "current_price": ltp,
                     "open": open_p,
                     "day_high": high_p,
@@ -724,12 +779,12 @@ def fetch_crypto_info(ticker: str) -> Optional[dict]:
                     "close": prev_c,
                     "change_pct": chg_pct,
                     "volume": vol,
-                    "fifty_two_week_high": high_p * 1.15,
-                    "fifty_two_week_low": low_p * 0.70,
-                    "market_cap": ltp * 19700000,
+                    "fifty_two_week_high": (high_p * 1.15) if not _is_gold_ticker(ticker) else None,
+                    "fifty_two_week_low": (low_p * 0.70) if not _is_gold_ticker(ticker) else None,
+                    "market_cap": None if _is_gold_ticker(ticker) else ltp * 19700000,
                     "pe_ratio": None,
                     "dividend_yield": None,
-                    "sector": "Cryptocurrency",
+                    "sector": "Commodity" if _is_gold_ticker(ticker) else "Cryptocurrency",
                 }
                 save_company_info(ticker, info)
                 return info
@@ -747,7 +802,7 @@ def fetch_crypto_info(ticker: str) -> Optional[dict]:
         v = float(last.get("volume", 0))
         info = {
             "ticker": ticker,
-            "company_name": "Bitcoin (BTC / USD)",
+            "company_name": "Gold (XAU/USD)" if _is_gold_ticker(ticker) else "Bitcoin (BTC / USD)",
             "current_price": c,
             "open": o,
             "day_high": h,
@@ -755,12 +810,12 @@ def fetch_crypto_info(ticker: str) -> Optional[dict]:
             "close": c,
             "change_pct": round(((c - o) / o) * 100, 2) if o > 0 else 0.0,
             "volume": v,
-            "fifty_two_week_high": h * 1.15,
-            "fifty_two_week_low": l * 0.70,
-            "market_cap": c * 19700000,
+            "fifty_two_week_high": (h * 1.15) if not _is_gold_ticker(ticker) else None,
+            "fifty_two_week_low": (l * 0.70) if not _is_gold_ticker(ticker) else None,
+            "market_cap": None if _is_gold_ticker(ticker) else c * 19700000,
             "pe_ratio": None,
             "dividend_yield": None,
-            "sector": "Cryptocurrency",
+            "sector": "Commodity" if _is_gold_ticker(ticker) else "Cryptocurrency",
         }
         save_company_info(ticker, info)
         return info
@@ -769,7 +824,7 @@ def fetch_crypto_info(ticker: str) -> Optional[dict]:
 
 
 def search_nse_stocks(query: str, limit: int = 12) -> list[dict]:
-    """Search locally stored NSE listings by ticker or company name from SQLite, plus Crypto assets."""
+    """Search locally stored NSE listings by ticker or company name from SQLite, plus Crypto and Commodity assets."""
     results = search_stock_universe(query, limit)
     q = query.upper().strip()
     if any(term in q for term in ["BTC", "BITCOIN", "CRYPTO"]):
@@ -782,6 +837,16 @@ def search_nse_stocks(query: str, limit: int = 12) -> list[dict]:
         }
         if not any(r.get("ticker") == "BTC" for r in results):
             results.insert(0, btc_entry)
+    if any(term in q for term in ["XAU", "GOLD", "PAXG", "COMMODITY", "FOREX", "XAUUSD"]):
+        gold_entry = {
+            "ticker": "XAUUSD",
+            "name": "Gold Spot / US Dollar (XAU/USD)",
+            "exchange": "COMMODITY",
+            "token": "XAUUSD",
+            "exch_seg": "COMMODITY",
+        }
+        if not any(r.get("ticker") == "XAUUSD" for r in results):
+            results.insert(0, gold_entry)
     return results[:limit]
 
 

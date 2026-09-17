@@ -12,7 +12,12 @@ const useStore = create(
       theme: 'dark',
       activeView: 'Live Chart',
 
-      setSelectedSymbol: (symbol) => set({ selectedSymbol: symbol }),
+      // Normalized once here so every entry point (screener, heatmap,
+      // command palette, toolbar) maps to the same per-symbol state —
+      // chart drawings, live ticks and caches are all keyed by this value.
+      setSelectedSymbol: (symbol) => set({
+        selectedSymbol: String(symbol ?? '').toUpperCase().trim() || 'BTC',
+      }),
       setSelectedInterval: (iv) =>
         set((s) => {
           const updatedPrices = { ...s.livePrices };
@@ -110,6 +115,18 @@ const useStore = create(
         portfolio: state.portfolio,
         priceAlerts: state.priceAlerts,
       }),
+      // One-time repair: values persisted before symbol normalization
+      // (e.g. lowercase) are upgraded to the canonical form on load.
+      onRehydrateStorage: () => (rehydrated) => {
+        try {
+          const sym = String(rehydrated?.selectedSymbol ?? '').toUpperCase().trim();
+          if (sym && sym !== rehydrated.selectedSymbol) {
+            rehydrated.selectedSymbol = sym;
+          } else if (!sym) {
+            rehydrated.selectedSymbol = 'BTC';
+          }
+        } catch {}
+      },
     }
   )
 );

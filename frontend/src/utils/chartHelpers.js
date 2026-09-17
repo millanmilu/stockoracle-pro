@@ -67,13 +67,20 @@ export function addBusinessDays(dateStr, days) {
   return d.toISOString().split('T')[0];
 }
 
+export function isGoldSymbol(symbol) {
+  if (!symbol) return false;
+  const s = String(symbol).toUpperCase().trim();
+  return s === 'XAUUSD' || s === 'GOLD' || s === 'PAXG' || s.startsWith('XAU') || s.startsWith('PAXG');
+}
+
 export function isCryptoSymbol(symbol) {
   if (!symbol) return false;
   const s = String(symbol).toUpperCase().trim();
+  if (isGoldSymbol(s)) return true;
   return s === 'BTC' || s.startsWith('BTC') || s.includes('BITCOIN') || s.includes('ETH') || s.endsWith('USDT');
 }
 
-export const POPULAR_STOCKS = ['BTC', 'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'WIPRO', 'NIFTY50', 'BANKNIFTY'];
+export const POPULAR_STOCKS = ['BTC', 'XAUUSD', 'GOLD', 'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'WIPRO', 'NIFTY50', 'BANKNIFTY'];
 
 export const INTERVALS = [
   { label: '1s (1 sec)', value: '1s' },

@@ -1,5 +1,6 @@
 import api from '../utils/api';
 import { useState, useCallback } from 'react';
+import { isGoldSymbol, isCryptoSymbol } from '../utils/chartHelpers';
 
 export function useStock() {
   const [loading, setLoading] = useState(false);
@@ -35,12 +36,8 @@ export function useStock() {
       // Backend not running or error; proceed to check crypto fallback
     }
 
-    // Client-side fallback for Crypto (e.g. BTC) via Binance public klines API
-    const isCrypto = ticker && (
-      ticker.toUpperCase() === 'BTC' ||
-      ticker.toUpperCase().startsWith('BTC') ||
-      ticker.toUpperCase().includes('BITCOIN')
-    );
+    // Client-side fallback for Crypto/Commodity (e.g. BTC, XAUUSD) via Binance public klines API
+    const isCrypto = ticker && isCryptoSymbol(ticker);
 
     if (isCrypto) {
       try {
@@ -49,7 +46,8 @@ export function useStock() {
           '15m': '15m', '30m': '30m', '1h': '1h', '4h': '4h', '1d': '1d'
         };
         const bIv = binanceIvMap[interval] || '1d';
-        const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=${bIv}&limit=500`);
+        const bSymbol = isGoldSymbol(ticker) ? 'PAXGUSDT' : (ticker.toUpperCase().endsWith('USDT') ? ticker.toUpperCase() : 'BTCUSDT');
+        const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${bSymbol}&interval=${bIv}&limit=500`);
         const json = await res.json();
         if (Array.isArray(json) && json.length > 0) {
           const isIntraday = interval !== '1d';

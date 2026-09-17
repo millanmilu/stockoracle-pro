@@ -154,6 +154,10 @@ export default function LiveChartView() {
   const lastVerifiedPriceRef = useRef(null);
   const recentPricesRef = useRef([]); // Rolling window of recent LTPs for adaptive spike detection
   const spikeCountRef = useRef(0);
+  // Request-id guard: quick symbol/interval switches must not let a stale
+  // history response overwrite the current symbol's candles (which would
+  // also resolve that symbol's drawings against the wrong candle set).
+  const historySeqRef = useRef(0);
 
   // Persist active indicators to localStorage
   useEffect(() => {
@@ -164,6 +168,8 @@ export default function LiveChartView() {
 
   // 1. Fetch & Staged Historical Data Loading
   const loadHistory = useCallback(async (symbol, iv) => {
+    const seq = ++historySeqRef.current;
+    const alive = () => historySeqRef.current === seq;
     setLoading(true);
     setError(null);
     activeCandleRef.current = null;
@@ -175,6 +181,7 @@ export default function LiveChartView() {
     try {
       // Fetch full available history for the selected interval
       const res = await fetchHistory(symbol, iv, 'ALL');
+      if (!alive()) return;
       const rawCandles = res?.candles || [];
       const source = res?.dataSource || 'angel_one';
       setDataSource(source);
@@ -237,10 +244,11 @@ export default function LiveChartView() {
         activeCandleRef.current = { ...last };
       }
     } catch (err) {
+      if (!alive()) return;
       setError(err?.message || 'Failed to load stock history');
       setCandles([]);
     } finally {
-      setLoading(false);
+      if (alive()) setLoading(false);
     }
   }, [fetchHistory]);
 

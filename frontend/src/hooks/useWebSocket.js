@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import useStore from '../store/useStore';
 import { getWsUrl } from '../utils/api';
-import { POPULAR_STOCKS, emitLiveTick } from '../utils/chartHelpers';
+import { POPULAR_STOCKS, emitLiveTick, isGoldSymbol, isCryptoSymbol } from '../utils/chartHelpers';
 
 export function useWebSocket(onMessage) {
   const wsRef = useRef(null);
@@ -94,7 +94,7 @@ export function useWebSocket(onMessage) {
             const data = JSON.parse(e.data);
             if (data && data.type !== 'pong') {
               if (data.ticker && data.price != null) {
-                const isCrypto = data.ticker === 'BTC' || data.ticker.startsWith('BTC') || data.ticker.includes('BITCOIN');
+                const isCrypto = isCryptoSymbol(data.ticker);
                 // If direct Binance WebSocket is actively connected for crypto, let Binance stream take priority
                 if (isCrypto && cryptoWsRef.current && cryptoWsRef.current.readyState === WebSocket.OPEN) {
                   return;
@@ -135,11 +135,8 @@ export function useWebSocket(onMessage) {
   const selectedInterval = useStore((s) => s.selectedInterval || '1m');
 
   useEffect(() => {
-    const isCrypto = selectedSymbol && (
-      selectedSymbol.toUpperCase() === 'BTC' ||
-      selectedSymbol.toUpperCase().startsWith('BTC') ||
-      selectedSymbol.toUpperCase().includes('BITCOIN')
-    );
+    const s = (selectedSymbol || '').toUpperCase().trim();
+    const isCrypto = isCryptoSymbol(s);
 
     if (!isCrypto) {
       if (cryptoWsRef.current) {
@@ -166,6 +163,9 @@ export function useWebSocket(onMessage) {
       '1d': '1d',
     };
     const bInterval = binanceKlineMap[selectedInterval] || '1m';
+    const binanceStreamSym = isGoldSymbol(s)
+      ? 'paxgusdt'
+      : (s.endsWith('USDT') ? s.toLowerCase() : 'btcusdt');
 
     // Store state of latest 24h ticker metrics so kline ticks retain 24h context
     let latest24h = {
@@ -180,7 +180,7 @@ export function useWebSocket(onMessage) {
     const connectCryptoWs = () => {
       if (!active) return;
       try {
-        const streamUrl = `wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/btcusdt@kline_${bInterval}/btcusdt@aggTrade`;
+        const streamUrl = `wss://stream.binance.com:9443/stream?streams=${binanceStreamSym}@ticker/${binanceStreamSym}@kline_${bInterval}/${binanceStreamSym}@aggTrade`;
         ws = new WebSocket(streamUrl);
         cryptoWsRef.current = ws;
 

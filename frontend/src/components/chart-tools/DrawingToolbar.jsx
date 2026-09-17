@@ -95,8 +95,6 @@ const PINS_STORAGE_KEY = 'stockoracle_drawing_toolbar_pins_v1';
  *  dot cursor were removed from the rail start on request.) */
 const DEFAULT_PINNED_TOOLS = [];
 
-/** Groups that only contain pointer modes render as individual rail buttons. */
-const POINTER_GROUP_ID = 'pointer';
 
 const ICONS = {
   cross: MousePointer2,
@@ -186,10 +184,8 @@ function readPinnedTools() {
   }
 }
 
-/** Groups that render a flyout (everything except the always-visible pointer set). */
-const FLYOUT_GROUPS = DRAWING_TOOL_GROUPS.filter((group) => group.id !== POINTER_GROUP_ID);
-const POINTER_GROUP = DRAWING_TOOL_GROUPS.find((group) => group.id === POINTER_GROUP_ID);
-const POINTER_TOOLS = POINTER_GROUP ? POINTER_GROUP.tools : [];
+/** All tool groups render as flyout group buttons on the rail. */
+const FLYOUT_GROUPS = DRAWING_TOOL_GROUPS;
 
 // ── Presentational helpers ──────────────────────────────────────────────────
 
@@ -676,71 +672,7 @@ export default function DrawingToolbar({
           overscrollBehavior: 'contain',
         }}
       >
-      {/* Pointer modes — always visible */}
-      {POINTER_TOOLS.map((tool) => (
-        <RailButton
-          key={tool.id}
-          toolId={tool.id}
-          label={tool.label}
-          hint={tool.hint}
-          shortcut={TOOL_SHORTCUTS[tool.id]}
-          active={tool.id === activeTool}
-          size={btn}
-          onSelect={pickTool}
-          onHover={showTip}
-          onLeave={() => setTooltip(null)}
-          icon={<ToolIcon toolId={tool.id} size={icon} />}
-        />
-      ))}
-
-      {pinnedSpecs.length > 0 && divider}
-
-      {/* Pinned favourites — drag to reorder */}
-      {pinnedSpecs.map((tool) => (
-        <RailButton
-          key={`pin-${tool.id}`}
-          toolId={tool.id}
-          label={tool.label}
-          hint={tool.hint}
-          shortcut={TOOL_SHORTCUTS[tool.id]}
-          active={tool.id === activeTool}
-          size={btn}
-          draggable
-          dragging={dragId === tool.id}
-          dropTarget={dropId === tool.id}
-          onSelect={pickTool}
-          onHover={showTip}
-          onLeave={() => setTooltip(null)}
-          onDragStart={() => setDragId(tool.id)}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setDropId(tool.id);
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            const from = dragId;
-            const to = tool.id;
-            setDragId(null);
-            setDropId(null);
-            if (!from || from === to) return;
-            setPinned((prev) => {
-              const next = prev.filter((id) => id !== from);
-              const at = next.indexOf(to);
-              next.splice(at < 0 ? next.length : at, 0, from);
-              return next;
-            });
-          }}
-          onDragEnd={() => {
-            setDragId(null);
-            setDropId(null);
-          }}
-          icon={<ToolIcon toolId={tool.id} size={icon} />}
-        />
-      ))}
-
-      {divider}
-
-      {/* Tool groups with flyouts */}
+      {/* Tool groups with flyouts (strictly grouped drawing categories) */}
       {FLYOUT_GROUPS.map(renderGroupButton)}
 
       {divider}

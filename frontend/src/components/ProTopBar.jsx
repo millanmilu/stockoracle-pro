@@ -3,6 +3,7 @@ import { Menu, Zap, Maximize2, Minimize2, Search, Bookmark, TrendingUp, Trending
 import useStore from '../store/useStore';
 import ThemeToggle from './ThemeToggle';
 import { getThemeTokens } from '../utils/theme';
+import { isGoldSymbol, isCryptoSymbol } from '../utils/chartHelpers';
 import api from '../utils/api';
 
 // No DEFAULT_INDICES — hardcoded prices must never be shown as if they were live market data.
@@ -132,8 +133,17 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
           <Zap size={16} color="#6366F1" fill="#6366F1" />
           <span>StockOracle Pro</span>
         </div>
-        <div style={{ background: 'rgba(99,102,241,0.14)', border: '1px solid rgba(99,102,241,0.3)', padding: '2px 7px', borderRadius: 4, fontSize: '0.66rem', color: '#818CF8', fontWeight: 800, fontFamily: 'JetBrains Mono, monospace' }}>
-          NSE:{selectedSymbol}
+        <div style={{
+          background: isGoldSymbol(selectedSymbol) ? 'rgba(250,204,21,0.14)' : (isCryptoSymbol(selectedSymbol) ? 'rgba(245,158,11,0.14)' : 'rgba(99,102,241,0.14)'),
+          border: `1px solid ${isGoldSymbol(selectedSymbol) ? 'rgba(250,204,21,0.35)' : (isCryptoSymbol(selectedSymbol) ? 'rgba(245,158,11,0.35)' : 'rgba(99,102,241,0.3)')}`,
+          padding: '2px 7px',
+          borderRadius: 4,
+          fontSize: '0.66rem',
+          color: isGoldSymbol(selectedSymbol) ? '#FACC15' : (isCryptoSymbol(selectedSymbol) ? '#F59E0B' : '#818CF8'),
+          fontWeight: 800,
+          fontFamily: 'JetBrains Mono, monospace'
+        }}>
+          {isGoldSymbol(selectedSymbol) ? 'COM:XAUUSD' : (isCryptoSymbol(selectedSymbol) ? `CRYPTO:${selectedSymbol}` : `NSE:${selectedSymbol}`)}
         </div>
 
         {/* Compact Search Input */}
@@ -175,8 +185,27 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
                   onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(99,102,241,0.15)'}
                   onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
                 >
-                  <span style={{ fontWeight: 700, color: '#818CF8', fontSize: '0.76rem', fontFamily: 'JetBrains Mono, monospace' }}>{r.symbol || r.ticker}</span>
-                  <span style={{ color: '#94A3B8', fontSize: '0.68rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{r.name || r.companyName}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <span style={{
+                      fontWeight: 700,
+                      color: (r.ticker === 'XAUUSD' || r.symbol === 'XAUUSD') ? '#FACC15' : ((r.ticker === 'BTC' || r.symbol === 'BTC') ? '#F59E0B' : '#818CF8'),
+                      fontSize: '0.76rem',
+                      fontFamily: 'JetBrains Mono, monospace'
+                    }}>
+                      {(r.ticker === 'XAUUSD' || r.symbol === 'XAUUSD') ? '🥇 XAUUSD' : ((r.ticker === 'BTC' || r.symbol === 'BTC') ? '₿ BTC' : (r.symbol || r.ticker))}
+                    </span>
+                    <span style={{ color: '#94A3B8', fontSize: '0.68rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{r.name || r.companyName}</span>
+                  </div>
+                  <span style={{
+                    fontSize: '0.62rem',
+                    padding: '1px 5px',
+                    borderRadius: 3,
+                    background: r.exchange === 'COMMODITY' ? 'rgba(250,204,21,0.15)' : (r.exchange === 'CRYPTO' ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.06)'),
+                    color: r.exchange === 'COMMODITY' ? '#FACC15' : (r.exchange === 'CRYPTO' ? '#F59E0B' : '#64748B'),
+                    fontWeight: 700,
+                  }}>
+                    {r.exchange || 'NSE'}
+                  </span>
                 </div>
               ))}
             </div>

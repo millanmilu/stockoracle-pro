@@ -21,6 +21,7 @@ import {
   resolveShortcut,
 } from './drawingToolCatalog';
 import * as DG from '../../utils/drawingGeometry';
+import { isCryptoSymbol } from '../../utils/chartHelpers';
 
 const STORAGE_KEY = 'stockoracle_drawings_tv_v6';
 
@@ -74,7 +75,7 @@ export default function DrawingTools({
   // 1:1 on scroll/zoom instead of stretching over volume/oscillator panes.
   mainPaneRef = null,
 }) {
-  const isCrypto = symbol ? (String(symbol).toUpperCase().startsWith('BTC') || String(symbol).toUpperCase().includes('BITCOIN') || String(symbol).toUpperCase().endsWith('USDT')) : false;
+  const isCrypto = isCryptoSymbol(symbol);
   const currSym = isCrypto ? '$' : '₹';
   // Toolbar dimensions synchronized with DrawingToolbar (46px desktop, 36px mobile)
   const toolbarWidth = getToolbarWidth(isMobile);
@@ -1613,7 +1614,11 @@ export default function DrawingTools({
     if (e.key === 'Escape') {
       e.preventDefault();
       cancelPlacement();
-      toast.success('Placement cancelled');
+      if (!isCursorMode(activeToolRef.current)) {
+        setActiveTool(DEFAULT_TOOL);
+      }
+      setSelectedDrawingId(null);
+      toast.success('Drawing tool unselected');
       return true;
     }
     if ((e.key === 'Enter' || e.key === ' ') && activeTool === 'polyline') {
@@ -1891,6 +1896,37 @@ export default function DrawingTools({
       const tag = document.activeElement?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (handlePlacementKey(e)) return;
+      if (e.key === 'Escape') {
+        let handled = false;
+        if (!isCursorMode(activeToolRef.current)) {
+          setActiveTool(DEFAULT_TOOL);
+          handled = true;
+        }
+        if (selectedDrawingId) {
+          setSelectedDrawingId(null);
+          handled = true;
+        }
+        if (contextMenu) {
+          setContextMenu(null);
+          handled = true;
+        }
+        if (drawingSettingsId) {
+          setDrawingSettingsId(null);
+          handled = true;
+        }
+        if (showStickerMenu) {
+          setShowStickerMenu(false);
+          setStickerPos(null);
+          handled = true;
+        }
+        cancelPlacement();
+        setChartLocked(false);
+        if (handled) {
+          e.preventDefault();
+          toast.success('Drawing tool unselected');
+        }
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selectedDrawingId) {
         e.preventDefault();
         handleDuplicateSelected();
@@ -1913,7 +1949,20 @@ export default function DrawingTools({
     };
     window.addEventListener('keydown', onObjectKeys);
     return () => window.removeEventListener('keydown', onObjectKeys);
-  }, [selectedDrawingId, lockAllDrawings, handleDuplicateSelected, handlePlacementKey, saveDrawingsWithHistory]);
+  }, [
+    selectedDrawingId,
+    lockAllDrawings,
+    handleDuplicateSelected,
+    handlePlacementKey,
+    saveDrawingsWithHistory,
+    isCursorMode,
+    setActiveTool,
+    cancelPlacement,
+    contextMenu,
+    drawingSettingsId,
+    showStickerMenu,
+    setChartLocked,
+  ]);
 
   const handleAddText = () => {
     if (textInputVal.trim() && textInputPos) {
@@ -2999,7 +3048,13 @@ export default function DrawingTools({
             onChange={(e) => setTextInputVal(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleAddText();
-              if (e.key === 'Escape') setTextInputPos(null);
+              if (e.key === 'Escape') {
+                setTextInputPos(null);
+                if (!isCursorMode(activeToolRef.current)) {
+                  setActiveTool(DEFAULT_TOOL);
+                }
+                setChartLocked(false);
+              }
             }}
             autoFocus
             style={{
