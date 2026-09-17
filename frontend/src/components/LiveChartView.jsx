@@ -24,6 +24,7 @@ function useWindowSize() {
   return width;
 }
 import useStore from '../store/useStore';
+import { getThemeTokens } from '../utils/theme';
 import { useStock } from '../hooks/useStock';
 import ChartToolbar from './chart/ChartToolbar';
 import ChartCanvas from './chart/ChartCanvas';
@@ -47,6 +48,8 @@ import { toChartTime, getSessionBucketStart, isCryptoSymbol, subscribeLiveTick }
 export default function LiveChartView() {
   const selectedSymbol = useStore(s => s.selectedSymbol || 'RELIANCE');
   const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
+  const theme = useStore(s => s.theme);
+  const tk = getThemeTokens(theme);
   const wsLiveData = useStore(s => s.wsLiveData);
   const wsConnected = useStore(s => s.wsConnected);
   const storeLiveTick = useStore(s => s.livePrices?.[selectedSymbol]);
@@ -610,7 +613,7 @@ export default function LiveChartView() {
         flexDirection: 'column',
         width: '100%',
         height: '100%',
-        backgroundColor: '#090C15',
+        backgroundColor: tk.chartBg,
         overflow: 'hidden',
         boxSizing: 'border-box',
         padding: isMobile ? 3 : 6,
@@ -706,7 +709,7 @@ export default function LiveChartView() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 zIndex: 20,
-                backgroundColor: 'rgba(9, 12, 21, 0.7)',
+                backgroundColor: theme === 'light' ? 'rgba(240,242,248,0.85)' : 'rgba(9, 12, 21, 0.7)',
                 color: '#818CF8',
                 fontFamily: 'JetBrains Mono, monospace',
                 fontSize: '0.85rem',

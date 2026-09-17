@@ -82,13 +82,21 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_security(self):
+        # Accept legacy ENV=... as a fallback for ENVIRONMENT=...
+        if self.ENVIRONMENT == "production" and os.environ.get("ENV", "").strip():
+            env_alias = os.environ["ENV"].strip()
+            if env_alias and env_alias.lower() not in ("production", "prod"):
+                self.ENVIRONMENT = env_alias
         if not self.JWT_SECRET:
             env_val = os.environ.get("JWT_SECRET")
             if env_val:
                 self.JWT_SECRET = env_val
             elif self.is_production:
-                import secrets
-                self.JWT_SECRET = secrets.token_urlsafe(32)
+                # Do NOT auto-generate an ephemeral secret in production:
+                # a per-process random key would make vault rows undecryptable
+                # after restart. Leave unset so _get_vault_key() fails loudly
+                # with instructions to set JWT_SECRET.
+                self.JWT_SECRET = None
             else:
                 self.JWT_SECRET = "stockoracle-dev-secret-key-non-prod"
         return self

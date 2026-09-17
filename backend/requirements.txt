@@ -33,9 +33,13 @@ psycopg2-binary>=2.9.9
 celery>=5.4.0
 redis>=5.0.4
 pydantic-settings>=2.2.0
+cryptography>=41.0.0
 rich>=13.7.0
 textual>=0.70.0
 typer>=0.12.0
 plotext>=5.2.8
 # openbb>=4.2.0
+
+# Test-only (async test support; harmless in prod)
+pytest-asyncio>=0.23.0
 

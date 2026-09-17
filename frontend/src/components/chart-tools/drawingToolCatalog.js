@@ -16,12 +16,12 @@
 
 export const DRAWING_TOOL_GROUPS = [
   {
-    id: 'cursors',
-    label: 'Cursors',
+    id: 'pointer',
+    label: 'Cursor & Pointer',
     tools: [
-      { id: 'cross', label: 'Cursor', points: 0, kind: 'cursor', hint: 'Select, move and edit objects' },
       { id: 'crosshair', label: 'Crosshair', points: 0, kind: 'cursor', hint: 'Default pointer — chart pans and zooms' },
-      { id: 'dot', label: 'Dot', points: 0, kind: 'cursor', hint: 'Precision dot pointer' },
+      { id: 'cross', label: 'Cursor', points: 0, kind: 'cursor', hint: 'Select, move and edit objects' },
+      { id: 'dot', label: 'Dot', points: 0, kind: 'cursor', hint: 'Precision selection pointer' },
     ],
   },
   {
@@ -37,18 +37,43 @@ export const DRAWING_TOOL_GROUPS = [
       { id: 'horizontal_ray', label: 'Horizontal Ray', points: 1, legacy: true, hint: 'Price level from the click to the right' },
       { id: 'vertical_line', label: 'Vertical Line', points: 1, hint: 'Time marker for a single bar' },
       { id: 'cross_line', label: 'Cross Line', points: 1, hint: 'Full-width + full-height crosshair' },
+      { id: 'arrow', label: 'Arrow', points: 2, hint: 'Arrow with a solid marker head' },
     ],
   },
   {
-    id: 'fib_gann',
-    label: 'Gann and Fibonacci Tools',
+    id: 'channels',
+    label: 'Channels',
+    tools: [
+      { id: 'parallel_channel', label: 'Parallel Channel', points: 2, legacy: true, hint: 'Trend corridor' },
+      { id: 'regression_trend', label: 'Regression Trend', points: 2, hint: 'Least-squares fit with ±2σ rails' },
+      { id: 'flat_top_bottom', label: 'Flat Top/Bottom', points: 2, hint: 'Channel with one horizontal rail' },
+      { id: 'disjoint_channel', label: 'Disjoint Channel', points: 4, hint: 'Two independent channel rails' },
+    ],
+  },
+  {
+    id: 'fibonacci',
+    label: 'Fibonacci Tools',
     tools: [
       { id: 'fibonacci', label: 'Fib Retracement', points: 2, legacy: true, hint: 'Retracement levels between two anchors' },
       { id: 'fib_extension', label: 'Trend-based Fib Extension', points: 3, hint: 'Projects the AB move from C' },
       { id: 'fib_channel', label: 'Fib Channel', points: 3, hint: 'Parallel Fibonacci rails' },
+      { id: 'fib_fan', label: 'Fib Fan', points: 2, hint: 'Fan rays through Fibonacci fractions of the move' },
       { id: 'fib_timezone', label: 'Fib Time Zone', points: 1, hint: 'Vertical lines at Fibonacci bar counts' },
+      { id: 'fib_circle', label: 'Fib Circle', points: 2, hint: 'Concentric circles at Fibonacci radii' },
+    ],
+  },
+  {
+    id: 'gann',
+    label: 'Gann Tools',
+    tools: [
       { id: 'gann_fan', label: 'Gann Fan', points: 2, hint: 'Nine Gann angle rays' },
       { id: 'gann_box', label: 'Gann Box', points: 2, hint: 'Retracement grid inside a box' },
+    ],
+  },
+  {
+    id: 'pitchforks',
+    label: 'Pitchforks',
+    tools: [
       { id: 'pitchfork', label: "Andrew's Pitchfork", points: 3, hint: 'Median line with two parallel tines' },
       { id: 'schiff_pitchfork', label: 'Schiff Pitchfork', points: 3, hint: 'Schiff variant of the pitchfork' },
       { id: 'inside_pitchfork', label: 'Inside Pitchfork', points: 3, hint: 'Inside (modified Schiff) pitchfork' },
@@ -60,16 +85,13 @@ export const DRAWING_TOOL_GROUPS = [
     tools: [
       { id: 'brush', label: 'Brush', points: 'free', legacy: true, hint: 'Freehand sketch' },
       { id: 'highlighter', label: 'Highlighter', points: 'free', hint: 'Thick translucent marker' },
-      { id: 'arrow', label: 'Arrow', points: 2, hint: 'Arrow with a solid marker head' },
       { id: 'rectangle', label: 'Rectangle', points: 2, legacy: true, hint: 'Zone / supply-demand box' },
       { id: 'rotated_rectangle', label: 'Rotated Rectangle', points: 3, hint: 'Box rotated along the trend' },
       { id: 'ellipse', label: 'Ellipse', points: 2, hint: 'Oval zone' },
       { id: 'circle', label: 'Circle', points: 2, hint: 'Circle from centre to radius' },
       { id: 'triangle', label: 'Triangle', points: 2, hint: 'Triangle zone' },
+      { id: 'arc', label: 'Arc', points: 2, hint: 'Curved arc between two points' },
       { id: 'polyline', label: 'Polyline', points: 'free', hint: 'Multi-segment line, double-click to finish' },
-      { id: 'parallel_channel', label: 'Parallel Channel', points: 2, legacy: true, hint: 'Trend corridor' },
-      { id: 'flat_top_bottom', label: 'Flat Top/Bottom', points: 2, hint: 'Channel with one horizontal rail' },
-      { id: 'disjoint_channel', label: 'Disjoint Channel', points: 4, hint: 'Two independent channel rails' },
     ],
   },
   {
@@ -83,6 +105,13 @@ export const DRAWING_TOOL_GROUPS = [
       { id: 'price_note', label: 'Price Note', points: 2, hint: 'Price readout between two levels' },
       { id: 'flag', label: 'Flag', points: 1, hint: 'Event flag marker' },
       { id: 'pin', label: 'Pin', points: 1, hint: 'Pin marker for a bar' },
+    ],
+  },
+  {
+    id: 'icons',
+    label: 'Icons',
+    tools: [
+      { id: 'smile', label: 'Stickers & Emoji', points: 1, legacy: true, hint: 'Place an emoji marker' },
     ],
   },
   {
@@ -100,7 +129,7 @@ export const DRAWING_TOOL_GROUPS = [
     ],
   },
   {
-    id: 'prediction',
+    id: 'trading',
     label: 'Prediction and Measurement',
     tools: [
       { id: 'long_position', label: 'Long Position', points: 2, legacy: true, hint: 'Entry, stop and target for a long' },
@@ -114,17 +143,20 @@ export const DRAWING_TOOL_GROUPS = [
       { id: 'ruler', label: 'Measure', points: 2, legacy: true, hint: 'Ruler: price, %, bars and duration' },
     ],
   },
-  {
-    id: 'icons',
-    label: 'Icons & Stickers',
-    tools: [
-      { id: 'smile', label: 'Stickers & Emoji', points: 1, legacy: true, hint: 'Place an emoji marker' },
-    ],
-  },
 ];
 
-export const ALL_DRAWING_TOOLS = DRAWING_TOOL_GROUPS.flatMap((group) =>
-  group.tools.map((tool) => ({ ...tool, group: group.id, groupLabel: group.label })),
+/**
+ * Flat catalogue with stable ordering metadata. `order` is the index across
+ * every group, which lets the toolbar rail and the customisation panel sort
+ * tools without duplicating the group order in two places.
+ */
+export const ALL_DRAWING_TOOLS = DRAWING_TOOL_GROUPS.flatMap((group, groupIndex) =>
+  group.tools.map((tool, toolIndex) => ({
+    ...tool,
+    group: group.id,
+    groupLabel: group.label,
+    order: DRAWING_TOOL_GROUPS.slice(0, groupIndex).reduce((sum, g) => sum + g.tools.length, 0) + toolIndex,
+  })),
 );
 
 const TOOL_INDEX = new Map(ALL_DRAWING_TOOLS.map((tool) => [tool.id, tool]));
@@ -184,4 +216,98 @@ export const MAGNET_SNAP_RADIUS = 35;
 export function nextMagnetMode(mode) {
   const index = MAGNET_MODES.indexOf(mode);
   return MAGNET_MODES[(index + 1) % MAGNET_MODES.length];
+}
+
+/**
+ * Keyboard shortcuts surfaced in tool tooltips and handled by the drawing
+ * layer. Alt-based chords are used deliberately: they never clash with the
+ * Ctrl+Z / Ctrl+D editing keys, and the reserved char actions below
+ * (Alt+L lock, Alt+H hide, Alt+R remove-all, Alt+M magnet) are kept free.
+ */
+export const TOOL_SHORTCUTS = {
+  // Pointer
+  crosshair: 'Alt+X',
+  cross: 'Alt+V',
+  dot: 'Alt+Shift+X',
+  // Lines
+  trendline: 'Alt+T',
+  ray: 'Alt+Y',
+  extended_line: 'Alt+E',
+  info_line: 'Alt+I',
+  trend_angle: 'Alt+A',
+  horizontal_line: 'Alt+J',
+  horizontal_ray: 'Alt+K',
+  vertical_line: 'Alt+B',
+  cross_line: 'Alt+G',
+  arrow: 'Alt+W',
+  // Channels
+  parallel_channel: 'Alt+C',
+  flat_top_bottom: 'Alt+N',
+  disjoint_channel: 'Alt+Q',
+  // Fibonacci
+  fibonacci: 'Alt+F',
+  fib_extension: 'Alt+Shift+E',
+  fib_channel: 'Alt+Shift+C',
+  fib_fan: 'Alt+1',
+  fib_timezone: 'Alt+2',
+  fib_circle: 'Alt+3',
+  // Gann
+  gann_fan: 'Alt+4',
+  gann_box: 'Alt+5',
+  pitchfork: 'Alt+6',
+  schiff_pitchfork: 'Alt+7',
+  inside_pitchfork: 'Alt+8',
+  // Channels
+  regression_trend: 'Alt+Shift+N',
+  // Shapes
+  brush: 'Alt+9',
+  highlighter: 'Alt+0',
+  rectangle: 'Alt+P',
+  rotated_rectangle: 'Alt+Shift+R',
+  ellipse: 'Alt+O',
+  circle: 'Alt+Shift+O',
+  triangle: 'Alt+D',
+  arc: 'Alt+S',
+  polyline: 'Alt+Z',
+  // Annotation
+  text: 'Alt+/',
+  callout: 'Alt+.',
+  note: 'Alt+,',
+  price_label: 'Alt+;',
+  price_note: "Alt+'",
+  flag: 'Alt+[',
+  pin: 'Alt+]',
+  // Trading tools
+  long_position: 'Alt+Shift+L',
+  short_position: 'Alt+Shift+S',
+  date_range: 'Alt+Shift+D',
+  price_range: 'Alt+Shift+P',
+  ruler: 'Alt+Shift+M',
+};
+
+/** Toolbar / cluster actions shown in tooltips and handled globally. */
+export const ACTION_SHORTCUTS = {
+  undo: 'Ctrl+Z',
+  redo: 'Ctrl+Shift+Z',
+  deleteSelected: 'Delete',
+  duplicate: 'Ctrl+D',
+  lockAll: 'Alt+L',
+  hideAll: 'Alt+H',
+  removeAll: 'Alt+R',
+  magnet: 'Alt+M',
+  keepDrawing: 'Alt+Shift+K',
+};
+
+/**
+ * Tool id for a shortcut chord, e.g. resolveShortcut('t', { alt: true }) → 'trendline'.
+ * Letters are lower-cased so Shift chords compare equally on every layout.
+ */
+export function resolveShortcut(key, { alt = false, shift = false, ctrl = false, meta = false } = {}) {
+  if (!alt || ctrl || meta) return null;
+  const raw = String(key ?? '');
+  const normalized = /^[a-zA-Z]$/.test(raw) ? raw.toLowerCase() : raw;
+  const chord = `Alt+${shift ? 'Shift+' : ''}${normalized}`;
+  // Case-insensitive: catalog stores 'Alt+T' but KeyboardEvent.key may be 't'.
+  const want = chord.toLowerCase();
+  return Object.keys(TOOL_SHORTCUTS).find((id) => String(TOOL_SHORTCUTS[id]).toLowerCase() === want) || null;
 }

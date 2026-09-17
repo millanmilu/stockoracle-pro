@@ -36,22 +36,44 @@
 /* ── Light Theme Overrides ─────────────────────────────────────────────────── */
 [data-theme="light"] {
   --bg-primary:   #f0f2f8;
-  --bg-secondary: #e4e8f2;
+  --bg-secondary: #ffffff;
   --bg-card:      #ffffff;
   --bg-glass:     rgba(255, 255, 255, 0.85);
-  --border:       rgba(99, 102, 241, 0.2);
+  --border:       rgba(15, 23, 42, 0.12);
   --border-hover: rgba(99, 102, 241, 0.5);
   --text-primary: #0F172A;
-  --text-secondary: #374151;
-  --text-muted:   #6B7280;
-  --shadow:       0 8px 32px rgba(0,0,0,0.12);
+  --text-secondary: #1E293B;
+  --text-muted:   #475569;
+  --shadow:       0 8px 32px rgba(15, 23, 42, 0.10);
 
   /* Semantic tokens */
   --bg:           #f0f2f8;
   --text:         #0f172a;
   --card-bg:      #ffffff;
-  --sidebar-bg:   #e4e8f2;
-  --text-muted:   #555;
+  --sidebar-bg:   #f1f5f9;
+  --text-muted:   #475569;
+
+  /* Shell surfaces */
+  --shell-bg:     #f0f2f8;
+  --shell-text:   #0F172A;
+  --topbar-bg:    #ffffff;
+  --sidebar-bg-pro: #f1f5f9;
+  --main-bg:      #f0f2f8;
+  --status-bg:    #e2e8f0;
+  --nav-text:     #334155;
+  --nav-active-bg: rgba(99,102,241,0.14);
+}
+
+/* Dark shell tokens (default) */
+:root, [data-theme="dark"] {
+  --shell-bg:     #04050E;
+  --shell-text:   #F0F0FF;
+  --topbar-bg:    #06080F;
+  --sidebar-bg-pro: #060A16;
+  --main-bg:      #07090F;
+  --status-bg:    #03040A;
+  --nav-text:     #6B7280;
+  --nav-active-bg: rgba(99,102,241,0.14);
 }
 
 
@@ -889,7 +911,7 @@ input, select, textarea { font-family: inherit; font-size: 0.78rem; }
   display: flex; flex-direction: column;
   height: 100vh; width: 100vw;
   overflow: hidden;
-  background: #04050E; color: #F0F0FF;
+  background: var(--shell-bg); color: var(--shell-text);
   font-family: 'Inter', sans-serif;
 }
 .app-body {
@@ -902,7 +924,7 @@ input, select, textarea { font-family: inherit; font-size: 0.78rem; }
   overflow-y: auto;
   overflow-x: hidden;
   height: 100%;
-  background: #07090F;
+  background: var(--main-bg);
   position: relative;
   scroll-padding-top: 20px;
   scrollbar-width: thin;
@@ -941,8 +963,8 @@ input, select, textarea { font-family: inherit; font-size: 0.78rem; }
 /* Pro Sidebar */
 .pro-sidebar {
   flex-shrink: 0;
-  background: #060A16;
-  border-right: 1px solid rgba(99,102,241,0.1);
+  background: var(--sidebar-bg-pro);
+  border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
   transition: width 0.22s cubic-bezier(0.4,0,0.2,1);
   overflow: hidden;
@@ -954,20 +976,20 @@ input, select, textarea { font-family: inherit; font-size: 0.78rem; }
 /* Pro Right Panel */
 .pro-right-panel {
   flex-shrink: 0; width: 260px;
-  background: #060A16;
-  border-left: 1px solid rgba(99,102,241,0.1);
+  background: var(--sidebar-bg-pro);
+  border-left: 1px solid var(--border);
   display: flex; flex-direction: column; overflow: hidden;
 }
 
 /* Pro Status Bar */
 .pro-status-bar {
   height: 24px;
-  background: #03040A;
-  border-top: 1px solid rgba(99,102,241,0.1);
+  background: var(--status-bg);
+  border-top: 1px solid var(--border);
   display: flex; align-items: center;
   justify-content: space-between;
   padding: 0 14px;
-  font-size: 0.68rem; color: #374151;
+  font-size: 0.68rem; color: var(--text-muted);
   font-family: 'JetBrains Mono', monospace;
   flex-shrink: 0; z-index: 10;
 }
@@ -977,7 +999,7 @@ input, select, textarea { font-family: inherit; font-size: 0.78rem; }
   display: flex; align-items: center; gap: 10px;
   padding: 7px 12px; border-radius: 6px;
   cursor: pointer; border: none; background: transparent;
-  color: #6B7280; font-size: 0.8rem; font-weight: 500;
+  color: var(--nav-text); font-size: 0.8rem; font-weight: 500;
   width: 100%; text-align: left;
   transition: all 0.13s;
   white-space: nowrap; overflow: hidden;
@@ -989,14 +1011,14 @@ input, select, textarea { font-family: inherit; font-size: 0.78rem; }
   color: #C7D2FE;
 }
 .pro-nav-item.active {
-  background: rgba(99,102,241,0.14);
-  color: #818CF8;
+  background: var(--nav-active-bg);
+  color: #6366F1;
   border-left-color: #6366F1;
   font-weight: 700;
 }
 .pro-nav-section {
   font-size: 0.62rem; font-weight: 700;
-  color: #1F2937; text-transform: uppercase;
+  color: var(--text-muted); text-transform: uppercase;
   letter-spacing: 0.1em;
   padding: 10px 14px 3px;
   white-space: nowrap;
@@ -1005,8 +1027,8 @@ input, select, textarea { font-family: inherit; font-size: 0.78rem; }
 /* Pro Top Bar */
 .pro-top-bar {
   height: 48px; flex-shrink: 0;
-  background: #06080F;
-  border-bottom: 1px solid rgba(99,102,241,0.12);
+  background: var(--topbar-bg);
+  border-bottom: 1px solid var(--border);
   display: flex; align-items: center;
   gap: 10px; padding: 0 10px;
   z-index: 100; position: relative;
@@ -1039,3 +1061,89 @@ input[type="search"]::-webkit-search-results-decoration {
   border-radius: 4px;
 }
 .indicator-modal-list::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.65); }
+
+/* ═══════════════════════════════════════════════════
+   LIGHT THEME — component surface overrides
+   Shell uses CSS vars above; these fix remaining
+   hardcoded dark hex surfaces for light mode.
+   ═══════════════════════════════════════════════════ */
+[data-theme="light"] .glass-card {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(15, 23, 42, 0.10);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255,255,255,0.8);
+}
+[data-theme="light"] .stat-card {
+  background: linear-gradient(135deg, #ffffff 0%, #f1f5f9 100%);
+  border-color: rgba(15, 23, 42, 0.10);
+}
+[data-theme="light"] .stat-card-value { color: #0F172A; }
+[data-theme="light"] .stat-card-sub { color: #334155; font-weight: 500; }
+[data-theme="light"] .stat-card-label { color: #475569; }
+[data-theme="light"] .data-table th { color: #475569; border-bottom-color: rgba(15,23,42,0.14); font-weight: 700; }
+[data-theme="light"] .data-table td { color: #0F172A; border-bottom-color: rgba(15,23,42,0.08); font-weight: 500; }
+[data-theme="light"] .data-table tr:hover td { background: rgba(99,102,241,0.06); }
+[data-theme="light"] p { color: #334155; }
+[data-theme="light"] h4 { color: #334155; }
+[data-theme="light"] .filter-pill {
+  background: rgba(15,23,42,0.05);
+  border-color: rgba(15,23,42,0.14);
+  color: #334155;
+  font-weight: 600;
+}
+[data-theme="light"] .filter-pill:hover {
+  background: rgba(99,102,241,0.12);
+  color: #0F172A;
+}
+[data-theme="light"] .sc-tooltip {
+  background: #ffffff;
+  border-color: rgba(99,102,241,0.35);
+  box-shadow: 0 8px 24px rgba(15,23,42,0.14);
+}
+[data-theme="light"] .overlay-backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+[data-theme="light"] .terminal-tabs { background: #ffffff; }
+[data-theme="light"] .terminal-tab-content { background: #ffffff; }
+[data-theme="light"] .pro-nav-item { color: #334155; font-weight: 500; }
+[data-theme="light"] .pro-nav-item:hover {
+  background: rgba(99,102,241,0.12);
+  color: #0F172A;
+}
+[data-theme="light"] .pro-nav-section { color: #475569; font-weight: 800; }
+[data-theme="light"] .pro-status-bar { color: #475569; font-weight: 600; }
+[data-theme="light"] .scanline-overlay { opacity: 0.35; }
+[data-theme="light"] .table-scroll-container::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.06);
+}
+[data-theme="light"] .terminal-section-title { color: #4F46E5; }
+[data-theme="light"] .search-input {
+  background: #ffffff;
+  color: #0F172A;
+}
+/* Theme-aware scrollbar in light mode */
+[data-theme="light"] ::-webkit-scrollbar-track { background: #f0f2f8; }
+
+/* Explicit theme toggle (segmented Light/Dark control) */
+.theme-toggle {
+  display: flex; align-items: center;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  padding: 2px;
+  gap: 2px;
+}
+.theme-toggle-btn {
+  display: flex; align-items: center; gap: 5px;
+  border: none; background: transparent;
+  padding: 4px 10px; border-radius: 99px;
+  font-size: 0.7rem; font-weight: 700;
+  color: var(--text-muted);
+  cursor: pointer; transition: all 0.18s ease;
+  white-space: nowrap;
+}
+.theme-toggle-btn:hover { color: var(--text-primary); }
+.theme-toggle-btn.active {
+  background: linear-gradient(135deg, #6366F1, #8B5CF6);
+  color: #fff;
+  box-shadow: 0 2px 10px rgba(99,102,241,0.4);
+}

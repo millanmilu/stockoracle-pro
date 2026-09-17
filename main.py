@@ -55,7 +55,15 @@ def main():
 
     elif args.mode == "worker":
         logger.info("Starting Celery Worker Fleet...")
-        from backend.services.tasks import celery_app
+        try:
+            from backend.tasks.celery_app import celery_app
+        except ImportError as exc:
+            logger.error(
+                "Celery is not installed (pip install -r backend/requirements.txt). "
+                "Worker mode unavailable: %s",
+                exc,
+            )
+            sys.exit(1)
         celery_app.worker_main(["worker", "--loglevel=info"])
 
     else:

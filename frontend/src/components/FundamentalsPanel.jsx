@@ -1061,7 +1061,33 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ display: 'flex', background: 'rgba(0,0,0,0.45)', borderRadius: 6, padding: 2, border: '1px solid rgba(255,255,255,0.08)' }}>
+                    {[
+                      ['all', 'All Quarters'],
+                      ['8q', 'Last 8Q'],
+                      ['4q', 'Last 4Q']
+                    ].map(([key, label]) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => setQTimeframe(key)}
+                        style={{
+                          padding: '4px 9px',
+                          borderRadius: 4,
+                          border: 'none',
+                          background: qTimeframe === key ? 'rgba(99,102,241,0.35)' : 'transparent',
+                          color: qTimeframe === key ? '#FFFFFF' : '#94A3B8',
+                          fontSize: '0.66rem',
+                          fontWeight: qTimeframe === key ? 700 : 500,
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   <button
                     onClick={handleExportQuarterlyCSV}
                     style={{ padding: '5px 11px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.12)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.68rem', fontWeight: 600 }}
@@ -1160,6 +1186,35 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
             <div>
               <span style={{ fontSize: '0.84rem', fontWeight: 800, color: '#F0F0FF' }}>Consolidated Annual Profit & Loss Statement</span>
               <div style={{ fontSize: '0.62rem', color: '#64748B', marginTop: 1 }}>Multi-year audited financial records</div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', background: 'rgba(0,0,0,0.45)', borderRadius: 6, padding: 2, border: '1px solid rgba(255,255,255,0.08)' }}>
+              {[
+                ['10y', '10 Years'],
+                ['5y', '5 Years'],
+                ['3y', '3 Years']
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setATimeframe(key)}
+                  style={{
+                    padding: '4px 9px',
+                    borderRadius: 4,
+                    border: 'none',
+                    background: aTimeframe === key ? 'rgba(99,102,241,0.35)' : 'transparent',
+                    color: aTimeframe === key ? '#FFFFFF' : '#94A3B8',
+                    fontSize: '0.66rem',
+                    fontWeight: aTimeframe === key ? 700 : 500,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
           </div>
         </div>
@@ -1575,8 +1630,8 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
                 <tbody>
                   {peers.map((p, idx) => (
                     <tr key={idx} style={{ background: idx % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'transparent' }}>
-                      <td style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 700, borderBottom: '1px solid rgba(255,255,255,0.04)', whiteSpace: 'nowrap', color: p.name.includes(ticker) ? '#818CF8' : '#F0F0FF' }}>
-                        {p.name} {p.name.includes(ticker) && ' ★'}
+                      <td style={{ padding: '9px 12px', textAlign: 'left', fontWeight: 700, borderBottom: '1px solid rgba(255,255,255,0.04)', whiteSpace: 'nowrap', color: p.name?.includes(ticker) ? '#818CF8' : '#F0F0FF' }}>
+                        {p.name || p.ticker || '—'} {p.name?.includes(ticker) && ' ★'}
                       </td>
                       <td style={{ padding: '9px 12px', textAlign: 'right', color: '#CBD5E1', borderBottom: '1px solid rgba(255,255,255,0.04)', whiteSpace: 'nowrap' }}>{p.price != null ? Number(p.price).toLocaleString('en-IN') : '—'}</td>
                       <td style={{ padding: '9px 12px', textAlign: 'right', borderBottom: '1px solid rgba(255,255,255,0.04)', whiteSpace: 'nowrap', color: (p.pe_ratio || 0) < 25 ? '#10B981' : '#CBD5E1' }}>{p.pe_ratio != null ? p.pe_ratio : '—'}</td>

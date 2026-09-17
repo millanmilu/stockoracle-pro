@@ -10,7 +10,7 @@ import pyotp
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Security
 from pydantic import BaseModel
 
 from backend.core.logging import get_logger
@@ -21,11 +21,15 @@ from backend.data.database import (
     get_broker_account_orm,
     delete_broker_account_orm,
 )
-from backend.shared.security import encrypt_value, decrypt_value
+from backend.shared.security import encrypt_value, decrypt_value, verify_api_key
 
 logger = get_logger("stockoracle.broker")
 
-router = APIRouter(prefix="/api/broker", tags=["Broker Settings"])
+router = APIRouter(
+    prefix="/api/broker",
+    tags=["Broker Settings"],
+    dependencies=[Security(verify_api_key)],
+)
 
 
 # ── Request / Response Models ──────────────────────────────────────────────────

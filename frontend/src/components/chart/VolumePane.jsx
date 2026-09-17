@@ -1,6 +1,8 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { createChart, CrosshairMode } from 'lightweight-charts';
-import { Eye, EyeOff, GripHorizontal } from 'lucide-react';
+import { EyeOff, GripHorizontal } from 'lucide-react';
+import useStore from '../../store/useStore';
+import { getChartBaseOptions, getThemeTokens } from '../../utils/theme';
 
 const MIN_HEIGHT = 92;
 const MAX_HEIGHT = 360;
@@ -33,8 +35,22 @@ const VolumePane = forwardRef(function VolumePane({
   const valueRef = useRef(null);
   const isDraggingRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
+  const theme = useStore(s => s.theme);
+  const tk = getThemeTokens(theme);
 
   useEffect(() => { candlesRef.current = candles; }, [candles]);
+
+  useEffect(() => {
+    try {
+      const base = getChartBaseOptions(theme);
+      chartRef.current?.applyOptions({
+        layout: { background: { type: 'solid', color: 'transparent' }, textColor: base.layout.textColor },
+        grid: base.grid,
+        rightPriceScale: { borderColor: base.rightPriceScale.borderColor },
+        timeScale: { borderColor: base.timeScale.borderColor },
+      });
+    } catch {}
+  }, [theme]);
 
   const updateLegend = useCallback((candle) => {
     if (valueRef.current) valueRef.current.textContent = formatVolume(Number(candle?.volume));
@@ -68,11 +84,12 @@ const VolumePane = forwardRef(function VolumePane({
 
   useEffect(() => {
     if (!containerRef.current) return;
+    const base = getChartBaseOptions(theme);
     const chart = createChart(containerRef.current, {
-      layout: { background: { type: 'solid', color: '#090C16' }, textColor: '#64748B', fontFamily: '"JetBrains Mono", monospace', fontSize: 10 },
-      grid: { vertLines: { color: 'rgba(99,102,241,0.04)' }, horzLines: { color: 'rgba(99,102,241,0.06)' } },
-      rightPriceScale: { borderColor: 'rgba(99,102,241,0.12)', scaleMargins: { top: 0.08, bottom: 0.05 }, autoScale: true, minimumWidth: 72 },
-      timeScale: { visible: false, borderColor: 'rgba(99,102,241,0.12)', rightOffset: 12, barSpacing: 9, minBarSpacing: 0.5, lockVisibleTimeRangeOnResize: true },
+      layout: { background: { type: 'solid', color: 'transparent' }, textColor: base.layout.textColor, fontFamily: '"JetBrains Mono", monospace', fontSize: 10 },
+      grid: base.grid,
+      rightPriceScale: { borderColor: base.rightPriceScale.borderColor, textColor: base.rightPriceScale.textColor, scaleMargins: { top: 0.08, bottom: 0.05 }, autoScale: true, minimumWidth: 72 },
+      timeScale: { visible: false, borderColor: base.timeScale.borderColor, rightOffset: 12, barSpacing: 9, minBarSpacing: 0.5, lockVisibleTimeRangeOnResize: true },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' }, horzLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' } },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
       handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
@@ -132,14 +149,14 @@ const VolumePane = forwardRef(function VolumePane({
     return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); };
   }, [onHeightChange]);
 
-  return <div style={{ position: 'relative', height, flexShrink: 0, background: '#090C16', borderTop: '1px solid rgba(99,102,241,0.18)', display: isHidden ? 'none' : 'block' }}>
+  return <div style={{ position: 'relative', height, flexShrink: 0, background: tk.paneBg, borderTop: `1px solid ${tk.paneBorder}`, display: isHidden ? 'none' : 'block' }}>
     <div role="separator" aria-label="Resize volume panel" onPointerDown={event => { event.preventDefault(); isDraggingRef.current = true; setIsDragging(true); }} style={{ position: 'absolute', top: -5, left: 0, right: 0, height: 10, zIndex: 20, cursor: 'ns-resize', display: 'flex', justifyContent: 'center', alignItems: 'center', color: isDragging ? '#A5B4FC' : '#475569' }}><GripHorizontal size={18} /></div>
     <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
     <div ref={hairlineRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, borderLeft: '1px dashed rgba(129,140,248,0.45)', pointerEvents: 'none', display: 'none', zIndex: 14 }} />
     <div ref={tooltipRef} role="tooltip" style={{ position: 'absolute', top: 30, left: 0, display: 'none', pointerEvents: 'none', zIndex: 16, padding: '3px 6px', borderRadius: 3, background: 'rgba(15,23,42,0.94)', border: '1px solid rgba(148,163,184,0.24)', color: '#E2E8F0', font: '600 0.66rem JetBrains Mono, monospace', whiteSpace: 'nowrap' }} />
-    <div style={{ position: 'absolute', top: 6, left: 10, zIndex: 15, display: 'flex', alignItems: 'center', gap: 7, padding: '2px 8px', borderRadius: 4, background: 'rgba(11,15,28,0.88)', border: '1px solid rgba(255,255,255,0.06)', color: '#94A3B8', font: '700 0.68rem JetBrains Mono, monospace' }}>
-      <span style={{ color: '#26A69A' }}>VOL</span><span>MA({volumeMA})</span><strong ref={valueRef} style={{ color: '#E2E8F0' }}>-</strong>
-      <button type="button" onClick={onToggleHide} title="Hide volume" aria-label="Hide volume" style={{ display: 'flex', padding: 1, color: '#94A3B8', background: 'transparent', border: 0, cursor: 'pointer' }}><EyeOff size={11} /></button>
+    <div style={{ position: 'absolute', top: 6, left: 10, zIndex: 15, display: 'flex', alignItems: 'center', gap: 7, padding: '2px 8px', borderRadius: 4, background: tk.legendBg, border: `1px solid ${tk.legendBorder}`, color: tk.toolbarMuted, font: '700 0.68rem JetBrains Mono, monospace' }}>
+      <span style={{ color: '#26A69A' }}>VOL</span><span>MA({volumeMA})</span><strong ref={valueRef} style={{ color: tk.legendText }}>-</strong>
+      <button type="button" onClick={onToggleHide} title="Hide volume" aria-label="Hide volume" style={{ display: 'flex', padding: 1, color: tk.legendMuted, background: 'transparent', border: 0, cursor: 'pointer' }}><EyeOff size={11} /></button>
     </div>
   </div>;
 });

@@ -341,8 +341,9 @@ async def websocket_price_broadcast_loop():
     while True:
         cycle_started = time.monotonic()
         try:
-            # Periodic batched persistence of buffered ticks (worker thread inside)
-            if _tick_writer.maybe_flush():
+            # Periodic batched persistence of buffered ticks.
+            # DB writes run in a worker thread so the event loop never blocks.
+            if await asyncio.to_thread(_tick_writer.maybe_flush):
                 await asyncio.sleep(0)
 
             if manager.active_connections:
@@ -356,8 +357,10 @@ async def websocket_price_broadcast_loop():
                 # Skipped while the SmartAPI streamer owns a healthy connection.
                 has_equities = any(not is_crypto_ticker(t) for t in tickers_to_check)
                 if has_equities and not _streamer_status.get("connected"):
+                    # ensure_session() performs synchronous network auth (TOTP/HTTP) —
+                    # never run it directly on the event loop.
                     try:
-                        ensure_session()
+                        await asyncio.to_thread(ensure_session)
                     except Exception as e:
                         logger.debug("Session refresh check failed: %s", e)
 
@@ -468,8 +471,8 @@ async def lifespan(app: FastAPI):
         # Persist any ticks still sitting in the buffer before exit
         try:
             _tick_writer.maybe_flush(force=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Final live-tick flush skipped on shutdown: %s", exc)
 
 
 # ── FastAPI App Instance ──────────────────────────────────────────────────────
@@ -533,6 +536,12 @@ async def websocket_endpoint(websocket: WebSocket):
             except Exception as exc:
                 logger.debug("WebSocket incoming message parse failed: %s (raw: %r)", exc, raw)
     except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        logger.debug("WebSocket receive loop terminated: %s", exc)
+    finally:
+        # Always deregister the connection — prevents dead sockets from leaking
+        # in the connection manager (and their tickers from staying subscribed).
         manager.disconnect(websocket)
 
 

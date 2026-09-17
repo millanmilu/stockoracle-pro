@@ -1,6 +1,8 @@
 import React from 'react';
 import { Eye, EyeOff, X } from 'lucide-react';
 import { INDICATOR_DEFINITIONS } from './indicatorDefinitions';
+import useStore from '../../store/useStore';
+import { getThemeTokens } from '../../utils/theme';
 
 /**
  * IndicatorLegend — TradingView-style On-Chart Indicator Legend HUD
@@ -14,6 +16,8 @@ export default function IndicatorLegend({
   onToggleHide = () => {},
   onRemove = () => {},
 }) {
+  const theme = useStore(s => s.theme);
+  const tk = getThemeTokens(theme);
   if (!activeIndicators || activeIndicators.length === 0) return null;
 
   return (
@@ -55,12 +59,12 @@ export default function IndicatorLegend({
               gap: 5,
               padding: '2px 7px',
               borderRadius: 4,
-              backgroundColor: 'rgba(11, 15, 28, 0.88)',
+              backgroundColor: tk.legendBg,
               backdropFilter: 'blur(4px)',
               border: `1px solid ${isHidden ? 'rgba(100, 116, 139, 0.25)' : 'rgba(99, 102, 241, 0.25)'}`,
               fontSize: '0.68rem',
               fontFamily: 'JetBrains Mono, monospace',
-              color: isHidden ? '#64748B' : '#E2E8F0',
+              color: isHidden ? '#64748B' : tk.legendText,
               opacity: isHidden ? 0.6 : 1,
               transition: 'all 0.15s ease',
             }}
@@ -78,7 +82,7 @@ export default function IndicatorLegend({
             />
 
             {/* Indicator Name */}
-            <span style={{ fontWeight: 700, color: isHidden ? '#64748B' : '#94A3B8' }}>
+            <span style={{ fontWeight: 700, color: isHidden ? '#64748B' : tk.legendMuted }}>
               {def.shortName}
             </span>
 
@@ -100,15 +104,15 @@ export default function IndicatorLegend({
               style={{
                 background: 'transparent',
                 border: 'none',
-                color: isHidden ? '#64748B' : '#94A3B8',
+                color: isHidden ? '#64748B' : tk.legendMuted,
                 cursor: 'pointer',
                 padding: 1,
                 display: 'flex',
                 alignItems: 'center',
                 borderRadius: 2,
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = '#F1F5F9')}
-              onMouseLeave={(e) => (e.currentTarget.style.color = isHidden ? '#64748B' : '#94A3B8')}
+              onMouseEnter={(e) => (e.currentTarget.style.color = theme === 'light' ? '#0F172A' : '#F1F5F9')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = isHidden ? '#64748B' : tk.legendMuted)}
             >
               {isHidden ? <EyeOff size={11} /> : <Eye size={11} />}
             </button>

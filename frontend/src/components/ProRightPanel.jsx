@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Send, BrainCircuit, TrendingUp, TrendingDown } from 'lucide-react';
+import { X, Send, BrainCircuit } from 'lucide-react';
 import useStore from '../store/useStore';
+import { getThemeTokens } from '../utils/theme';
 import api from '../utils/api';
 
 const DEFAULT_TICKERS = ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'AXISBANK', 'WIPRO', 'LT', 'HCLTECH'];
@@ -8,6 +9,8 @@ const DEFAULT_TICKERS = ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SB
 export default function ProRightPanel({ onClose }) {
   const selectedSymbol = useStore(s => s.selectedSymbol);
   const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
+  const theme = useStore(s => s.theme);
+  const tk = getThemeTokens(theme);
   const [filter, setFilter] = useState('');
   const [quotes, setQuotes] = useState({});
   const [chatInput, setChatInput] = useState('');
@@ -60,20 +63,20 @@ export default function ProRightPanel({ onClose }) {
 
   return (
     <div className="pro-right-panel">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', borderBottom: '1px solid rgba(99,102,241,0.1)' }}>
-        <h3 style={{ fontSize: '0.85rem', fontWeight: 600, color: '#F0F0FF', margin: 0 }}>Watchlist</h3>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: '#9CA3AF', cursor: 'pointer', display: 'flex' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', borderBottom: `1px solid ${tk.divider}` }}>
+        <h3 style={{ fontSize: '0.85rem', fontWeight: 600, color: tk.topbarText, margin: 0 }}>Watchlist</h3>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', color: tk.topbarMuted, cursor: 'pointer', display: 'flex' }}>
           <X size={16} />
         </button>
       </div>
-      
+
       <div style={{ padding: '10px' }}>
         <input
           type="text"
           placeholder="Filter..."
           value={filter}
           onChange={e => setFilter(e.target.value)}
-          style={{ width: '100%', padding: '6px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#fff', fontSize: '0.75rem', outline: 'none' }}
+          style={{ width: '100%', padding: '6px 10px', background: tk.inputBg, border: `1px solid ${tk.inputBorder}`, borderRadius: 6, color: tk.inputText, fontSize: '0.75rem', outline: 'none' }}
         />
       </div>
 
@@ -90,26 +93,26 @@ export default function ProRightPanel({ onClose }) {
             <div 
               key={t} 
               onClick={() => setSelectedSymbol(t)}
-              style={{ 
-                padding: '9px 12px', 
-                borderBottom: '1px solid rgba(255,255,255,0.04)', 
+              style={{
+                padding: '9px 12px',
+                borderBottom: `1px solid ${tk.topbarBorder}`,
                 cursor: 'pointer',
-                background: selectedSymbol === t ? 'rgba(99,102,241,0.15)' : 'transparent',
+                background: selectedSymbol === t ? tk.hoverBg : 'transparent',
                 borderLeft: selectedSymbol === t ? '2px solid #6366F1' : '2px solid transparent',
-                display: 'flex', 
+                display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 transition: 'background 0.15s',
               }}
             >
               <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, marginRight: 8 }}>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: '0.82rem', color: '#818CF8' }}>{t}</span>
-                <span style={{ fontSize: '0.67rem', color: '#94A3B8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 110 }}>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontWeight: 700, fontSize: '0.82rem', color: '#6366F1' }}>{t}</span>
+                <span style={{ fontSize: '0.67rem', color: tk.topbarMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 110 }}>
                   {q?.companyName || q?.name || t}
                 </span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
-                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.82rem', fontWeight: 700, color: '#FFF' }}>
+                <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.82rem', fontWeight: 700, color: tk.topbarText }}>
                   {hasPrice ? `₹${Number(price).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                 </span>
                 <span style={{ 
@@ -126,9 +129,9 @@ export default function ProRightPanel({ onClose }) {
         })}
       </div>
 
-      <div style={{ padding: '14px', borderTop: '1px solid rgba(99,102,241,0.1)', background: 'rgba(0,0,0,0.2)' }}>
-        <div style={{ fontSize: '0.7rem', color: '#9CA3AF', fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <BrainCircuit size={12} color="#818CF8" /> Ask AI ({selectedSymbol})
+      <div style={{ padding: '14px', borderTop: `1px solid ${tk.divider}`, background: tk.inputBg }}>
+        <div style={{ fontSize: '0.7rem', color: tk.topbarMuted, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <BrainCircuit size={12} color="#6366F1" /> Ask AI ({selectedSymbol})
         </div>
         
         {chatResponse && (
@@ -144,7 +147,7 @@ export default function ProRightPanel({ onClose }) {
             value={chatInput}
             onChange={e => setChatInput(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && handleChat()}
-            style={{ flex: 1, padding: '6px 10px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#fff', fontSize: '0.75rem', outline: 'none' }}
+            style={{ flex: 1, padding: '6px 10px', background: tk.inputBg, border: `1px solid ${tk.inputBorder}`, borderRadius: 6, color: tk.inputText, fontSize: '0.75rem', outline: 'none' }}
           />
           <button 
             onClick={handleChat}

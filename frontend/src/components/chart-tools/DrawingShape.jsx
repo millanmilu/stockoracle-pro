@@ -20,6 +20,8 @@ export default function DrawingShape({
   currency = '₹',
   timeframeMs = 0,
   toX,
+  toY,
+  candles = [],
   onHandleDown,
   onDoubleClick,
 }) {
@@ -27,7 +29,7 @@ export default function DrawingShape({
   const render = SHAPE_RENDERERS[drawing.type];
   if (!render) return null;
 
-  const content = render({ drawing, points, surface, handlers, currency, timeframeMs, toX });
+  const content = render({ drawing, points, surface, handlers, currency, timeframeMs, toX, toY, candles });
   if (!content) return null;
 
   return (

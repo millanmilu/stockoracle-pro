@@ -474,13 +474,21 @@ def get_user_screens_endpoint(
     effective_user = user_id or get_current_user_id(request)
     user_screens = get_user_screens_list(effective_user)
 
-    # Add pre-built institutional templates
+    # Add pre-built institutional templates (all fields verified against DSL whitelist)
     templates = [
         {"id": "tpl_1", "name": "💎 Undervalued Quality Stocks", "formula_query": "ROCE > 20 AND PE < 30 AND DebtToEquity < 0.5", "universe": "NIFTY_500", "description": "High ROCE, low leverage, trading at reasonable PE multiples."},
         {"id": "tpl_2", "name": "🚀 Breakout With Rising Volume", "formula_query": "RSI14 > 55 AND VolumeRatio20D > 1.3 AND Distance52WHigh > -5", "universe": "NIFTY_500", "description": "Stocks trading near 52-week highs with volume expansion."},
         {"id": "tpl_3", "name": "📈 High ROCE + Low Debt", "formula_query": "ROCE > 25 AND DebtToEquity < 0.2", "universe": "NIFTY_500", "description": "Virtually debt-free high return on capital compounds."},
         {"id": "tpl_4", "name": "🛡️ Oversold Large Caps", "formula_query": "MarketCap > 50000 AND RSI14 < 45", "universe": "NIFTY_500", "description": "Blue-chip leaders in short-term oversold pullback territory."},
-        {"id": "tpl_5", "name": "🤖 AI High-Confidence Signals", "formula_query": "AIConsensus > 80 AND VolumeRatio20D > 1.0", "universe": "NIFTY_500", "description": "Stocks with top tri-engine neural consensus and institutional flow."},
+        {"id": "tpl_5", "name": "🤖 AI High-Confidence Signals", "formula_query": "AIConsensus > 80 AND VolumeRatio20D > 1.0", "universe": "NIFTY_500", "description": "Stocks with top transparent AI confluence and institutional flow."},
+        {"id": "tpl_6", "name": "📊 Momentum Stocks", "formula_query": "RSI14 > 55 AND MACDHist > 0 AND VolumeRatio20D > 1.2", "universe": "NIFTY_500", "description": "Positive RSI momentum with MACD above signal and volume support."},
+        {"id": "tpl_7", "name": "⚡ Volume Breakouts", "formula_query": "VolumeBreakout > 0 AND RSI14 > 50", "universe": "NIFTY_500", "description": "Deterministic volume breakout (2x + positive ROC) with momentum."},
+        {"id": "tpl_8", "name": "🏆 52-Week High", "formula_query": "Breakout52W > 0 AND VolumeRatio20D > 1.2", "universe": "NIFTY_500", "description": "Trading at/above verified 52-week high with volume confirmation."},
+        {"id": "tpl_9", "name": "🔄 Oversold Reversal", "formula_query": "RSI14 < 35 AND DebtToEquity < 1.0", "universe": "NIFTY_500", "description": "Oversold RSI with acceptable balance-sheet risk for reversals."},
+        {"id": "tpl_10", "name": "📉 Trend Following", "formula_query": "EMAAlignment == 'BULLISH_ALIGNED' AND ADX > 25", "universe": "NIFTY_500", "description": "EMA 20>50>200 alignment with strong ADX trend."},
+        {"id": "tpl_11", "name": "💹 High Growth", "formula_query": "SalesGrowth3Y > 15 AND ProfitGrowth3Y > 15 AND ROCE > 15", "universe": "NIFTY_500", "description": "Double-digit 3Y sales + profit CAGR with quality ROCE."},
+        {"id": "tpl_12", "name": "🔁 MACD Crossover", "formula_query": "MACDHist > 0 AND RSI14 > 45 AND RSI14 < 70", "universe": "NIFTY_500", "description": "MACD above signal with RSI in the tradeable mid-range."},
+        {"id": "tpl_13", "name": "🧠 AI High Confluence", "formula_query": "Confluence > 70 AND AIConsensus > 70", "universe": "NIFTY_500", "description": "Top technical confluence confirmed by transparent AI score."},
     ]
 
     return {
@@ -547,13 +555,85 @@ def delete_user_screen_endpoint(
     screen_id: int,
     request: Request,
     user_id: Optional[str] = Query(None),
-    _auth: None = Security(verify_api_key)
+    _auth: None = Security(verify_api_key),
 ):
     """Deletes a saved user screen."""
     from backend.data.database import delete_user_screen_query
     effective_user = user_id or get_current_user_id(request)
     delete_user_screen_query(screen_id, user_id=effective_user)
     return {"deleted": True, "id": screen_id}
+
+
+@router.get("/screener/overview")
+def get_screener_overview_endpoint():
+    """Institutional overview: clickable cards, market breadth, sector rotation.
+
+    All counts are derived from real screener_daily_metrics rows.
+    """
+    from backend.data.database import get_screener_overview_stats
+    from backend.data.fetcher import get_session_status
+    from backend.data.market_calendar import is_market_open
+    stats = get_screener_overview_stats()
+    try:
+        market_open = bool(is_market_open())
+    except Exception:
+        market_open = False
+    stats["market_status"] = "OPEN" if market_open else "CLOSED"
+    try:
+        stats["feed_live"] = bool(get_session_status())
+    except Exception:
+        stats["feed_live"] = False
+    return stats
+
+
+@router.get("/screener/detail/{ticker}")
+def get_screener_detail_endpoint(ticker: str):
+    """Side-panel detail for one ticker: scores, regime, confluence, why-list.
+
+    Every field comes from the precomputed row; missing values are N/A, never fake.
+    """
+    from backend.data.database import get_screener_detail
+    t = (ticker or "").upper().strip()
+    detail = get_screener_detail(t)
+    if not detail:
+        raise HTTPException(status_code=404, detail=f"No screener metrics for '{t}'.")
+    return detail
+
+
+@router.get("/screener/filter-meta")
+def get_screener_filter_meta_endpoint():
+    """Filter-builder metadata: categories, whitelisted fields, availability.
+
+    The UI renders ONLY these fields; anything else shows 'Data unavailable'.
+    """
+    from backend.research.screener_dsl import FIELD_MAP
+    categories = {
+        "PRICE": ["Price", "Change1D", "Change1W", "Change1M", "Distance52WHigh",
+                  "Distance52WLow", "Pos52W", "ATRPct", "HistVol"],
+        "VOLUME": ["VolumeRatio20D", "VolumeBreakout"],
+        "TREND": ["EMA9", "EMA20", "EMA50", "EMA200", "ADX", "Supertrend", "Trend", "EMAAlignment"],
+        "MOMENTUM": ["RSI14", "MACDHist", "MACDCrossover", "StochK", "StochD", "CCI", "ROC", "WilliamsR", "MomentumState"],
+        "VOLATILITY": ["ATRPct", "BBWidth", "BBPosition", "HistVol"],
+        "MARKET_STRUCTURE": ["Structure", "Regime", "Breakout52W", "Breakdown52W",
+                             "ResistanceBreakout", "SupportBreakdown", "BreakoutStrength",
+                             "Retest", "Consolidation"],
+        "FUNDAMENTALS": ["MarketCap", "PE", "PB", "ROE", "ROCE", "DebtToEquity",
+                         "SalesGrowth3Y", "ProfitGrowth3Y"],
+        "SENTIMENT": ["Sentiment"],
+        "AI": ["AIConsensus", "AIConfidence", "Confluence", "AITrend",
+               "AIMomentum", "AIVolatility", "AIPattern", "RsNifty", "RsSector"],
+    }
+    unavailable = [
+        "Delivery volume", "Promoter holding", "Institutional/FII/DII holding",
+        "Free cash flow", "Dividend yield", "Operating/Net margin",
+        "EPS / EPS growth", "Revenue/Profit quarterly splits", "Social sentiment",
+    ]
+    return {
+        "categories": categories,
+        "whitelisted_fields": sorted(set(FIELD_MAP.keys())),
+        "unavailable_fields": unavailable,
+        "note": "Only whitelisted fields can be filtered. Unavailable fields show 'Data unavailable for this condition.'",
+    }
 
 
 # ── Institutional & Quant Terminal Endpoints (OpenBB + OpenTerminalUI) ──────

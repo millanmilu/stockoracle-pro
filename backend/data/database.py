@@ -48,6 +48,57 @@ def get_db_connection():
     return conn
 
 
+SCREENER_EXTENDED_COLUMNS = [
+    ("ema_9", "FLOAT"), ("ema_20", "FLOAT"), ("ema_50", "FLOAT"), ("ema_200", "FLOAT"),
+    ("adx_14", "FLOAT"), ("atr_pct", "FLOAT"), ("bb_width_pct", "FLOAT"), ("bb_position", "FLOAT"),
+    ("stoch_k", "FLOAT"), ("stoch_d", "FLOAT"), ("cci_20", "FLOAT"), ("roc_12", "FLOAT"),
+    ("williams_r", "FLOAT"), ("macd_hist", "FLOAT"), ("macd_crossover", "VARCHAR(30)"),
+    ("supertrend_dir", "FLOAT"), ("vwap_dist_pct", "FLOAT"), ("hist_vol_20", "FLOAT"),
+    ("high_52w", "FLOAT"), ("low_52w", "FLOAT"), ("pos_52w_pct", "FLOAT"),
+    ("structure_label", "VARCHAR(40)"), ("trend_hint", "VARCHAR(20)"),
+    ("support_price", "FLOAT"), ("resistance_price", "FLOAT"),
+    ("breakout_52w_high", "INTEGER DEFAULT 0"), ("breakdown_52w_low", "INTEGER DEFAULT 0"),
+    ("resistance_breakout", "INTEGER DEFAULT 0"), ("support_breakdown", "INTEGER DEFAULT 0"),
+    ("volume_breakout", "INTEGER DEFAULT 0"), ("breakout_strength", "FLOAT"),
+    ("retest_status", "VARCHAR(20)"), ("consolidation", "INTEGER DEFAULT 0"),
+    ("liquidity_sweep", "VARCHAR(20)"),
+    ("momentum_state", "VARCHAR(20)"), ("ema_alignment", "VARCHAR(30)"),
+    ("market_regime", "VARCHAR(30)"), ("regime_confidence", "FLOAT"),
+    ("rs_vs_nifty_pct", "FLOAT"), ("rs_vs_sector_pct", "FLOAT"),
+    ("confluence_score", "FLOAT"), ("ai_trend_score", "FLOAT"),
+    ("ai_momentum_score", "FLOAT"), ("ai_volatility_score", "FLOAT"),
+    ("ai_pattern_score", "FLOAT"),
+    ("sentiment_score", "FLOAT"), ("sentiment_label", "VARCHAR(30)"),
+    ("news_count", "INTEGER DEFAULT 0"),
+    ("why_json", "TEXT"), ("confluence_json", "TEXT"), ("data_status", "VARCHAR(20) DEFAULT 'OK'"),
+]
+
+
+def _ensure_screener_extended_columns() -> None:
+    """Adds institutional screener columns to legacy screener_daily_metrics tables."""
+    with get_db_session() as session:
+        try:
+            existing = {row[1] for row in session.execute(text("PRAGMA table_info(screener_daily_metrics)")).fetchall()}
+        except Exception:
+            existing = set()
+        for col, ddl in SCREENER_EXTENDED_COLUMNS:
+            if col not in existing:
+                try:
+                    session.execute(text(f"ALTER TABLE screener_daily_metrics ADD COLUMN {col} {ddl}"))
+                except Exception as exc:
+                    logger.debug("Add screener column %s skipped: %s", col, exc)
+        for idx_name, col in [
+            ("idx_screener_regime", "market_regime"),
+            ("idx_screener_structure", "structure_label"),
+            ("idx_screener_confluence", "confluence_score"),
+            ("idx_screener_adx", "adx_14"),
+        ]:
+            try:
+                session.execute(text(f"CREATE INDEX IF NOT EXISTS {idx_name} ON screener_daily_metrics ({col})"))
+            except Exception:
+                pass
+
+
 def init_db():
     """Initializes the database schema and creates all tables via SQLAlchemy ORM."""
     logger.info("Initializing database with unified SQLAlchemy engine: %s", DB_PATH)
@@ -72,6 +123,12 @@ def init_db():
             ))
     except Exception as e:
         logger.debug("Historical prices auto-cleansing check notice: %s", e)
+
+    # Institutional screener extension: add missing columns to pre-existing DBs
+    try:
+        _ensure_screener_extended_columns()
+    except Exception as e:
+        logger.debug("Screener extended-columns ensure notice: %s", e)
 
 
     # Auto-seed broker_accounts from existing .env credentials if table is currently empty
@@ -220,54 +277,112 @@ def validate_and_sanitize_candles(df: pd.DataFrame) -> pd.DataFrame:
     return clean_df
 
 
+def _sanitize_volume(v) -> int:
+    """Coerces volume to a non-negative int (NaN/negative/invalid -> 0)."""
+    try:
+        f = float(v)
+        if np.isnan(f) or f < 0:
+            return 0
+        return int(f)
+    except Exception:
+        return 0
+
+
+def _get_db_close_median(ticker: str) -> Optional[float]:
+    """Returns median close for ticker from historical_prices, or None if unavailable."""
+    try:
+        with get_db_session() as session:
+            stmt = select(HistoricalPrice.close).where(HistoricalPrice.ticker == ticker.upper())
+            rows = session.execute(stmt).all()
+            if not rows:
+                return None
+            vals = [float(r[0]) for r in rows if r[0] is not None and float(r[0]) > 0]
+            if not vals:
+                return None
+            return float(pd.Series(vals).median())
+    except Exception:
+        return None
+
+
 def clean_paise_and_outliers(ticker: str = None):
     """
     Scans historical_prices table, auto-corrects paise-to-rupee unit mismatches
     (close > 50 * median), and deletes corrupt/non-positive price rows via SQLAlchemy ORM.
+
+    NOTE: HistoricalPrice PK is (ticker, date) — there is no `id` column,
+    so paise rows are keyed on (ticker, date).
     """
     try:
         with get_db_session() as session:
-            stmt = select(HistoricalPrice.id, HistoricalPrice.ticker, HistoricalPrice.close)
+            stmt = select(
+                HistoricalPrice.ticker, HistoricalPrice.date,
+                HistoricalPrice.open, HistoricalPrice.high,
+                HistoricalPrice.low, HistoricalPrice.close,
+            )
             if ticker:
                 stmt = stmt.where(HistoricalPrice.ticker == ticker.upper())
             rows = session.execute(stmt).all()
             if not rows:
                 return
 
-            df = pd.DataFrame([{"id": r[0], "ticker": r[1], "close": float(r[2])} for r in rows])
+            df = pd.DataFrame([
+                {"ticker": r[0], "date": r[1], "close": float(r[5])} for r in rows
+            ])
             if df.empty:
                 return
 
             for t, group in df.groupby("ticker"):
                 median_val = group["close"].median()
-                if not median_val or median_val <= 0:
+                try:
+                    median_f = float(median_val)
+                except (TypeError, ValueError):
+                    continue
+                if np.isnan(median_f) or median_f <= 0:
                     continue
 
                 # Identify candidates (> 50x median, likely paise mismatch)
-                paise_candidates = group[group["close"] > median_val * 50]
+                paise_candidates = group[group["close"] > median_f * 50]
                 if not paise_candidates.empty:
-                    for cid in paise_candidates["id"]:
+                    for _, prow in paise_candidates.iterrows():
                         session.execute(
-                            text("UPDATE historical_prices SET open = open/100.0, high = high/100.0, low = low/100.0, close = close/100.0 WHERE id = :id"),
-                            {"id": cid}
+                            text("UPDATE historical_prices SET open = open/100.0, high = high/100.0, low = low/100.0, close = close/100.0 WHERE ticker = :t AND date = :d"),
+                            {"t": t, "d": prow["date"]}
                         )
                     logger.info("Normalized %d paise records to rupees for %s.", len(paise_candidates), t)
-
-            # Delete invalid <= 0 rows or corrupt non-10-char dates
-            session.execute(text("DELETE FROM historical_prices WHERE close <= 0 OR high <= 0 OR open <= 0 OR low <= 0 OR length(date) != 10"))
     except Exception as e:
         logger.error("Error in clean_paise_and_outliers: %s", e)
+
+    # Always run invalid-row purge even if the paise pass above failed
+    try:
+        with get_db_session() as session:
+            session.execute(text("DELETE FROM historical_prices WHERE close <= 0 OR high <= 0 OR open <= 0 OR low <= 0 OR length(date) != 10"))
+    except Exception as e:
+        logger.error("Error purging invalid rows in clean_paise_and_outliers: %s", e)
 
 
 def save_historical_prices(ticker: str, df: pd.DataFrame):
     """
     Saves a DataFrame of daily historical prices into the database using SQLAlchemy 2.0 ORM.
     Strictly accepts only daily dates (YYYY-MM-DD) matching DATE_REGEX.
+    Applies paise-to-rupee normalization (> 50x median) on the write path.
     """
     if df is None or df.empty:
         return
 
     ticker = ticker.upper()
+    # Reference median for paise detection: prefer existing DB history,
+    # fall back to the incoming batch median for partial-batch contamination.
+    db_median = _get_db_close_median(ticker)
+    try:
+        batch_closes = pd.to_numeric(df["close"], errors="coerce")
+        batch_closes = batch_closes[batch_closes > 0]
+        batch_median = float(batch_closes.median()) if not batch_closes.empty else None
+        if batch_median is not None and (np.isnan(batch_median) or batch_median <= 0):
+            batch_median = None
+    except Exception:
+        batch_median = None
+    ref_median = db_median if db_median else batch_median
+
     records = []
     for _, row in df.iterrows():
         try:
@@ -281,10 +396,18 @@ def save_historical_prices(ticker: str, df: pd.DataFrame):
             h_val = _normalize_price(row["high"])
             l_val = _normalize_price(row["low"])
             c_val = _normalize_price(row["close"])
-            vol   = int(row.get("volume", 0) or 0)
+            vol = _sanitize_volume(row.get("volume", 0))
 
-            if not all([o_val, h_val, l_val, c_val]):
+            if o_val is None or h_val is None or l_val is None or c_val is None:
                 continue
+            # Paise-to-rupee normalization: outlier closes > 50x median are /100
+            if ref_median and c_val > ref_median * 50:
+                o_val = round(o_val / 100.0, 2)
+                h_val = round(h_val / 100.0, 2)
+                l_val = round(l_val / 100.0, 2)
+                c_val = round(c_val / 100.0, 2)
+                if o_val <= 0 or h_val <= 0 or l_val <= 0 or c_val <= 0:
+                    continue
             records.append({
                 "ticker": ticker,
                 "date": d_str,
@@ -300,34 +423,43 @@ def save_historical_prices(ticker: str, df: pd.DataFrame):
     if not records:
         return
 
+    # Chunked upserts: a single multi-row INSERT of a multi-year daily series
+    # (7 vars x ~7000+ bars) exceeds SQLite's SQLITE_MAX_VARIABLE_NUMBER and
+    # aborts the whole history write with "too many SQL variables", which in
+    # turn 500s the chart history endpoint. 400 rows/chunk stays far below
+    # the limit on both sqlite and postgres while keeping identical semantics.
     with get_db_session() as session:
         dialect = session.bind.dialect.name if session.bind else "sqlite"
         if dialect == "sqlite":
-            stmt = sqlite_insert(HistoricalPrice).values(records)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["ticker", "date"],
-                set_={
-                    "open": stmt.excluded.open,
-                    "high": stmt.excluded.high,
-                    "low": stmt.excluded.low,
-                    "close": stmt.excluded.close,
-                    "volume": stmt.excluded.volume,
-                }
-            )
-            session.execute(stmt)
+            for i in range(0, len(records), 400):
+                chunk = records[i:i + 400]
+                stmt = sqlite_insert(HistoricalPrice).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["ticker", "date"],
+                    set_={
+                        "open": stmt.excluded.open,
+                        "high": stmt.excluded.high,
+                        "low": stmt.excluded.low,
+                        "close": stmt.excluded.close,
+                        "volume": stmt.excluded.volume,
+                    }
+                )
+                session.execute(stmt)
         elif dialect == "postgresql":
-            stmt = pg_insert(HistoricalPrice).values(records)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["ticker", "date"],
-                set_={
-                    "open": stmt.excluded.open,
-                    "high": stmt.excluded.high,
-                    "low": stmt.excluded.low,
-                    "close": stmt.excluded.close,
-                    "volume": stmt.excluded.volume,
-                }
-            )
-            session.execute(stmt)
+            for i in range(0, len(records), 400):
+                chunk = records[i:i + 400]
+                stmt = pg_insert(HistoricalPrice).values(chunk)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["ticker", "date"],
+                    set_={
+                        "open": stmt.excluded.open,
+                        "high": stmt.excluded.high,
+                        "low": stmt.excluded.low,
+                        "close": stmt.excluded.close,
+                        "volume": stmt.excluded.volume,
+                    }
+                )
+                session.execute(stmt)
         else:
             for r in records:
                 session.merge(HistoricalPrice(**r))
@@ -720,8 +852,8 @@ def _save_json(table: str, key_col: str, key_val: str, data: Any, ttl_minutes: i
     try:
         from backend.data.redis_cache import cache_set
         cache_set(cache_k, data, ttl_seconds=int(ttl_minutes * 60))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("L1 cache write skipped (%s:%s): %s", table, ticker_key, exc)
 
     payload = json.dumps(data, default=str)
     now_str = datetime.now().isoformat()
@@ -755,8 +887,8 @@ def _get_json(table: str, key_col: str, key_val: str, ttl_minutes: int = 5) -> O
         cached_val = cache_get(cache_k)
         if cached_val is not None:
             return cached_val
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("L1 cache read skipped (%s:%s): %s", table, ticker_key, exc)
 
     expiry = (datetime.now() - timedelta(minutes=ttl_minutes)).isoformat()
     model = CACHE_MODEL_MAP.get(table)
@@ -774,8 +906,8 @@ def _get_json(table: str, key_col: str, key_val: str, ttl_minutes: int = 5) -> O
                 try:
                     from backend.data.redis_cache import cache_set
                     cache_set(cache_k, val, ttl_seconds=int(ttl_minutes * 60))
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("L1 cache backfill skipped (%s:%s): %s", table, ticker_key, exc)
                 return val
     except Exception as e:
         logger.warning("DB cache read error (%s): %s", table, e)
@@ -1173,8 +1305,14 @@ def get_paper_account(user_id: str = "default_user") -> dict:
         }
 
 
-def get_paper_positions(user_id: str = "default_user") -> list:
-    """Returns active open paper trading positions enriched with live LTP, market value, and unrealized P&L."""
+def get_paper_positions(user_id: str = "default_user", enforce_stops: bool = False) -> list:
+    """Returns active open paper trading positions enriched with live LTP, market value, and unrealized P&L.
+
+    Pure read by default: SL/TP auto-exits are NOT evaluated here so a GET
+    can never liquidate positions (cash-debited-but-no-position bug). Pass
+    enforce_stops=True only from an explicit SL/TP evaluation path
+    (see enforce_paper_stops()) — never from a generic read.
+    """
     with get_db_session() as session:
         stmt = select(PaperPosition).where(PaperPosition.user_id == user_id).order_by(PaperPosition.id.desc())
         rows = session.execute(stmt).scalars().all()
@@ -1197,6 +1335,7 @@ def get_paper_positions(user_id: str = "default_user") -> list:
 
             current_p = buy_p
             sector = "Diversified"
+            info = None
             try:
                 info = get_company_info(ticker)
                 if info and info.get("current_price") and float(info["current_price"]) > 0:
@@ -1207,17 +1346,49 @@ def get_paper_positions(user_id: str = "default_user") -> list:
                         current_p = float(m.close_price)
                     if m and m.sector:
                         sector = m.sector
-            except Exception:
+            except Exception as exc:
+                logger.debug("Paper position enrichment fallback for %s: %s", ticker, exc)
                 current_p = buy_p
+
+            # ── SL/TP auto-exit freshness guard ─────────────────────────────
+            # Exits are evaluated ONLY when enforce_stops=True AND against
+            # verified, fresh prices while the market is open:
+            #   1. today's real live ticks (actual traded prices), or
+            #   2. a fresh quote while the market is open.
+            # Stale caches, daily-close fallbacks, or after-hours ticks must
+            # NEVER liquidate a position from a read path.
+            verified_p = None
+            if enforce_stops:
+                try:
+                    from backend.data.market_calendar import is_market_open as _is_open
+                    _market_open = bool(_is_open())
+                except Exception:
+                    _market_open = False
+                if _market_open:
+                    try:
+                        ticks_ohlcv = get_live_tick_ohlcv(ticker)
+                        if ticks_ohlcv and ticks_ohlcv.get("close") and float(ticks_ohlcv["close"]) > 0:
+                            verified_p = float(ticks_ohlcv["close"])
+                    except Exception as exc:
+                        logger.debug("Paper SL/TP tick lookup failed for %s: %s", ticker, exc)
+                        verified_p = None
+                    if verified_p is None and info and info.get("current_price"):
+                        try:
+                            if float(info["current_price"]) > 0:
+                                verified_p = float(info["current_price"])
+                        except Exception as exc:
+                            logger.debug("Paper SL/TP quote lookup failed for %s: %s", ticker, exc)
+                            verified_p = None
 
             sl = float(p["stop_loss"]) if p.get("stop_loss") else None
             tp = float(p["target_price"]) if p.get("target_price") else None
-            if sl and current_p <= sl and current_p > 0:
-                close_paper_position(p["id"], current_price=current_p, user_id=user_id, exit_reason="STOP_LOSS_HIT")
-                continue
-            if tp and current_p >= tp and current_p > 0:
-                close_paper_position(p["id"], current_price=current_p, user_id=user_id, exit_reason="TARGET_HIT")
-                continue
+            if enforce_stops and verified_p is not None:
+                if sl and verified_p <= sl:
+                    close_paper_position(p["id"], current_price=verified_p, user_id=user_id, exit_reason="STOP_LOSS_HIT")
+                    continue
+                if tp and verified_p >= tp:
+                    close_paper_position(p["id"], current_price=verified_p, user_id=user_id, exit_reason="TARGET_HIT")
+                    continue
 
             invested_val = round(shares * buy_p, 2)
             market_val = round(shares * current_p, 2)
@@ -1233,6 +1404,24 @@ def get_paper_positions(user_id: str = "default_user") -> list:
             positions.append(p)
 
         return positions
+
+
+def enforce_paper_stops(user_id: str = "default_user") -> list:
+    """Explicit SL/TP evaluation pass. Returns list of auto-closed position dicts.
+
+    Call this from a scheduler or an explicit user action — never from a
+    read-only getter. Only runs while the market is open.
+    """
+    try:
+        from backend.data.market_calendar import is_market_open
+        if not is_market_open():
+            return []
+    except Exception as exc:
+        logger.debug("Paper stop enforcement market-open check failed: %s", exc)
+        return []
+    # Re-read with enforcement enabled; closed positions are skipped inside.
+    get_paper_positions(user_id=user_id, enforce_stops=True)
+    return get_paper_trade_history(user_id=user_id, limit=10)
 
 
 def place_paper_order(ticker: str, order_type: str, action: str, shares: float, price: float, stop_loss: float = None, target_price: float = None, notes: str = None, user_id: str = "default_user") -> dict:
@@ -1377,13 +1566,19 @@ def close_paper_position(position_id: int, current_price: float, user_id: str = 
             return {"status": "ERROR", "message": f"Position #{position_id} not found."}
         shares = float(pos.shares)
 
-    return sell_paper_position(
+    result = sell_paper_position(
         position_id=position_id,
         shares_to_sell=shares,
         current_price=current_price,
         notes=exit_reason,
         user_id=user_id
     )
+    # Contract: a full close reports "CLOSED" (partial sells keep "SUCCESS",
+    # as returned by sell_paper_position). The frontend passes this status
+    # through to the UI, and the API docs / tests assert on "CLOSED".
+    if result.get("status") == "SUCCESS":
+        result["status"] = "CLOSED"
+    return result
 
 
 def get_paper_trade_history(user_id: str = "default_user", limit: int = 100) -> list:
@@ -1654,6 +1849,47 @@ def upsert_screener_daily_metric(row_data: dict) -> None:
         "updated_at": now_str,
     }
 
+    # Institutional extension: copy any known extended metric when provided.
+    # Unknown keys are ignored so legacy callers keep working unchanged.
+    _extended_float_keys = [
+        "ema_9", "ema_20", "ema_50", "ema_200", "adx_14", "atr_pct",
+        "bb_width_pct", "bb_position", "stoch_k", "stoch_d", "cci_20",
+        "roc_12", "williams_r", "macd_hist", "supertrend_dir",
+        "vwap_dist_pct", "hist_vol_20", "high_52w", "low_52w",
+        "pos_52w_pct", "support_price", "resistance_price",
+        "breakout_strength", "regime_confidence", "rs_vs_nifty_pct",
+        "rs_vs_sector_pct", "confluence_score", "ai_trend_score",
+        "ai_momentum_score", "ai_volatility_score", "ai_pattern_score",
+        "sentiment_score",
+    ]
+    for _k in _extended_float_keys:
+        if row_data.get(_k) is not None:
+            try:
+                metric_dict[_k] = float(row_data[_k])
+            except Exception:
+                pass
+    _extended_str_keys = [
+        "macd_crossover", "structure_label", "trend_hint", "retest_status",
+        "liquidity_sweep", "momentum_state", "ema_alignment",
+        "market_regime", "sentiment_label", "data_status",
+    ]
+    for _k in _extended_str_keys:
+        if row_data.get(_k) is not None:
+            metric_dict[_k] = str(row_data[_k])[:40]
+    _extended_int_keys = [
+        "breakout_52w_high", "breakdown_52w_low", "resistance_breakout",
+        "support_breakdown", "volume_breakout", "consolidation", "news_count",
+    ]
+    for _k in _extended_int_keys:
+        if row_data.get(_k) is not None:
+            try:
+                metric_dict[_k] = int(bool(row_data[_k])) if _k != "news_count" else int(row_data[_k])
+            except Exception:
+                pass
+    for _k in ["why_json", "confluence_json"]:
+        if row_data.get(_k) is not None:
+            metric_dict[_k] = str(row_data[_k])[:4000]
+
     with get_db_session() as session:
         dialect = session.bind.dialect.name if session.bind else "sqlite"
         if dialect == "sqlite":
@@ -1692,9 +1928,14 @@ def execute_screener_sql_query(
         params = tuple(params)
 
     allowed_sorts = {
-        "market_cap_cr", "close_price", "change_1d_pct", "rsi_14", "pe_ratio",
+        "market_cap_cr", "close_price", "change_1d_pct", "change_1w_pct",
+        "change_1m_pct", "rsi_14", "pe_ratio",
         "pb_ratio", "roe_pct", "roce_pct", "debt_to_equity", "volume_ratio_20d",
-        "sales_growth_3y", "profit_growth_3y", "ai_consensus_score"
+        "sales_growth_3y", "profit_growth_3y", "ai_consensus_score",
+        "ai_confidence_score", "confluence_score", "adx_14", "atr_pct",
+        "pos_52w_pct", "distance_52w_high_pct", "ema_50", "ema_200",
+        "stoch_k", "cci_20", "roc_12", "hist_vol_20", "breakout_strength",
+        "regime_confidence", "rs_vs_nifty_pct", "ticker", "sector",
     }
     safe_sort = sort_by if sort_by in allowed_sorts else "market_cap_cr"
     safe_dir = "ASC" if str(sort_dir).upper() == "ASC" else "DESC"
@@ -1745,6 +1986,63 @@ def execute_screener_sql_query(
         }
 
 
+def get_screener_overview_stats() -> dict:
+    """Aggregated institutional overview directly from real screener rows.
+
+    Returns overview cards, market breadth and sector rotation computed from
+    the screener_daily_metrics table (no fake values; empty table -> zeros).
+    """
+    try:
+        from backend.research.screener_engines import (
+            compute_overview_cards, compute_market_breadth, compute_sector_rotation,
+        )
+        with get_db_session() as session:
+            rows = session.execute(text("SELECT * FROM screener_daily_metrics LIMIT 2000")).mappings().all()
+            all_rows = [dict(r) for r in rows]
+        if not all_rows:
+            return {"cards": {}, "breadth": {"total": 0, "data_status": "N/A"},
+                    "sectors": [], "total": 0, "data_status": "N/A"}
+        return {
+            "cards": compute_overview_cards(all_rows),
+            "breadth": compute_market_breadth(all_rows),
+            "sectors": compute_sector_rotation(all_rows),
+            "total": len(all_rows),
+            "data_status": "OK",
+        }
+    except Exception as exc:
+        logger.warning("get_screener_overview_stats failed: %s", exc)
+        return {"cards": {}, "breadth": {"total": 0, "data_status": "N/A"},
+                "sectors": [], "total": 0, "data_status": "STALE"}
+
+
+def get_screener_detail(ticker: str) -> Optional[dict]:
+    """Full institutional detail row for the side panel, including why/notes."""
+    import json as _json
+    t = (ticker or "").upper().strip()
+    if not t:
+        return None
+    try:
+        with get_db_session() as session:
+            row = session.execute(
+                text("SELECT * FROM screener_daily_metrics WHERE ticker = :t LIMIT 1"),
+                {"t": t},
+            ).mappings().first()
+            if not row:
+                return None
+            detail = dict(row)
+        for _jk in ("why_json", "confluence_json"):
+            raw = detail.get(_jk)
+            if isinstance(raw, str) and raw:
+                try:
+                    detail[_jk.replace("_json", "_parsed")] = _json.loads(raw)
+                except Exception:
+                    detail[_jk.replace("_json", "_parsed")] = None
+        return detail
+    except Exception as exc:
+        logger.warning("get_screener_detail(%s) failed: %s", t, exc)
+        return None
+
+
 def save_user_screen_query(
     user_id: str,
     name: str,
@@ -1758,7 +2056,7 @@ def save_user_screen_query(
 ) -> dict:
     """Saves a user custom multi-factor screen and creates a unique share token."""
     import uuid
-    share_token = str(uuid.uuid4())[:12]
+    share_token = uuid.uuid4().hex[:20]
     now_str = datetime.now().isoformat()
 
     with get_db_session() as session:
@@ -2008,8 +2306,8 @@ def increment_ai_provider_requests(provider_name: str) -> None:
                     updated_at=now_str,
                 )
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed incrementing AI provider counter %s: %s", provider_name, exc)
 
 
 def save_broker_audit_log(

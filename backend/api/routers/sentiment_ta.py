@@ -13,14 +13,19 @@ import asyncio
 import logging
 import time
 from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Security
 from pydantic import BaseModel
+from backend.shared.security import verify_api_key
 from backend.api._guards import require_real_data
 
 logger = logging.getLogger("StockOracle.API.SentimentTA")
 
 
-router = APIRouter(prefix="/api", tags=["Sentiment & TA 2.0"])
+router = APIRouter(
+    prefix="/api",
+    tags=["Sentiment & TA 2.0"],
+    dependencies=[Security(verify_api_key)],
+)
 
 # ── In-Memory Response Cache ──────────────────────────────────────────────────
 _TA_CACHE: Dict[str, Dict[str, Any]] = {}

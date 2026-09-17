@@ -1,167 +1,79 @@
 import React from 'react';
-import { SlidersHorizontal, Filter, Download, Save, Dices } from 'lucide-react';
+import { SlidersHorizontal, Filter, Download, Save, Dices, Bell } from 'lucide-react';
+import { REFRESH_OPTIONS } from './screenerColumns';
 
 export default function ScreenerHeaderBar({
   filtersOpen,
   onToggleFilters,
-  queryMode,
+  activeFilterCount = 0,
   dataAsOf,
+  marketStatus = 'UNKNOWN',
+  feedLive = false,
+  wsState = 'idle',
+  scannedCount = 0,
+  universe = 'ALL NSE',
+  onUniverseChange,
+  universes = ['ALL NSE'],
+  search = '',
+  onSearch,
+  refreshMode = 'manual',
+  onRefreshMode,
   onExportCsv,
   onOpenSaveModal,
-  onOpenBacktestModal
+  onOpenBacktestModal,
+  onCreateAlert,
+  onRefresh,
+  loading = false,
 }) {
+  const live = wsState === 'live' || feedLive;
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      flexWrap: 'wrap',
-      gap: 12,
-      background: 'linear-gradient(180deg, rgba(15, 23, 42, 0.6) 0%, rgba(9, 13, 28, 0.8) 100%)',
-      backdropFilter: 'blur(12px)',
-      border: '1px solid rgba(99, 102, 241, 0.15)',
-      borderRadius: 14,
-      padding: '12px 18px',
-      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4)'
-    }}>
-      {/* Brand & Subtitle */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{
-          width: 38,
-          height: 38,
-          borderRadius: 10,
-          background: 'linear-gradient(135deg, #6366F1, #06B6D4)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: '0 0 15px rgba(99, 102, 241, 0.4)'
-        }}>
-          <SlidersHorizontal size={20} color="#FFF" />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'linear-gradient(180deg, rgba(15,23,42,0.6) 0%, rgba(9,13,28,0.8) 100%)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 14, padding: '10px 14px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg, #6366F1, #06B6D4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <SlidersHorizontal size={18} color="#FFF" />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: '1.05rem', fontWeight: 900, color: '#FFF' }}>Institutional Screener</span>
+              <span style={{ padding: '2px 8px', borderRadius: 6, background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.4)', color: '#A5B4FC', fontSize: '0.62rem', fontWeight: 800 }}>PRO</span>
+              <span style={{ padding: '2px 8px', borderRadius: 6, background: live ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.12)', border: `1px solid ${live ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.35)'}`, color: live ? '#10B981' : '#F87171', fontSize: '0.62rem', fontWeight: 800 }}>
+                {wsState === 'connecting' ? 'RECONNECTING' : live ? '● LIVE' : '○ OFFLINE'}
+              </span>
+              <span style={{ padding: '2px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', fontSize: '0.62rem', fontWeight: 700 }}>
+                Market: {marketStatus}
+              </span>
+            </div>
+            <div style={{ fontSize: '0.66rem', color: '#64748B', marginTop: 2 }}>
+              {scannedCount.toLocaleString('en-IN')} stocks scanned
+              {dataAsOf ? <> • Last update: <strong style={{ color: '#A5B4FC' }}>{dataAsOf}</strong></> : null}
+              <span style={{ color: feedLive ? '#10B981' : '#F59E0B' }}> • Data: {feedLive ? 'LIVE' : 'CACHED'}</span>
+            </div>
+          </div>
         </div>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '1.15rem', fontWeight: 900, letterSpacing: '-0.02em', color: '#FFF', fontFamily: 'Inter, sans-serif' }}>
-              Institutional Screener
-            </span>
-            <span style={{
-              padding: '2px 8px',
-              borderRadius: 6,
-              background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(168, 85, 247, 0.25))',
-              border: '1px solid rgba(99, 102, 241, 0.4)',
-              color: '#A5B4FC',
-              fontSize: '0.65rem',
-              fontWeight: 800,
-              letterSpacing: '0.05em'
-            }}>
-              PRO v2.0
-            </span>
-          </div>
-          <div style={{ fontSize: '0.68rem', color: '#64748B', marginTop: 2, fontWeight: 500 }}>
-            Real-time multi-factor quantitative scanning • Live WebSocket ticks • 100% True Backtesting
-            {dataAsOf && (
-              <span style={{ color: '#94A3B8' }}> • Metrics as of <strong style={{ color: '#A5B4FC' }}>{dataAsOf}</strong></span>
-            )}
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+          <button type="button" onClick={onToggleFilters} style={btn(filtersOpen)}><Filter size={13} /> Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}</button>
+          <button type="button" onClick={onOpenSaveModal} style={btn(false)}><Save size={13} /> Save</button>
+          <button type="button" onClick={onExportCsv} style={btn(false)}><Download size={13} /> Export</button>
+          <button type="button" onClick={onCreateAlert} style={btn(false)}><Bell size={13} /> Alert</button>
+          <button type="button" onClick={onOpenBacktestModal} style={greenBtn}><Dices size={13} /> Backtest</button>
         </div>
       </div>
-
-      {/* Action Buttons */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <button
-          onClick={onToggleFilters}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '7px 14px',
-            borderRadius: 8,
-            background: filtersOpen ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.04)',
-            color: filtersOpen ? '#A5B4FC' : '#94A3B8',
-            border: filtersOpen ? '1px solid #6366F1' : '1px solid rgba(255, 255, 255, 0.08)',
-            cursor: 'pointer',
-            fontSize: '0.74rem',
-            fontWeight: 700,
-            transition: 'all 0.15s ease'
-          }}
-        >
-          <Filter size={14} /> Filter Drawer
-          <span style={{
-            background: '#6366F1',
-            color: '#FFF',
-            borderRadius: '50%',
-            width: 17,
-            height: 17,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '0.6rem',
-            fontWeight: 800
-          }}>
-            {queryMode === 'visual' ? '10' : '1'}
-          </span>
-        </button>
-
-        <button
-          onClick={onExportCsv}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '7px 13px',
-            borderRadius: 8,
-            background: 'rgba(255, 255, 255, 0.04)',
-            color: '#CBD5E1',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            cursor: 'pointer',
-            fontSize: '0.74rem',
-            fontWeight: 600,
-            transition: 'all 0.15s ease'
-          }}
-        >
-          <Download size={14} /> Export CSV
-        </button>
-
-        <button
-          onClick={onOpenSaveModal}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '7px 13px',
-            borderRadius: 8,
-            background: 'rgba(255, 255, 255, 0.04)',
-            color: '#CBD5E1',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            cursor: 'pointer',
-            fontSize: '0.74rem',
-            fontWeight: 600,
-            transition: 'all 0.15s ease'
-          }}
-        >
-          <Save size={14} /> Save Screen
-        </button>
-
-        <button
-          onClick={onOpenBacktestModal}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '7px 15px',
-            borderRadius: 8,
-            background: 'linear-gradient(135deg, #10B981, #059669)',
-            color: '#FFF',
-            border: 'none',
-            cursor: 'pointer',
-            fontSize: '0.74rem',
-            fontWeight: 800,
-            boxShadow: '0 2px 10px rgba(16, 185, 129, 0.3)',
-            transition: 'transform 0.15s ease'
-          }}
-        >
-          <Dices size={14} /> Backtest Strategy
-        </button>
+      <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={universe} onChange={(e) => onUniverseChange && onUniverseChange(e.target.value)} style={sel} title="Exchange universe">
+          {universes.map((u) => <option key={u} value={u}>{u}</option>)}
+        </select>
+        <select value="Equity" disabled style={{ ...sel, opacity: 0.7 }} title="Asset class"><option>Equity</option></select>
+        <input value={search} onChange={(e) => onSearch && onSearch(e.target.value)} placeholder="Search Symbol / Company" style={{ ...sel, minWidth: 190 }} />
+        <select value={refreshMode} onChange={(e) => onRefreshMode && onRefreshMode(e.target.value)} style={sel} title="Auto refresh">
+          {REFRESH_OPTIONS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+        </select>
+        <button type="button" onClick={onRefresh} disabled={loading} style={btn(false)}>{loading ? 'Scanning…' : 'Refresh'}</button>
       </div>
     </div>
   );
 }
+
+const btn = (active) => ({ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, background: active ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.04)', color: active ? '#A5B4FC' : '#CBD5E1', border: active ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.08)', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 700 });
+const greenBtn = { display: 'flex', alignItems: 'center', gap: 5, padding: '6px 13px', borderRadius: 8, background: 'linear-gradient(135deg, #10B981, #059669)', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 800 };
+const sel = { background: '#060913', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, padding: '5px 9px', color: '#F1F5F9', fontSize: '0.7rem', outline: 'none' };

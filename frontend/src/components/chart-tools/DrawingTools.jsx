@@ -7,7 +7,7 @@ import {
   RotateCcw, RotateCw, ArrowUpRight, ArrowDownRight, Layers
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import DrawingToolbar from './DrawingToolbar';
+import DrawingToolbar, { getToolbarWidth } from './DrawingToolbar';
 import DrawingShape from './DrawingShape';
 import {
   CURSOR_TOOLS,
@@ -18,20 +18,41 @@ import {
   getToolSpec,
   isExtendedTool,
   nextMagnetMode,
+  resolveShortcut,
 } from './drawingToolCatalog';
 import * as DG from '../../utils/drawingGeometry';
 
 const STORAGE_KEY = 'stockoracle_drawings_tv_v6';
 
-const FIBONACCI_LEVELS = [
-  { level: 0.0,   label: '0.0 (0%)',     color: '#787B86', fill: 'rgba(120,123,134,0.08)' },
-  { level: 0.236, label: '0.236 (23.6%)', color: '#EF5350', fill: 'rgba(239,83,80,0.12)' },
-  { level: 0.382, label: '0.382 (38.2%)', color: '#F59E0B', fill: 'rgba(245,158,11,0.12)' },
-  { level: 0.5,   label: '0.5 (50.0%)',   color: '#10B981', fill: 'rgba(16,185,129,0.12)' },
-  { level: 0.618, label: '0.618 (61.8%)', color: '#00E5FF', fill: 'rgba(0,229,255,0.12)' },
-  { level: 0.786, label: '0.786 (78.6%)', color: '#6366F1', fill: 'rgba(99,102,241,0.12)' },
-  { level: 1.0,   label: '1.0 (100%)',   color: '#A855F7', fill: 'rgba(168,85,247,0.12)' },
-];
+// Intervals that legacy per-interval drawing keys may exist for (v6 stored
+// `${STORAGE_KEY}_${symbol}_${interval}`). One-time merge moves them into the
+// shared per-symbol key so sketches appear on every timeframe.
+const LEGACY_INTERVALS = ['1s', '30s', '1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d', '1w', '1M'];
+
+/**
+ * Canonical millisecond timestamp for any bar-time shape in the app:
+ * epoch seconds (intraday candles) or 'YYYY-MM-DD' (daily IST market date).
+ * Used to match anchors across timeframes.
+ */
+function canonicalMs(t) {
+  if (t == null) return null;
+  if (typeof t === 'number') {
+    if (!Number.isFinite(t)) return null;
+    return t > 1e12 ? t : t * 1000; // epoch seconds (or ms) → ms
+  }
+  const s = String(t).trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const ms = Date.parse(`${s}T00:00:00Z`);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  const ms = Date.parse(s);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+// Single source of truth lives in drawingGeometry (FIB_LEVEL_STYLE) —
+// this alias keeps the legacy Fib renderer + preview on identical colors/labels.
+const FIBONACCI_LEVELS = DG.FIB_LEVEL_STYLE;
 
 const COLOR_PRESETS = ['#38BDF8', '#10B981', '#F59E0B', '#EF5350', '#A855F7', '#EC4899', '#FFFFFF', '#64748B'];
 
@@ -55,10 +76,10 @@ export default function DrawingTools({
 }) {
   const isCrypto = symbol ? (String(symbol).toUpperCase().startsWith('BTC') || String(symbol).toUpperCase().includes('BITCOIN') || String(symbol).toUpperCase().endsWith('USDT')) : false;
   const currSym = isCrypto ? '$' : '₹';
-  // Compact dimensions for mobile — 34px wide toolbar, 28×28 buttons, 13px icons
-  const toolbarWidth = isMobile ? 34 : 44;
-  const btnSize = isMobile ? 28 : 32;
-  const iconSize = isMobile ? 13 : 16;
+  // Toolbar dimensions synchronized with DrawingToolbar (46px desktop, 36px mobile)
+  const toolbarWidth = getToolbarWidth(isMobile);
+  const btnSize = isMobile ? 30 : 34;
+  const iconSize = isMobile ? 15 : 17;
 
 
   // Tool & State Management — activeTool is controlled by LiveChartView when the
@@ -97,6 +118,7 @@ export default function DrawingTools({
   const [clipboard, setClipboard] = useState(null); // single drawing copied via context menu / Ctrl+C
   const [contextMenu, setContextMenu] = useState(null); // { x, y, drawingId }
   const [showObjectTree, setShowObjectTree] = useState(false);
+  const [drawingSettingsId, setDrawingSettingsId] = useState(null); // drawing id with open settings modal
   const [surfaceSize, setSurfaceSize] = useState({ width: 0, height: 0 });
   const [hiddenIds, setHiddenIds] = useState(() => new Set()); // per-drawing visibility (TradingView eye toggle)
   const [textEdit, setTextEdit] = useState(null); // { id } — inline text editing via double-click
@@ -238,6 +260,22 @@ export default function DrawingTools({
     return m;
   }, [candles]);
 
+  // Canonical millisecond timestamp for any bar-time shape the app uses:
+  // epoch seconds (intraday) or 'YYYY-MM-DD' (daily, IST market date).
+  // A daily date maps to its UTC midnight — nearest-bar search below still
+  // lands on that session's first bar, since it is closer than any bar of
+  // the previous session.
+  const msIndex = useMemo(() => {
+    const arr = [];
+    if (Array.isArray(candles)) {
+      for (let i = 0; i < candles.length; i += 1) {
+        const ms = canonicalMs(candles[i]?.time);
+        if (ms != null) arr.push([ms, i]);
+      }
+    }
+    return arr; // ascending by construction — candles are time-sorted
+  }, [candles]);
+
   const timeForLogical = useCallback((logical) => {
     if (logical == null || !Array.isArray(candles) || candles.length === 0) return undefined;
     const idx = Math.round(Number(logical));
@@ -265,13 +303,36 @@ export default function DrawingTools({
 
   // Effective logical for rendering: time-map hit wins (scroll/pan/append
   // stable), stored logical is the fallback (off-chart sketches).
+  //
+  // ── Cross-timeframe resolution ──────────────────────────────────────────
+  // Drawings are shared across ALL intervals of a symbol (TradingView
+  // behavior). Bar `time` differs by interval (epoch seconds intraday vs
+  // 'YYYY-MM-DD' daily), so an exact time-map hit fails across intervals.
+  // Fall back to the nearest bar by canonical timestamp: price is
+  // interval-independent, and the bar identity only needs to land on the
+  // same session/day for the sketch to appear in the right place. The
+  // source-interval `frac` is dropped here — sub-bar offsets are meaningless
+  // in another interval's bar units.
   const resolvedLogical = useCallback((storedLogical, storedTime, storedFrac) => {
     if (storedTime != null && timeIndexMap.has(storedTime)) {
       const f = Number(storedFrac);
       return timeIndexMap.get(storedTime) + (Number.isFinite(f) ? f : 0);
     }
+    const ms = canonicalMs(storedTime);
+    if (ms != null && msIndex.length > 0) {
+      let lo = 0;
+      let hi = msIndex.length - 1;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (msIndex[mid][0] < ms) lo = mid + 1;
+        else hi = mid;
+      }
+      let best = lo;
+      if (lo > 0 && Math.abs(msIndex[lo - 1][0] - ms) <= Math.abs(msIndex[lo][0] - ms)) best = lo - 1;
+      return msIndex[best][1];
+    }
     return storedLogical;
-  }, [timeIndexMap]);
+  }, [timeIndexMap, msIndex]);
 
   // ── 2. True Magnet Snapping Engine ─────────────────────────────────────────
 
@@ -409,27 +470,52 @@ export default function DrawingTools({
   }, [chartRef]);
 
   // ── 4. History & Persistence ───────────────────────────────────────────────
-  // Drawings are namespaced per symbol + interval so switching symbols or
-  // timeframes never mixes objects. Selection, pending placement and history
-  // are reset together — otherwise a stale selected id could point at a
-  // drawing from another symbol's set.
+  // Drawings are namespaced per symbol and SHARED across all timeframes
+  // (TradingView behavior): a trendline drawn on 5m shows on 1d and vice
+  // versa, resolved through canonical timestamps (see resolvedLogical).
+  // Selection, pending placement and history reset on symbol switch —
+  // otherwise a stale selected id could point at another symbol's set.
   const storageKey = useMemo(
-    () => `${STORAGE_KEY}_${symbol}_${interval}`,
-    [symbol, interval],
+    () => `${STORAGE_KEY}_${symbol}`,
+    [symbol],
   );
 
   useEffect(() => {
-    const saved = localStorage.getItem(storageKey);
-    if (saved) {
-      try {
+    let loaded = null;
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
         const parsed = JSON.parse(saved);
-        setDrawings(Array.isArray(parsed) ? parsed : []);
-      } catch (_) {
-        setDrawings([]);
+        if (Array.isArray(parsed)) loaded = parsed;
       }
-    } else {
-      setDrawings([]);
+    } catch (_) {}
+    // One-time merge: fold legacy per-interval keys into the shared key so
+    // existing sketches are not lost and appear on every timeframe.
+    if (!loaded) {
+      const merged = [];
+      const seen = new Set();
+      for (const iv of LEGACY_INTERVALS) {
+        try {
+          const raw = localStorage.getItem(`${STORAGE_KEY}_${symbol}_${iv}`);
+          if (!raw) continue;
+          const arr = JSON.parse(raw);
+          if (!Array.isArray(arr)) continue;
+          for (const d of arr) {
+            const id = d && d.id;
+            if (id == null || seen.has(id)) continue;
+            seen.add(id);
+            merged.push(d);
+          }
+        } catch (_) {}
+      }
+      if (merged.length) {
+        loaded = merged;
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(merged));
+        } catch (_) {}
+      }
     }
+    setDrawings(loaded || []);
     setUndoStack([]);
     setRedoStack([]);
     setSelectedDrawingId(null);
@@ -604,6 +690,9 @@ export default function DrawingTools({
     if (e?.stopPropagation) e.stopPropagation();
     setSelectedDrawingId(drawingId);
     if (lockAllDrawings) return false;
+    // Per-drawing lock (TradingView): locked objects stay selectable so the
+    // toolbar/settings remain usable, but anchors cannot move.
+    if (drawingsRef.current.find((d) => d.id === drawingId)?.locked) return false;
     dragSnapshotRef.current = drawingsRef.current;
     bodyGestureRef.current = null; // fresh origin captured on first move frame
     setDraggingHandle(handle);
@@ -704,6 +793,16 @@ export default function DrawingTools({
       return null;
     }
   }, [chartRef]);
+
+  /** price → pixel y, used by regression trend and extended shape renderers. */
+  const priceToY = useCallback((price) => {
+    if (price == null || !candleRef?.current) return null;
+    try {
+      return candleRef.current.priceToCoordinate(Number(price)) ?? null;
+    } catch (_) {
+      return null;
+    }
+  }, [candleRef]);
 
   // Pane-locked overlay geometry: the SVG is sized to the main price pane
   // (not the whole terminal column), so its pixel space matches
@@ -1581,6 +1680,27 @@ export default function DrawingTools({
     toast.success('All drawings removed');
   };
 
+  // Patch fields of the currently selected drawing (style/text/flags) with
+  // history push so every toolbar/settings tweak is undoable.
+  const updateSelectedDrawing = useCallback((patch) => {
+    if (!selectedDrawingId) return;
+    const updated = drawingsRef.current.map((d) => (d.id === selectedDrawingId ? { ...d, ...patch } : d));
+    saveDrawingsWithHistory(updated, true);
+  }, [selectedDrawingId, saveDrawingsWithHistory]);
+
+  // Delete selected via toolbar (respects per-drawing lock like the Del key).
+  const deleteSelectedDrawing = useCallback(() => {
+    if (!selectedDrawingId) return;
+    if (drawingsRef.current.find((d) => d.id === selectedDrawingId)?.locked) {
+      toast.error('Unlock the drawing first');
+      return;
+    }
+    saveDrawingsWithHistory(drawingsRef.current.filter((d) => d.id !== selectedDrawingId), true);
+    setSelectedDrawingId(null);
+    setDrawingSettingsId(null);
+    toast.success('Deleted drawing');
+  }, [selectedDrawingId, saveDrawingsWithHistory]);
+
   // ── TradingView-style object behaviours ────────────────────────────────────
   const handleSelectTool = useCallback((toolId) => {
     const spec = getToolSpec(toolId);
@@ -1629,6 +1749,24 @@ export default function DrawingTools({
       if (isCursorMode(activeTool)) setChartLocked(false);
     }
   }, [activeTool, isCursorMode, setChartLocked]);
+
+  // Catalog Alt-shortcuts (Alt+T trendline, Alt+J h-line, …) activate the
+  // corresponding drawing tool. Alt-only (no Ctrl/Meta) and never while
+  // typing — so browser/OS chords and text fields are untouched. Placed
+  // after handleSelectTool so the dep array never hits a TDZ const.
+  useEffect(() => {
+    const onToolShortcut = (e) => {
+      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || document.activeElement?.isContentEditable) return;
+      const toolId = resolveShortcut(e.key, { alt: true, shift: !!e.shiftKey });
+      if (!toolId) return;
+      e.preventDefault();
+      handleSelectTool(toolId);
+    };
+    window.addEventListener('keydown', onToolShortcut);
+    return () => window.removeEventListener('keydown', onToolShortcut);
+  }, [handleSelectTool]);
 
   const handleCycleMagnet = useCallback(() => {
     const next = nextMagnetMode(magnetMode);
@@ -1764,6 +1902,10 @@ export default function DrawingTools({
           toast.error('Drawings are locked');
           return;
         }
+        if (drawingsRef.current.find((d) => d.id === selectedDrawingId)?.locked) {
+          toast.error('Unlock the drawing first');
+          return;
+        }
         saveDrawingsWithHistory(drawingsRef.current.filter((d) => d.id !== selectedDrawingId), true);
         setSelectedDrawingId(null);
         toast.success('Drawing deleted');
@@ -1820,7 +1962,6 @@ export default function DrawingTools({
 
   const selectedDrawing = drawings.find((d) => d.id === selectedDrawingId);
   const contextTarget = contextMenu ? drawings.find((d) => d.id === contextMenu.drawingId) : null;
-  const visibleDrawings = useMemo(() => drawings.filter((d) => !hiddenIds.has(d.id)), [drawings, hiddenIds]);
 
   // Registry preview anchors for the in-progress drawing — points-based shapes
   // use their live points directly; legacy start/end shapes are converted so
@@ -1865,36 +2006,78 @@ export default function DrawingTools({
       />
 
       {/* ── Selected Drawing Floating Context Action Toolbar ── */}
-      {selectedDrawing && isCursorMode(activeTool) && (
+      {/* TradingView-style: appears on ANY selection (any active tool), hidden
+          only while a placement/drag gesture is in progress. */}
+      {selectedDrawing && !isDrawing && !currentDraw && (pendingPoints?.length ?? 0) === 0 && (
         <div style={{
           position: 'absolute',
           top: 12,
           left: '50%',
           transform: 'translateX(-50%)',
-          backgroundColor: '#131722',
-          border: '1px solid #2962FF',
+          backgroundColor: 'var(--bg-card, #131722)',
+          border: '1px solid var(--border, #2962FF)',
           borderRadius: 8,
           padding: '4px 12px',
           display: 'flex',
           alignItems: 'center',
           gap: 10,
           zIndex: 60,
-          boxShadow: '0 12px 32px rgba(0,0,0,0.85)',
+          boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
           userSelect: 'none',
+          maxWidth: 'calc(100% - 24px)',
+          overflowX: 'auto',
         }}>
-          <span style={{ fontSize: '0.72rem', color: '#93C5FD', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            {selectedDrawing.type.replace('_', ' ')}
+          <span style={{ fontSize: '0.72rem', color: '#93C5FD', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+            {String(selectedDrawing.type || '').replace(/_/g, ' ')}
           </span>
+
+          {/* Visibility toggle */}
+          <button
+            onClick={() => {
+              setHiddenIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(selectedDrawingId)) next.delete(selectedDrawingId);
+                else next.add(selectedDrawingId);
+                return next;
+              });
+            }}
+            title={hiddenIds.has(selectedDrawingId) ? 'Show drawing' : 'Hide drawing'}
+            style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 2, display: 'flex' }}
+          >
+            {hiddenIds.has(selectedDrawingId) ? <EyeOff size={15} /> : <Eye size={15} />}
+          </button>
+
+          {/* Per-drawing lock */}
+          <button
+            onClick={() => updateSelectedDrawing({ locked: !selectedDrawing.locked })}
+            title={selectedDrawing.locked ? 'Unlock drawing' : 'Lock drawing (anchors cannot move)'}
+            style={{
+              background: selectedDrawing.locked ? 'rgba(245,158,11,0.15)' : 'transparent',
+              border: 'none', borderRadius: 4, color: selectedDrawing.locked ? '#F59E0B' : '#94A3B8',
+              cursor: 'pointer', padding: 3, display: 'flex',
+            }}
+          >
+            {selectedDrawing.locked ? <Lock size={15} /> : <Unlock size={15} />}
+          </button>
+
+          {/* Full settings */}
+          <button
+            onClick={() => setDrawingSettingsId(selectedDrawingId)}
+            title="Drawing settings"
+            style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 2, display: 'flex' }}
+          >
+            <Settings size={15} />
+          </button>
+
+          <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border, rgba(148,163,184,0.2))' }} />
 
           {/* Color Presets */}
           <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
             {COLOR_PRESETS.map((c) => (
               <div
                 key={c}
-                onClick={() => {
-                  const updated = drawings.map((d) => (d.id === selectedDrawingId ? { ...d, color: c } : d));
-                  saveDrawingsWithHistory(updated, true);
-                }}
+                onClick={() => updateSelectedDrawing({ color: c })}
+                title={c}
                 style={{
                   width: 16, height: 16, borderRadius: '50%', backgroundColor: c, cursor: 'pointer',
                   border: selectedDrawing.color === c ? '2px solid #FFF' : '1px solid rgba(255,255,255,0.2)',
@@ -1911,10 +2094,8 @@ export default function DrawingTools({
             {[1, 2, 3, 4].map((w) => (
               <button
                 key={w}
-                onClick={() => {
-                  const updated = drawings.map((d) => (d.id === selectedDrawingId ? { ...d, strokeWidth: w } : d));
-                  saveDrawingsWithHistory(updated, true);
-                }}
+                onClick={() => updateSelectedDrawing({ strokeWidth: w })}
+                title={`Width ${w}px`}
                 style={{
                   padding: '2px 6px', borderRadius: 4, border: 'none',
                   backgroundColor: selectedDrawing.strokeWidth === w ? '#2962FF' : '#2A2E39',
@@ -1931,10 +2112,8 @@ export default function DrawingTools({
             {['solid', 'dashed', 'dotted'].map((st) => (
               <button
                 key={st}
-                onClick={() => {
-                  const updated = drawings.map((d) => (d.id === selectedDrawingId ? { ...d, lineStyle: st } : d));
-                  saveDrawingsWithHistory(updated, true);
-                }}
+                onClick={() => updateSelectedDrawing({ lineStyle: st })}
+                title={`Style ${st}`}
                 style={{
                   padding: '2px 6px', borderRadius: 4, border: 'none',
                   backgroundColor: (selectedDrawing.lineStyle || 'solid') === st ? '#2962FF' : '#2A2E39',
@@ -1947,24 +2126,22 @@ export default function DrawingTools({
             ))}
           </div>
 
+          <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border, rgba(148,163,184,0.2))' }} />
+
           {/* Duplicate Button */}
           <button
             onClick={handleDuplicateSelected}
             title="Duplicate Drawing (Ctrl+D)"
-            style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 2 }}
+            style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 2, display: 'flex' }}
           >
             <Copy size={15} />
           </button>
 
           {/* Delete Button */}
           <button
-            onClick={() => {
-              saveDrawingsWithHistory(drawingsRef.current.filter((d) => d.id !== selectedDrawingId), true);
-              setSelectedDrawingId(null);
-              toast.success('Deleted drawing');
-            }}
+            onClick={deleteSelectedDrawing}
             title="Delete Drawing (Del)"
-            style={{ background: 'transparent', border: 'none', color: '#EF5350', cursor: 'pointer', padding: 2 }}
+            style={{ background: 'transparent', border: 'none', color: '#EF5350', cursor: 'pointer', padding: 2, display: 'flex' }}
           >
             <Trash2 size={15} />
           </button>
@@ -1973,12 +2150,153 @@ export default function DrawingTools({
           <button
             onClick={() => setSelectedDrawingId(null)}
             title="Close selection"
-            style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', padding: 2 }}
+            style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', padding: 2, display: 'flex' }}
           >
             <X size={15} />
           </button>
         </div>
       )}
+
+      {/* ── Drawing Settings Modal (TradingView-style per-object settings) ── */}
+      {drawingSettingsId && (() => {
+        const target = drawings.find((d) => d.id === drawingSettingsId);
+        if (!target) return null;
+        const patchTarget = (patch) => {
+          const updated = drawingsRef.current.map((d) => (d.id === drawingSettingsId ? { ...d, ...patch } : d));
+          saveDrawingsWithHistory(updated, true);
+        };
+        const isLineLike = ['trendline', 'ray', 'extended_line', 'info_line', 'trend_angle', 'arrow'].includes(target.type);
+        const hasText = target.text !== undefined;
+        const sectionTitle = { fontSize: '0.62rem', fontWeight: 800, color: '#64748B', letterSpacing: '0.06em', marginBottom: 6 };
+        const rowLabel = { fontSize: '0.7rem', color: '#CBD5E1', minWidth: 92 };
+        return (
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(3,7,18,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            onMouseDown={(e) => { if (e.target === e.currentTarget) setDrawingSettingsId(null); }}
+          >
+            <div style={{ width: 340, maxWidth: '92vw', maxHeight: '86vh', overflowY: 'auto', background: 'var(--bg-card, #0F172A)', border: '1px solid var(--border, rgba(99,102,241,0.3))', borderRadius: 12, padding: '16px 18px', boxShadow: '0 24px 60px rgba(0,0,0,0.6)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary, #F1F5F9)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  {String(target.type || '').replace(/_/g, ' ')} Settings
+                </span>
+                <button onClick={() => setDrawingSettingsId(null)} title="Close settings" style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', display: 'flex', padding: 2 }}>
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Style */}
+              <div style={{ marginBottom: 14 }}>
+                <div style={sectionTitle}>STYLE</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={rowLabel}>Color</span>
+                  <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+                    {COLOR_PRESETS.map((c) => (
+                      <div
+                        key={c}
+                        onClick={() => patchTarget({ color: c })}
+                        title={c}
+                        style={{
+                          width: 18, height: 18, borderRadius: '50%', backgroundColor: c, cursor: 'pointer',
+                          border: target.color === c ? '2px solid #FFF' : '1px solid rgba(255,255,255,0.2)',
+                        }}
+                      />
+                    ))}
+                    <input
+                      type="color"
+                      value={/^#[0-9a-fA-F]{6}$/.test(target.color || '') ? target.color : '#2962FF'}
+                      onChange={(e) => patchTarget({ color: e.target.value })}
+                      title="Custom color"
+                      style={{ width: 26, height: 22, padding: 0, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4, background: 'transparent', cursor: 'pointer' }}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={rowLabel}>Width</span>
+                  <input
+                    type="range" min={1} max={5} step={1}
+                    value={target.strokeWidth || 2}
+                    onChange={(e) => patchTarget({ strokeWidth: Number(e.target.value) })}
+                    style={{ flex: 1, accentColor: '#6366F1' }}
+                  />
+                  <span style={{ fontSize: '0.7rem', color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace', minWidth: 30, textAlign: 'right' }}>{target.strokeWidth || 2}px</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={rowLabel}>Line style</span>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    {['solid', 'dashed', 'dotted'].map((st) => (
+                      <button
+                        key={st}
+                        onClick={() => patchTarget({ lineStyle: st })}
+                        style={{
+                          padding: '3px 10px', borderRadius: 5, border: 'none',
+                          background: (target.lineStyle || 'solid') === st ? '#2962FF' : 'rgba(255,255,255,0.06)',
+                          color: '#FFF', fontSize: '0.66rem', fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
+                        }}
+                      >
+                        {st}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Text */}
+              {hasText && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={sectionTitle}>TEXT</div>
+                  <input
+                    type="text"
+                    value={target.text || ''}
+                    onChange={(e) => patchTarget({ text: e.target.value })}
+                    placeholder="Label text…"
+                    style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, padding: '6px 10px', color: '#F1F5F9', fontSize: '0.74rem', outline: 'none', boxSizing: 'border-box' }}
+                  />
+                </div>
+              )}
+
+              {/* Line extensions */}
+              {isLineLike && (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={sectionTitle}>LINE</div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.72rem', color: '#CBD5E1', marginBottom: 6, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={target.extendLeft ?? false} onChange={(e) => patchTarget({ extendLeft: e.target.checked })} style={{ accentColor: '#6366F1' }} />
+                    Extend left
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.72rem', color: '#CBD5E1', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={target.extendRight ?? false} onChange={(e) => patchTarget({ extendRight: e.target.checked })} style={{ accentColor: '#6366F1' }} />
+                    Extend right
+                  </label>
+                </div>
+              )}
+
+              {/* Object */}
+              <div style={{ marginBottom: 4 }}>
+                <div style={sectionTitle}>OBJECT</div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.72rem', color: '#CBD5E1', marginBottom: 6, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!!target.locked} onChange={(e) => patchTarget({ locked: e.target.checked })} style={{ accentColor: '#F59E0B' }} />
+                  Lock (anchors cannot move)
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.72rem', color: '#CBD5E1', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={!hiddenIds.has(target.id)}
+                    onChange={() => {
+                      setHiddenIds((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(target.id)) next.delete(target.id);
+                        else next.add(target.id);
+                        return next;
+                      });
+                    }}
+                    style={{ accentColor: '#6366F1' }}
+                  />
+                  Visible on chart
+                </label>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── High-Performance Interactive SVG Canvas ── */}
       {/* Pane-locked: height follows the main price pane so scroll/zoom maps 1:1.
@@ -2035,6 +2353,8 @@ export default function DrawingTools({
                     currency={currSym}
                     timeframeMs={timeframeMs}
                     toX={logicalToX}
+                    toY={priceToY}
+                    candles={candles}
                     selected={selectedDrawingId === d.id}
                     handlers={{
                       onBodyDown: (e) => startBodyDrag(e, d.id),
@@ -2427,6 +2747,11 @@ export default function DrawingTools({
               const h = Math.abs(pt2.y - pt1.y);
               const priceDelta = (d.startPrice != null && d.endPrice != null) ? d.endPrice - d.startPrice : dy * 0.45;
               const pricePercent = d.startPrice ? (priceDelta / d.startPrice) * 100 : (dy * 0.08);
+              // Bar count from anchored logical indices (zoom-independent);
+              // pixel guess is only a fallback for legacy drawings w/o anchors.
+              const rulerBars = (d.startLogical != null && d.endLogical != null)
+                ? Math.max(1, Math.round(Math.abs(d.endLogical - d.startLogical)))
+                : Math.max(1, Math.round(dx / 8));
 
               return (
                 <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: 'pointer' }}>
@@ -2438,7 +2763,7 @@ export default function DrawingTools({
                     strokeDasharray="3,3"
                   />
                   <text x={x + 6} y={y + 14} fill="#FFF" fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace">
-                    {priceDelta >= 0 ? '+' : ''}{priceDelta.toFixed(2)} ({pricePercent.toFixed(2)}%) · {Math.max(1, Math.round(dx / 8))} bars
+                    {priceDelta >= 0 ? '+' : ''}{priceDelta.toFixed(2)} ({pricePercent.toFixed(2)}%) · {rulerBars} bars
                   </text>
                 </g>
               );
@@ -2496,6 +2821,8 @@ export default function DrawingTools({
                     currency={currSym}
                     timeframeMs={timeframeMs}
                     toX={logicalToX}
+                    toY={priceToY}
+                    candles={candles}
                     selected={false}
                     handlers={{}}
                     onHandleDown={() => {}}
@@ -2544,6 +2871,30 @@ export default function DrawingTools({
                   stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4"
                 />
               )}
+              {currentDraw.type === 'parallel_channel' && (() => {
+                const cWidth = currentDraw.channelWidth || 35;
+                const pdx = currentDraw.endX - currentDraw.startX;
+                const pdy = currentDraw.endY - currentDraw.startY;
+                const pAngle = Math.atan2(pdy, pdx) - Math.PI / 2;
+                const pOffX = Math.cos(pAngle) * cWidth;
+                const pOffY = Math.sin(pAngle) * cWidth;
+                return (
+                  <g stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4">
+                    <line
+                      x1={currentDraw.startX + pOffX} y1={currentDraw.startY + pOffY}
+                      x2={currentDraw.endX + pOffX} y2={currentDraw.endY + pOffY}
+                    />
+                    <line
+                      x1={currentDraw.startX} y1={currentDraw.startY}
+                      x2={currentDraw.endX} y2={currentDraw.endY}
+                    />
+                    <line
+                      x1={currentDraw.startX - pOffX} y1={currentDraw.startY - pOffY}
+                      x2={currentDraw.endX - pOffX} y2={currentDraw.endY - pOffY}
+                    />
+                  </g>
+                );
+              })()}
               {currentDraw.type === 'horizontal_line' && (
                 <line
                   x1={0} y1={currentDraw.startY}
@@ -2630,7 +2981,7 @@ export default function DrawingTools({
       {textInputPos && (
         <div style={{
           position: 'absolute',
-          left: textInputPos.x + 44,
+          left: textInputPos.x + (isOpen ? toolbarWidth : 0),
           top: textInputPos.y,
           zIndex: 60,
           background: '#131722',
@@ -2683,7 +3034,7 @@ export default function DrawingTools({
       {showStickerMenu && stickerPos && (
         <div style={{
           position: 'absolute',
-          left: stickerPos.x + 44,
+          left: stickerPos.x + (isOpen ? toolbarWidth : 0),
           top: stickerPos.y,
           zIndex: 60,
           background: '#131722',
@@ -2779,15 +3130,15 @@ export default function DrawingTools({
           boxShadow: '0 16px 40px rgba(0,0,0,0.7)',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span style={{ color: '#7DD3FC', fontSize: 11, fontWeight: 800, letterSpacing: 0.4 }}>OBJECTS ({visibleDrawings.length})</span>
+            <span style={{ color: '#7DD3FC', fontSize: 11, fontWeight: 800, letterSpacing: 0.4 }}>OBJECTS ({drawings.length})</span>
             <button type="button" onClick={() => setShowObjectTree(false)} style={{ background: 'transparent', border: 0, color: '#64748B', cursor: 'pointer', padding: 0 }}>
               <X size={14} />
             </button>
           </div>
-          {visibleDrawings.length === 0 ? (
+          {drawings.length === 0 ? (
             <div style={{ color: '#475569', fontSize: 11, textAlign: 'center', padding: '14px 0' }}>No objects yet</div>
           ) : (
-            visibleDrawings.map((d) => (
+            drawings.map((d) => (
               <div
                 key={d.id}
                 onClick={() => setSelectedDrawingId(d.id)}
@@ -2799,11 +3150,12 @@ export default function DrawingTools({
                   borderRadius: 5,
                   cursor: 'pointer',
                   background: d.id === selectedDrawingId ? 'rgba(41,98,255,0.18)' : 'transparent',
+                  opacity: hiddenIds.has(d.id) ? 0.45 : 1,
                 }}
               >
                 <span style={{ width: 9, height: 9, borderRadius: '50%', background: d.color || '#38BDF8', flexShrink: 0 }} />
                 <span style={{ flex: 1, fontSize: 11, color: '#CBD5E1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {getToolSpec(d.type)?.label || d.type.replace('_', ' ')}
+                  {getToolSpec(d.type)?.label || (d.type === 'sticker' ? 'Stickers & Emoji' : d.type.replace('_', ' '))}
                 </span>
                 <button
                   type="button"

@@ -3,6 +3,7 @@ backend/.env
 .env
 .env.local
 *.pem
+backend/.vault_dev.key
 
 # Python
 __pycache__/

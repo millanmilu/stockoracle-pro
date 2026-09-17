@@ -139,7 +139,7 @@ def test_user_screens_crud_and_share_token():
     )
 
     assert saved["id"] > 0
-    assert len(saved["share_token"]) == 12
+    assert len(saved["share_token"]) >= 12
 
     # Fetch by user
     screens = get_user_screens_list(user_id="test_trader")

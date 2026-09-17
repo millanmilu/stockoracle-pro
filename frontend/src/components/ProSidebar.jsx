@@ -104,8 +104,8 @@ export default function ProSidebar({ collapsed, onToggleCollapse }) {
           </div>
         ))}
       </div>
-      <div style={{ padding: '10px', borderTop: '1px solid rgba(99,102,241,0.1)', display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end' }}>
-        <button onClick={onToggleCollapse} style={{ background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 4 }}>
+      <div style={{ padding: '10px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end' }}>
+        <button onClick={onToggleCollapse} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 4 }}>
           {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
         </button>
       </div>

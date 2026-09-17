@@ -36,8 +36,8 @@ from backend.data.database import (
 # Clean any 1-row or partial fragment rows from historical_prices
 try:
     purge_stale_partial_history(5)
-except Exception:
-    pass
+except Exception as exc:
+    logger.debug("Startup partial-history purge skipped: %s", exc)
 
 
 
@@ -402,6 +402,11 @@ ALIAS_TOKEN_MAP = {
     "NIFTY50": {"symbol": "NIFTY", "token": "26000", "exch_seg": "NSE", "name": "NIFTY 50"},
     "NIFTY_50": {"symbol": "NIFTY", "token": "26000", "exch_seg": "NSE", "name": "NIFTY 50"},
     "NIFTY-50": {"symbol": "NIFTY", "token": "26000", "exch_seg": "NSE", "name": "NIFTY 50"},
+    # Renamed equity symbols — old tickers kept working for screener universe,
+    # watchlists and chart search (tokens verified against Angel ScripMaster).
+    "HUL": {"symbol": "HINDUNILVR-EQ", "token": "1394", "exch_seg": "NSE", "name": "Hindustan Unilever Ltd"},
+    "HINDUNI": {"symbol": "HINDUNILVR-EQ", "token": "1394", "exch_seg": "NSE", "name": "Hindustan Unilever Ltd"},
+    "ZOMATO": {"symbol": "ETERNAL-EQ", "token": "5097", "exch_seg": "NSE", "name": "Eternal Ltd"},
 }
 
 
@@ -425,8 +430,8 @@ def get_token_info(ticker: str) -> Optional[dict]:
                 info = db_row
                 _scrip_map[key] = info
                 _scrip_map[t] = info
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("stock_universe token lookup failed for %s: %s", t, exc)
 
     if not info and _scrip_map_failed:
         _load_scrip_master(force=True)
@@ -539,8 +544,8 @@ def fetch_crypto_data(ticker: str, period: str = "ALL", interval: str = "1d") ->
                     intra_db.attrs["data_source"] = "sqlite"
                     _set_cached(cache_key, intra_db, ttl_seconds=tolerance_sec // 2 or 2)
                     return intra_db
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("Intraday cache freshness check failed for %s: %s", ticker, exc)
 
     # 2. Fetch from Binance public klines API
     binance_interval_map = {

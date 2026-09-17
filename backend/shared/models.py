@@ -5,9 +5,9 @@ Compatible with PostgreSQL / TimescaleDB and SQLite.
 from datetime import datetime, timezone
 from sqlalchemy import (
     Column, String, Integer, Float, BigInteger, Text, DateTime, Boolean,
-    Index, UniqueConstraint, PrimaryKeyConstraint, func
+    Index, UniqueConstraint, PrimaryKeyConstraint, func, CheckConstraint
 )
-from sqlalchemy.orm import declarative_base
+from sqlalchemy.orm import declarative_base, validates
 
 Base = declarative_base()
 
@@ -30,7 +30,33 @@ class HistoricalPrice(Base):
 
     __table_args__ = (
         Index("idx_hist_ticker_date", "ticker", "date"),
+        CheckConstraint("length(date) = 10", name="ck_hist_date_len"),
+        CheckConstraint("open > 0", name="ck_hist_open_pos"),
+        CheckConstraint("high > 0", name="ck_hist_high_pos"),
+        CheckConstraint("low > 0", name="ck_hist_low_pos"),
+        CheckConstraint("close > 0", name="ck_hist_close_pos"),
+        CheckConstraint("low <= open AND low <= close", name="ck_hist_low_le"),
+        CheckConstraint("high >= open AND high >= close", name="ck_hist_high_ge"),
+        CheckConstraint("volume >= 0", name="ck_hist_vol_nonneg"),
     )
+
+    @validates("date")
+    def _validate_date(self, key, value):
+        import re as _re
+        v = str(value or "").strip()
+        if not _re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+            raise ValueError(f"HistoricalPrice.date must be YYYY-MM-DD, got {value!r}")
+        return v
+
+    @validates("open", "high", "low", "close")
+    def _validate_price(self, key, value):
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"HistoricalPrice.{key} must be numeric, got {value!r}")
+        if not (v > 0):
+            raise ValueError(f"HistoricalPrice.{key} must be > 0, got {value!r}")
+        return v
 
 
 class StockUniverse(Base):
@@ -325,6 +351,64 @@ class ScreenerDailyMetric(Base):
     sma_50 = Column(Float, nullable=True)
     sma_200 = Column(Float, nullable=True)
     volume_ratio_20d = Column(Float, nullable=True, index=True)
+    # ── Institutional extension (all nullable; backfilled by screener pipeline) ──
+    ema_9 = Column(Float, nullable=True)
+    ema_20 = Column(Float, nullable=True)
+    ema_50 = Column(Float, nullable=True)
+    ema_200 = Column(Float, nullable=True)
+    adx_14 = Column(Float, nullable=True, index=True)
+    atr_pct = Column(Float, nullable=True)
+    bb_width_pct = Column(Float, nullable=True)
+    bb_position = Column(Float, nullable=True)
+    stoch_k = Column(Float, nullable=True)
+    stoch_d = Column(Float, nullable=True)
+    cci_20 = Column(Float, nullable=True)
+    roc_12 = Column(Float, nullable=True)
+    williams_r = Column(Float, nullable=True)
+    macd_hist = Column(Float, nullable=True)
+    macd_crossover = Column(String(30), nullable=True)
+    supertrend_dir = Column(Float, nullable=True)
+    vwap_dist_pct = Column(Float, nullable=True)
+    hist_vol_20 = Column(Float, nullable=True)
+    high_52w = Column(Float, nullable=True)
+    low_52w = Column(Float, nullable=True)
+    pos_52w_pct = Column(Float, nullable=True, index=True)
+    # Market structure (deterministic rule output, never AI-invented)
+    structure_label = Column(String(40), nullable=True, index=True)
+    trend_hint = Column(String(20), nullable=True, index=True)
+    support_price = Column(Float, nullable=True)
+    resistance_price = Column(Float, nullable=True)
+    breakout_52w_high = Column(Integer, nullable=True, default=0)
+    breakdown_52w_low = Column(Integer, nullable=True, default=0)
+    resistance_breakout = Column(Integer, nullable=True, default=0)
+    support_breakdown = Column(Integer, nullable=True, default=0)
+    volume_breakout = Column(Integer, nullable=True, default=0)
+    breakout_strength = Column(Float, nullable=True)
+    retest_status = Column(String(20), nullable=True)
+    consolidation = Column(Integer, nullable=True, default=0)
+    liquidity_sweep = Column(String(20), nullable=True)
+    # Momentum / regime
+    momentum_state = Column(String(20), nullable=True, index=True)
+    ema_alignment = Column(String(30), nullable=True, index=True)
+    market_regime = Column(String(30), nullable=True, index=True)
+    regime_confidence = Column(Float, nullable=True)
+    # Relative strength (None when benchmark unavailable — never synthesised)
+    rs_vs_nifty_pct = Column(Float, nullable=True)
+    rs_vs_sector_pct = Column(Float, nullable=True)
+    # Confluence + transparent AI sub-scores
+    confluence_score = Column(Float, nullable=True, index=True)
+    ai_trend_score = Column(Float, nullable=True)
+    ai_momentum_score = Column(Float, nullable=True)
+    ai_volatility_score = Column(Float, nullable=True)
+    ai_pattern_score = Column(Float, nullable=True)
+    # Sentiment (neutral/None when feed unavailable)
+    sentiment_score = Column(Float, nullable=True)
+    sentiment_label = Column(String(30), nullable=True)
+    news_count = Column(Integer, nullable=True, default=0)
+    # Traceability
+    why_json = Column(Text, nullable=True)
+    confluence_json = Column(Text, nullable=True)
+    data_status = Column(String(20), nullable=True, default="OK")
 
     # Fundamentals
     pe_ratio = Column(Float, nullable=True, index=True)

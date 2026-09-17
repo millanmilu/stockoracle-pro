@@ -638,8 +638,8 @@ def extract_json_from_ai_response(raw_text: str) -> Optional[Dict[str, Any]]:
                 parsed = json.loads(inner)
                 if isinstance(parsed, dict):
                     return parsed
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug("AI JSON fence-parse failed: %s", exc)
 
     # 2. Search for outermost { ... }
     start = s.find("{")
@@ -650,15 +650,15 @@ def extract_json_from_ai_response(raw_text: str) -> Optional[Dict[str, Any]]:
             parsed = json.loads(candidate)
             if isinstance(parsed, dict):
                 return parsed
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("AI JSON brace-parse failed: %s", exc)
 
     # 3. Direct parse attempt
     try:
         parsed = json.loads(s)
         if isinstance(parsed, dict):
             return parsed
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("AI JSON direct-parse failed: %s", exc)
 
     return None

@@ -139,4 +139,4 @@ echo "============================================================"
 REMOTE
 )
 
-ssh -F /dev/null -o StrictHostKeyChecking=no -i "$SSH_KEY" "$USER_HOST" "$REMOTE_CMD"
+ssh -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$USER_HOST" "$REMOTE_CMD"

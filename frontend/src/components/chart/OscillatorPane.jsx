@@ -2,6 +2,8 @@ import React, { useEffect, useRef, forwardRef, useImperativeHandle, useCallback,
 import { createChart, CrosshairMode } from 'lightweight-charts';
 import { Eye, EyeOff, X } from 'lucide-react';
 import { calculateById } from '../../utils/indicatorEngine';
+import useStore from '../../store/useStore';
+import { getChartBaseOptions, getThemeTokens } from '../../utils/theme';
 
 /**
  * OscillatorPane — Universal Sub-Pane for All Oscillator Types
@@ -149,7 +151,21 @@ export default forwardRef(function OscillatorPane({
   const syncedHairRef  = useRef(null);
   const isHoveringRef  = useRef(false);
   const candlesRef     = useRef(candles);
+  const theme = useStore(s => s.theme);
+  const tk = getThemeTokens(theme);
   const cfg = OSC_CONFIG[oscType] || OSC_CONFIG.rsi;
+
+  useEffect(() => {
+    try {
+      const base = getChartBaseOptions(theme);
+      chartRef.current?.applyOptions({
+        layout: { background: { type: 'solid', color: 'transparent' }, textColor: base.layout.textColor },
+        grid: base.grid,
+        rightPriceScale: { borderColor: base.rightPriceScale.borderColor, textColor: base.rightPriceScale.textColor },
+        timeScale: { borderColor: base.timeScale.borderColor, textColor: base.timeScale.textColor },
+      });
+    } catch {}
+  }, [theme]);
 
   // DOM refs for zero-latency legend updates
   const val1Ref  = useRef(null);
@@ -250,11 +266,12 @@ export default forwardRef(function OscillatorPane({
   useEffect(() => {
     if (!containerRef.current) return;
 
+    const base = getChartBaseOptions(theme);
     const chart = createChart(containerRef.current, {
       height: 130,
-      layout: { background: { type: 'solid', color: '#090C16' }, textColor: '#64748B', fontFamily: '"JetBrains Mono", monospace', fontSize: 10 },
-      grid: { vertLines: { color: 'rgba(99,102,241,0.04)', style: 1 }, horzLines: { color: 'rgba(99,102,241,0.06)' } },
-      rightPriceScale: { borderColor: 'rgba(99,102,241,0.12)', textColor: '#64748B', scaleMargins: { top: 0.12, bottom: 0.12 }, autoScale: true, alignLabels: true, minimumWidth: 72 },
+      layout: { background: { type: 'solid', color: 'transparent' }, textColor: base.layout.textColor, fontFamily: '"JetBrains Mono", monospace', fontSize: 10 },
+      grid: base.grid,
+      rightPriceScale: { borderColor: base.rightPriceScale.borderColor, textColor: base.rightPriceScale.textColor, scaleMargins: { top: 0.12, bottom: 0.12 }, autoScale: true, alignLabels: true, minimumWidth: 72 },
       timeScale: { visible: false, borderColor: 'rgba(99,102,241,0.12)', lockVisibleTimeRangeOnResize: true, rightOffset: 12, barSpacing: 9, minBarSpacing: 0.5, shiftVisibleRangeOnNewBar: false },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' }, horzLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' } },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
@@ -384,13 +401,17 @@ export default forwardRef(function OscillatorPane({
     } catch {}
   }, [seriesData, oscType, isHidden, resetLegendToLatest]);
 
-  // Legend HUD content based on oscType
+  // Legend HUD content based on oscType — labels use theme-aware muted tone
+  // (hardcoded slate-400 #94A3B8 is unreadable on white in light mode).
+  const labelColor = tk.legendMuted;
+  const subLabelColor = theme === 'light' ? '#475569' : '#64748B';
+  const subLabel = { color: subLabelColor, fontSize: '0.62rem' };
   const renderLegend = () => {
     const dot = <div style={{ width: 7, height: 7, borderRadius: '50%', backgroundColor: cfg.color, flexShrink: 0 }} />;
     const single = (showDot = true) => (
       <>
         {showDot && dot}
-        <span style={{ fontWeight: 700, color: '#94A3B8' }}>{cfg.label}</span>
+        <span style={{ fontWeight: 700, color: labelColor }}>{cfg.label}</span>
         <span ref={val1Ref} style={{ fontWeight: 800, color: cfg.color, minWidth: 40 }}>—</span>
       </>
     );
@@ -401,29 +422,29 @@ export default forwardRef(function OscillatorPane({
     if (oscType === 'macd') {
       return <>
         {dot}
-        <span style={{ fontWeight: 700, color: '#94A3B8' }}>MACD</span>
-        <span style={{ color: '#64748B', fontSize: '0.62rem' }}>MACD:</span>
+        <span style={{ fontWeight: 700, color: labelColor }}>MACD</span>
+        <span style={subLabel}>MACD:</span>
         <strong ref={val1Ref} style={{ color: '#06B6D4' }}>—</strong>
-        <span style={{ color: '#64748B', fontSize: '0.62rem' }}>Sig:</span>
+        <span style={subLabel}>Sig:</span>
         <strong ref={val2Ref} style={{ color: '#F97316' }}>—</strong>
-        <span style={{ color: '#64748B', fontSize: '0.62rem' }}>H:</span>
+        <span style={subLabel}>H:</span>
         <strong ref={val3Ref} style={{ color: '#26A69A' }}>—</strong>
       </>;
     }
     if (oscType === 'stoch' || oscType === 'stoch_rsi') {
       return <>
         {dot}
-        <span style={{ fontWeight: 700, color: '#94A3B8' }}>{cfg.label}</span>
-        <span style={{ color: '#64748B', fontSize: '0.62rem' }}>%K:</span>
+        <span style={{ fontWeight: 700, color: labelColor }}>{cfg.label}</span>
+        <span style={subLabel}>%K:</span>
         <strong ref={val1Ref} style={{ color: cfg.color }}>—</strong>
-        <span style={{ color: '#64748B', fontSize: '0.62rem' }}>%D:</span>
+        <span style={subLabel}>%D:</span>
         <strong ref={val2Ref} style={{ color: '#F97316' }}>—</strong>
       </>;
     }
     if (oscType === 'adx') {
       return <>
         {dot}
-        <span style={{ fontWeight: 700, color: '#94A3B8' }}>ADX</span>
+        <span style={{ fontWeight: 700, color: labelColor }}>ADX</span>
         <span ref={val1Ref} style={{ fontWeight: 800, color: '#FBBF24', minWidth: 28 }}>—</span>
         <span style={{ color: '#10B981', fontSize: '0.62rem' }}>+DI</span>
         <strong ref={val2Ref} style={{ color: '#10B981' }}>—</strong>
@@ -434,10 +455,10 @@ export default forwardRef(function OscillatorPane({
     if (oscType === 'elder_ray') {
       return <>
         {dot}
-        <span style={{ fontWeight: 700, color: '#94A3B8' }}>Elder Ray</span>
-        <span style={{ color: '#64748B', fontSize: '0.62rem' }}>Bull:</span>
+        <span style={{ fontWeight: 700, color: labelColor }}>Elder Ray</span>
+        <span style={subLabel}>Bull:</span>
         <strong ref={val1Ref} style={{ color: '#10B981' }}>—</strong>
-        <span style={{ color: '#64748B', fontSize: '0.62rem' }}>Bear:</span>
+        <span style={subLabel}>Bear:</span>
         <strong ref={val2Ref} style={{ color: '#EF5350' }}>—</strong>
       </>;
     }
@@ -447,7 +468,7 @@ export default forwardRef(function OscillatorPane({
 
   return (
     <div
-      style={{ position: 'relative', width: '100%', height: 130, backgroundColor: '#090C16', borderTop: '1px solid rgba(99,102,241,0.18)', flexShrink: 0 }}
+      style={{ position: 'relative', width: '100%', height: 130, backgroundColor: tk.paneBg, borderTop: `1px solid ${tk.paneBorder}`, flexShrink: 0 }}
       onMouseLeave={() => {
         isHoveringRef.current = false;
         if (syncedHairRef.current) syncedHairRef.current.style.display = 'none';
@@ -459,9 +480,9 @@ export default forwardRef(function OscillatorPane({
       <div ref={syncedHairRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, borderLeft: '1px dashed rgba(129,140,248,0.45)', pointerEvents: 'none', display: 'none', zIndex: 14 }} />
 
       {/* Legend HUD */}
-      <div style={{ position: 'absolute', top: 5, left: 10, zIndex: 15, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px', borderRadius: 4, backgroundColor: 'rgba(11,15,28,0.88)', backdropFilter: 'blur(6px)', border: '1px solid rgba(255,255,255,0.06)', fontSize: '0.68rem', fontFamily: 'JetBrains Mono, monospace', color: isHidden ? '#64748B' : '#E2E8F0', opacity: isHidden ? 0.6 : 1 }}>
+      <div style={{ position: 'absolute', top: 5, left: 10, zIndex: 15, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px', borderRadius: 4, backgroundColor: tk.legendBg, backdropFilter: 'blur(6px)', border: `1px solid ${tk.legendBorder}`, fontSize: '0.68rem', fontFamily: 'JetBrains Mono, monospace', color: isHidden ? '#64748B' : tk.legendText, opacity: isHidden ? 0.6 : 1 }}>
         {renderLegend()}
-        <button onClick={(e) => { e.stopPropagation(); onToggleHide(oscType); }} title={isHidden ? 'Show' : 'Hide'} style={{ background: 'transparent', border: 'none', color: isHidden ? '#64748B' : '#94A3B8', cursor: 'pointer', padding: 1, display: 'flex', alignItems: 'center', borderRadius: 2, marginLeft: 2 }} onMouseEnter={e => e.currentTarget.style.color='#F1F5F9'} onMouseLeave={e => e.currentTarget.style.color=isHidden ? '#64748B' : '#94A3B8'}>
+        <button onClick={(e) => { e.stopPropagation(); onToggleHide(oscType); }} title={isHidden ? 'Show' : 'Hide'} style={{ background: 'transparent', border: 'none', color: isHidden ? '#64748B' : tk.legendMuted, cursor: 'pointer', padding: 1, display: 'flex', alignItems: 'center', borderRadius: 2, marginLeft: 2 }} onMouseEnter={e => e.currentTarget.style.color=theme === 'light' ? '#0F172A' : '#F1F5F9'} onMouseLeave={e => e.currentTarget.style.color=isHidden ? '#64748B' : tk.legendMuted}>
           {isHidden ? <EyeOff size={11} /> : <Eye size={11} />}
         </button>
         <button onClick={(e) => { e.stopPropagation(); onClose(oscType); }} style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', padding: 1, display: 'flex', alignItems: 'center', borderRadius: 2 }} title={`Close ${oscType.toUpperCase()} pane`} onMouseEnter={e => e.currentTarget.style.color='#EF5350'} onMouseLeave={e => e.currentTarget.style.color='#64748B'}>

@@ -8,8 +8,10 @@ from urllib.parse import quote_plus
 from urllib.request import Request as UrllibRequest, urlopen
 import xml.etree.ElementTree as ET
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Security
 from pydantic import BaseModel, Field
+
+from backend.shared.security import verify_api_key
 
 from backend.data.fetcher import fetch_stock_data, get_token_info
 from backend.analysis.indicators import enrich_stock_dataframe
@@ -19,7 +21,11 @@ from backend.api._guards import require_real_data
 
 logger = logging.getLogger("StockOracle.API.AIChat")
 
-router = APIRouter(prefix="/api", tags=["AI Chat & LLM Intelligence"])
+router = APIRouter(
+    prefix="/api",
+    tags=["AI Chat & LLM Intelligence"],
+    dependencies=[Security(verify_api_key)],
+)
 
 
 class ChatRequest(BaseModel):

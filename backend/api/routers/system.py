@@ -41,7 +41,7 @@ def health_check():
 
 
 @router.get("/api/db/status")
-def db_status_endpoint():
+def db_status_endpoint(_auth: None = Security(verify_api_key)):
     """Returns row counts and storage metrics for all core database tables."""
     return get_db_stats()
 

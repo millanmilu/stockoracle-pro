@@ -3,7 +3,13 @@ StockOracle Pro — Celery Application Instance & Task Registry
 """
 import os
 import logging
-from celery import Celery
+try:
+    from celery import Celery
+except ImportError as exc:
+    raise ImportError(
+        "celery is required for background workers "
+        "(pip install -r backend/requirements.txt)."
+    ) from exc
 from backend.shared.config import settings
 
 logger = logging.getLogger("StockOracle.Celery")

@@ -14,19 +14,36 @@ export default function ScreenerBulkBar({
 
   const handleBulkPaperTrade = async () => {
     toast.loading(`Placing market buy orders for ${selectedCount} stocks...`, { id: 'bulk-trade' });
+    const priceByTicker = new Map(
+      (allResults || []).map(r => [r.ticker, Number(r.close_price ?? r.price) || 0])
+    );
     let success = 0;
+    const failed = [];
     for (const ticker of selectedTickers) {
       try {
+        const price = priceByTicker.get(ticker) || 0;
+        if (!price || price <= 0) {
+          failed.push(`${ticker} (no price)`);
+          continue;
+        }
         await api.post('/api/paper/order', {
           ticker,
-          side: 'BUY',
-          quantity: 5,
           order_type: 'MARKET',
+          action: 'BUY',
+          shares: 5,
+          price,
+          notes: `Screener bulk buy`,
         });
         success++;
-      } catch (e) {}
+      } catch (e) {
+        failed.push(`${ticker} (${e.response?.data?.detail || 'rejected'})`);
+      }
     }
-    toast.success(`Executed ${success}/${selectedCount} paper trades!`, { id: 'bulk-trade' });
+    if (failed.length > 0) {
+      toast.error(`Executed ${success}/${selectedCount}. Failed: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? ` +${failed.length - 3} more` : ''}`, { id: 'bulk-trade' });
+    } else {
+      toast.success(`Executed ${success}/${selectedCount} paper trades!`, { id: 'bulk-trade' });
+    }
   };
 
   const handleSaveToWatchlist = () => {

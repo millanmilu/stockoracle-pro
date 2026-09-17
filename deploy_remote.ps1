@@ -123,5 +123,5 @@ echo "  Amplify:  https://main.d3qrmvw6hu9g61.amplifyapp.com"
 echo "============================================================"
 "@
 
-# 3. Execute via SSH
-ssh -F /dev/null -o StrictHostKeyChecking=no -i "$sshKey" "$userHost" "$remoteCommand"
+# 3. Execute via SSH (pinned known_hosts; first connect prompts to accept the host key)
+ssh -i "$sshKey" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$HOME/.ssh/known_hosts" "$userHost" "$remoteCommand"

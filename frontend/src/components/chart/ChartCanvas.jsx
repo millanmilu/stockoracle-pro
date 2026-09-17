@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useMemo } from 'react';
 import { createChart, CrosshairMode, PriceScaleMode } from 'lightweight-charts';
 import { Eye, EyeOff, X } from 'lucide-react';
-import { CHART_OPTIONS, CANDLE_STYLE, isCryptoSymbol, subscribeLiveTick } from '../../utils/chartHelpers';
+import { CHART_OPTIONS, CANDLE_STYLE, isCryptoSymbol } from '../../utils/chartHelpers';
+import { getChartBaseOptions, getThemeTokens, applyChartTheme } from '../../utils/theme';
+import useStore from '../../store/useStore';
 import { INDICATOR_DEFINITIONS } from './indicatorDefinitions';
 import { calculateById } from '../../utils/indicatorEngine';
 import { detectSMC } from '../../utils/marketStructure';
@@ -240,9 +242,16 @@ const ChartCanvas = forwardRef(function ChartCanvas({
 
   const isHoveringRef = useRef(false);
   const candlesRef = useRef(candles);
+  const theme = useStore(s => s.theme);
+  const tk = getThemeTokens(theme);
   useEffect(() => {
     candlesRef.current = candles;
   }, [candles]);
+
+  // Live-apply light/dark colors without recreating the chart (preserves zoom/scroll)
+  useEffect(() => {
+    if (chartInstanceRef.current) applyChartTheme(chartInstanceRef.current, theme);
+  }, [theme]);
 
 
   // Filter active indicators to only include overlays (not oscillators which live in sub-panes),
@@ -477,8 +486,11 @@ const ChartCanvas = forwardRef(function ChartCanvas({
 
     containerRef.current.innerHTML = '';
 
+    const themeOpts = getChartBaseOptions(theme);
     const chart = createChart(containerRef.current, {
       ...CHART_OPTIONS,
+      ...themeOpts,
+      rightPriceScale: { ...CHART_OPTIONS.rightPriceScale, ...themeOpts.rightPriceScale },
       width: containerRef.current.clientWidth || 800,
       height: containerRef.current.clientHeight || 500,
       crosshair: {
@@ -498,6 +510,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       },
       timeScale: {
         ...CHART_OPTIONS.timeScale,
+        ...themeOpts.timeScale,
         timeVisible: interval !== '1d',
         secondsVisible: interval === '1s' || interval === '30s',
         tickMarkFormatter: (time) => {
@@ -1029,12 +1042,12 @@ const ChartCanvas = forwardRef(function ChartCanvas({
                     gap: 5,
                     padding: '2px 7px',
                     borderRadius: 4,
-                    backgroundColor: 'rgba(11, 15, 28, 0.88)',
+                    backgroundColor: tk.legendBg,
                     backdropFilter: 'blur(6px)',
                     border: `1px solid ${isHidden ? 'rgba(100, 116, 139, 0.25)' : 'rgba(99, 102, 241, 0.25)'}`,
                     fontSize: '0.68rem',
                     fontFamily: 'JetBrains Mono, monospace',
-                    color: isHidden ? '#64748B' : '#E2E8F0',
+                    color: isHidden ? '#64748B' : tk.legendText,
                     opacity: isHidden ? 0.6 : 1,
                     transition: 'all 0.15s ease',
                   }}
@@ -1049,7 +1062,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
                       flexShrink: 0,
                     }}
                   />
-                  <span style={{ fontWeight: 700, color: isHidden ? '#64748B' : '#94A3B8' }}>
+                  <span style={{ fontWeight: 700, color: isHidden ? '#64748B' : tk.legendMuted }}>
                     {ind.shortName}
                   </span>
                   <span
@@ -1075,15 +1088,15 @@ const ChartCanvas = forwardRef(function ChartCanvas({
                     style={{
                       background: 'transparent',
                       border: 'none',
-                      color: isHidden ? '#64748B' : '#94A3B8',
+                      color: isHidden ? '#64748B' : tk.legendMuted,
                       cursor: 'pointer',
                       padding: 1,
                       display: 'flex',
                       alignItems: 'center',
                       borderRadius: 2,
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = '#F1F5F9')}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = isHidden ? '#64748B' : '#94A3B8')}
+                    onMouseEnter={(e) => (e.currentTarget.style.color = theme === 'light' ? '#0F172A' : '#F1F5F9')}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = isHidden ? '#64748B' : tk.legendMuted)}
                   >
                     {isHidden ? <EyeOff size={11} /> : <Eye size={11} />}
                   </button>

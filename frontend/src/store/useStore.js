@@ -26,9 +26,22 @@ const useStore = create(
       setPredictionData: (data)   => set({ predictionData: data }),
       setTrainingStatus: (status) => set({ trainingStatus: status }),
       setTheme: (theme) => {
-        document.documentElement.setAttribute('data-theme', theme);
-        set({ theme });
+        const next = theme === 'light' ? 'light' : 'dark';
+        try {
+          document.documentElement.setAttribute('data-theme', next);
+          document.documentElement.style.colorScheme = next;
+        } catch {}
+        set({ theme: next });
       },
+      toggleTheme: () =>
+        set((s) => {
+          const next = s.theme === 'light' ? 'dark' : 'light';
+          try {
+            document.documentElement.setAttribute('data-theme', next);
+            document.documentElement.style.colorScheme = next;
+          } catch {}
+          return { theme: next };
+        }),
       setActiveView: (view) => set({ activeView: view }),
 
       // ── History Cache (avoids re-fetching when switching views) ─────────────
@@ -101,8 +114,31 @@ const useStore = create(
   )
 );
 
-// Apply persisted theme on load
-const { theme } = useStore.getState();
-document.documentElement.setAttribute('data-theme', theme || 'dark');
+// Apply persisted theme on load (fall back to OS preference on first visit)
+function resolveInitialTheme() {
+  try {
+    const raw = localStorage.getItem('stockoracle-store');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const persisted = parsed?.state?.theme;
+      if (persisted === 'light' || persisted === 'dark') return persisted;
+    }
+  } catch {}
+  try {
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: light)').matches) {
+      return 'light';
+    }
+  } catch {}
+  return useStore.getState().theme || 'dark';
+}
+
+try {
+  const initial = resolveInitialTheme();
+  document.documentElement.setAttribute('data-theme', initial);
+  document.documentElement.style.colorScheme = initial;
+  if (useStore.getState().theme !== initial) {
+    useStore.setState({ theme: initial });
+  }
+} catch {}
 
 export default useStore;

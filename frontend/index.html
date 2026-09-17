@@ -9,6 +9,23 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
   </head>
   <body>
+    <script>
+      // Early theme init — avoids dark flash when user prefers light mode.
+      (function () {
+        try {
+          var t = 'dark';
+          var raw = localStorage.getItem('stockoracle-store');
+          if (raw) {
+            var persisted = JSON.parse(raw)?.state?.theme;
+            if (persisted === 'light' || persisted === 'dark') t = persisted;
+          } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+            t = 'light';
+          }
+          document.documentElement.setAttribute('data-theme', t);
+          document.documentElement.style.colorScheme = t;
+        } catch (e) {}
+      })();
+    </script>
     <div id="root">
       <!-- Minimal loading placeholder — replaced by React on mount -->
       <div id="init-loader" style="display:flex;align-items:center;justify-content:center;height:100vh;background:#04050E;color:#818CF8;font-family:monospace;flex-direction:column;gap:12px">

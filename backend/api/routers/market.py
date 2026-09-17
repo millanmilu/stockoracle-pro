@@ -12,7 +12,9 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Request
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Request, Security
+
+from backend.shared.security import verify_api_key
 from fastapi.responses import JSONResponse, Response
 
 from backend.data.fetcher import (
@@ -25,7 +27,13 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger("StockOracle.API.Market")
 
-router = APIRouter(prefix="/api", tags=["Market Data"])
+router = APIRouter(
+    prefix="/api",
+    tags=["Market Data"],
+    # Enforced only when API_KEY is configured (no-op in dev). Keeps
+    # market-data scraping / compute from staying open in prod deployments.
+    dependencies=[Security(verify_api_key)],
+)
 
 # Columns consumed by the chart. Trimmed from the ~45 returned by enrich_stock_dataframe()
 # to reduce payload from ~8 MB to ~2 MB. Use ?full=true to receive all columns.

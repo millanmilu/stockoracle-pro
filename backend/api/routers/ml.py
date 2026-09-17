@@ -3,7 +3,9 @@ StockOracle Pro — Machine Learning, Predictions & Backtesting API Router
 """
 import logging
 from typing import Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Security
+
+from backend.shared.security import verify_api_key
 
 from backend.data.fetcher import fetch_stock_data, get_session_status
 from backend.analysis.backtester import run_backtest
@@ -13,7 +15,12 @@ from backend.api._guards import require_real_data
 
 logger = logging.getLogger("StockOracle.API.ML")
 
-router = APIRouter(prefix="/api", tags=["Machine Learning & AI"])
+router = APIRouter(
+    prefix="/api",
+    tags=["Machine Learning & AI"],
+    # ML inference/training is compute-heavy — require API key in prod.
+    dependencies=[Security(verify_api_key)],
+)
 
 
 @router.get("/stock/{symbol}/predict")

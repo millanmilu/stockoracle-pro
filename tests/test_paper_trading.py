@@ -32,14 +32,18 @@ def test_paper_order_execution_and_closing():
     reset_paper_account(user_id=user)
 
     # 1. Place Buy Order: 100 shares of RELIANCE @ ₹1,400 = ₹140,000
+    # NOTE: SL/TP are deliberately set far outside any plausible RELIANCE price
+    # because the dev SQLite DB is shared — cached company_info / today's live
+    # tick rows (written by other test runs or the app) must never auto-close
+    # this freshly placed position via get_paper_positions()' SL/TP evaluation.
     res = place_paper_order(
         ticker="RELIANCE",
         order_type="BUY",
         action="BUY",
         shares=100,
         price=1400.0,
-        stop_loss=1350.0,
-        target_price=1500.0,
+        stop_loss=100.0,
+        target_price=100000.0,
         user_id=user
     )
     assert res["status"] == "SUCCESS"

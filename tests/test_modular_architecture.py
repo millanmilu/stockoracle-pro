@@ -97,36 +97,42 @@ def test_sqlalchemy_audit_log():
 
 
 def test_modular_routes_mounted():
-    """Verify all domain routers are properly mounted in FastAPI app."""
-    routes = [route.path for route in app.routes]
+    """Verify all domain routers are properly mounted in FastAPI app.
+
+    Note: FastAPI >= 0.121 / newer Starlette stores included routers as
+    `_IncludedRouter` wrappers, so `app.routes` no longer exposes `.path`
+    for mounted domain routers. The OpenAPI schema reflects the effective
+    mounted paths and works across all FastAPI/Starlette versions.
+    """
+    paths = set(app.openapi()["paths"].keys())
 
     # System
-    assert "/api/health" in routes
-    assert "/api/db/status" in routes
-    assert "/api/audit-log" in routes
+    assert "/api/health" in paths
+    assert "/api/db/status" in paths
+    assert "/api/audit-log" in paths
 
     # Market Data
-    assert "/api/stock/{ticker}/info" in routes
-    assert "/api/stock/{ticker}/history" in routes
-    assert "/api/stocks/search" in routes
+    assert "/api/stock/{ticker}/info" in paths
+    assert "/api/stock/{ticker}/history" in paths
+    assert "/api/stocks/search" in paths
 
     # Research
-    assert "/api/stock/{ticker}/fundamentals" in routes
-    assert "/api/stock/{ticker}/options-chain" in routes
-    assert "/api/macro" in routes
+    assert "/api/stock/{ticker}/fundamentals" in paths
+    assert "/api/stock/{ticker}/options-chain" in paths
+    assert "/api/macro" in paths
 
     # Portfolio & Paper
-    assert "/api/portfolio" in routes
-    assert "/api/paper/account" in routes
-    assert "/api/paper/order" in routes
+    assert "/api/portfolio" in paths
+    assert "/api/paper/account" in paths
+    assert "/api/paper/order" in paths
 
     # Alerts
-    assert "/api/smart-alerts" in routes
-    assert "/api/smart-alerts/evaluate" in routes
+    assert "/api/smart-alerts" in paths
+    assert "/api/smart-alerts/evaluate" in paths
 
     # ML & AI Chat
-    assert "/api/stock/{symbol}/predict" in routes
-    assert "/api/ai/chat" in routes
+    assert "/api/stock/{symbol}/predict" in paths
+    assert "/api/ai/chat" in paths
 
 
 def test_celery_task_registry():

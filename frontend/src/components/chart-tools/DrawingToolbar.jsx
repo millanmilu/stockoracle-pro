@@ -1,22 +1,28 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Activity,
   AlignJustify,
   ArrowDownRight,
   ArrowUpRight,
   BarChart3,
-  Boxes,
   BoxSelect,
+  Boxes,
   Brush,
   CalendarRange,
+  Check,
+  ChevronDown,
+  ChevronUp,
   ChevronsUpDown,
   Circle,
+  CircleDashed,
   Crosshair,
   Dot,
   Eye,
   EyeOff,
+  Fan,
   Flag,
   Grid3x3,
+  GripVertical,
   Highlighter,
   Layers,
   Lock,
@@ -29,12 +35,16 @@ import {
   MoveUpRight,
   PenLine,
   Pencil,
+  Pin,
+  PinOff,
+  Plus,
   Radar,
   Repeat,
   RotateCcw,
   RotateCw,
   Route,
   Ruler,
+  SlidersHorizontal,
   Smile,
   Spline,
   Square,
@@ -51,20 +61,42 @@ import {
   X,
 } from 'lucide-react';
 import {
+  ACTION_SHORTCUTS,
   DRAWING_TOOL_GROUPS,
   MAGNET_LABELS,
+  TOOL_SHORTCUTS,
   getToolSpec,
-  nextMagnetMode,
 } from './drawingToolCatalog';
 
 /**
- * TradingView-style vertical drawing toolbar.
+ * StockOracle Pro drawing toolbar.
  *
- * Everything is data-driven from `drawingToolCatalog`: each group renders one
- * rail button (showing the group's last used tool) that opens a flyout with the
- * full tool list. The bottom cluster mirrors TradingView's magnet /
- * stay-in-mode / lock / hide / remove / object-tree controls.
+ * A compact, TradingView-*inspired* (original implementation) vertical rail that
+ * stays aligned with the chart surface:
+ *
+ *   1. Pointer tools   — always-visible cursor / crosshair / dot.
+ *   2. Pinned tools    — user-pinnable favourites, drag to reorder.
+ *   3. Tool groups     — one rail button per group; the flyout lists the whole
+ *                        group with icons and keyboard shortcuts. The rail
+ *                        glyph tracks the group's last-used tool.
+ *   4. Chart controls  — magnet, stay-in-draw-mode, undo/redo, lock, hide,
+ *                        remove-all (with confirmation) and the object tree.
+ *
+ * Everything is data-driven from `drawingToolCatalog`, so a tool only appears
+ * here when it is genuinely implemented: the group's `tools` array is built from
+ * tools that have both an icon and a renderer.
  */
+
+const PINS_STORAGE_KEY = 'stockoracle_drawing_toolbar_pins_v1';
+
+/** No default pins — the rail starts directly with tool categories.
+ *  Users pin their own favourites via the star in any flyout. (Trendline,
+ *  horizontal line, fib retracement, rectangle, long/short position and the
+ *  dot cursor were removed from the rail start on request.) */
+const DEFAULT_PINNED_TOOLS = [];
+
+/** Groups that only contain pointer modes render as individual rail buttons. */
+const POINTER_GROUP_ID = 'pointer';
 
 const ICONS = {
   cross: MousePointer2,
@@ -82,7 +114,9 @@ const ICONS = {
   fibonacci: Layers,
   fib_extension: ChevronsUpDown,
   fib_channel: Repeat,
+  fib_fan: Fan,
   fib_timezone: CalendarRange,
+  fib_circle: CircleDashed,
   gann_fan: Route,
   gann_box: Grid3x3,
   pitchfork: Spline,
@@ -96,8 +130,10 @@ const ICONS = {
   ellipse: Circle,
   circle: Circle,
   triangle: Triangle,
+  arc: Waves,
   polyline: Spline,
   parallel_channel: Repeat,
+  regression_trend: TrendingUp,
   flat_top_bottom: SquareDashedBottom,
   disjoint_channel: Repeat,
   text: Type,
@@ -136,40 +172,250 @@ function ToolIcon({ toolId, size = 16, color }) {
   return <Icon size={size} color={color} style={rotate ? { transform: 'rotate(90deg)' } : undefined} />;
 }
 
-const rowButton = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 9,
-  width: '100%',
-  padding: '6px 9px',
-  border: 0,
-  borderRadius: 5,
-  background: 'transparent',
-  cursor: 'pointer',
-  textAlign: 'left',
+/** Reads the persisted pin list, dropping anything that is no longer a tool. */
+function readPinnedTools() {
+  try {
+    const raw = window.localStorage.getItem(PINS_STORAGE_KEY);
+    if (!raw) return DEFAULT_PINNED_TOOLS;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return DEFAULT_PINNED_TOOLS;
+    const valid = parsed.filter((id) => typeof id === 'string' && getToolSpec(id));
+    return valid.length ? valid : DEFAULT_PINNED_TOOLS;
+  } catch {
+    return DEFAULT_PINNED_TOOLS;
+  }
+}
+
+/** Groups that render a flyout (everything except the always-visible pointer set). */
+const FLYOUT_GROUPS = DRAWING_TOOL_GROUPS.filter((group) => group.id !== POINTER_GROUP_ID);
+const POINTER_GROUP = DRAWING_TOOL_GROUPS.find((group) => group.id === POINTER_GROUP_ID);
+const POINTER_TOOLS = POINTER_GROUP ? POINTER_GROUP.tools : [];
+
+// ── Presentational helpers ──────────────────────────────────────────────────
+
+const COLOR = {
+  bg: '#0F131D',
+  panel: '#111827',
+  border: 'rgba(148,163,184,0.18)',
+  borderSoft: 'rgba(255,255,255,0.08)',
+  text: '#CBD5E1',
+  textDim: '#94A3B8',
+  textMuted: '#64748B',
+  accent: '#38BDF8',
+  accentBg: 'rgba(56,189,248,0.16)',
+  hoverBg: 'rgba(148,163,184,0.12)',
+  danger: '#EF5350',
+  mono: 'JetBrains Mono, monospace',
 };
 
-function FlyoutRow({ tool, active, onPick }) {
+const panelStyle = {
+  position: 'absolute',
+  left: '100%',
+  width: 236,
+  padding: 6,
+  borderRadius: '0 8px 8px 0',
+  border: `1px solid ${COLOR.border}`,
+  borderLeft: 0,
+  background: COLOR.panel,
+  boxShadow: '0 18px 40px rgba(0,0,0,0.6)',
+  zIndex: 60,
+};
+
+/**
+ * One square rail button. Handles hover tinting, the active accent state,
+ * tooltip reporting and optional HTML5 drag-and-drop (pinned tools only).
+ */
+function RailButton({
+  toolId,
+  icon,
+  label,
+  hint,
+  shortcut,
+  active = false,
+  size = 32,
+  disabled = false,
+  onSelect,
+  onHover,
+  onLeave,
+  draggable = false,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  dragging = false,
+  dropTarget = false,
+  badge = null,
+}) {
+  const [hovered, setHovered] = useState(false);
   return (
     <button
       type="button"
-      onClick={() => onPick(tool.id)}
-      title={tool.hint}
-      style={{
-        ...rowButton,
-        background: active ? 'rgba(41,98,255,0.16)' : 'transparent',
-        color: active ? '#7DD3FC' : '#CBD5E1',
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={onDragEnd}
+      aria-label={label}
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={(event) => {
+        if (disabled) return;
+        onSelect?.(toolId, event);
       }}
-      onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = 'rgba(148,163,184,0.12)'; }}
-      onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = 'transparent'; }}
+      onMouseEnter={(event) => {
+        setHovered(true);
+        onHover?.(event, { toolId, icon, label, hint, shortcut });
+      }}
+      onMouseLeave={() => {
+        setHovered(false);
+        onLeave?.();
+      }}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: size,
+        height: size,
+        padding: 0,
+        flexShrink: 0,
+        border: `1px solid ${active ? 'rgba(56,189,248,0.45)' : 'transparent'}`,
+        borderRadius: 6,
+        background: active ? COLOR.accentBg : hovered ? COLOR.hoverBg : 'transparent',
+        color: disabled ? '#475569' : active ? COLOR.accent : hovered ? '#E2E8F0' : COLOR.textDim,
+        cursor: disabled ? 'not-allowed' : draggable ? 'grab' : 'pointer',
+        opacity: dragging ? 0.45 : 1,
+        outline: dropTarget ? `1px dashed ${COLOR.accent}` : 'none',
+        transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
+      }}
     >
-      <ToolIcon toolId={tool.id} size={15} color={active ? '#7DD3FC' : '#94A3B8'} />
-      <span style={{ flex: 1, fontSize: 12, whiteSpace: 'nowrap' }}>{tool.label}</span>
-      {active ? <span style={{ fontSize: 9, color: '#7DD3FC' }}>ACTIVE</span> : null}
+      {icon}
+      {badge}
     </button>
   );
 }
 
+/** Compact hover tooltip: name, hint and keyboard shortcut. */
+function ToolTooltip({ data, railWidth, top }) {
+  if (!data) return null;
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: railWidth + 8,
+        top,
+        zIndex: 90,
+        pointerEvents: 'none',
+        maxWidth: 220,
+        padding: '6px 9px',
+        borderRadius: 6,
+        border: `1px solid ${COLOR.border}`,
+        background: 'rgba(17,24,39,0.98)',
+        boxShadow: '0 10px 26px rgba(0,0,0,0.5)',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: '#E2E8F0', whiteSpace: 'nowrap' }}>{data.label}</span>
+        {data.shortcut ? (
+          <span style={{ marginLeft: 'auto', fontSize: 9.5, color: COLOR.textMuted, fontFamily: COLOR.mono, whiteSpace: 'nowrap' }}>
+            {data.shortcut}
+          </span>
+        ) : null}
+      </div>
+      {data.hint ? (
+        <div style={{ marginTop: 2, fontSize: 10, lineHeight: 1.35, color: COLOR.textDim, whiteSpace: 'normal' }}>{data.hint}</div>
+      ) : null}
+    </div>
+  );
+}
+
+/** A flyout row for one tool: icon, name, shortcut, active marker, pin toggle. */
+function FlyoutRow({ tool, active, pinned, onPick, onTogglePin, showPin = true, highlighted = false, rowRef = null }) {
+  const [hovered, setHovered] = useState(false);
+  const shortcut = TOOL_SHORTCUTS[tool.id];
+  return (
+    <div
+      ref={rowRef}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 2,
+        borderRadius: 5,
+        background: active ? COLOR.accentBg : hovered || highlighted ? COLOR.hoverBg : 'transparent',
+        outline: highlighted && !active ? `1px solid ${COLOR.accent}` : 'none',
+        outlineOffset: -1,
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <button
+        type="button"
+        onClick={() => onPick(tool.id)}
+        title={`${tool.label}${shortcut ? ` (${shortcut})` : ''}`}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 9,
+          flex: 1,
+          minWidth: 0,
+          padding: '6px 8px',
+          border: 0,
+          borderRadius: 5,
+          background: 'transparent',
+          color: active ? COLOR.accent : COLOR.text,
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <ToolIcon toolId={tool.id} size={15} color={active ? COLOR.accent : COLOR.textDim} />
+        <span style={{ flex: 1, minWidth: 0, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {tool.label}
+        </span>
+        {active ? (
+          <Check size={13} color={COLOR.accent} />
+        ) : shortcut ? (
+          <span style={{ fontSize: 9.5, color: COLOR.textMuted, fontFamily: COLOR.mono }}>{shortcut}</span>
+        ) : null}
+      </button>
+      {showPin ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onTogglePin?.(tool.id);
+          }}
+          title={pinned ? `Unpin ${tool.label}` : `Pin ${tool.label} to the toolbar`}
+          aria-label={pinned ? `Unpin ${tool.label}` : `Pin ${tool.label}`}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 24,
+            height: 24,
+            flexShrink: 0,
+            marginRight: 4,
+            padding: 0,
+            border: 0,
+            borderRadius: 4,
+            background: 'transparent',
+            color: pinned ? COLOR.accent : hovered ? COLOR.textDim : 'transparent',
+            cursor: 'pointer',
+          }}
+        >
+          {pinned ? <PinOff size={12} /> : <Plus size={12} />}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Main vertical drawing rail (default export — consumed by DrawingTools).
+ * Same props contract as before: pointer tools, pinnable favourites with
+ * drag-reorder, one flyout button per tool group, and the chart-controls
+ * cluster (magnet / stay-in-draw / undo / redo / lock / hide / clear-all /
+ * object tree). Rail surfaces use CSS vars so light mode stays readable.
+ */
 export default function DrawingToolbar({
   activeTool,
   onSelectTool = () => {},
@@ -194,18 +440,32 @@ export default function DrawingToolbar({
   const [openGroup, setOpenGroup] = useState(null);
   const [flyoutTop, setFlyoutTop] = useState(8);
   const [groupTool, setGroupTool] = useState({});
+  const [pinned, setPinned] = useState(readPinnedTools);
+  const [tooltip, setTooltip] = useState(null);
+  const [dragId, setDragId] = useState(null);
+  const [dropId, setDropId] = useState(null);
   const railRef = useRef(null);
 
-  const width = isMobile ? 36 : 46;
+  const width = getToolbarWidth(isMobile);
   const btn = isMobile ? 30 : 34;
   const icon = isMobile ? 15 : 17;
+
+  // Persist favourites.
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PINS_STORAGE_KEY, JSON.stringify(pinned));
+    } catch {}
+  }, [pinned]);
 
   // Remember the last tool used per group so the rail glyph tracks TradingView.
   useEffect(() => {
     const spec = getToolSpec(activeTool);
-    if (spec) setGroupTool((prev) => (prev[spec.group] === spec.id ? prev : { ...prev, [spec.group]: spec.id }));
+    if (spec) {
+      setGroupTool((prev) => (prev[spec.group] === spec.id ? prev : { ...prev, [spec.group]: spec.id }));
+    }
   }, [activeTool]);
 
+  // Close the flyout on outside click / Escape.
   useEffect(() => {
     if (!openGroup) return undefined;
     const close = (event) => {
@@ -225,28 +485,156 @@ export default function DrawingToolbar({
     [openGroup],
   );
 
+  const togglePin = useCallback((id) => {
+    setPinned((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
+  }, []);
+
+  const showTip = useCallback((event, info) => {
+    const top = Math.max(0, (event?.currentTarget?.offsetTop ?? 0) - 4);
+    setTooltip({ data: info, top });
+  }, []);
+
+  const pinnedSpecs = useMemo(
+    () => pinned.map((id) => getToolSpec(id)).filter(Boolean),
+    [pinned],
+  );
+
   const magnetColor = magnetMode === 'strong' ? '#2962FF' : magnetMode === 'weak' ? '#0EA5E9' : null;
 
-  const clusterButton = (onClick, title, activeState, children, activeColor = '#2962FF') => (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      style={{
-        width: btn,
-        height: btn,
-        borderRadius: 5,
-        border: 0,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: activeState ? activeColor : 'transparent',
-        color: activeState ? '#FFFFFF' : '#94A3B8',
-        cursor: 'pointer',
-      }}
-    >
-      {children}
-    </button>
+  // Favorites first inside the flyout: pinned tools of this group float to
+  // the top under a ★ header; the rest keep catalog order below.
+  const flyoutTools = useMemo(() => {
+    if (!activeGroup) return [];
+    const fav = [];
+    const rest = [];
+    for (const tool of activeGroup.tools) {
+      (pinned.includes(tool.id) ? fav : rest).push(tool);
+    }
+    return { fav, rest, all: [...fav, ...rest] };
+  }, [activeGroup, pinned]);
+
+  // Keyboard navigation within the flyout (arrows + Enter, Esc closes).
+  const [highlightIdx, setHighlightIdx] = useState(0);
+  useEffect(() => { setHighlightIdx(0); }, [openGroup]);
+  const flyoutRef = useRef(null);
+  useEffect(() => {
+    if (openGroup && flyoutRef.current) {
+      try { flyoutRef.current.focus({ preventScroll: true }); } catch (_) {}
+    }
+  }, [openGroup]);
+
+  // Toggle category flyout. Pure state updates (no setState-in-updater) so
+  // StrictMode double-invocation can never swallow the toggle.
+  const openFlyout = useCallback((groupId, anchor) => {
+    if (openGroup === groupId) {
+      setOpenGroup(null); // toggle: same category closes
+      return;
+    }
+    // Viewport-aware: clamp so the panel never overflows the bottom edge.
+    const group = DRAWING_TOOL_GROUPS.find((g) => g.id === groupId);
+    const rows = group ? group.tools.length : 6;
+    const panelH = Math.min(rows * 30 + 48, (typeof window !== 'undefined' ? window.innerHeight : 800) * 0.72);
+    let top = Math.max(0, (anchor?.offsetTop ?? 8) - 6);
+    try {
+      const railTop = railRef.current?.getBoundingClientRect()?.top ?? 0;
+      const maxTop = (typeof window !== 'undefined' ? window.innerHeight : 800) - railTop - panelH - 8;
+      if (top > maxTop) top = Math.max(8, maxTop);
+    } catch (_) {}
+    setFlyoutTop(top);
+    setOpenGroup(groupId);
+  }, [openGroup]);
+
+  const pickTool = useCallback((toolId) => {
+    onSelectTool(toolId);
+    if (!isMobile) setOpenGroup(null);
+  }, [onSelectTool, isMobile]);
+
+  const onFlyoutKeyDown = useCallback((event) => {
+    const n = flyoutTools.all.length;
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      setOpenGroup(null);
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setHighlightIdx((i) => (n ? (i + 1) % n : 0));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setHighlightIdx((i) => (n ? (i - 1 + n) % n : 0));
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      setHighlightIdx(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      setHighlightIdx(n - 1);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      const tool = flyoutTools.all[highlightIdx];
+      if (tool) pickTool(tool.id);
+    }
+  }, [flyoutTools, highlightIdx, pickTool]);
+
+  // One rail button per flyout group, with the "has submenu" corner tick.
+  const renderGroupButton = (group) => {
+    const currentTool = groupTool[group.id] || group.tools[0]?.id;
+    const groupActive = group.tools.some((tool) => tool.id === activeTool);
+    const highlighted = groupActive || openGroup === group.id;
+    return (
+      <RailButton
+        key={group.id}
+        toolId={currentTool}
+        label={`${group.label} — ${getToolSpec(currentTool)?.label || ''}`}
+        hint={getToolSpec(currentTool)?.hint}
+        shortcut={TOOL_SHORTCUTS[currentTool]}
+        active={highlighted}
+        size={btn}
+        onSelect={(toolId, event) => {
+          openFlyout(group.id, event?.currentTarget);
+          if (!groupActive && currentTool) onSelectTool(currentTool);
+        }}
+        onHover={showTip}
+        onLeave={() => setTooltip(null)}
+        icon={
+          <span style={{ position: 'relative', display: 'flex' }}>
+            <ToolIcon toolId={currentTool} size={icon} color={highlighted ? '#FFFFFF' : '#94A3B8'} />
+            <span
+              style={{
+                position: 'absolute',
+                right: -6,
+                bottom: -6,
+                width: 0,
+                height: 0,
+                borderLeft: '4px solid transparent',
+                borderBottom: `4px solid ${highlighted ? '#FFFFFF' : '#64748B'}`,
+              }}
+            />
+          </span>
+        }
+      />
+    );
+  };
+
+  const cluster = (key, { onClick, title, shortcut, activeState = false, activeColor = '#2962FF', children, badge = null }) => (
+    <RailButton
+      key={key}
+      toolId={key}
+      label={title}
+      shortcut={shortcut}
+      active={!!activeState}
+      size={btn}
+      onSelect={onClick}
+      onHover={showTip}
+      onLeave={() => setTooltip(null)}
+      icon={
+        <span style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          {children}
+          {badge}
+        </span>
+      }
+    />
+  );
+
+  const divider = (
+    <div style={{ width: 22, height: 1, background: 'var(--border)', margin: '4px 0' }} />
   );
 
   return (
@@ -258,114 +646,185 @@ export default function DrawingToolbar({
         display: isOpen ? 'flex' : 'none',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: '6px 0',
-        gap: 3,
-        background: '#0F131D',
-        borderRight: '1px solid rgba(255,255,255,0.08)',
+        background: 'var(--bg-card)',
+        borderRight: '1px solid var(--border)',
         position: 'relative',
         zIndex: 46,
         flexShrink: 0,
         userSelect: 'none',
-        overflowY: 'auto',
-        overflowX: 'visible',
-        scrollbarWidth: 'none',
-        overscrollBehavior: 'contain',
+        overflow: 'visible',
       }}
     >
-      {DRAWING_TOOL_GROUPS.map((group) => {
-        const currentTool = groupTool[group.id] || group.tools[0].id;
-        const groupActive = group.tools.some((tool) => tool.id === activeTool);
-        const isOpenGroup = openGroup === group.id;
-        const highlighted = groupActive || isOpenGroup;
-        return (
-          <button
-            key={group.id}
-            type="button"
-            onClick={(event) => {
-              setFlyoutTop(Math.max(0, event.currentTarget.offsetTop - 6));
-              if (isOpenGroup) {
-                setOpenGroup(null);
-              } else {
-                setOpenGroup(group.id);
-                if (!groupActive) onSelectTool(currentTool);
-              }
-            }}
-            onMouseEnter={(event) => {
-              if (openGroup && !isOpenGroup) {
-                setFlyoutTop(Math.max(0, event.currentTarget.offsetTop - 6));
-                setOpenGroup(group.id);
-              }
-            }}
-            title={`${group.label} — ${getToolSpec(currentTool)?.label || ''}`}
+      {/* Scrollable button column. The flyout/tooltip live OUTSIDE this
+          scroller as siblings: overflow-y:auto would otherwise force
+          overflow-x to auto as well and clip the flyout (the classic
+          "submenu never shows" bug). */}
+      <div
+        onScroll={() => { if (openGroup) setOpenGroup(null); }}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          padding: '6px 0',
+          gap: 3,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          scrollbarWidth: 'none',
+          overscrollBehavior: 'contain',
+        }}
+      >
+      {/* Pointer modes — always visible */}
+      {POINTER_TOOLS.map((tool) => (
+        <RailButton
+          key={tool.id}
+          toolId={tool.id}
+          label={tool.label}
+          hint={tool.hint}
+          shortcut={TOOL_SHORTCUTS[tool.id]}
+          active={tool.id === activeTool}
+          size={btn}
+          onSelect={pickTool}
+          onHover={showTip}
+          onLeave={() => setTooltip(null)}
+          icon={<ToolIcon toolId={tool.id} size={icon} />}
+        />
+      ))}
+
+      {pinnedSpecs.length > 0 && divider}
+
+      {/* Pinned favourites — drag to reorder */}
+      {pinnedSpecs.map((tool) => (
+        <RailButton
+          key={`pin-${tool.id}`}
+          toolId={tool.id}
+          label={tool.label}
+          hint={tool.hint}
+          shortcut={TOOL_SHORTCUTS[tool.id]}
+          active={tool.id === activeTool}
+          size={btn}
+          draggable
+          dragging={dragId === tool.id}
+          dropTarget={dropId === tool.id}
+          onSelect={pickTool}
+          onHover={showTip}
+          onLeave={() => setTooltip(null)}
+          onDragStart={() => setDragId(tool.id)}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDropId(tool.id);
+          }}
+          onDrop={(event) => {
+            event.preventDefault();
+            const from = dragId;
+            const to = tool.id;
+            setDragId(null);
+            setDropId(null);
+            if (!from || from === to) return;
+            setPinned((prev) => {
+              const next = prev.filter((id) => id !== from);
+              const at = next.indexOf(to);
+              next.splice(at < 0 ? next.length : at, 0, from);
+              return next;
+            });
+          }}
+          onDragEnd={() => {
+            setDragId(null);
+            setDropId(null);
+          }}
+          icon={<ToolIcon toolId={tool.id} size={icon} />}
+        />
+      ))}
+
+      {divider}
+
+      {/* Tool groups with flyouts */}
+      {FLYOUT_GROUPS.map(renderGroupButton)}
+
+      {divider}
+
+      {/* Chart controls cluster */}
+      {cluster('magnet', {
+        onClick: onCycleMagnet,
+        title: MAGNET_LABELS[magnetMode] || 'Magnet',
+        shortcut: ACTION_SHORTCUTS.magnet,
+        activeState: magnetMode !== 'off',
+        activeColor: magnetColor || '#2962FF',
+        children: <Magnet size={icon} />,
+      })}
+      {cluster('stay', {
+        onClick: onToggleStayInDrawMode,
+        title: stayInDrawMode ? 'Stay in Drawing Mode: ON' : 'Stay in Drawing Mode: OFF',
+        shortcut: ACTION_SHORTCUTS.keepDrawing,
+        activeState: stayInDrawMode,
+        children: <Lock size={icon - 2} />,
+      })}
+      {cluster('undo', {
+        onClick: onUndo,
+        title: 'Undo',
+        shortcut: ACTION_SHORTCUTS.undo,
+        children: <RotateCcw size={icon - 2} />,
+      })}
+      {cluster('redo', {
+        onClick: onRedo,
+        title: 'Redo',
+        shortcut: ACTION_SHORTCUTS.redo,
+        children: <RotateCw size={icon - 2} />,
+      })}
+      {cluster('lock', {
+        onClick: onToggleLockAll,
+        title: lockAllDrawings ? 'Unlock All Objects' : 'Lock All Objects',
+        shortcut: ACTION_SHORTCUTS.lockAll,
+        activeState: lockAllDrawings,
+        activeColor: '#F59E0B',
+        children: lockAllDrawings ? <Lock size={icon - 2} /> : <Unlock size={icon - 2} />,
+      })}
+      {cluster('hide', {
+        onClick: onToggleHideAll,
+        title: hideAllDrawings ? 'Show All Objects' : 'Hide All Objects',
+        shortcut: ACTION_SHORTCUTS.hideAll,
+        activeState: hideAllDrawings,
+        activeColor: '#EF5350',
+        children: hideAllDrawings ? <EyeOff size={icon - 2} /> : <Eye size={icon - 2} />,
+      })}
+      {cluster('clear', {
+        onClick: onClearAll,
+        title: 'Remove All Objects',
+        shortcut: ACTION_SHORTCUTS.removeAll,
+        children: <Trash2 size={icon - 2} />,
+      })}
+      {cluster('tree', {
+        onClick: onToggleObjectTree,
+        title: `Object Tree (${drawingCount})`,
+        activeState: showObjectTree,
+        activeColor: '#0EA5E9',
+        children: <Layers size={icon - 2} />,
+        badge: drawingCount > 0 ? (
+          <span
             style={{
-              position: 'relative',
-              width: btn,
-              height: btn,
-              borderRadius: 5,
-              border: 0,
+              position: 'absolute',
+              top: -4,
+              right: -6,
+              minWidth: 14,
+              height: 14,
+              padding: '0 3px',
+              borderRadius: 7,
+              background: '#0EA5E9',
+              color: '#082F49',
+              fontSize: 8.5,
+              fontWeight: 800,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              background: highlighted ? '#2962FF' : 'transparent',
-              color: highlighted ? '#FFFFFF' : '#94A3B8',
-              cursor: 'pointer',
             }}
           >
-            <ToolIcon toolId={currentTool} size={icon} color={highlighted ? '#FFFFFF' : '#94A3B8'} />
-            <span
-              style={{
-                position: 'absolute',
-                right: 2,
-                bottom: 2,
-                width: 0,
-                height: 0,
-                borderLeft: '4px solid transparent',
-                borderBottom: `4px solid ${highlighted ? '#FFFFFF' : '#64748B'}`,
-              }}
-            />
-          </button>
-        );
+            {drawingCount > 99 ? '99+' : drawingCount}
+          </span>
+        ) : null,
       })}
-
-      <div style={{ width: 22, height: 1, background: 'rgba(255,255,255,0.08)', margin: '4px 0' }} />
-
-      {clusterButton(
-        onCycleMagnet,
-        MAGNET_LABELS[magnetMode] || 'Magnet',
-        magnetMode !== 'off',
-        <Magnet size={icon} />,
-        magnetColor || '#2962FF',
-      )}
-      {clusterButton(
-        onToggleStayInDrawMode,
-        stayInDrawMode ? 'Stay in Drawing Mode: ON' : 'Stay in Drawing Mode: OFF',
-        stayInDrawMode,
-        <Lock size={icon - 2} />,
-      )}
-      {clusterButton(onUndo, 'Undo (Ctrl+Z)', false, <RotateCcw size={icon - 2} />)}
-      {clusterButton(onRedo, 'Redo (Ctrl+Y)', false, <RotateCw size={icon - 2} />)}
-      {clusterButton(
-        onToggleLockAll,
-        lockAllDrawings ? 'Unlock All Objects (Alt+L)' : 'Lock All Objects (Alt+L)',
-        lockAllDrawings,
-        lockAllDrawings ? <Lock size={icon - 2} /> : <Unlock size={icon - 2} />,
-        '#F59E0B',
-      )}
-      {clusterButton(
-        onToggleHideAll,
-        hideAllDrawings ? 'Show All Objects (Alt+H)' : 'Hide All Objects (Alt+H)',
-        hideAllDrawings,
-        hideAllDrawings ? <EyeOff size={icon - 2} /> : <Eye size={icon - 2} />,
-        '#EF5350',
-      )}
-      {clusterButton(onClearAll, 'Remove All Objects (Alt+R)', false, <Trash2 size={icon - 2} />)}
-      {clusterButton(
-        onToggleObjectTree,
-        `Object Tree (${drawingCount})`,
-        showObjectTree,
-        <Layers size={icon - 2} />,
-        '#0EA5E9',
-      )}
+      </div>
 
       <button
         type="button"
@@ -373,59 +832,74 @@ export default function DrawingToolbar({
         title={isOpen ? 'Hide drawing tools' : 'Show drawing tools'}
         aria-label={isOpen ? 'Hide drawing tools' : 'Show drawing tools'}
         style={{
-          marginTop: 'auto',
           width: btn,
           height: btn,
+          margin: '4px 0 6px',
           borderRadius: 5,
           border: 0,
           background: 'transparent',
-          color: '#64748B',
+          color: 'var(--text-muted)',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          flexShrink: 0,
         }}
       >
         {isOpen ? <X size={icon - 3} /> : <Pencil size={icon - 3} />}
       </button>
 
-      {/* ── Tool flyout ── */}
+      {/* Tool flyout — favorites of this group pinned to the top */}
       {activeGroup ? (
         <div
-          style={{
-            position: 'absolute',
-            left: '100%',
-            top: flyoutTop,
-            width: isMobile ? 186 : 224,
-            maxHeight: isMobile ? '58vh' : '72vh',
-            overflowY: 'auto',
-            padding: 6,
-            borderRadius: '0 8px 8px 0',
-            border: '1px solid rgba(148,163,184,0.18)',
-            borderLeft: 0,
-            background: '#111827',
-            boxShadow: '0 18px 40px rgba(0,0,0,0.6)',
-            zIndex: 60,
-          }}
+          ref={flyoutRef}
+          tabIndex={-1}
+          onKeyDown={onFlyoutKeyDown}
+          role="menu"
+          aria-label={`${activeGroup.label} tools`}
+          style={{ ...panelStyle, top: flyoutTop, width: isMobile ? 186 : 236, maxHeight: isMobile ? '58vh' : '72vh', overflowY: 'auto', outline: 'none' }}
         >
-          <div style={{ padding: '4px 9px 6px', color: '#64748B', fontSize: 10, fontWeight: 700, letterSpacing: 0.4 }}>
+          <div style={{ padding: '4px 9px 6px', color: COLOR.textMuted, fontSize: 10, fontWeight: 700, letterSpacing: 0.4 }}>
             {activeGroup.label.toUpperCase()}
           </div>
-          {activeGroup.tools.map((tool) => (
+          {flyoutTools.fav.length > 0 && (
+            <>
+              <div style={{ padding: '2px 9px 3px', color: COLOR.accent, fontSize: 9, fontWeight: 800, letterSpacing: 0.6 }}>
+                ★ FAVORITES
+              </div>
+              {flyoutTools.fav.map((tool) => (
+                <FlyoutRow
+                  key={`fav-${tool.id}`}
+                  tool={tool}
+                  active={tool.id === activeTool}
+                  pinned
+                  highlighted={flyoutTools.all[highlightIdx]?.id === tool.id}
+                  onPick={pickTool}
+                  onTogglePin={togglePin}
+                />
+              ))}
+              <div style={{ height: 1, background: COLOR.border, margin: '4px 6px' }} />
+            </>
+          )}
+          {flyoutTools.rest.map((tool) => (
             <FlyoutRow
               key={tool.id}
               tool={tool}
               active={tool.id === activeTool}
-              onPick={(toolId) => {
-                onSelectTool(toolId);
-                if (!isMobile) setOpenGroup(null);
-              }}
+              pinned={false}
+              highlighted={flyoutTools.all[highlightIdx]?.id === tool.id}
+              onPick={pickTool}
+              onTogglePin={togglePin}
             />
           ))}
         </div>
       ) : null}
+
+      <ToolTooltip data={tooltip?.data} railWidth={width} top={tooltip?.top ?? 0} />
     </div>
   );
 }
 
-export { ICONS, ToolIcon, FlyoutRow };
+const getToolbarWidth = (isMobile) => (isMobile ? 36 : 46);
+
+export { ICONS, ToolIcon, FlyoutRow, getToolbarWidth };

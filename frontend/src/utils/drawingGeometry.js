@@ -465,3 +465,68 @@ export function projectionLevels(a, b, c) {
     level2: { y: c.y + dy, price: Number(c.price ?? 0) + dPrice },
   };
 }
+
+// ── Fib fan / circle / arc helpers ─────────────────────────────────────────
+/**
+ * Fibonacci fan: ray origin `a` passes through the vertical fraction `level`
+ * of the a→b move measured on the vertical line through `b`. Returns the fan
+ * points (renderer extends each to the surface edge via edgeExit/rayEnd).
+ */
+export function fibFanRays(a, b, levels = FIB_RETRACEMENT_LEVELS) {
+  if (!a || !b) return [];
+  return levels.map((level) => ({
+    level,
+    x: b.x,
+    y: a.y + (b.y - a.y) * level,
+  }));
+}
+
+/** Fibonacci circles: radii are level fractions of the a→b distance. */
+export function fibCircles(a, b, levels = FIB_RETRACEMENT_LEVELS) {
+  if (!a || !b) return [];
+  const r = distance(a, b);
+  return levels.map((level) => ({ level, radius: r * level, cx: a.x, cy: a.y }));
+}
+
+/**
+ * SVG quadratic path for the Arc tool — a smooth bow from a to b, offset
+ * perpendicular to the a→b chord by `bulge × distance` (screen-up biased).
+ */
+export function arcPath(a, b, bulge = 0.35) {
+  if (!a || !b) return '';
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const d = distance(a, b);
+  if (d < 1) return '';
+  // Perpendicular unit vector (screen-space, biased upward).
+  const px = dy / d;
+  const py = -dx / d;
+  // Flip so the bow always points up on screen regardless of draw direction.
+  const sign = py < 0 ? 1 : -1;
+  const cx = (a.x + b.x) / 2 + px * sign * d * bulge;
+  const cy = (a.y + b.y) / 2 + py * sign * d * bulge;
+  return `M ${Number(a.x).toFixed(2)} ${Number(a.y).toFixed(2)} Q ${cx.toFixed(2)} ${cy.toFixed(2)} ${Number(b.x).toFixed(2)} ${Number(b.y).toFixed(2)}`;
+}
+
+/**
+ * Per-object "Extend Left / Extend Right" (TradingView line settings).
+ *
+ * Returns the *visible* endpoints for a two-point line whose object carries
+ * `extendLeft` / `extendRight` flags. Anchors stay untouched — only the drawn
+ * span grows to the surface edge, which is why this runs at render time so the
+ * extension follows pan/zoom like every other coordinate transform.
+ */
+export function applyLineExtension(a, b, { extendLeft = false, extendRight = false } = {}, surface) {
+  if (!a || !b || isDegenerate(a, b)) return [a, b];
+  if (extendLeft && extendRight) return fullLineEndpoints(a, b, surface);
+  if (extendRight) return [a, edgeExit(a, b, surface)];
+  if (extendLeft) return [edgeExit(b, a, surface), b];
+  return [a, b];
+}
+
+/** True when an object type supports the Extend Left/Right settings. */
+export const EXTENDABLE_DRAWING_TYPES = ['trendline', 'extended_line', 'info_line', 'trend_angle'];
+
+export function isExtendableType(type) {
+  return EXTENDABLE_DRAWING_TYPES.includes(type);
+}

@@ -74,6 +74,15 @@ export default function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showKeymapModal, setShowKeymapModal] = useState(false);
 
+  // Keep <html data-theme> in sync (store is source of truth; index.html sets initial to avoid FOUC)
+  useEffect(() => {
+    try {
+      const next = theme === 'light' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      document.documentElement.style.colorScheme = next;
+    } catch {}
+  }, [theme]);
+
   // Global Keyboard Listener for / or Ctrl+K (Command Palette) and ? (Keymap)
   React.useEffect(() => {
     const handleKeyDown = (e) => {
@@ -140,10 +149,18 @@ export default function App() {
   };
 
 
+  const isLight = theme === 'light';
   return (
     <div className="app-shell" data-theme={theme}>
       <div className="scanline-overlay" />
-      <Toaster position="top-right" toastOptions={{ style: { background: '#0F172A', color: '#F0F0FF', border: '1px solid rgba(99,102,241,0.3)' } }} />
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          style: isLight
+            ? { background: '#ffffff', color: '#0F172A', border: '1px solid rgba(99,102,241,0.3)' }
+            : { background: '#0F172A', color: '#F0F0FF', border: '1px solid rgba(99,102,241,0.3)' },
+        }}
+      />
       <CommandPalette isOpen={showCommandPalette} onClose={() => setShowCommandPalette(false)} />
       <KeymapModal isOpen={showKeymapModal} onClose={() => setShowKeymapModal(false)} />
       
@@ -179,7 +196,7 @@ export default function App() {
 }
 
 function TrainingBar({ trainingStatus, selectedSymbol }) {
-  return <div style={{ backgroundColor:'rgba(15,23,42,0.95)', padding:'6px 20px', borderBottom:'1px solid rgba(99,102,241,0.25)', display:'flex', alignItems:'center', gap:15 }}>
+  return <div style={{ backgroundColor:'var(--bg-card)', padding:'6px 20px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:15 }}>
     <div style={{ fontSize:'0.8rem', color:'#3B82F6', fontWeight:'bold' }}>Training AI Model for {trainingStatus.ticker || selectedSymbol}…</div>
     <div style={{ flex:1, height:4, background:'rgba(255,255,255,0.08)', borderRadius:2, overflow:'hidden' }}>
       <div style={{ width:`${trainingStatus.progress||0}%`, height:'100%', background:'#3B82F6', transition:'width 0.3s' }} />

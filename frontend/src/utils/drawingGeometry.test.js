@@ -9,6 +9,8 @@ import {
   FIB_RETRACEMENT_LEVELS,
   FIB_EXTENSION_LEVELS,
   GANN_FAN_ANGLES,
+  applyLineExtension,
+  arcPath,
   arrowHead,
   channelQuad,
   clamp,
@@ -21,7 +23,9 @@ import {
   elliottWaveLabels,
   extendLine,
   fibChannelLines,
+  fibCircles,
   fibExtensionLines,
+  fibFanRays,
   fibRetracementBands,
   fibRetracementLines,
   fibTimezoneLines,
@@ -34,6 +38,7 @@ import {
   gannBoxLevels,
   gannFanLines,
   isDegenerate,
+  isExtendableType,
   measureStats,
   midpoint,
   normalizeRect,
@@ -427,5 +432,71 @@ describe('drawingGeometry — projection tools', () => {
     );
     assert.deepEqual(levels.level1, { y: 30, price: 120 });
     assert.deepEqual(levels.level2, { y: 40, price: 145 });
+  });
+});
+
+describe('drawingGeometry — fib fan / circles / arc', () => {
+  it('fibFanRays puts each level on the vertical line through b', () => {
+    const rays = fibFanRays(p(0, 100), p(10, 0), [0, 0.5, 1]);
+    assert.equal(rays.length, 3);
+    assert.deepEqual(rays[0], { level: 0, x: 10, y: 100 });
+    assert.deepEqual(rays[1], { level: 0.5, x: 10, y: 50 });
+    assert.deepEqual(rays[2], { level: 1, x: 10, y: 0 });
+    assert.deepEqual(fibFanRays(p(0, 0)), []);
+  });
+
+  it('fibCircles scale the a→b distance by each level', () => {
+    const circles = fibCircles(p(0, 0), p(3, 4), [0, 0.618, 1]);
+    assert.equal(circles.length, 3);
+    assert.equal(circles[0].radius, 0);
+    assert.ok(Math.abs(circles[1].radius - 3.09) < 1e-9);
+    assert.equal(circles[2].radius, 5);
+  });
+
+  it('arcPath bows upward on screen for both draw directions', () => {
+    const left = arcPath(p(0, 50), p(100, 50));
+    const right = arcPath(p(100, 50), p(0, 50));
+    assert.match(left, /^M 0\.00 50\.00 Q .* 100\.00 50\.00$/);
+    assert.match(right, /^M 100\.00 50\.00 Q .* 0\.00 50\.00$/);
+    // Control point sits above the chord (smaller y) for both draw directions.
+    // Path layout: "M x y Q cx cy x y" → token 5 is the control-point y.
+    assert.ok(Number(left.split(' ')[5]) < 50);
+    assert.ok(Number(right.split(' ')[5]) < 50);
+    assert.equal(arcPath(p(5, 5), p(5, 5)), '');
+  });
+});
+
+describe('drawingGeometry — line extension (Extend Left / Extend Right)', () => {
+  const surface = { width: 200, height: 100 };
+
+  it('leaves the anchors untouched when neither flag is set', () => {
+    const a = p(50, 50);
+    const b = p(150, 50);
+    assert.deepEqual(applyLineExtension(a, b, {}, surface), [a, b]);
+  });
+
+  it('extendRight keeps the start anchor and grows to the right edge', () => {
+    const [from, to] = applyLineExtension(p(50, 50), p(150, 50), { extendRight: true }, surface);
+    assert.deepEqual(from, { x: 50, y: 50 });
+    assert.deepEqual(to, { x: 200, y: 50 });
+  });
+
+  it('extendLeft keeps the end anchor and grows to the left edge', () => {
+    const [from, to] = applyLineExtension(p(50, 50), p(150, 50), { extendLeft: true }, surface);
+    assert.deepEqual(from, { x: 0, y: 50 });
+    assert.deepEqual(to, { x: 150, y: 50 });
+  });
+
+  it('both flags produce an infinite line clipped to the surface', () => {
+    const [from, to] = applyLineExtension(p(50, 50), p(150, 50), { extendLeft: true, extendRight: true }, surface);
+    assert.deepEqual(from, { x: 0, y: 50 });
+    assert.deepEqual(to, { x: 200, y: 50 });
+  });
+
+  it('degenerate lines and unsupported types fall back to raw anchors', () => {
+    const a = p(40, 40);
+    assert.deepEqual(applyLineExtension(a, p(40, 40), { extendLeft: true, extendRight: true }, surface), [a, p(40, 40)]);
+    assert.equal(isExtendableType('trendline'), true);
+    assert.equal(isExtendableType('rectangle'), false);
   });
 });

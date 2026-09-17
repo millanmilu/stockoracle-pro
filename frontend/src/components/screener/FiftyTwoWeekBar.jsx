@@ -3,26 +3,40 @@ import React from 'react';
 /**
  * 52-Week High / Low Position Range Bar
  * Visual indicator of where current price stands between 52W Low and 52W High.
+ *
+ * Props use ScreenerDailyMetric *distance* percentages (NOT absolute prices):
+ *   dist_high = (price - high52w) / high52w * 100  (<= 0 when below the high)
+ *   dist_low  = (price - low52w)  / low52w  * 100  (>= 0 when above the low)
  */
 export default function FiftyTwoWeekBar({ price, low52w, high52w }) {
   if (!price) {
     return <span style={{ color: '#4B5563', fontSize: '0.72rem' }}>—</span>;
   }
 
+  // Position of price within the [low52w .. high52w] range, derived purely
+  // from distances so rupee prices are never mixed with percentages.
   let currentPos = 50;
   let label = '50% of 52W';
+  let hasRange = false;
 
-  if (low52w != null && high52w != null) {
-    if (high52w > low52w && low52w > 0) {
-      const range = high52w - low52w;
-      currentPos = Math.max(0, Math.min(100, ((price - low52w) / range) * 100));
+  if (typeof high52w === 'number' && typeof low52w === 'number' && isFinite(high52w) && isFinite(low52w)) {
+    const span = Math.abs(low52w) + Math.abs(high52w);
+    if (span > 0) {
+      if (high52w >= 0 && low52w >= 0) {
+        currentPos = 100; // at or above the 52W high
+      } else if (low52w <= 0 && high52w <= 0) {
+        currentPos = 0; // at or below the 52W low
+      } else {
+        // Normal case (high < 0 < low): fraction up from the low.
+        currentPos = Math.max(0, Math.min(100, (low52w / span) * 100));
+      }
       label = `${currentPos.toFixed(0)}% of 52W`;
-    } else if (high52w < 0 && low52w > 0) {
-      // Distance percentages format: dist_high is -4.2%, dist_low is +22.8%
-      const totalDist = low52w + Math.abs(high52w);
-      currentPos = totalDist > 0 ? Math.max(0, Math.min(100, (low52w / totalDist) * 100)) : 50;
-      label = `${currentPos.toFixed(0)}% range`;
+      hasRange = true;
     }
+  }
+
+  if (!hasRange) {
+    return <span style={{ color: '#4B5563', fontSize: '0.72rem' }}>—</span>;
   }
 
   const nearHigh = currentPos >= 80;

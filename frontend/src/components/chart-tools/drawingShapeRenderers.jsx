@@ -24,7 +24,17 @@ import {
 // ── Trend line family ───────────────────────────────────────────────────────
 function renderExtendedLine({ points, surface, handlers, drawing }) {
   const [a, b] = points;
-  const [from, to] = G.fullLineEndpoints(a, b, surface);
+  // Extended Line is infinite in both directions by default; the Extend
+  // Left/Right settings let a user shrink it back to a plain segment.
+  const [from, to] = G.applyLineExtension(
+    a,
+    b,
+    {
+      extendLeft: drawing.extendLeft ?? true,
+      extendRight: drawing.extendRight ?? true,
+    },
+    surface,
+  );
   return (
     <>
       <HitLine a={from} b={to} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
@@ -33,14 +43,15 @@ function renderExtendedLine({ points, surface, handlers, drawing }) {
   );
 }
 
-function renderInfoLine({ points, handlers, drawing, currency }) {
+function renderInfoLine({ points, surface, handlers, drawing, currency }) {
   const [a, b] = points;
   const stats = G.measureStats(a, b);
   const text = `${G.formatSignedPrice(stats.delta, currency)}  ${G.formatSignedPercent(stats.percent)}  ${stats.bars} bars`;
+  const [from, to] = G.applyLineExtension(a, b, drawing, surface);
   return (
     <>
-      <HitLine a={a} b={b} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
-      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...strokeProps(drawing)} style={{ pointerEvents: 'none' }} />
+      <HitLine a={from} b={to} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
+      <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} {...strokeProps(drawing)} style={{ pointerEvents: 'none' }} />
       <AnchorDots points={points} color={drawing.color} />
       <Label
         x={G.midpoint(a, b).x}
@@ -54,13 +65,14 @@ function renderInfoLine({ points, handlers, drawing, currency }) {
   );
 }
 
-function renderTrendAngle({ points, handlers, drawing }) {
+function renderTrendAngle({ points, surface, handlers, drawing }) {
   const [a, b] = points;
   const angle = G.trendAngle(a, b);
+  const [from, to] = G.applyLineExtension(a, b, drawing, surface);
   return (
     <>
-      <HitLine a={a} b={b} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
-      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...strokeProps(drawing)} style={{ pointerEvents: 'none' }} />
+      <HitLine a={from} b={to} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
+      <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} {...strokeProps(drawing)} style={{ pointerEvents: 'none' }} />
       {/* baseline reference so the angle is readable */}
       <line
         x1={a.x}
@@ -163,6 +175,92 @@ function renderFibExtension({ points, handlers, drawing }) {
   );
 }
 
+/**
+ * Regression Trend: least-squares fit through bar closes across the anchor
+ * span, with parallel rails at ±2σ. Computed from real candle data (passed
+ * as `candles`); falls back to a plain segment when too few bars resolve.
+ */
+function renderRegressionTrend({ points, handlers, drawing, candles, toX, toY }) {
+  const [a, b] = points;
+  if (!b) return null;
+  const l0 = Math.round(Math.min(a.logical ?? 0, b.logical ?? 0));
+  const l1 = Math.round(Math.max(a.logical ?? 0, b.logical ?? 0));
+  let fit = null;
+  try {
+    if (Array.isArray(candles) && l1 - l0 >= 2 && toX && toY) {
+      const xs = [];
+      const ys = [];
+      for (let i = l0; i <= l1; i += 1) {
+        const c = Number(candles[i]?.close);
+        if (Number.isFinite(c)) {
+          xs.push(i);
+          ys.push(c);
+        }
+      }
+      if (xs.length >= 3) {
+        const n = xs.length;
+        const mx = xs.reduce((s, v) => s + v, 0) / n;
+        const my = ys.reduce((s, v) => s + v, 0) / n;
+        let num = 0;
+        let den = 0;
+        for (let i = 0; i < n; i += 1) {
+          num += (xs[i] - mx) * (ys[i] - my);
+          den += (xs[i] - mx) * (xs[i] - mx);
+        }
+        if (den > 0) {
+          const slope = num / den;
+          const intercept = my - slope * mx;
+          let sd = 0;
+          for (let i = 0; i < n; i += 1) {
+            const r = ys[i] - (slope * xs[i] + intercept);
+            sd += r * r;
+          }
+          sd = Math.sqrt(sd / n);
+          const px = (logical) => toX(logical);
+          const py = (price) => toY(price);
+          const x0 = px(l0);
+          const x1 = px(l1);
+          const yc0 = py(slope * l0 + intercept);
+          const yc1 = py(slope * l1 + intercept);
+          const yu0 = py(slope * l0 + intercept + 2 * sd);
+          const yu1 = py(slope * l1 + intercept + 2 * sd);
+          const yl0 = py(slope * l0 + intercept - 2 * sd);
+          const yl1 = py(slope * l1 + intercept - 2 * sd);
+          if ([x0, x1, yc0, yc1, yu0, yu1, yl0, yl1].every((v) => v != null && Number.isFinite(v))) {
+            fit = { x0, x1, yc0, yc1, yu0, yu1, yl0, yl1, sd };
+          }
+        }
+      }
+    }
+  } catch (_) {
+    fit = null;
+  }
+  if (!fit) {
+    // Honest fallback: not enough verifiable bars — plain segment only.
+    return (
+      <>
+        <HitLine a={a} b={b} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
+        <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...strokeProps(drawing)} style={{ pointerEvents: 'none' }} />
+        <AnchorDots points={points} color={drawing.color} />
+      </>
+    );
+  }
+  const col = drawing.color || '#38BDF8';
+  return (
+    <>
+      <HitLine a={{ x: fit.x0, y: fit.yc0 }} b={{ x: fit.x1, y: fit.yc1 }} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
+      <g style={{ pointerEvents: 'none' }}>
+        <line x1={fit.x0} y1={fit.yu0} x2={fit.x1} y2={fit.yu1} {...strokeProps(drawing, { width: 1, opacity: 0.65 })} strokeDasharray="5,4" />
+        <line x1={fit.x0} y1={fit.yc0} x2={fit.x1} y2={fit.yc1} {...strokeProps(drawing, { width: 2 })} />
+        <line x1={fit.x0} y1={fit.yl0} x2={fit.x1} y2={fit.yl1} {...strokeProps(drawing, { width: 1, opacity: 0.65 })} strokeDasharray="5,4" />
+        <Label x={fit.x1 + 4} y={Math.min(fit.yu0, fit.yu1) - 8} text={`+2σ ${fit.sd.toFixed(2)}`} color={drawing.color} align="start" />
+        <Label x={fit.x1 + 4} y={Math.max(fit.yl0, fit.yl1) + 14} text="-2σ" color={drawing.color} align="start" />
+      </g>
+      <AnchorDots points={points} color={col} />
+    </>
+  );
+}
+
 function renderFibChannel({ points, handlers, drawing }) {
   const [a, b, c] = points;
   if (!c) return null;
@@ -207,6 +305,89 @@ function renderFibTimezone({ points, handlers, drawing, toX, surface }) {
           </g>
         );
       })}
+    </>
+  );
+}
+
+function renderFibFan({ points, handlers, drawing }) {
+  const [a, b] = points;
+  if (!b) return null;
+  const rays = G.fibFanRays(a, b);
+  // Interpolate the price at each fan level from the anchor prices.
+  const fromPrice = Number(a.price ?? 0);
+  const span = Number(b.price ?? 0) - fromPrice;
+  const fanPrices = {};
+  rays.forEach((ray) => { fanPrices[ray.level] = fromPrice + span * ray.level; });
+  return (
+    <>
+      <HitLine a={a} b={b} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
+      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...strokeProps(drawing, { width: 1, opacity: 0.45 })} style={{ pointerEvents: 'none' }} />
+      {rays.map((ray) => (
+        <g key={`fanray-${ray.level}`} style={{ pointerEvents: 'none' }}>
+          <line
+            x1={a.x}
+            y1={a.y}
+            x2={ray.x}
+            y2={ray.y}
+            stroke={drawing.color || '#38BDF8'}
+            strokeWidth={1}
+            strokeOpacity={0.75}
+          />
+        </g>
+      ))}
+      {rays.map((ray) => (
+        <Label
+          key={`fanlbl-${ray.level}`}
+          x={ray.x - 6}
+          y={ray.y - 8}
+          text={`${ray.level} — ${Number(fanPrices[ray.level] ?? 0).toFixed(2)}`}
+          color={drawing.color}
+          align="end"
+        />
+      ))}
+      <AnchorDots points={points} color={drawing.color} />
+    </>
+  );
+}
+
+function renderFibCircle({ points, handlers, drawing }) {
+  const [a, b] = points;
+  if (!b) return null;
+  const circles = G.fibCircles(a, b);
+  return (
+    <>
+      <HitLine a={a} b={b} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
+      {circles
+        .filter((circle) => circle.radius > 1)
+        .map((circle) => (
+          <circle
+            key={`fibcircle-${circle.level}`}
+            cx={circle.cx}
+            cy={circle.cy}
+            r={circle.radius}
+            fill="none"
+            stroke={drawing.color || '#38BDF8'}
+            strokeWidth={1}
+            strokeOpacity={0.65}
+            style={{ pointerEvents: 'none' }}
+          />
+        ))}
+      <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...strokeProps(drawing, { width: 1, opacity: 0.5 })} style={{ pointerEvents: 'none' }} />
+      <AnchorDots points={points} color={drawing.color} />
+    </>
+  );
+}
+
+function renderArc({ points, handlers, drawing }) {
+  const [a, b] = points;
+  if (!b) return null;
+  const d = G.arcPath(a, b, drawing.arcBulge ?? 0.35);
+  if (!d) return null;
+  return (
+    <>
+      <HitPath d={d} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
+      <path d={d} {...strokeProps(drawing)} style={{ pointerEvents: 'none' }} />
+      <AnchorDots points={points} color={drawing.color} />
     </>
   );
 }
@@ -821,6 +1002,9 @@ const SHAPE_RENDERERS = {
   // Fibonacci & Gann
   fib_extension: renderFibExtension,
   fib_channel: renderFibChannel,
+  regression_trend: renderRegressionTrend,
+  fib_fan: renderFibFan,
+  fib_circle: renderFibCircle,
   fib_timezone: renderFibTimezone,
   gann_fan: renderGannFan,
   gann_box: renderGannBox,
@@ -834,6 +1018,7 @@ const SHAPE_RENDERERS = {
   ellipse: renderEllipse,
   circle: (props) => renderEllipse({ ...props, forceCircle: true }),
   triangle: renderTriangle,
+  arc: renderArc,
   flat_top_bottom: renderFlatTopBottom,
   disjoint_channel: renderDisjointChannel,
   // Annotations

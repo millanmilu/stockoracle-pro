@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Menu, Zap, Sun, Moon, Maximize2, Minimize2, Search, Bookmark, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
+import { Menu, Zap, Maximize2, Minimize2, Search, Bookmark, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
 import useStore from '../store/useStore';
+import ThemeToggle from './ThemeToggle';
+import { getThemeTokens } from '../utils/theme';
 import api from '../utils/api';
 
 // No DEFAULT_INDICES — hardcoded prices must never be shown as if they were live market data.
@@ -8,7 +10,7 @@ import api from '../utils/api';
 export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenCommandPalette }) {
   const selectedSymbol = useStore(s => s.selectedSymbol);
   const theme = useStore(s => s.theme);
-  const setTheme = useStore(s => s.setTheme);
+  const tk = getThemeTokens(theme);
   const [indices, setIndices] = useState([]);
   const [tapeUnavailable, setTapeUnavailable] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -97,8 +99,8 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
         height: '42px',
         padding: '0 12px',
         gap: '10px',
-        background: '#050713',
-        borderBottom: '1px solid rgba(255,255,255,0.07)',
+        background: tk.topbarBg,
+        borderBottom: `1px solid ${tk.topbarBorder}`,
         position: 'relative',
         overflow: 'visible',
         zIndex: 100
@@ -123,10 +125,10 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
 
       {/* Left: Brand + Active Symbol + Quick Search */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, position: 'relative', zIndex: 110 }}>
-        <button onClick={onToggleSidebar} style={{ background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer', display: 'flex', padding: 2 }}>
+        <button onClick={onToggleSidebar} style={{ background: 'transparent', border: 'none', color: tk.topbarMuted, cursor: 'pointer', display: 'flex', padding: 2 }}>
           <Menu size={18} />
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 800, fontSize: '0.88rem', color: '#F0F0FF', letterSpacing: '-0.01em' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 800, fontSize: '0.88rem', color: tk.topbarText, letterSpacing: '-0.01em' }}>
           <Zap size={16} color="#6366F1" fill="#6366F1" />
           <span>StockOracle Pro</span>
         </div>
@@ -136,13 +138,13 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
 
         {/* Compact Search Input */}
         <div style={{ position: 'relative', width: 145 }} ref={searchRef}>
-          <Search size={11} style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)', color: '#6B7280' }} />
+          <Search size={11} style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)', color: tk.topbarMuted }} />
           <input
             type="text"
             placeholder="Search symbol..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            style={{ width: '100%', padding: '4px 6px 4px 22px', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, color: '#fff', fontSize: '0.72rem', outline: 'none' }}
+            style={{ width: '100%', padding: '4px 6px 4px 22px', background: tk.inputBg, border: `1px solid ${tk.inputBorder}`, borderRadius: 6, color: tk.inputText, fontSize: '0.72rem', outline: 'none' }}
           />
           {results.length > 0 && (
             <div style={{
@@ -150,7 +152,7 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
               top: 'calc(100% + 5px)',
               left: 0,
               width: 240,
-              background: '#0B0F22',
+              background: tk.searchResultsBg,
               border: '1px solid rgba(99,102,241,0.3)',
               borderRadius: 8,
               zIndex: 9999,
@@ -185,8 +187,8 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
       {/* Center: Infinite Seamless Running Marquee Ticker */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative', height: '100%', display: 'flex', alignItems: 'center', margin: '0 8px' }}>
         {/* Subtle Fade Edges */}
-        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 20, background: 'linear-gradient(90deg, #050713, transparent)', zIndex: 2, pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 20, background: 'linear-gradient(270deg, #050713, transparent)', zIndex: 2, pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 20, background: `linear-gradient(90deg, ${tk.topbarBg}, transparent)`, zIndex: 2, pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 20, background: `linear-gradient(270deg, ${tk.topbarBg}, transparent)`, zIndex: 2, pointerEvents: 'none' }} />
 
         {tapeUnavailable || tapeItems.length === 0 ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.66rem', fontFamily: 'JetBrains Mono, monospace', color: '#475569', paddingLeft: 8 }}>
@@ -215,15 +217,15 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
                     padding: '0 14px',
                     fontSize: '0.68rem',
                     fontFamily: 'JetBrains Mono, monospace',
-                    borderRight: '1px solid rgba(255, 255, 255, 0.05)',
+                    borderRight: `1px solid ${tk.topbarBorder}`,
                     cursor: 'pointer',
                     userSelect: 'none',
                     opacity: isStatic ? 0.55 : 1,
                   }}
                   title={isStatic ? 'Reference value — not real-time' : undefined}
                 >
-                  <span style={{ color: '#94A3B8', fontWeight: 600 }}>{item.symbol}</span>
-                  <span style={{ fontWeight: 700, color: isStatic ? '#64748B' : '#F1F5F9' }}>
+                  <span style={{ color: tk.topbarMuted, fontWeight: 600 }}>{item.symbol}</span>
+                  <span style={{ fontWeight: 700, color: isStatic ? tk.topbarMuted : tk.topbarText }}>
                     {price > 0
                       ? (price >= 100 ? price.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : price.toFixed(2))
                       : '—'}
@@ -254,13 +256,11 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
 
       {/* Right: Actions */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, position: 'relative', zIndex: 110 }}>
-        <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} style={{ background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer', display: 'flex', padding: 3 }}>
-          {theme === 'dark' ? <Sun size={15} /> : <Moon size={15} />}
-        </button>
-        <button onClick={toggleFullscreen} style={{ background: 'transparent', border: 'none', color: '#9CA3AF', cursor: 'pointer', display: 'flex', padding: 3 }}>
+        <ThemeToggle />
+        <button onClick={toggleFullscreen} title="Toggle fullscreen" style={{ background: 'transparent', border: 'none', color: tk.topbarMuted, cursor: 'pointer', display: 'flex', padding: 3 }}>
           {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
         </button>
-        <button onClick={onOpenCommandPalette} style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', padding: '3px 7px', borderRadius: 4, color: '#9CA3AF', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem' }}>
+        <button onClick={onOpenCommandPalette} style={{ background: tk.inputBg, border: `1px solid ${tk.inputBorder}`, padding: '3px 7px', borderRadius: 4, color: tk.topbarMuted, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem' }}>
           <Search size={11} /> ⌘K
         </button>
         <button

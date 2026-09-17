@@ -1,110 +1,76 @@
 import React, { useMemo } from 'react';
 
-/**
- * Sector Heat & Sentiment Distribution Bar with Interactive Filtering
- */
-export default function ScreenerSectorChart({ rows = [], selectedSector = 'ALL', onSelectSector }) {
-  const sectorSummary = useMemo(() => {
+/** Sector rotation: Strong / Improving / Weakening / Weak from REAL rows. Click filters. */
+const QUAD_ORDER = ['Strong', 'Improving', 'Weakening', 'Weak'];
+const QUAD_COLOR = { Strong: '#10B981', Improving: '#38BDF8', Weakening: '#F59E0B', Weak: '#EF4444' };
+
+export default function ScreenerSectorChart({ rows = [], sectors = [], selectedSector = 'ALL', onSelectSector }) {
+  const cards = useMemo(() => {
+    if (sectors && sectors.length) return [...sectors].sort((a, b) => (b.composite ?? 0) - (a.composite ?? 0));
     const map = {};
-    rows.forEach((r) => {
+    (rows || []).forEach((r) => {
       const sec = r.sector || 'Diversified';
-      if (!map[sec]) {
-        map[sec] = { sector: sec, total: 0, bullish: 0, bearish: 0, neutral: 0, totalScore: 0 };
-      }
-      map[sec].total += 1;
-      const sig = (r.ai_signal || r.signal || '').toUpperCase();
+      if (!map[sec]) map[sec] = { sector: sec, stocks: 0, bullish: 0, totalScore: 0, chg: 0 };
+      map[sec].stocks += 1;
+      const sig = String(r.ai_signal || '').toUpperCase();
       if (sig.includes('BUY')) map[sec].bullish += 1;
-      else if (sig.includes('SELL')) map[sec].bearish += 1;
-      else map[sec].neutral += 1;
-      map[sec].totalScore += (r.ai_consensus_score || r.ai_score || 50);
+      map[sec].totalScore += Number(r.ai_consensus_score || 50);
+      map[sec].chg += Number(r.change_1d_pct || 0);
     });
+    return Object.values(map).map((m) => ({
+      sector: m.sector, stocks: m.stocks,
+      avg_ai_score: m.stocks ? +(m.totalScore / m.stocks).toFixed(1) : 50,
+      avg_change_1d_pct: m.stocks ? +(m.chg / m.stocks).toFixed(2) : 0,
+      bullish: m.bullish, quadrant: m.bullish / Math.max(1, m.stocks) >= 0.5 ? 'Strong' : 'Weakening',
+      composite: m.bullish,
+    })).sort((a, b) => b.avg_ai_score - a.avg_ai_score);
+  }, [rows, sectors]);
 
-    return Object.values(map)
-      .map((item) => ({
-        ...item,
-        avgScore: (item.totalScore / item.total).toFixed(0),
-        bullishPct: ((item.bullish / item.total) * 100).toFixed(0),
-      }))
-      .sort((a, b) => b.total - a.total);
-  }, [rows]);
+  const grouped = useMemo(() => {
+    const g = { Strong: [], Improving: [], Weakening: [], Weak: [] };
+    cards.forEach((c) => { (g[c.quadrant] || g.Weakening).push(c); });
+    return g;
+  }, [cards]);
 
-  if (!sectorSummary.length) return null;
+  if (!cards.length) return null;
 
   return (
-    <div style={{
-      background: '#090D1C',
-      border: '1px solid rgba(99,102,241,0.18)',
-      borderRadius: 12,
-      padding: '12px 16px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 8
-    }}>
+    <div style={{ background: '#090D1C', border: '1px solid rgba(99,102,241,0.18)', borderRadius: 12, padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: '0.68rem', color: '#64748B', fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
-          Sector Sentiment Breakdown ({sectorSummary.length} Sectors)
+        <span style={{ fontSize: '0.66rem', color: '#64748B', fontWeight: 800, letterSpacing: '0.05em' }}>
+          SECTOR ROTATION — PERFORMANCE / MOMENTUM / BREADTH ({cards.length})
         </span>
-        {selectedSector !== 'ALL' && selectedSector !== 'All' && (
-          <button
-            type="button"
-            onClick={() => onSelectSector('ALL')}
-            style={{
-              background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)',
-              borderRadius: 6, color: '#A5B4FC', fontSize: '0.66rem', fontWeight: 700, padding: '2px 8px', cursor: 'pointer'
-            }}
-          >
-            Show All Sectors
-          </button>
+        {selectedSector !== 'ALL' && (
+          <button type="button" onClick={() => onSelectSector('ALL')} style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6, color: '#A5B4FC', fontSize: '0.64rem', fontWeight: 700, padding: '2px 8px', cursor: 'pointer' }}>Show All</button>
         )}
       </div>
-
-      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
-        {sectorSummary.map((sec) => {
-          const isSelected = selectedSector === sec.sector;
-          const isBull = +sec.bullishPct >= 50;
-
-          return (
-            <div
-              key={sec.sector}
-              onClick={() => onSelectSector(isSelected ? 'ALL' : sec.sector)}
-              style={{
-                minWidth: 130,
-                background: isSelected ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.025)',
-                border: isSelected ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.06)',
-                borderRadius: 8,
-                padding: '8px 10px',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontWeight: 700, fontSize: '0.74rem', color: isSelected ? '#A5B4FC' : '#E2E8F0', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {sec.sector}
-                </span>
-                <span style={{ fontSize: '0.64rem', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>
-                  {sec.total}
-                </span>
-              </div>
-
-              {/* Sentiment ratio bar */}
-              <div style={{ display: 'flex', height: 4, background: '#060913', borderRadius: 2, overflow: 'hidden', margin: '5px 0' }}>
-                <div style={{ width: `${(sec.bullish / sec.total) * 100}%`, background: '#10B981' }} />
-                <div style={{ width: `${(sec.neutral / sec.total) * 100}%`, background: '#F59E0B' }} />
-                <div style={{ width: `${(sec.bearish / sec.total) * 100}%`, background: '#EF4444' }} />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.62rem' }}>
-                <span style={{ color: isBull ? '#10B981' : '#F59E0B', fontWeight: 700 }}>
-                  {sec.bullishPct}% Bull
-                </span>
-                <span style={{ color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>
-                  AI {sec.avgScore}
-                </span>
-              </div>
+      {QUAD_ORDER.map((q) => (
+        grouped[q].length ? (
+          <div key={q}>
+            <div style={{ fontSize: '0.6rem', fontWeight: 800, color: QUAD_COLOR[q], marginBottom: 4 }}>{q.toUpperCase()} ({grouped[q].length})</div>
+            <div style={{ display: 'flex', gap: 7, overflowX: 'auto', paddingBottom: 2 }}>
+              {grouped[q].map((sec) => {
+                const isSel = selectedSector === sec.sector;
+                return (
+                  <div key={sec.sector} onClick={() => onSelectSector(isSel ? 'ALL' : sec.sector)} style={{ minWidth: 128, background: isSel ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.025)', border: isSel ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.06)', borderRadius: 8, padding: '7px 9px', cursor: 'pointer' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 700, fontSize: '0.7rem', color: '#E2E8F0', maxWidth: 84, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sec.sector}</span>
+                      <span style={{ fontSize: '0.6rem', color: '#94A3B8', fontFamily: 'JetBrains Mono, monospace' }}>{sec.stocks}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6rem', marginTop: 3 }}>
+                      <span style={{ color: (sec.avg_change_1d_pct ?? 0) >= 0 ? '#10B981' : '#EF4444', fontWeight: 700 }}>{(sec.avg_change_1d_pct ?? 0) >= 0 ? '+' : ''}{sec.avg_change_1d_pct ?? 0}%</span>
+                      <span style={{ color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>AI {sec.avg_ai_score ?? '—'}</span>
+                    </div>
+                    {sec.breadth_pct != null && (
+                      <div style={{ fontSize: '0.58rem', color: '#64748B', marginTop: 2 }}>Breadth {sec.breadth_pct}% • Vol {sec.avg_rel_volume ?? '—'}x</div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
+          </div>
+        ) : null
+      ))}
     </div>
   );
 }
