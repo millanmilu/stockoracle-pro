@@ -18,7 +18,7 @@
 
 ## `backend/ml/` — forecasting
 - `predictor.py` StockPredictor: BiLSTM+Attention + Transformer + GBDT ensemble → 7-day return + bounds + signal. Model na mile to heuristic fallback (label me "Uncalibrated", confidence None).
-- `lstm_model.py`, `transformer_model.py`, `benchmarking.py` (5-fold vs Naive/SMA), `forecast_bands.py` (80/95% bands). Models `backend/ml/saved_models/` me.
+- `lstm_model.py`, `transformer_model.py`, `benchmarking.py` (5-fold vs Naive/SMA), `forecast_bands.py` (80/95% bands). Models `backend/ml/saved_models/` me bante hain **pehli training par** — abhi koi `.pt` trained nahi hai, isliye predictor heuristic fallback par hai.
 
 ## `backend/ai/` — LLM layer
 - `provider.py`: 6 providers (gemini/openai/anthropic/mistral/cohere/groq), PROVIDERS registry, `ask_ai()` auto-fallback, test/mask/encrypt, `extract_json_from_ai_response()`.
@@ -26,7 +26,7 @@
 
 ## `backend/services/` + `tasks/` + `providers/`
 - `market_data.py`: MarketDataService singleton — async, TTL (quote 15s, OHLCV 60s, funda 4h, options 2m), threadpool offload.
-- `ai_consensus.py`: XGBoost+NN+TA+sentiment → single score.
+- `ai_consensus.py`: 3-engine consensus — Technical (RSI/EMA/MACD/ADX) + ML (XGBoost-bundle `predict_future`, confidence = validation MAPE se) + Fundamental (PE/ROE) → single score. ML me certified confidence na ho to engine UNAVAILABLE mark karke 2-engine reweight hota hai.
 - `alert_scheduler.py`: loop + evaluate_all_alerts + status. `telegram_bot.py`: push + test.
 - `tasks/`: celery_app + ml_tasks (train_stock_model_task).
 - `providers/openbb/`: wrapper (dual-dispatch) + terminal_service (async quote+OHLCV).
