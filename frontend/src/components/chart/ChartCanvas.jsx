@@ -1079,10 +1079,14 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           const res = calculateById(def.engineId || 'ai_forecast', candles, def.params || {});
           if (res.valid && res.points) fc = { median: [], upper: [], lower: [], ...res.points };
         } catch {}
+        // Anchor the forecast lines to the last candle's close so the bands form a continuous probability cone
+        const anchor = fc.anchor || (candles.length > 0 ? { time: candles[candles.length - 1].time, value: Number(candles[candles.length - 1].close) } : null);
+        const anchorPt = (anchor && anchor.time != null && isFinite(anchor.value)) ? [{ time: anchor.time, value: Number(anchor.value) }] : [];
+
         const legs = [
-          sanitizeSeriesData((fc.median || []).map((p) => ({ time: p.time, value: Number(p.value) }))),
-          sanitizeSeriesData((fc.upper || []).map((p) => ({ time: p.time, value: Number(p.value) }))),
-          sanitizeSeriesData((fc.lower || []).map((p) => ({ time: p.time, value: Number(p.value) }))),
+          sanitizeSeriesData([...anchorPt, ...(fc.median || []).map((p) => ({ time: p.time, value: Number(p.value) }))]),
+          sanitizeSeriesData([...anchorPt, ...(fc.upper || []).map((p) => ({ time: p.time, value: Number(p.value) }))]),
+          sanitizeSeriesData([...anchorPt, ...(fc.lower || []).map((p) => ({ time: p.time, value: Number(p.value) }))]),
         ];
         bandList.forEach((s, idx) => {
           s.applyOptions({ visible: !isHidden });

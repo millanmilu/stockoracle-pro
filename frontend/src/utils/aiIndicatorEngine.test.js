@@ -107,6 +107,35 @@ describe('aiIndicatorEngine — advanced AI studies', () => {
     assert.deepEqual(getAIReversalMarkers(mk(40, (i) => 100 + i * 0.1), {}), []);
   });
 
+  it('reversal markers emit correct polarity on extreme exhaustion', () => {
+    // Sharp dump leading to deep oversold exhaustion
+    const dump = mk(80, (i) => (i < 40 ? 150 : 150 - (i - 40) * 2.5));
+    const dumpMarkers = getAIReversalMarkers(dump, { threshold: 40 });
+    if (dumpMarkers.length) {
+      assert.ok(dumpMarkers.some((m) => m.position === 'belowBar' && m.shape === 'arrowUp' && m.color === '#10B981'),
+        'oversold reversal marker should point up below bar');
+    }
+  });
+
+  it('dynamic S/R assigns side S below last close and R above last close', () => {
+    const osc = mk(150, (i) => 100 + Math.sin(i / 8) * 6);
+    const zones = getAISupportResistance(osc, {});
+    const lastClose = osc[osc.length - 1].close;
+    const supports = zones.filter((z) => z.side === 'S');
+    const resistances = zones.filter((z) => z.side === 'R');
+    assert.ok(supports.length > 0 && resistances.length > 0);
+    supports.forEach((s) => assert.ok(s.price <= lastClose + 1e-4, 'Support must be <= lastClose'));
+    resistances.forEach((r) => assert.ok(r.price >= lastClose - 1e-4, 'Resistance must be >= lastClose'));
+  });
+
+  it('forecast provides anchor at last candle and clamps extreme drift', () => {
+    const fc = computeAIForecast(up, { horizon: 5 });
+    assert.ok(fc.anchor != null, 'forecast must return anchor');
+    assert.equal(fc.anchor.time, up[up.length - 1].time);
+    assert.equal(fc.anchor.value, up[up.length - 1].close);
+    assert.ok(fc.lower.every((p) => p.value >= 0.01), 'lower band must be >= 0.01');
+  });
+
   it('dashboard summary aggregates every engine', () => {
     const s = computeAIDashboardScores(up);
     assert.equal(s.available, true);

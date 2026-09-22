@@ -90,6 +90,21 @@ describe('AI Signal Engine', () => {
     }
     assert.ok(res.riskReward > 0);
   });
+
+  it('dampens confidence in chop market and avoids false 100% probability', () => {
+    const chop = trend(260, 100, 0.0, 0.3);
+    const res = analyzeSignal(chop);
+    assert.equal(res.available, true);
+    assert.ok(res.probability <= 85, `chop market probability should be <= 85%, got ${res.probability}%`);
+  });
+
+  it('guarantees positive SL and TP even on low price assets', () => {
+    const penny = trend(100, 2.0, -0.01, 0.05);
+    const res = analyzeSignal(penny);
+    assert.equal(res.available, true);
+    assert.ok(res.stopLoss > 0, `stopLoss ${res.stopLoss} must be positive`);
+    assert.ok(res.takeProfit > 0, `takeProfit ${res.takeProfit} must be positive`);
+  });
 });
 
 describe('Market Structure detectors', () => {

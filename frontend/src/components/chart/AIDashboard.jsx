@@ -52,7 +52,7 @@ export default function AIDashboard({
   const [expanded, setExpanded] = useState(false);
   const [mtf, setMtf] = useState({});
   const [mtfLoading, setMtfLoading] = useState(false);
-  const runRef = useRef(false);
+  const lastSymbolRef = useRef('');
 
   // Current timeframe signal
   const signal = useMemo(() => analyzeSignal(candles), [candles]);
@@ -68,8 +68,9 @@ export default function AIDashboard({
 
   // Multi-timeframe alignment: fetch each interval and compute its signal.
   useEffect(() => {
-    if (!symbol || runRef.current) return;
-    runRef.current = true;
+    if (!symbol) return;
+    if (lastSymbolRef.current === symbol) return;
+    lastSymbolRef.current = symbol;
     setMtfLoading(true);
 
     let cancelled = false;
@@ -181,11 +182,11 @@ export default function AIDashboard({
           <AIScoreChip label="TREND" value={aiScores.trend.available ? `${aiScores.trend.score > 0 ? '+' : ''}${aiScores.trend.score}` : '—'} title={aiScores.trend.label || 'n/a'} color={aiScores.trend.score > 20 ? '#10B981' : aiScores.trend.score < -20 ? '#EF5350' : '#F59E0B'} />
           <AIScoreChip label="MOM" value={aiScores.momentum.available ? `${aiScores.momentum.score > 0 ? '+' : ''}${aiScores.momentum.score}` : '—'} title={aiScores.momentum.label || 'n/a'} color={aiScores.momentum.score > 30 ? '#10B981' : aiScores.momentum.score < -30 ? '#EF5350' : '#A855F7'} />
           <AIScoreChip label="REGIME" value={aiScores.regime.available ? aiScores.regime.label : '—'} title={aiScores.regime.playbook || ''} color={aiScores.regime.label === 'TREND' ? '#10B981' : aiScores.regime.label === 'RANGE' ? '#F59E0B' : '#38BDF8'} />
-          <AIScoreChip label="EXH" value={aiScores.exhaustion.available ? `${aiScores.exhaustion.score > 0 ? '+' : ''}${aiScores.exhaustion.score}` : '—'} title={aiScores.exhaustion.label || 'n/a'} color={Math.abs(aiScores.exhaustion.score) >= 60 ? '#EF5350' : '#94A3B8'} />
-          <AIScoreChip label="BRK" value={aiScores.breakout.available ? aiScores.breakout.label : '—'} title={aiScores.breakout.impulse != null ? `impulse ${aiScores.breakout.impulse}` : ''} color={aiScores.breakout.label === 'SQUEEZE' ? '#F59E0B' : '#FB923C'} />
+          <AIScoreChip label="EXH" value={aiScores.exhaustion.available ? `${aiScores.exhaustion.score > 0 ? '+' : ''}${aiScores.exhaustion.score}` : '—'} title={aiScores.exhaustion.label || 'n/a'} color={aiScores.exhaustion.score >= 60 ? '#10B981' : aiScores.exhaustion.score <= -60 ? '#EF5350' : '#94A3B8'} />
+          <AIScoreChip label="BRK" value={aiScores.breakout.available ? aiScores.breakout.label : '—'} title={aiScores.breakout.impulse != null ? `impulse ${aiScores.breakout.impulse}` : ''} color={aiScores.breakout.label === 'BULL-IMP' ? '#10B981' : aiScores.breakout.label === 'BEAR-IMP' ? '#EF5350' : aiScores.breakout.label === 'SQUEEZE' ? '#F59E0B' : '#FB923C'} />
           <AIScoreChip label="S/R" value={`${aiScores.sr.supports.length}S/${aiScores.sr.resistances.length}R`} title="AI support / resistance zones" color="#F472B6" />
-          <AIScoreChip label="PAT" value={aiScores.patterns.length ? aiScores.patterns.map((p) => p.name.split(' ')[0]).join(',') : '—'} title={aiScores.patterns.map((p) => `${p.name} ${p.direction} ${p.completion}%`).join(' · ') || 'no pattern'} color="#60A5FA" />
-          <AIScoreChip label="FCST" value={aiScores.forecast.available ? aiScores.forecast.direction : '—'} title={`${aiScores.forecast.bars}-bar path`} color="#FBBF24" />
+          <AIScoreChip label="PAT" value={aiScores.patterns.length ? aiScores.patterns.map((p) => p.name.split(' ')[0]).join(',') : '—'} title={aiScores.patterns.map((p) => `${p.name} ${p.direction} ${p.completion}%`).join(' · ') || 'no pattern'} color={aiScores.patterns[0]?.direction === 'bull' ? '#10B981' : aiScores.patterns[0]?.direction === 'bear' ? '#EF5350' : '#60A5FA'} />
+          <AIScoreChip label="FCST" value={aiScores.forecast.available ? aiScores.forecast.direction : '—'} title={`${aiScores.forecast.bars}-bar path`} color={aiScores.forecast.direction === 'UP' ? '#10B981' : aiScores.forecast.direction === 'DOWN' ? '#EF5350' : '#FBBF24'} />
         </div>
       )}
 
