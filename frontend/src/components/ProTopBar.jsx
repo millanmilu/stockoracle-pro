@@ -6,13 +6,27 @@ import { getThemeTokens } from '../utils/theme';
 import { isGoldSymbol, isCryptoSymbol } from '../utils/chartHelpers';
 import api from '../utils/api';
 
-// No DEFAULT_INDICES — hardcoded prices must never be shown as if they were live market data.
+// Baseline skeleton — price: null + UNAVAILABLE until the first tape fetch
+// resolves. Hardcoded numbers must NEVER be shown as live market data
+// (backend contract: "never fake prices"; AGENTS.md §4 No Fake Hardcoded Rates).
+const BASELINE_TAPE_ITEMS = [
+  { symbol: 'BTC', name: 'Bitcoin (USD)', price: null, change_pct: null, status: 'UNAVAILABLE', target_symbol: 'BTC' },
+  { symbol: 'GOLD', name: 'Gold Spot (USD)', price: null, change_pct: null, status: 'UNAVAILABLE', target_symbol: 'XAUUSD' },
+  { symbol: 'NIFTY 50', name: 'NSE Benchmark', price: null, change_pct: null, status: 'UNAVAILABLE', target_symbol: 'NIFTY50' },
+  { symbol: 'BANK NIFTY', name: 'Banking Index', price: null, change_pct: null, status: 'UNAVAILABLE', target_symbol: 'BANKNIFTY' },
+  { symbol: 'INDIA VIX', name: 'Volatility Index', price: null, change_pct: null, status: 'UNAVAILABLE' },
+  { symbol: 'USD / INR', name: 'Forex', price: null, change_pct: null, status: 'UNAVAILABLE' },
+  { symbol: 'BRENT CRUDE', name: 'Commodity ($)', price: null, change_pct: null, status: 'UNAVAILABLE' },
+];
 
 export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenCommandPalette }) {
   const selectedSymbol = useStore(s => s.selectedSymbol);
+  // No whole-store livePrices subscription here — that re-rendered the entire
+  // topbar on every tick (BTC dozens/sec). Tape only needs a 1s snapshot of
+  // the symbols it actually displays (see liveSnapshot effect below).
   const theme = useStore(s => s.theme);
   const tk = getThemeTokens(theme);
-  const [indices, setIndices] = useState([]);
+  const [indices, setIndices] = useState(() => BASELINE_TAPE_ITEMS);
   const [tapeUnavailable, setTapeUnavailable] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Mobile layout (<=640px): badge + marquee collapse, search goes fluid.
@@ -41,27 +55,62 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Fetch tape data — never fall back to hardcoded prices
+  // Fetch tape data — backend always ships BTC/GOLD rows (LIVE when verified,
+  // STATIC reference or UNAVAILABLE otherwise), so no client-side injection.
+  // Outage state is flagged via tapeUnavailable instead of faking prices.
   useEffect(() => {
+    let isMounted = true;
     const fetchTape = async () => {
       try {
         const { data } = await api.get('/api/terminal/ticker-tape');
+        if (!isMounted) return;
         if (Array.isArray(data.indices) && data.indices.length > 0) {
-          setIndices(data.indices);
-          setTapeUnavailable(false);
+          const items = data.indices.filter(it => !String(it.symbol || '').toUpperCase().includes('SENSEX'));
+          setIndices(items.length > 0 ? items : data.indices);
+          setTapeUnavailable(data.source === 'unavailable');
         } else {
-          setIndices([]);
           setTapeUnavailable(true);
         }
       } catch {
-        setIndices([]);
-        setTapeUnavailable(true);
+        // Keep last good rows; flag the outage instead of faking prices.
+        if (isMounted) setTapeUnavailable(true);
       }
     };
     fetchTape();
-    const interval = setInterval(fetchTape, 25000);
-    return () => clearInterval(interval);
+    const interval = setInterval(fetchTape, 20000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
+
+  // 1s live snapshot for tape symbols only (render-cheap: re-renders at most
+  // 1/sec and only when a displayed symbol's tick object actually changed).
+  const [liveSnapshot, setLiveSnapshot] = useState({});
+  useEffect(() => {
+    const wanted = new Set(['XAUUSD']);
+    indices.forEach((it) => {
+      for (const k of [it?.target_symbol, it?.targetSymbol, it?.symbol]) {
+        const s = String(k || '').toUpperCase().trim();
+        if (s) wanted.add(s);
+      }
+    });
+    const pull = () => {
+      try {
+        const lp = useStore.getState().livePrices || {};
+        const next = {};
+        wanted.forEach((k) => { if (lp[k]) next[k] = lp[k]; });
+        setLiveSnapshot((prev) => {
+          const pk = Object.keys(prev);
+          if (pk.length === Object.keys(next).length && pk.every((k) => prev[k] === next[k])) return prev;
+          return next;
+        });
+      } catch {}
+    };
+    pull();
+    const id = setInterval(pull, 1000);
+    return () => clearInterval(id);
+  }, [indices]);
 
   // Symbol Search
   useEffect(() => {
@@ -98,6 +147,29 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
     setResults([]);
   };
 
+  const handleTapeItemClick = (item) => {
+    let raw = item?.target_symbol || item?.targetSymbol || item?.symbol;
+    if (!raw) return;
+    const clean = String(raw).toUpperCase().trim();
+    let ticker = clean;
+    if (clean === 'GOLD' || clean === 'XAU' || clean === 'XAUUSD') {
+      ticker = 'XAUUSD';
+    } else if (clean === 'BTC' || clean === 'BITCOIN' || clean === 'BTC/USD') {
+      ticker = 'BTC';
+    } else if (clean === 'NIFTY50' || clean === 'NIFTY 50' || clean === 'NIFTY') {
+      // NIFTY50 has no stock_universe token (verified: token None) — selecting
+      // it blanks the chart (404/503) and wastes backend WS cycles. Never
+      // navigate there from the tape.
+      return;
+    } else if (clean === 'BANK NIFTY') {
+      ticker = 'BANKNIFTY';
+    } else if (clean.includes('VIX') || clean.includes('CRUDE') || clean.includes('/')) {
+      return;
+    }
+    useStore.getState().setSelectedSymbol(ticker);
+    useStore.getState().setActiveView?.('Live Chart');
+  };
+
   const tapeItems = indices.length > 0 ? [...indices, ...indices] : [];
 
   return (
@@ -130,6 +202,34 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
         }
         .topbar-marquee-track:hover {
           animation-play-state: paused;
+        }
+        .topbar-tape-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 2px 10px;
+          margin: 0 4px;
+          border-radius: 6px;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(255, 255, 255, 0.09);
+          font-size: 0.68rem;
+          font-family: 'JetBrains Mono', monospace;
+          cursor: pointer;
+          user-select: none;
+          transition: all 0.15s ease;
+        }
+        .topbar-tape-chip:hover {
+          background: rgba(99, 102, 241, 0.16) !important;
+          border-color: rgba(99, 102, 241, 0.5) !important;
+          transform: translateY(-1px);
+        }
+        [data-theme="light"] .topbar-tape-chip {
+          background: rgba(15, 23, 42, 0.04);
+          border: 1px solid rgba(15, 23, 42, 0.12);
+        }
+        [data-theme="light"] .topbar-tape-chip:hover {
+          background: rgba(99, 102, 241, 0.1) !important;
+          border-color: rgba(99, 102, 241, 0.4) !important;
         }
       `}</style>
 
@@ -228,70 +328,91 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
       {/* Center: Infinite Seamless Running Marquee Ticker (hidden on mobile to protect search) */}
       {!isMobile && (
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative', height: '100%', display: 'flex', alignItems: 'center', margin: '0 8px', minWidth: 0 }}>
-        {/* Subtle Fade Edges */}
-        <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 20, background: `linear-gradient(90deg, ${tk.topbarBg}, transparent)`, zIndex: 2, pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 20, background: `linear-gradient(270deg, ${tk.topbarBg}, transparent)`, zIndex: 2, pointerEvents: 'none' }} />
-
-        {tapeUnavailable || tapeItems.length === 0 ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.66rem', fontFamily: 'JetBrains Mono, monospace', color: '#475569', paddingLeft: 8 }}>
+        {tapeItems.length === 0 ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.66rem', fontFamily: 'JetBrains Mono, monospace', color: '#64748B', paddingLeft: 8 }}>
             <AlertCircle size={11} />
-            <span>Market data unavailable</span>
+            <span>Market data connecting…</span>
           </div>
         ) : (
+          <>
+          {tapeUnavailable && (
+            <span title="Backend unreachable — showing last known values" style={{ flexShrink: 0, fontSize: '0.58rem', fontWeight: 800, letterSpacing: '0.06em', fontFamily: 'JetBrains Mono, monospace', color: '#D97706', background: 'rgba(217,119,6,0.12)', border: '1px solid rgba(217,119,6,0.35)', padding: '2px 7px', borderRadius: 4 }}>
+              OFFLINE
+            </span>
+          )}
           <div className="topbar-marquee-track">
             {tapeItems.map((item, idx) => {
-              const price = Number(item.price || 0);
-              const changePct = Number(item.change_pct || 0);
+              const sym = String(item.symbol || '').toUpperCase().trim();
+              const targetSym = String(item.target_symbol || item.targetSymbol || sym).toUpperCase().trim();
+              const liveFeed = liveSnapshot[targetSym] || liveSnapshot[sym] || (sym === 'GOLD' ? liveSnapshot['XAUUSD'] : undefined);
+              const price = Number(liveFeed?.price ?? item.price ?? 0);
+              const changePct = Number(liveFeed?.change_pct ?? item.change_pct ?? 0);
               const isUp = changePct >= 0;
-              const isStatic = item.status === 'STATIC';
+              const isStatic = !liveFeed && item.status === 'STATIC';
+              const isUnavailable = !liveFeed && item.status === 'UNAVAILABLE';
+              const isChartable = !sym.includes('VIX') && !sym.includes('CRUDE') && (!sym.includes('/') || sym.includes('BTC')) && !sym.startsWith('NIFTY');
+              const isGold = sym === 'GOLD' || sym === 'XAUUSD';
+              const isBtc = sym === 'BTC' || sym === 'BITCOIN';
+              const isNifty = sym.startsWith('NIFTY');
+              const isBankNifty = sym.includes('BANK');
+              const prefix = (isBtc || isGold || sym.includes('CRUDE')) ? '$' : (sym.includes('INR') ? '₹' : '');
+
               return (
                 <div
                   key={idx}
-                  onClick={() => {
-                    if (item.symbol && !item.symbol.includes('/') && !item.symbol.includes('VIX') && !item.symbol.includes('CRUDE')) {
-                      useStore.getState().setSelectedSymbol(item.symbol.replace(/\s+/g, ''));
-                    }
-                  }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    padding: '0 14px',
-                    fontSize: '0.68rem',
-                    fontFamily: 'JetBrains Mono, monospace',
-                    borderRight: `1px solid ${tk.topbarBorder}`,
-                    cursor: 'pointer',
-                    userSelect: 'none',
-                    opacity: isStatic ? 0.55 : 1,
-                  }}
-                  title={isStatic ? 'Reference value — not real-time' : undefined}
+                  onClick={() => handleTapeItemClick(item)}
+                  className="topbar-tape-chip"
+                  style={{ opacity: (isStatic || isUnavailable) && !liveFeed ? 0.65 : 1, cursor: isChartable ? 'pointer' : 'default' }}
+                  title={isChartable ? `Click to open ${item.symbol} chart` : (isStatic ? 'Reference value' : 'Not chartable')}
                 >
-                  <span style={{ color: tk.topbarMuted, fontWeight: 600 }}>{item.symbol}</span>
-                  <span style={{ fontWeight: 700, color: isStatic ? tk.topbarMuted : tk.topbarText }}>
+                  {isBtc ? (
+                    <span style={{ color: '#F59E0B', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                      <span>₿</span> BTC
+                    </span>
+                  ) : isGold ? (
+                    <span style={{ color: '#FACC15', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                      <span>🥇</span> GOLD
+                    </span>
+                  ) : isNifty ? (
+                    <span style={{ color: '#818CF8', fontWeight: 800 }}>NIFTY 50</span>
+                  ) : isBankNifty ? (
+                    <span style={{ color: '#38BDF8', fontWeight: 800 }}>BANK NIFTY</span>
+                  ) : (
+                    <span style={{ color: tk.topbarMuted, fontWeight: 700 }}>{item.symbol}</span>
+                  )}
+
+                  <span style={{ fontWeight: 800, color: tk.topbarText }}>
                     {price > 0
-                      ? (price >= 100 ? price.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : price.toFixed(2))
+                      ? `${prefix}${price >= 100 ? price.toLocaleString('en-IN', { maximumFractionDigits: 2 }) : price.toFixed(2)}`
                       : '—'}
                   </span>
-                  {price > 0 && (
+
+                  {price > 0 && item.change_pct != null && (
                     <span style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 2,
                       color: isUp ? '#10B981' : '#EF4444',
+                      background: isUp ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                      border: `1px solid ${isUp ? 'rgba(16, 185, 129, 0.25)' : 'rgba(239, 68, 68, 0.25)'}`,
+                      padding: '1px 5px',
+                      borderRadius: 4,
                       fontWeight: 700,
-                      fontSize: '0.63rem'
+                      fontSize: '0.62rem'
                     }}>
                       {isUp ? <TrendingUp size={9} /> : <TrendingDown size={9} />}
                       {isUp ? '+' : ''}{changePct.toFixed(2)}%
                     </span>
                   )}
+
                   {isStatic && (
-                    <span style={{ fontSize: '0.5rem', color: '#475569', fontWeight: 500 }}>REF</span>
+                    <span style={{ fontSize: '0.52rem', color: '#64748B', background: 'rgba(255,255,255,0.06)', padding: '1px 4px', borderRadius: 3, fontWeight: 600 }}>REF</span>
                   )}
                 </div>
               );
             })}
           </div>
+          </>
         )}
       </div>
       )}

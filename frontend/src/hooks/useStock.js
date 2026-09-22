@@ -24,6 +24,7 @@ export function useStock() {
     // Never request an interval the backend rejects (422) — normalize first
     // so callers can never blank the chart with e.g. '3m'.
     const cleanInterval = normalizeInterval(interval, '1d');
+    let backendDetail = null;
     try {
       const params = { interval: cleanInterval };
       if (timeframe) params.timeframe = timeframe;
@@ -35,8 +36,25 @@ export function useStock() {
       if (Array.isArray(data) && data.length > 0) {
         return { candles: data, dataSource: 'unknown' };
       }
+      backendDetail = data?.detail || 'Empty history response';
     } catch (e) {
-      // Backend not running or error; proceed to check crypto fallback
+      // Preserve the real reason (503 broker-offline vs 404 unknown ticker vs
+      // network down) instead of swallowing it — callers surface it in the UI.
+      backendDetail = e?.response?.data?.detail || e?.message || 'Backend unreachable';
+      const status = e?.response?.status;
+      // Only crypto/commodity symbols have a client-side fallback; equities
+      // must fail loudly so a wrong instrument is never plotted silently.
+      const isCryptoLike = ticker && isCryptoSymbol(ticker);
+      if (!isCryptoLike) {
+        const msg = status === 503
+          ? `Live data unavailable (${backendDetail})`
+          : backendDetail;
+        setHistoryError(msg);
+        const err = new Error(msg);
+        err.status = status || 0;
+        err.detail = backendDetail;
+        throw err;
+      }
     }
 
     // Client-side fallback for Crypto/Commodity (e.g. BTC, XAUUSD) via Binance public klines API
@@ -49,17 +67,18 @@ export function useStock() {
           '15m': '15m', '30m': '30m', '1h': '1h', '4h': '4h', '1d': '1d'
         };
         const bIv = binanceIvMap[cleanInterval] || '1d';
-        const bSymbol = isGoldSymbol(ticker) ? 'PAXGUSDT' : (ticker.toUpperCase().endsWith('USDT') ? ticker.toUpperCase() : 'BTCUSDT');
+        const isGold = isGoldSymbol(ticker);
+        const bSymbol = isGold ? 'PAXGUSDT' : (ticker.toUpperCase().endsWith('USDT') ? ticker.toUpperCase() : 'BTCUSDT');
         const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${bSymbol}&interval=${bIv}&limit=500`);
         const json = await res.json();
         if (Array.isArray(json) && json.length > 0) {
           const isIntraday = cleanInterval !== '1d';
           const candles = json.map(k => {
             const timeMs = k[0];
-            const d = new Date(timeMs);
+            // Daily buckets are IST (backend invariant) — never UTC.
             const dateVal = isIntraday
               ? Math.floor(timeMs / 1000)
-              : d.toISOString().substring(0, 10);
+              : new Date(timeMs + 5.5 * 3600 * 1000).toISOString().substring(0, 10);
             return {
               date: dateVal,
               open: parseFloat(k[1]),
@@ -69,13 +88,28 @@ export function useStock() {
               volume: parseFloat(k[5]),
             };
           });
+          // GOLD/XAUUSD is a PAXG token proxy, NOT spot gold — flag it so the
+          // chart never mislabels a different instrument as GOLD.
+          if (isGold) {
+            return {
+              candles,
+              dataSource: 'binance_proxy_PAXG',
+              proxySymbol: bSymbol,
+              proxyWarning: 'GOLD shown via PAXGUSDT token proxy (Binance) — not spot XAUUSD',
+            };
+          }
           return { candles, dataSource: 'binance_live' };
         }
       } catch (_) {}
     }
 
-    setHistoryError('Failed to load historical candles');
-    return { candles: [], dataSource: 'error' };
+    const msg = backendDetail
+      ? `Failed to load historical candles (${backendDetail})`
+      : 'Failed to load historical candles';
+    setHistoryError(msg);
+    const err = new Error(msg);
+    err.detail = backendDetail;
+    throw err;
   }, []);
 
   const fetchPredict = useCallback(async (ticker) => {

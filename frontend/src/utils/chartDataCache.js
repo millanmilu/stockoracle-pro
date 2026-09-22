@@ -12,8 +12,36 @@
  * refreshes in the background.
  */
 
-const cache = new Map(); // key -> { candles, dataSource, ts }
-const MAX_ENTRIES = 20;
+const cache = new Map(); // key -> { candles, dataSource, ts, bytes }
+const MAX_ENTRIES = 5;
+// Byte budget: with ~10-13 MB per full-history entry, 20 entries ≈ 200 MB JS
+// heap (mobile risk). Cap total cached bytes; oldest entries evicted first.
+// Per-candle estimate (~1.2 KB with 71 indicator cols) avoids a full
+// JSON.stringify on every write (which would itself jank on 7k+ rows).
+const MAX_BYTES = 30 * 1024 * 1024;
+const BYTES_PER_CANDLE = 1200;
+
+function entryBytes(candles) {
+  return (Array.isArray(candles) ? candles.length : 0) * BYTES_PER_CANDLE;
+}
+
+function evictIfNeeded() {
+  while (cache.size > MAX_ENTRIES) {
+    cache.delete(cache.keys().next().value);
+  }
+  let total = 0;
+  for (const v of cache.values()) total += v.bytes || 0;
+  while (total > MAX_BYTES && cache.size > 1) {
+    const oldest = cache.keys().next().value;
+    const evicted = cache.get(oldest);
+    total -= evicted?.bytes || 0;
+    cache.delete(oldest);
+  }
+}
+
+export function clearChartCache() {
+  cache.clear();
+}
 
 export function cacheKey(symbol, interval) {
   return `${String(symbol || '').toUpperCase()}__${String(interval || '1d')}`;
@@ -34,10 +62,8 @@ export function setCachedCandles(symbol, interval, candles, dataSource = 'cache'
       candles,
       dataSource,
       ts: Date.now(),
+      bytes: entryBytes(candles),
     });
-    if (cache.size > MAX_ENTRIES) {
-      const oldest = cache.keys().next().value;
-      cache.delete(oldest);
-    }
+    evictIfNeeded();
   } catch {}
 }

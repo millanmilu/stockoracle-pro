@@ -14,10 +14,10 @@ export default function BloombergTickerTape() {
       try {
         const { data } = await api.get('/api/terminal/ticker-tape');
         if (Array.isArray(data.indices) && data.indices.length > 0) {
-          // Only accept entries that carry a real price (> 0) from the API.
-          // Entries with status "STATIC" are reference values, not live — display them
-          // with a visual indicator so users know they are not real-time.
-          setIndices(data.indices);
+          // Backend always ships BTC/GOLD rows (LIVE when verified, STATIC /
+          // UNAVAILABLE otherwise) — never inject hardcoded prices as LIVE.
+          const items = data.indices.filter(it => !String(it.symbol || '').toUpperCase().includes('SENSEX'));
+          setIndices(items.length > 0 ? items : data.indices);
           setError(false);
         } else {
           // Empty response means broker is offline; show unavailable notice.

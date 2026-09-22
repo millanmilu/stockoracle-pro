@@ -768,9 +768,10 @@ def get_terminal_ticker_tape(
     return {
         "source": "unavailable",
         "indices": [
-            {"symbol": "NIFTY 50",   "name": "NSE Benchmark",    "price": None, "change_pct": None, "status": "UNAVAILABLE"},
-            {"symbol": "SENSEX",     "name": "BSE Benchmark",    "price": None, "change_pct": None, "status": "UNAVAILABLE"},
-            {"symbol": "BANK NIFTY", "name": "Banking Index",    "price": None, "change_pct": None, "status": "UNAVAILABLE"},
+            {"symbol": "BTC",        "name": "Bitcoin (USD)",    "price": None, "change_pct": None, "status": "UNAVAILABLE", "target_symbol": "BTC"},
+            {"symbol": "GOLD",       "name": "Gold Spot (USD)",  "price": None, "change_pct": None, "status": "UNAVAILABLE", "target_symbol": "XAUUSD"},
+            {"symbol": "NIFTY 50",   "name": "NSE Benchmark",    "price": None, "change_pct": None, "status": "UNAVAILABLE", "target_symbol": "NIFTY50"},
+            {"symbol": "BANK NIFTY", "name": "Banking Index",    "price": None, "change_pct": None, "status": "UNAVAILABLE", "target_symbol": "BANKNIFTY"},
             {"symbol": "INDIA VIX",  "name": "Volatility Index", "price": None, "change_pct": None, "status": "UNAVAILABLE"},
             {"symbol": "USD / INR",  "name": "Forex",            "price": None, "change_pct": None, "status": "UNAVAILABLE"},
             {"symbol": "BRENT CRUDE","name": "Commodity ($)",    "price": None, "change_pct": None, "status": "UNAVAILABLE"},

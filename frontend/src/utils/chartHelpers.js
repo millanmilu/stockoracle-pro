@@ -80,7 +80,11 @@ export function isCryptoSymbol(symbol) {
   return s === 'BTC' || s.startsWith('BTC') || s.includes('BITCOIN') || s.includes('ETH') || s.endsWith('USDT');
 }
 
-export const POPULAR_STOCKS = ['BTC', 'XAUUSD', 'GOLD', 'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'WIPRO', 'NIFTY50', 'BANKNIFTY'];
+// NIFTY50 removed: not in stock_universe (no token/company_info/daily rows),
+// so it could never tick and only added backend load + log noise.
+// BANKNIFTY kept (universe member) even without price rows yet.
+// Cap kept at 50 in useWebSocket.sendSubscription (backend invariant §4).
+export const POPULAR_STOCKS = ['BTC', 'XAUUSD', 'GOLD', 'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'WIPRO', 'BANKNIFTY'];
 
 export const INTERVALS = [
   { label: '1s (1 sec)', value: '1s' },
@@ -282,6 +286,67 @@ export const INTERVAL_SLOT_SEC = {
 export const MAX_LIVE_FILL_SLOTS = 15;
 
 const IST_OFFSET_SEC = 5.5 * 3600;
+
+/**
+ * IST calendar date (YYYY-MM-DD) for a wall-clock timestamp.
+ * Single source of truth for daily buckets — crypto AND equity both use IST
+ * (AGENTS.md §5 + backend fetcher astimezone(_IST)). Never use
+ * `new Date(ms).toISOString().slice(0,10)` (UTC) for daily buckets: between
+ * 00:00–05:30 IST the UTC date is yesterday and live ticks would overwrite
+ * the previous day's finalized candle instead of opening a new bar.
+ */
+export function getIstDateString(nowMs) {
+  const ms = Number(nowMs);
+  if (!isFinite(ms)) return null;
+  return new Date(ms + 5.5 * 3600 * 1000).toISOString().substring(0, 10);
+}
+
+/**
+ * Bounded initial-history lookback per interval so default load stays small.
+ * Backend `days_map` already serves these timeframes; 'ALL' (7k+ daily rows,
+ * ~10MB / 71 cols) is only for explicit deep-history requests.
+ *  - 1d       → 2Y   (~500 daily bars, full indicator warmup)
+ *  - 1m/5m    → 5D   (intraday capacity, no SQLite bloat)
+ *  - 15m/30m  → 1M
+ *  - 1h/4h    → 6M
+ *  - 1s/30s   → 5D   (microstructure, never backfilled)
+ */
+export function getBoundedTimeframe(interval) {
+  const iv = String(interval || '').toLowerCase();
+  if (iv === '1d') return '2Y';
+  if (iv === '1m' || iv === '5m' || iv === '1s' || iv === '30s') return '5D';
+  if (iv === '15m' || iv === '30m') return '1M';
+  if (iv === '1h' || iv === '4h') return '6M';
+  return '6M';
+}
+
+/** Viewportapse left edge ke itne bars ke andar aaye to older-data backfill trigger hota hai. */
+export const BACKFILL_TRIGGER_BARS = 30;
+
+/**
+ * Progressive history depth per interval (left-pan infinite scroll).
+ * Index 0 === getBoundedTimeframe() (default fast load); panning left deepens
+ * one level at a time (2Y → 5Y → ALL). Levels stop where the backend stops
+ * serving deeper windows — exhaustion is detected when a deeper fetch adds no
+ * older bars (a remount with deep-cached data may cost one redundant fetch
+ * before self-marking exhausted).
+ */
+export const BACKFILL_LEVELS = {
+  '1d': ['2Y', '5Y', 'ALL'],
+  '1m': ['5D', '1M'], '5m': ['5D', '1M'], '1s': ['5D', '1M'], '30s': ['5D', '1M'],
+  '15m': ['1M', '3M'], '30m': ['1M', '3M'],
+  '1h': ['6M', '1Y'], '4h': ['6M', '1Y'],
+};
+
+/**
+ * Next deeper timeframe after `level` (0-based index into BACKFILL_LEVELS),
+ * or null when fully deep / unknown interval.
+ */
+export function nextBackfillTimeframe(interval, level) {
+  const levels = BACKFILL_LEVELS[String(interval || '').toLowerCase()] || BACKFILL_LEVELS['1h'];
+  const next = Number(level) + 1;
+  return next < levels.length ? levels[next] : null;
+}
 
 /**
  * Intermediate slot times between two published buckets (exclusive).

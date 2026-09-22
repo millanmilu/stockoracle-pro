@@ -13,3 +13,7 @@
 11. **Crypto seed DB me gaya?** → `_generate_crypto_seed_data` sirf charts ke liye hai — persist mat karo (DB me gaya to `sqlite` source banke ML me ghus jayega). Guard list me `crypto_seed` hai.
 12. **52W high/low unknown?** → `current*1.15` jaisa estimate mat banao — `null` bhejo.
 13. **Naya router bina auth?** → `dependencies=[Security(verify_api_key)]` lagao (research/ml pattern). Prod me `API_KEY` unset ho to startup par loud error aata hai.
+14. **Tape me hardcoded price LIVE lag raha?** → Kabhi mat karo (AGENTS.md §4). Backend `ticker-tape` hamesha BTC/GOLD rows deta hai (LIVE / STATIC / UNAVAILABLE) — frontend injection dead code hai, hatao. Baseline skeleton `price: null` rakho, outage `OFFLINE` badge se dikhao.
+15. **Topbar har tick pe re-render?** → `useStore(s => s.livePrices)` poora object subscribe karta hai (BTC dozens/sec). Tape ke liye 1s `getState()` snapshot kaafi hai.
+16. **Tape click se chart blank?** → `NIFTY50` ka universe token None hai (verify: `get_stock_universe_token`) — tape se uspe navigate mat karao.
+17. **Left-pan pe purana data chahiye?** → Default bounded load hi rakho; `BACKFILL_LEVELS` + `onNeedOlderData` (30-bar edge trigger) left me prepend karta hai. Viewport shift-compensate hota hai (`ChartCanvas` prepend branch) — `fitContent` mat chalao warna jump hoga. Backfill fail silent rehta hai (badge nahi), replay/loading me blocked, exhaustion pe stop.

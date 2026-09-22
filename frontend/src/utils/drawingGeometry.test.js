@@ -34,6 +34,7 @@ import {
   formatDuration,
   formatSignedPercent,
   formatSignedPrice,
+  formatVolumeCompact,
   fullLineEndpoints,
   gannBoxLevels,
   gannFanLines,
@@ -49,6 +50,7 @@ import {
   projectionLevels,
   rayEnd,
   signedPerpendicularOffset,
+  sliceCandlesByRange,
   strokeDasharray,
   triangleFromBox,
   trianglePatternVertices,
@@ -498,5 +500,64 @@ describe('drawingGeometry — line extension (Extend Left / Extend Right)', () =
     assert.deepEqual(applyLineExtension(a, p(40, 40), { extendLeft: true, extendRight: true }, surface), [a, p(40, 40)]);
     assert.equal(isExtendableType('trendline'), true);
     assert.equal(isExtendableType('rectangle'), false);
+  });
+});
+
+describe('drawingGeometry — volume profile & candle slicing', () => {
+  const candles = [
+    { time: 100, open: 10, high: 15, low: 9, close: 14, volume: 100 },
+    { time: 200, open: 14, high: 18, low: 13, close: 17, volume: 150 },
+    { time: 300, open: 17, high: 19, low: 16, close: 18, volume: 200 },
+    { time: 400, open: 18, high: 22, low: 17, close: 21, volume: 300 },
+    { time: 500, open: 21, high: 25, low: 20, close: 24, volume: 250 },
+  ];
+
+  it('formatVolumeCompact handles zero, K, M, B correctly', () => {
+    assert.equal(formatVolumeCompact(0), '0');
+    assert.equal(formatVolumeCompact(-10), '0');
+    assert.equal(formatVolumeCompact(450), '450');
+    assert.equal(formatVolumeCompact(1500), '1.5K');
+    assert.equal(formatVolumeCompact(2450000), '2.45M');
+    assert.equal(formatVolumeCompact(1800000000), '1.80B');
+  });
+
+  it('sliceCandlesByRange slices by logical index in forward direction', () => {
+    const a = { x: 50, y: 100, logical: 1 };
+    const b = { x: 150, y: 100, logical: 3 };
+    const slice = sliceCandlesByRange(candles, a, b);
+    assert.equal(slice.length, 3);
+    assert.equal(slice[0].time, 200);
+    assert.equal(slice[2].time, 400);
+  });
+
+  it('sliceCandlesByRange slices by logical index in reverse direction', () => {
+    const a = { x: 150, y: 100, logical: 3.2 };
+    const b = { x: 50, y: 100, logical: 0.8 };
+    const slice = sliceCandlesByRange(candles, a, b);
+    assert.equal(slice.length, 3);
+    assert.equal(slice[0].time, 200);
+    assert.equal(slice[2].time, 400);
+  });
+
+  it('sliceCandlesByRange clamps out-of-bound logical indices', () => {
+    const a = { x: -50, y: 100, logical: -5 };
+    const b = { x: 500, y: 100, logical: 10 };
+    const slice = sliceCandlesByRange(candles, a, b);
+    assert.equal(slice.length, 5);
+  });
+
+  it('sliceCandlesByRange falls back to timestamp when logical is absent', () => {
+    const a = { x: 50, y: 100, time: 200 };
+    const b = { x: 150, y: 100, time: 400 };
+    const slice = sliceCandlesByRange(candles, a, b);
+    assert.equal(slice.length, 3);
+    assert.equal(slice[0].time, 200);
+    assert.equal(slice[2].time, 400);
+  });
+
+  it('sliceCandlesByRange handles empty or invalid inputs gracefully', () => {
+    assert.deepEqual(sliceCandlesByRange([], { logical: 1 }, { logical: 2 }), []);
+    assert.deepEqual(sliceCandlesByRange(null, { logical: 1 }, { logical: 2 }), []);
+    assert.deepEqual(sliceCandlesByRange(candles, null, null), []);
   });
 });

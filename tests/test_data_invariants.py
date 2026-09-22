@@ -89,5 +89,27 @@ class TestDataInvariants(unittest.TestCase):
         self.assertTrue(row_10["low"] <= min(row_10["open"], row_10["close"]))
 
 
+    def test_chart_columns_match_documented_count(self):
+        """Guard the P0 payload comment: _CHART_COLUMNS length must equal the
+        documented default column count so stale '~8MB/22 cols' claims can't return."""
+        from backend.api.routers.market import _CHART_COLUMNS, _trim_and_round
+        self.assertEqual(len(_CHART_COLUMNS), 71, f"_CHART_COLUMNS drifted: {len(_CHART_COLUMNS)}")
+        for required in ["date", "open", "high", "low", "close", "volume",
+                         "sma_20", "sma_50", "rsi", "macd", "bb_upper",
+                         "supertrend", "atr", "vwap", "pivot"]:
+            self.assertIn(required, _CHART_COLUMNS)
+        # trim preserves every row (AGENTS.md §2) and stays JSON-safe
+        import pandas as pd
+        df = pd.DataFrame([{
+            "date": "2026-09-22", "open": 100.0, "high": 101.0, "low": 99.0,
+            "close": 100.5, "volume": 1000, "rsi": float("nan"),
+            "sma_20": 100.1, "extra_col": 1,
+        }])
+        rows = _trim_and_round(df, full=False)
+        self.assertEqual(len(rows), 1)
+        self.assertNotIn("extra_col", rows[0])
+        self.assertIsNone(rows[0]["rsi"])
+
+
 if __name__ == "__main__":
     unittest.main()

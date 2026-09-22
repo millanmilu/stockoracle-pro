@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useMemo, memo } from 'react';
 import { CrosshairMode, PriceScaleMode, LineStyle } from 'lightweight-charts';
 import { safeCreateChart } from '../../utils/safeChart';
 import { Eye, EyeOff, X } from 'lucide-react';
-import { CHART_OPTIONS, CANDLE_STYLE, isCryptoSymbol, sanitizeCandles, sanitizeSeriesData, compareChartTime } from '../../utils/chartHelpers';
+import { CHART_OPTIONS, CANDLE_STYLE, isCryptoSymbol, sanitizeCandles, sanitizeSeriesData, compareChartTime, BACKFILL_TRIGGER_BARS } from '../../utils/chartHelpers';
 import '../../utils/aiIndicatorEngine.js';
 import { getAISupportResistance, getAIBreakoutMarkers, getAIReversalMarkers, getAIPatternMarkers } from '../../utils/aiIndicatorEngine.js';
 import { getChartBaseOptions, getThemeTokens, applyChartTheme } from '../../utils/theme';
@@ -259,6 +259,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   onVisibleRangeChange = () => {},
   onCrosshairMove = () => {},
   onChartClick = () => {},
+  onNeedOlderData = () => {},
   paperPosition = null,
 }, ref) {
   const containerRef = useRef(null);
@@ -469,6 +470,8 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   visibleRangeRef.current = onVisibleRangeChange;
   const chartClickRef = useRef(onChartClick);
   chartClickRef.current = onChartClick;
+  const needOlderDataRef = useRef(onNeedOlderData);
+  needOlderDataRef.current = onNeedOlderData;
 
   // Expose imperative methods to parent controller
   useImperativeHandle(ref, () => ({
@@ -533,8 +536,21 @@ const ChartCanvas = forwardRef(function ChartCanvas({
             if (lastIdx >= 0 && candlesRef.current[lastIdx].time === candle.time) {
               candlesRef.current[lastIdx] = { ...candlesRef.current[lastIdx], ...candle, open: o, high: h, low: l, close: c };
             } else if (lastIdx >= 0 && candle.time > candlesRef.current[lastIdx].time) {
+              // Only follow the live edge when the viewport is ALREADY at the
+              // right edge. Panning into history + moving the mouse off-chart
+              // must not yank the user back on the next bucket rollover.
+              let atRightEdge = true;
+              try {
+                const range = chartInstanceRef.current && !chartInstanceRef.current.__isDisposed
+                  ? chartInstanceRef.current.timeScale().getVisibleLogicalRange()
+                  : null;
+                if (range) {
+                  const totalBars = candlesRef.current.length;
+                  atRightEdge = range.to >= totalBars - 2;
+                }
+              } catch { atRightEdge = true; }
               candlesRef.current.push({ ...candle, open: o, high: h, low: l, close: c });
-              if (!isHoveringRef.current) {
+              if (!isHoveringRef.current && atRightEdge) {
                 try {
                   if (chartInstanceRef.current && !chartInstanceRef.current.__isDisposed) {
                     chartInstanceRef.current.timeScale().scrollToRealtime();
@@ -714,9 +730,15 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       }
     });
 
-    // TimeScale Range Synchronization
+    // TimeScale Range Synchronization + progressive-history trigger:
+    // jab viewport loaded data ke left edge ke andar aa jaye (user history me
+    // pan kar raha hai), parent se older candles mangwao. Threshold check
+    // sasta hai (ek number compare) — debounce/guards parent me hain.
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (range) visibleRangeRef.current(range, 'main');
+      if (range && typeof range.from === 'number' && range.from < BACKFILL_TRIGGER_BARS) {
+        try { needOlderDataRef.current?.(); } catch {}
+      }
     });
 
     // Chart Click Event (e.g. for Jump to Bar in Replay mode)
@@ -784,11 +806,22 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   // Load Historical Candles into Series
   // Incremental live-bar appends (same first bar, small growth) must NOT
   // steal the viewport — only full reloads re-fit the visible range.
-  const candlesMetaRef = useRef({ firstTime: null, length: 0 });
+  // Left-pan backfills (older bars prepended, same last bar) shift the
+  // viewport forward by the prepend count so the user keeps looking at the
+  // exact same bars — no jump, no snap to the right edge.
+  const candlesMetaRef = useRef({ firstTime: null, lastTime: null, length: 0 });
   useEffect(() => {
     if (!candleSeriesRef.current || !Array.isArray(candles) || candles.length === 0) {
       return;
     }
+
+    // Captured BEFORE setData: prepend restore needs the pre-replace range.
+    let preRange = null;
+    try {
+      preRange = chartInstanceRef.current && !chartInstanceRef.current.__isDisposed
+        ? chartInstanceRef.current.timeScale().getVisibleLogicalRange()
+        : null;
+    } catch {}
 
     try {
       // Defense-in-depth: LiveChartView already sorts/dedupes and drops
@@ -831,14 +864,28 @@ const ChartCanvas = forwardRef(function ChartCanvas({
 
       const totalBars = formattedCandles.length;
       const prev = candlesMetaRef.current;
-      const isSameDataset = prev.firstTime != null && formattedCandles[0].time === prev.firstTime;
+      const newFirst = formattedCandles[0].time;
+      const newLast = formattedCandles[totalBars - 1].time;
+      const isSameDataset = prev.firstTime != null && newFirst === prev.firstTime;
+      // Backfill prepend: same live edge, earlier start, strictly longer.
+      const isPrepend = !isSameDataset && prev.lastTime != null
+        && newLast === prev.lastTime && totalBars > prev.length;
+      const prependShift = isPrepend ? totalBars - prev.length : 0;
       const isIncrementalAppend =
         isSameDataset &&
         totalBars >= prev.length &&
         totalBars - prev.length <= 2;
-      candlesMetaRef.current = { firstTime: formattedCandles[0].time, length: totalBars };
+      candlesMetaRef.current = { firstTime: newFirst, lastTime: newLast, length: totalBars };
 
-      if (!isSameDataset && totalBars > 0) {
+      if (isPrepend && preRange && totalBars > 0) {
+        // Keep the user on the same bars they were viewing.
+        try {
+          chartInstanceRef.current.timeScale().setVisibleLogicalRange({
+            from: preRange.from + prependShift,
+            to: preRange.to + prependShift,
+          });
+        } catch {}
+      } else if (!isSameDataset && totalBars > 0) {
         // Initial symbol/interval load: fit default 80 bars
         const visibleCount = Math.min(totalBars, 80);
         if (chartInstanceRef.current && !chartInstanceRef.current.__isDisposed) {
@@ -1663,4 +1710,45 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   );
 });
 
-export default ChartCanvas;
+// Memoized: parent (LiveChartView) no longer re-renders per tick, but this
+// guards the canvas tree (legend/overlays) against any residual prop churn.
+// livePrice is throttled upstream (2s) for paper P&L lines; candles identity
+// only changes on bucket rollover / history load, so shallow array compare is
+// sufficient and cheap.
+function chartCanvasPropsEqual(prev, next) {
+  if (prev.candles !== next.candles) {
+    if (!Array.isArray(prev.candles) || !Array.isArray(next.candles)) return false;
+    if (prev.candles.length !== next.candles.length) return false;
+    const a = prev.candles;
+    const b = next.candles;
+    if (a.length === 0) return true;
+    // Compare first/last bar identity + close — full deep compare on 7k rows
+    // per render would defeat the memo.
+    const firstA = a[0]; const firstB = b[0];
+    const lastA = a[a.length - 1]; const lastB = b[b.length - 1];
+    if (firstA?.time !== firstB?.time || lastA?.time !== lastB?.time) return false;
+    if (Number(lastA?.close) !== Number(lastB?.close)) return false;
+  }
+  const keys = ['interval', 'selectedSymbol', 'chartType', 'priceScaleMode', 'invertScale', 'showVolume', 'timezone', 'livePrice', 'liveChange', 'paperPosition'];
+  for (const k of keys) {
+    if (k === 'paperPosition') {
+      const pa = prev.paperPosition; const pb = next.paperPosition;
+      if (pa === pb) continue;
+      if (!pa || !pb) return false;
+      if (pa.ticker !== pb.ticker || Number(pa.current_price) !== Number(pb.current_price) || pa.shares !== pb.shares) return false;
+      continue;
+    }
+    if (prev[k] !== next[k]) return false;
+  }
+  if (prev.activeIndicators !== next.activeIndicators || prev.hiddenIndicators !== next.hiddenIndicators || prev.indicatorOverrides !== next.indicatorOverrides) return false;
+  // Callbacks are stable useCallbacks in the parent; ref-compare them.
+  if (prev.onVisibleRangeChange !== next.onVisibleRangeChange) return false;
+  if (prev.onCrosshairMove !== next.onCrosshairMove) return false;
+  if (prev.onChartClick !== next.onChartClick) return false;
+  if (prev.onNeedOlderData !== next.onNeedOlderData) return false;
+  if (prev.onToggleHideIndicator !== next.onToggleHideIndicator) return false;
+  if (prev.onRemoveIndicator !== next.onRemoveIndicator) return false;
+  return true;
+}
+
+export default memo(ChartCanvas, chartCanvasPropsEqual);

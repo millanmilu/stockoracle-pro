@@ -21,8 +21,12 @@
 
 ## 5. Frontend (`LiveChartView.jsx`)
 - `activeCandleRef` rakho — purani bars mutate mat karo.
-- Daily: aaj ki candle IST date pe. Intraday: bucket seconds se rollover.
+- Daily: aaj ki candle IST date pe (`getIstDateString()` — crypto me bhi, UTC kabhi nahi).
+- Intraday: bucket seconds se rollover.
 - >20% spike ticks ignore karo.
+- Default history bounded hai (`getBoundedTimeframe()` — kabhi `'ALL'` mat bhejo).
+- Per-tick `useStore(livePrices)` subscription sirf `LivePriceBadge` me — poora tree re-render mat karao.
+- `scrollToRealtime()` sirf jab viewport already right edge pe ho.
 
 ## Master Order (phase sequence)
 Phase1 (Data/Security/Core) → Phase2 (DB/Modular) → Phase3 (Reliability/DevOps) → Phase6 (Strategy/Paper 2.0) → Phase4 (Research) → Phase5 (AI/Quant) → Phase7 (Broker/Mobile).

@@ -35,8 +35,12 @@ router = APIRouter(
     dependencies=[Security(verify_api_key)],
 )
 
-# Columns consumed by the chart. Trimmed from the ~45 returned by enrich_stock_dataframe()
-# to reduce payload from ~8 MB to ~2 MB. Use ?full=true to receive all columns.
+# Columns consumed by the chart (71 incl. OHLCV + overlay/oscillator/level fields
+# used directly by ChartCanvas/OscillatorPane). Measured default payload is
+# ~10 MB inflated JSON (~1.5 MB gzip wire) for ~7.5k daily rows — the win comes
+# from bounded lookbacks (frontend getBoundedTimeframe: 1d→2Y, 1m/5m→5D,
+# 15m/30m→1M, 1h/4h→6M), not from trimming these fields. Use ?full=true to
+# receive every column returned by enrich_stock_dataframe().
 _CHART_COLUMNS = [
     "date", "open", "high", "low", "close", "volume",
     "sma_20", "sma_50", "sma_200", "ema_9", "ema_21",
@@ -171,8 +175,10 @@ def get_stock_history(
     Returns standard envelope { data: [...], data_source: "angel_one" | "sqlite" | "yahoo_finance" }
     and sets X-Data-Source response header.
 
-    When interval='1d' and timeframe is omitted or 'ALL', returns complete multi-year data from inception.
-    Pass ?full=true to receive all ~45 enriched columns instead of the default 22 chart columns.
+    When interval='1d' and timeframe is omitted or 'ALL', returns complete multi-year data from inception
+    (~7.5k rows / ~10 MB inflated JSON with the default 71 chart columns — prefer a bounded
+    timeframe such as 2Y/6M/1M/5D for chart loads).
+    Pass ?full=true to receive all enriched columns instead of the default 71 chart columns.
     """
     t = ticker.upper().strip()
 

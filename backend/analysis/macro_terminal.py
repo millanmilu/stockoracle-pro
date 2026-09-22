@@ -21,7 +21,7 @@ logger = logging.getLogger("StockOracle.Analysis.MacroTerminal")
 # quota (NIFTY row) and Stooq from per-tab-open stampedes.
 _CACHE: Dict[str, Any] = {}
 _CACHE_TS: Optional[datetime] = None
-_CACHE_TTL = timedelta(minutes=30)
+_CACHE_TTL = timedelta(seconds=20)
 
 # Static references (used ONLY with status STATIC when live is unavailable).
 _REF = {
@@ -53,10 +53,40 @@ def _live_nifty_row() -> Optional[Dict[str, Any]]:
         last, prev = float(closes.iloc[-1]), float(closes.iloc[-2])
         chg = round((last - prev) / (prev + 1e-9) * 100.0, 2)
         return {"symbol": "NIFTY 50", "name": "NSE Benchmark",
-                "price": round(last, 2), "change_pct": chg, "status": "LIVE"}
+                "price": round(last, 2), "change_pct": chg, "status": "LIVE", "target_symbol": "NIFTY50"}
     except Exception as exc:
         logger.debug("Live NIFTY row unavailable: %s", exc)
         return None
+
+
+def _live_asset_row(ticker: str, symbol: str, name: str, fallback_price: float, fallback_change: float) -> Dict[str, Any]:
+    """Asset price + day change from verified broker/SQLite/Binance history."""
+    try:
+        from backend.data.fetcher import fetch_stock_data
+        df = fetch_stock_data(ticker, period="5d", interval="1d")
+        if df is not None and not df.empty and len(df) >= 2:
+            closes = df["close"].astype(float)
+            last, prev = float(closes.iloc[-1]), float(closes.iloc[-2])
+            chg = round((last - prev) / (prev + 1e-9) * 100.0, 2)
+            return {
+                "symbol": symbol,
+                "name": name,
+                "price": round(last, 2),
+                "change_pct": chg,
+                "status": "LIVE",
+                "target_symbol": ticker,
+            }
+    except Exception as exc:
+        logger.debug("Live %s row unavailable: %s", ticker, exc)
+    return {
+        "symbol": symbol,
+        "name": name,
+        "price": fallback_price,
+        "change_pct": fallback_change,
+        "status": "STATIC",
+        "target_symbol": ticker,
+    }
+
 
 
 def get_sovereign_macro_dashboard() -> Dict[str, Any]:
@@ -112,10 +142,14 @@ def get_sovereign_macro_dashboard() -> Dict[str, Any]:
 
     # ── Benchmark tape: LIVE where verifiable, else STATIC reference ──
     nifty_row = _live_nifty_row()
+    btc_row = _live_asset_row("BTC", "BTC", "Bitcoin (USD)", 85830.00, 1.25)
+    gold_row = _live_asset_row("XAUUSD", "GOLD", "Gold Spot (USD)", 4339.78, 0.45)
+
     indices: List[Dict[str, Any]] = [
-        nifty_row or {"symbol": "NIFTY 50", "name": "NSE Benchmark", "price": 24852.40, "change_pct": 0.42, "status": "STATIC"},
-        {"symbol": "SENSEX",      "name": "BSE Benchmark",    "price": 81340.20, "change_pct": 0.38,  "status": "STATIC"},
-        {"symbol": "BANK NIFTY",  "name": "Banking Index",    "price": 53210.50, "change_pct": 0.65,  "status": "STATIC"},
+        btc_row,
+        gold_row,
+        nifty_row or {"symbol": "NIFTY 50", "name": "NSE Benchmark", "price": 24852.40, "change_pct": 0.42, "status": "STATIC", "target_symbol": "NIFTY50"},
+        {"symbol": "BANK NIFTY",  "name": "Banking Index",    "price": 53210.50, "change_pct": 0.65,  "status": "STATIC", "target_symbol": "BANKNIFTY"},
         {"symbol": "INDIA VIX",   "name": "Volatility Index",
          "price": round(vix_live, 2) if vix_live else 12.84,
          "change_pct": None if vix_live else -3.20,
@@ -142,9 +176,9 @@ def get_sovereign_macro_dashboard() -> Dict[str, Any]:
         "indices": indices,
         "as_of": datetime.now().isoformat(),
         "data_notice": (
-            "India 10Y yield, RBI repo/CPI/GDP, SENSEX, BANK NIFTY and Brent are "
-            "static reference values, NOT real-time. US 10Y, USD/INR, India VIX "
-            "and NIFTY 50 are live when their status reads LIVE."
+            "India 10Y yield, RBI repo/CPI/GDP, BANK NIFTY and Brent are "
+            "static reference values, NOT real-time. US 10Y, USD/INR, India VIX, "
+            "BTC, Gold and NIFTY 50 are live when their status reads LIVE."
         ),
     }
     _CACHE, _CACHE_TS = result, datetime.now()

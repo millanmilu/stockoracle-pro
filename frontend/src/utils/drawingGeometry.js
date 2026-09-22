@@ -530,3 +530,50 @@ export const EXTENDABLE_DRAWING_TYPES = ['trendline', 'extended_line', 'info_lin
 export function isExtendableType(type) {
   return EXTENDABLE_DRAWING_TYPES.includes(type);
 }
+
+/** Compact volume formatter (TradingView readout: 1.25M, 450.2K). */
+export function formatVolumeCompact(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return '0';
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return Math.round(n).toString();
+}
+
+/**
+ * Extracts the slice of candles bounded between two anchors (Anchor A and Anchor B).
+ * Used by Fixed Range Volume Profile (FRVP) and Range measurement tools.
+ * Handles both left-to-right and right-to-left placement.
+ */
+export function sliceCandlesByRange(candles, a, b) {
+  if (!Array.isArray(candles) || candles.length === 0 || !a || !b) return [];
+  let i0 = null;
+  let i1 = null;
+
+  const logA = Number(a.logical);
+  const logB = Number(b.logical);
+  if (Number.isFinite(logA) && Number.isFinite(logB)) {
+    i0 = Math.round(logA);
+    i1 = Math.round(logB);
+  } else if (a.time != null && b.time != null) {
+    const tMin = Math.min(a.time, b.time);
+    const tMax = Math.max(a.time, b.time);
+    for (let i = 0; i < candles.length; i += 1) {
+      const ct = candles[i]?.time;
+      if (ct != null) {
+        if (ct >= tMin && i0 == null) i0 = i;
+        if (ct <= tMax) i1 = i;
+      }
+    }
+  }
+
+  if (i0 == null || i1 == null) {
+    return [];
+  }
+  const minIdx = Math.min(i0, i1);
+  const maxIdx = Math.max(i0, i1);
+  const start = Math.max(0, Math.min(candles.length - 1, minIdx));
+  const end = Math.max(0, Math.min(candles.length - 1, maxIdx));
+  return candles.slice(start, end + 1);
+}

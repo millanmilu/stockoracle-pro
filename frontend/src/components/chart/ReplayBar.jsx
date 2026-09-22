@@ -30,6 +30,7 @@ const pillBtn = {
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
+  flexShrink: 0,
   width: 28,
   height: 28,
   padding: 0,
@@ -129,6 +130,8 @@ export default function ReplayBar({
           : '0 12px 32px rgba(0,0,0,0.55)',
         userSelect: 'none',
         maxWidth: 'calc(100% - 16px)',
+        overflow: 'hidden',
+        flexWrap: 'nowrap',
         backdropFilter: 'blur(8px)',
       }}
     >
@@ -270,7 +273,7 @@ export default function ReplayBar({
           onChange={(e) => onSeek(Number(e.target.value))}
           title="Scrub through history"
           aria-label="Scrub through history"
-          style={{ width: 140, accentColor: '#EF5350', cursor: 'pointer' }}
+          style={{ width: 140, maxWidth: '24vw', minWidth: 60, flexShrink: 1, accentColor: '#EF5350', cursor: 'pointer' }}
         />
       )}
 
@@ -303,6 +306,10 @@ export default function ReplayBar({
           fontSize: 10.5,
           color: '#E2E8F0',
           whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          minWidth: 0,
+          flexShrink: 1,
           padding: '0 4px',
         }}
       >

@@ -140,6 +140,7 @@ export const DRAWING_TOOL_GROUPS = [
       { id: 'date_range', label: 'Date Range', points: 2, hint: 'Measures bars and elapsed time' },
       { id: 'price_range', label: 'Price Range', points: 2, hint: 'Measures price change and percentage' },
       { id: 'date_price_range', label: 'Date and Price Range', points: 2, hint: 'Measures both time and price' },
+      { id: 'fixed_range_volume_profile', label: 'Fixed Range Volume Profile', points: 2, hint: 'Volume distribution between two points (VPVR)' },
       { id: 'ruler', label: 'Measure', points: 2, legacy: true, hint: 'Ruler: price, %, bars and duration' },
     ],
   },
@@ -282,6 +283,7 @@ export const TOOL_SHORTCUTS = {
   short_position: 'Alt+Shift+S',
   date_range: 'Alt+Shift+D',
   price_range: 'Alt+Shift+P',
+  fixed_range_volume_profile: 'Alt+Shift+V',
   ruler: 'Alt+Shift+M',
 };
 

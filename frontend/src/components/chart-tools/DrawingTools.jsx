@@ -832,6 +832,12 @@ export default function DrawingTools({
     const isTouchDrag = Boolean(e?.touches && e.touches.length);
     if (!isTouchDrag && e?.button != null && e.button !== 0) return false;
     setSelectedDrawingId(drawingId);
+    // Default z-order: while a drawing tool is active, the pointer belongs to
+    // the NEW drawing being placed — existing shapes stay back and must never
+    // hijack the gesture into a drag of the old object. (New drawings append
+    // to the end of the array, so they always paint front; manual override
+    // stays via right-click Bring to front / Send to back.)
+    if (!isCursorMode(activeTool)) return false;
     if (lockAllDrawings) return false;
     // Per-drawing lock (TradingView): locked objects stay selectable so the
     // toolbar/settings remain usable, but anchors cannot move.
@@ -858,7 +864,7 @@ export default function DrawingTools({
     dragMovedRef.current = false;
     setChartLocked(true);
     return true;
-  }, [lockAllDrawings, setChartLocked]);
+  }, [lockAllDrawings, setChartLocked, isCursorMode, activeTool]);
 
   /** Begins a body move for any selectable drawing (legacy or registry-shaped). */
   const startBodyDrag = useCallback((e, drawingId) => {

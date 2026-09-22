@@ -157,6 +157,7 @@ const ICONS = {
   date_range: CalendarRange,
   price_range: ChevronsUpDown,
   date_price_range: Boxes,
+  fixed_range_volume_profile: AlignJustify,
   ruler: Ruler,
   smile: Smile,
 };

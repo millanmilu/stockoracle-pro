@@ -39,6 +39,7 @@ const BASE = {
   stats: false,
   fibLevels: false,
   showPrices: false,
+  volumeProfile: false,
 };
 
 /**
@@ -115,6 +116,7 @@ const CAP_OVERRIDES = {
   date_range: { line: true, background: true, border: true, coords: 2, stats: true, midLine: true },
   price_range: { line: true, background: true, border: true, coords: 2, stats: true, midLine: true, showPrices: true },
   date_price_range: { line: true, background: true, border: true, coords: 2, stats: true, midLine: true, showPrices: true },
+  fixed_range_volume_profile: { line: false, background: true, border: true, coords: 2, stats: true, volumeProfile: true, showPrices: true },
   ruler: { line: true, background: true, border: true, coords: 2, stats: true, midLine: true, showPrices: true },
 };
 
@@ -174,6 +176,17 @@ export function drawingDefaults(type) {
     showStatsTime: true,
     showStatsPrice: true,
     showStatsPercent: true,
+    // Volume Profile (FRVP)
+    rows: 24,
+    valueAreaPercent: 70,
+    profileWidthPercent: 40,
+    upColor: '#26A69A',
+    downColor: '#EF5350',
+    pocColor: '#EA580C',
+    vahValColor: '#38BDF8',
+    showPoc: true,
+    showVahVal: true,
+    showProfileSummary: true,
     // Coordinates visibility handled via visibleIntervals
     visibleIntervals: null, // null = all timeframes (TradingView default)
     locked: false,

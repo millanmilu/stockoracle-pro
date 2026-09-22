@@ -114,7 +114,8 @@ def test_sovereign_macro_live_path(monkeypatch):
     assert by_sym["NIFTY 50"]["status"] == "LIVE"
     assert by_sym["INDIA VIX"] == {"symbol": "INDIA VIX", "name": "Volatility Index", "price": 16.25, "change_pct": None, "status": "LIVE"}
     assert by_sym["USD / INR"]["price"] == 88.10
-    assert by_sym["SENSEX"]["status"] == "STATIC"  # no verified source — stays honest
+    assert by_sym["BANK NIFTY"]["status"] == "STATIC"
+    assert "BTC" in by_sym and "GOLD" in by_sym
 
     mt._CACHE.clear()
     mt._CACHE_TS = None

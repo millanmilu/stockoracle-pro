@@ -317,6 +317,99 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                 </>
               )}
 
+              {caps.volumeProfile && (
+                <>
+                  <div style={sectionTitle}>VOLUME PROFILE</div>
+                  <div style={row}>
+                    <span style={rowLabel}>Row Count</span>
+                    <input
+                      type="number"
+                      min={4}
+                      max={100}
+                      step={1}
+                      value={d.rows ?? 24}
+                      onChange={(e) => patch({ rows: Math.max(4, Math.min(100, Number(e.target.value) || 24)) })}
+                      style={numberInput}
+                    />
+                  </div>
+                  <div style={row}>
+                    <span style={rowLabel}>Value Area %</span>
+                    <input
+                      type="number"
+                      min={10}
+                      max={99}
+                      step={1}
+                      value={d.valueAreaPercent ?? 70}
+                      onChange={(e) => patch({ valueAreaPercent: Math.max(10, Math.min(99, Number(e.target.value) || 70)) })}
+                      style={numberInput}
+                    />
+                  </div>
+                  <div style={row}>
+                    <span style={rowLabel}>Width %</span>
+                    <input
+                      type="number"
+                      min={10}
+                      max={100}
+                      step={5}
+                      value={d.profileWidthPercent ?? 40}
+                      onChange={(e) => patch({ profileWidthPercent: Math.max(10, Math.min(100, Number(e.target.value) || 40)) })}
+                      style={numberInput}
+                    />
+                  </div>
+                  <div style={row}>
+                    <span style={rowLabel}>Up Volume</span>
+                    <ColorRow value={d.upColor || '#26A69A'} onChange={(c) => patch({ upColor: c })} />
+                  </div>
+                  <div style={row}>
+                    <span style={rowLabel}>Down Volume</span>
+                    <ColorRow value={d.downColor || '#EF5350'} onChange={(c) => patch({ downColor: c })} />
+                  </div>
+
+                  <div style={sectionTitle}>LEVELS & LINES</div>
+                  <label style={checkLabel}>
+                    <input
+                      type="checkbox"
+                      checked={d.showPoc !== false}
+                      onChange={(e) => patch({ showPoc: e.target.checked })}
+                      style={{ accentColor: '#6366F1' }}
+                    />
+                    Show Point of Control (POC)
+                  </label>
+                  {d.showPoc !== false && (
+                    <div style={row}>
+                      <span style={rowLabel}>POC Color</span>
+                      <ColorRow value={d.pocColor || '#EA580C'} onChange={(c) => patch({ pocColor: c })} />
+                    </div>
+                  )}
+
+                  <label style={checkLabel}>
+                    <input
+                      type="checkbox"
+                      checked={d.showVahVal !== false}
+                      onChange={(e) => patch({ showVahVal: e.target.checked })}
+                      style={{ accentColor: '#6366F1' }}
+                    />
+                    Show Value Area (VAH / VAL)
+                  </label>
+                  {d.showVahVal !== false && (
+                    <div style={row}>
+                      <span style={rowLabel}>VA Color</span>
+                      <ColorRow value={d.vahValColor || '#38BDF8'} onChange={(c) => patch({ vahValColor: c })} />
+                    </div>
+                  )}
+
+                  <label style={checkLabel}>
+                    <input
+                      type="checkbox"
+                      checked={d.showProfileSummary !== false}
+                      onChange={(e) => patch({ showProfileSummary: e.target.checked })}
+                      style={{ accentColor: '#6366F1' }}
+                    />
+                    Show Volume & Bars Summary
+                  </label>
+                </>
+              )}
+
               <div style={sectionTitle}>OBJECT</div>
               <label style={checkLabel}>
                 <input type="checkbox" checked={!!d.locked} onChange={(e) => patch({ locked: e.target.checked })} style={{ accentColor: '#F59E0B' }} />

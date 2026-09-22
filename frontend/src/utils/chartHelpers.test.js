@@ -4,7 +4,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { getSessionBucketStart, sanitizeSeriesData, sanitizeCandles, isAppendableTime, compareChartTime, computeFillSlots, INTERVAL_SLOT_SEC, normalizeInterval, isSupportedInterval, SUPPORTED_INTERVALS } from './chartHelpers.js';
+import { getSessionBucketStart, sanitizeSeriesData, sanitizeCandles, isAppendableTime, compareChartTime, computeFillSlots, INTERVAL_SLOT_SEC, normalizeInterval, isSupportedInterval, SUPPORTED_INTERVALS, getIstDateString, getBoundedTimeframe, BACKFILL_LEVELS, BACKFILL_TRIGGER_BARS, nextBackfillTimeframe, POPULAR_STOCKS } from './chartHelpers.js';
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 const HOUR = 3600;
@@ -166,6 +166,83 @@ describe('getSessionBucketStart', () => {
       }
       assert.equal(normalizeInterval('3m', '1m'), '1m');
       assert.equal(normalizeInterval('1W', '1d'), '1d');
+    });
+  });
+
+  describe('getIstDateString — crypto daily bucket must be IST, never UTC', () => {
+    it('maps 00:00–05:30 IST to the NEW IST date (UTC date would be yesterday)', () => {
+      // 2026-09-23 02:00 IST = 2026-09-22 20:30 UTC. UTC slice gives 09-22 (wrong).
+      const ms = Date.UTC(2026, 8, 22, 20, 30, 0);
+      assert.equal(new Date(ms).toISOString().substring(0, 10), '2026-09-22');
+      assert.equal(getIstDateString(ms), '2026-09-23');
+    });
+
+    it('agrees with UTC date outside the 00:00–05:30 IST window', () => {
+      const ms = Date.UTC(2026, 8, 22, 10, 0, 0); // 15:30 IST same day
+      assert.equal(getIstDateString(ms), '2026-09-22');
+    });
+
+    it('returns null for non-finite input', () => {
+      assert.equal(getIstDateString(NaN), null);
+      assert.equal(getIstDateString(undefined), null);
+    });
+  });
+
+  describe('getBoundedTimeframe — default loads stay small (P0 payload)', () => {
+    it('maps intervals to bounded lookbacks (never ALL)', () => {
+      assert.equal(getBoundedTimeframe('1d'), '2Y');
+      assert.equal(getBoundedTimeframe('1m'), '5D');
+      assert.equal(getBoundedTimeframe('5m'), '5D');
+      assert.equal(getBoundedTimeframe('1s'), '5D');
+      assert.equal(getBoundedTimeframe('30s'), '5D');
+      assert.equal(getBoundedTimeframe('15m'), '1M');
+      assert.equal(getBoundedTimeframe('30m'), '1M');
+      assert.equal(getBoundedTimeframe('1h'), '6M');
+      assert.equal(getBoundedTimeframe('4h'), '6M');
+      for (const tf of ['1d', '1m', '5m', '15m', '30m', '1h', '4h', '1s', '30s']) {
+        assert.notEqual(getBoundedTimeframe(tf), 'ALL');
+      }
+    });
+  });
+
+  describe('BACKFILL_LEVELS — left-pan progressive history', () => {
+    it('level 0 always equals the bounded default load', () => {
+      for (const iv of SUPPORTED_INTERVALS) {
+        assert.equal(BACKFILL_LEVELS[iv][0], getBoundedTimeframe(iv), iv);
+      }
+    });
+
+    it('deepens one level at a time and stops at the end', () => {
+      assert.equal(nextBackfillTimeframe('1d', 0), '5Y');
+      assert.equal(nextBackfillTimeframe('1d', 1), 'ALL');
+      assert.equal(nextBackfillTimeframe('1d', 2), null);
+      assert.equal(nextBackfillTimeframe('1m', 0), '1M');
+      assert.equal(nextBackfillTimeframe('1m', 1), null);
+      assert.equal(nextBackfillTimeframe('1h', 0), '1Y');
+      assert.equal(nextBackfillTimeframe('1h', 1), null);
+      assert.equal(nextBackfillTimeframe('bogus', 0), '1Y'); // unknown → safe default chain
+    });
+
+    it('trigger threshold is a small positive bar count', () => {
+      assert.ok(Number.isInteger(BACKFILL_TRIGGER_BARS) && BACKFILL_TRIGGER_BARS > 0 && BACKFILL_TRIGGER_BARS < 80);
+    });
+  });
+
+  describe('continuation window uses INTERVAL_SLOT_SEC (not hardcoded 300s)', () => {
+    it('1h slot is 3600 so hourly continuity survives', () => {
+      assert.equal(INTERVAL_SLOT_SEC['1h'], 3600);
+      assert.equal(INTERVAL_SLOT_SEC['4h'], 14400);
+      // 1h bucket gap (3600s) must count as continuation
+      const gap = 3600;
+      assert.ok(gap <= (INTERVAL_SLOT_SEC['1h'] || 300));
+      // ...while a 2-slot skip (7200s) must not
+      assert.ok(7200 > (INTERVAL_SLOT_SEC['1h'] || 300));
+    });
+  });
+
+  describe('POPULAR_STOCKS never contains untickable symbols', () => {
+    it('excludes NIFTY50 (no universe token, never ticks)', () => {
+      assert.ok(!POPULAR_STOCKS.includes('NIFTY50'));
     });
   });
 

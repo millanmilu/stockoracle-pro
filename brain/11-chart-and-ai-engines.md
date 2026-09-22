@@ -128,6 +128,36 @@ dikhta hai.
    karte hain. Isliye "chart me line nahi aayi" ka matlab hamesha bug nahi hota; `calculateById()`
    ka `valid` flag dekho.
 
+## Live-chart perf + correctness locks (P0/P1 — Sep 2026)
+
+- **Bounded history:** `getBoundedTimeframe()` (`chartHelpers.js`) — `1d→2Y, 1m/5m/1s/30s→5D,
+  15m/30m→1M, 1h/4h→6M`. `LiveChartView.loadHistory` kabhi `'ALL'` nahi bhejta
+  (7k+ rows / ~10 MB / 71 cols). Backend default ab bhi `ALL` support karta hai,
+  par chart loads bounded hain.
+- **Payload truth:** `_CHART_COLUMNS` = 71 cols (comment me purana `~8MB→2MB / 22 cols`
+  claim fix ho gaya). Payload win rows se aata hai, column-trim se nahi.
+- **Render isolation:** `LivePriceBadge` (toolbar) hi ekmatra per-tick subscriber hai;
+  `LiveChartView` tree per-tick re-render nahi hota. `ChartCanvas` `React.memo` +
+  custom prop-compare me hai. Paper P&L lines ko 2s-throttled snapshot milta hai
+  (`throttledLivePrice`), raw tick nahi — warna `createPriceLine` flicker karta.
+- **Crypto WS:** `@aggTrade` unsubscribed (10-100+/sec jank); `@ticker` (1s) + `@kline`
+  kaafi hain. Ticks rAF-coalesced hain (`pendingTickRef`).
+- **Daily bucket IST:** `getIstDateString()` single source — crypto + equity dono.
+  `toISOString()` (UTC) kabhi daily bucket me mat use karo (00:00–05:30 IST bug).
+  Yehi `useStock` Binance fallback aur `useWebSocket` kline branch me bhi hai.
+- **Continuation:** `INTERVAL_SLOT_SEC[interval]` use hota hai (hardcoded 300s hata diya)
+  taaki 1h/4h me `prevClose` carry-over na toote.
+- **Viewport guard:** `scrollToRealtime()` sirf tab jab viewport already right edge pe ho
+  (`range.to >= totalBars - 2`) — history pan karne pe snap-back nahi.
+- **Cache budget:** `chartDataCache` me `MAX_ENTRIES=5` + 30 MB byte-budget
+  (per-candle ~1.2 KB estimate) — 20×10 MB entries (~200 MB heap) wala leak band.
+- **Error UX:** `useStock.fetchHistory` detail propagate karta hai (throw), generic
+  "Failed" nahi. GOLD `PAXGUSDT` proxy ko `dataSource: 'binance_proxy_PAXG'` +
+  `proxyWarning` banner milta hai. Error badge me Retry/Dismiss + 12s auto-clear.
+- **`POPULAR_STOCKS` me `NIFTY50` nahi** (no universe token — kabhi tick nahi deta tha).
+- **Replay:** timer deps me `replayIndex` nahi (speed even), end-toast once (ref guard),
+  keydown listener once (stable refs) — har candle pe re-attach nahi.
+
 ## Tests + commands
 
 ```bash

@@ -180,7 +180,10 @@ export function useWebSocket(onMessage) {
     // Binance edge/endpooint fallbacks: some networks/ISPs block :9443 or a
     // specific edge POP. Rotate on failed attempts. The backend WS keeps
     // ~1Hz crypto ticks flowing meanwhile, so the chart never goes stale.
-    const streams = `${binanceStreamSym}@ticker/${binanceStreamSym}@kline_${bInterval}/${binanceStreamSym}@aggTrade`;
+    // NOTE: @aggTrade (10-100+/sec on BTC) intentionally NOT subscribed —
+    // @ticker (1s) + @kline carry the same price with far less jank; the
+    // render-free tick bus + rAF coalescing already saturate at 60 FPS.
+    const streams = `${binanceStreamSym}@ticker/${binanceStreamSym}@kline_${bInterval}`;
     const cryptoWsUrls = [
       `wss://stream.binance.com:9443/stream?streams=${streams}`,
       `wss://stream.binance.com:443/stream?streams=${streams}`,
@@ -267,9 +270,11 @@ export function useWebSocket(onMessage) {
               if (k) {
                 const openTimeMs = k.t;
                 const isIntraday = selectedInterval !== '1d';
+                // Daily buckets are IST (backend fetcher astimezone(_IST)) —
+                // UTC date would attach 00:00–05:30 IST ticks to yesterday's bar.
                 const chartTime = isIntraday
                   ? Math.floor(openTimeMs / 1000)
-                  : new Date(openTimeMs).toISOString().substring(0, 10);
+                  : new Date(Number(openTimeMs) + 5.5 * 3600 * 1000).toISOString().substring(0, 10);
 
                 const cClose = parseFloat(k.c);
                 const cOpen = parseFloat(k.o);
