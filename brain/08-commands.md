@@ -23,6 +23,26 @@ venv/bin/pytest tests/test_data_invariants.py tests/test_database_invariants.py 
 venv/bin/pytest tests/test_ws_broadcast_fallback.py tests/test_indicators.py -v
 ```
 
+## Frontend tests (JS — CI me NAHI chalte)
+<!-- check: frontend_tests=7 -->
+```bash
+cd frontend && npm test        # = node --test src/utils/*.test.js
+```
+- **7 `*.test.js` files**, sab `src/utils/` me — glob `package.json` me `src/utils/*.test.js` hai,
+isliye test wahi rakho, warna chala hi nahi.
+- Indicator/AI engine tests: `aiIndicatorEngine.test.js`, `indicatorEngine.test.js`, `aiSignalEngine.test.js` (+ `chartHelpers`, `volumeProfile`, `drawingGeometry`, `watchlist`).
+- CI ka `frontend-ci` job sirf `npm run build` chalata hai — **`npm test` nahi**. Isliye JS unit tests
+  locally chalana zaroori hai, warna red test chup-chaap commit ho jayega.
+
+## Brain checker
+```bash
+python3 scripts/check_brain.py            # paths + counts verify (CI invariants job me bhi chalta hai)
+python3 scripts/check_brain.py --strict   # line-count drift pe bhi fail (default 10% tolerance)
+```
+`brain/*.md` ke saare backtick paths + tree paths exist karte hain ya nahi, ye check hota hai.
+Runtime artifacts (`.log`, `.db`, `.pt`, `.pem`) skip hote hain, aur kuch bhi repo ke bahar
+(`/api/...` endpoints, `{placeholder}` strings, commands) ignore hota hai.
+
 ## DB / Alembic
 ```bash
 venv/bin/alembic upgrade head

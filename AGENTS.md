@@ -1,5 +1,20 @@
 # StockOracle Pro — Architecture & Code Invariants
 
+## 📚 PROJECT BRAIN — pehle ye padho
+
+Poora detailed project memory `brain/` folder me hai (Hinglish): architecture, module maps,
+data flow, DB schema, saare endpoints, commands aur gotchas.
+
+**Start order:** `brain/README.md` → `brain/00-project-overview.md` → `brain/08-commands.md`.
+Frontend chart/AI engine pe kaam ho to `brain/11-chart-and-ai-engines.md`;
+screener/research pe kaam ho to `brain/12-research-screener.md`.
+
+Neeche ke 5 rules permanent locks hain — explanation aur detail `brain/07-invariants.md` me hai.
+Har feature ke baad brain update karo, aur `python3 scripts/check_brain.py` chalao —
+wahi CI me bhi chalta hai taaki ye docs silently stale na ho jayein.
+
+---
+
 ## CRITICAL RULES & INVARIANTS (DO NOT MODIFY WITHOUT EXPLICIT PERMISSION)
 
 These rules are permanent architectural locks designed to ensure data consistency, clean charts, and prevent corrupt candles.

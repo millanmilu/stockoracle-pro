@@ -3,9 +3,11 @@
 ```
 stockoracle-pro /
 ├── main.py                  # multi-mode entry (web / terminal / worker)
-├── brain/                   # ← YE FOLDER (project memory)
+├── AGENTS.md                # 5 architecture locks (brain/07 iska faithful copy hai)
+├── brain/                   # ← YE FOLDER (project memory; README.md se shuru karo)
+├── scripts/check_brain.py   # brain ke claims verify karta hai (CI invariants job me chalta hai)
 ├── backend/
-│   ├── main.py              # FastAPI app + WS broadcaster + router mount
+│   ├── main.py              # FastAPI app + WS broadcaster + router mount + 4 legacy routes
 │   ├── core/                # logging, middleware, config_loader (bridge)
 │   ├── shared/              # SINGLE SOURCE OF TRUTH: config, database, models, security
 │   ├── api/
@@ -13,21 +15,31 @@ stockoracle-pro /
 │   │   └── routers/         # 11 domain routers (neeche table)
 │   ├── data/                # fetcher, database, market_calendar, options, fundamentals, news, streamer, redis_cache
 │   ├── analysis/            # indicators, patterns, levels, backtester, quant_risk, monte_carlo, ...
-│   ├── ml/                  # predictor, lstm_model, transformer_model, benchmarking, forecast_bands
+│   ├── research/            # screener_dsl, screener_engines, screener_pipeline, ai_screener, screener_backtest
+│   ├── ml/                  # predictor (+saved_models/*.pt), lstm_model, transformer_model, benchmarking, forecast_bands
+│   ├── models/              # per-symbol XGBoost/ElasticNet JSON bundles (trainer/backtester/explainer padhte hain)
 │   ├── ai/                  # provider (6 LLMs), chat, news_summarizer
 │   ├── services/            # market_data, ai_consensus, alert_scheduler, telegram_bot
 │   ├── tasks/               # celery_app, ml_tasks
 │   ├── providers/openbb/    # OpenBB wrapper + terminal_service
-│   ├── scripts/             # backup_db, refresh_index, clear_price_data
+│   ├── scripts/             # backup_db, refresh_index, refresh_index_constituents, clear_price_data
 │   └── alembic/             # DB migrations
 ├── frontend/
-│   ├── src/components/      # LiveChartView.jsx (sabse important), panels, dashboards
-│   ├── src/stores/          # zustand stores
-│   └── src/utils/           # helpers
+│   ├── src/components/      # LiveChartView.jsx (sabse important) + 6 sub-folders
+│   │   ├── chart/           # ChartCanvas, OscillatorPane, VolumePane, IndicatorModal, AIDashboard, indicatorDefinitions
+│   │   ├── chart-tools/     # drawing tools, smcEngine, AIPatternRecognition
+│   │   ├── terminal/        # Bloomberg-style views + terminal/mit (Market Intelligence)
+│   │   └── screener/, paper/, heatmap/
+│   ├── src/store/           # zustand (useStore.js) — SINGULAR, `src/stores/` nahi
+│   ├── src/hooks/           # useStock.js, useWebSocket.js
+│   ├── src/constants/       # screenerConfig.js
+│   └── src/utils/           # engines (indicatorEngine, chartIndicators, aiIndicatorEngine, aiSignalEngine) + *.test.js
 ├── terminal_ui/             # institutional_terminal, chart_widget (ASCII)
-├── tests/                   # 19 test files (invariants + features)
+├── tests/                   # 19 test_*.py + conftest.py (invariants + features)
 └── logs/, aws/, .github/workflows/ci.yml
 ```
+
+**Detail files:** chart + AI engine layer → `11-chart-and-ai-engines.md`; screener/research layer + model artifacts → `12-research-screener.md`.
 
 ## 11 API Routers (`backend/main.py` me mount order)
 | Router file | Prefix | Kaam |
@@ -52,3 +64,8 @@ stockoracle-pro /
 `routers → services/analysis/ml → data/fetcher → shared/database`
 Router kabhi seedha SmartAPI/YFinance ko touch nahi karta — hamesha `fetcher.py` se.
 ML/analytics kabhi synthetic data pe nahi chalega — pehle `require_real_data()`.
+
+## Note: do model stores hain (confuse mat hona)
+- `backend/models/<SYMBOL>.json` — XGBoost + ElasticNet bundle per symbol, `validation_mape` ke saath. `analysis/trainer.py`, `analysis/backtester.py`, `analysis/explainer.py` ise `MODEL_DIR` se padhte hain.
+- `backend/ml/saved_models/<ticker>.pt` — PyTorch checkpoints jo `ml/predictor.py` (LSTM/Transformer ensemble) use karta hai.
+Inme se koi bhi update ho to `12-research-screener.md` bhi dekhna.
