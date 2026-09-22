@@ -87,7 +87,7 @@ import {
  * tools that have both an icon and a renderer.
  */
 
-const PINS_STORAGE_KEY = 'stockoracle_drawing_toolbar_pins_v1';
+export const PINS_STORAGE_KEY = 'stockoracle_drawing_toolbar_pins_v1';
 
 /** No default pins — the rail starts directly with tool categories.
  *  Users pin their own favourites via the star in any flyout. (Trendline,
@@ -326,9 +326,10 @@ function ToolTooltip({ data, railWidth, top }) {
 }
 
 /** A flyout row for one tool: icon, name, shortcut, active marker, pin toggle. */
-function FlyoutRow({ tool, active, pinned, onPick, onTogglePin, showPin = true, highlighted = false, rowRef = null }) {
+function FlyoutRow({ tool, active, pinned, onPick, onTogglePin, showPin = true, highlighted = false, rowRef = null, digit = null }) {
   const [hovered, setHovered] = useState(false);
   const shortcut = TOOL_SHORTCUTS[tool.id];
+  const keys = [shortcut, digit ? `[${digit}]` : null].filter(Boolean).join(' · ');
   return (
     <div
       ref={rowRef}
@@ -347,7 +348,7 @@ function FlyoutRow({ tool, active, pinned, onPick, onTogglePin, showPin = true, 
       <button
         type="button"
         onClick={() => onPick(tool.id)}
-        title={`${tool.label}${shortcut ? ` (${shortcut})` : ''}`}
+        title={`${tool.label}${keys ? ` (${keys})` : ''}`}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -369,8 +370,8 @@ function FlyoutRow({ tool, active, pinned, onPick, onTogglePin, showPin = true, 
         </span>
         {active ? (
           <Check size={13} color={COLOR.accent} />
-        ) : shortcut ? (
-          <span style={{ fontSize: 9.5, color: COLOR.textMuted, fontFamily: COLOR.mono }}>{shortcut}</span>
+        ) : keys ? (
+          <span style={{ fontSize: 9.5, color: COLOR.textMuted, fontFamily: COLOR.mono }}>{keys}</span>
         ) : null}
       </button>
       {showPin ? (
@@ -417,7 +418,7 @@ export default function DrawingToolbar({
   onSelectTool = () => {},
   magnetMode = 'off',
   onCycleMagnet = () => {},
-  stayInDrawMode = true,
+  stayInDrawMode = false,
   onToggleStayInDrawMode = () => {},
   lockAllDrawings = false,
   onToggleLockAll = () => {},
@@ -446,12 +447,29 @@ export default function DrawingToolbar({
   const btn = isMobile ? 30 : 34;
   const icon = isMobile ? 15 : 17;
 
-  // Persist favourites.
+  // Persist favourites + notify the floating favorites bar (same storage key).
   useEffect(() => {
     try {
       window.localStorage.setItem(PINS_STORAGE_KEY, JSON.stringify(pinned));
     } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent('so:pins-changed'));
+    } catch {}
   }, [pinned]);
+
+  // External pin changes (floating bar unpin / another tab) sync back here.
+  useEffect(() => {
+    const sync = () => {
+      const fresh = readPinnedTools();
+      setPinned((prev) => (JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh));
+    };
+    window.addEventListener('so:pins-changed', sync);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('so:pins-changed', sync);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
 
   // Remember the last tool used per group so the rail glyph tracks TradingView.
   useEffect(() => {
@@ -484,6 +502,13 @@ export default function DrawingToolbar({
   const togglePin = useCallback((id) => {
     setPinned((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
   }, []);
+
+  // Digit hotkey for a pinned favourite: 1..9,0 follow pin order (DrawingTools
+  // binds these globally). Only the first ten pins get digits.
+  const pinDigit = useCallback((id) => {
+    const i = pinned.indexOf(id);
+    return i >= 0 && i < 10 ? String((i + 1) % 10) : null;
+  }, [pinned]);
 
   const showTip = useCallback((event, info) => {
     const top = Math.max(0, (event?.currentTarget?.offsetTop ?? 0) - 4);
@@ -805,6 +830,7 @@ export default function DrawingToolbar({
                   tool={tool}
                   active={tool.id === activeTool}
                   pinned
+                  digit={pinDigit(tool.id)}
                   highlighted={flyoutTools.all[highlightIdx]?.id === tool.id}
                   onPick={pickTool}
                   onTogglePin={togglePin}
@@ -819,6 +845,7 @@ export default function DrawingToolbar({
               tool={tool}
               active={tool.id === activeTool}
               pinned={false}
+              digit={pinDigit(tool.id)}
               highlighted={flyoutTools.all[highlightIdx]?.id === tool.id}
               onPick={pickTool}
               onTogglePin={togglePin}

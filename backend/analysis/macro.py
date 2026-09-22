@@ -59,6 +59,15 @@ def _get_stooq_latest(symbol: str) -> Optional[float]:
     return None
 
 
+def get_stooq_quote(symbol: str) -> Optional[float]:
+    """Public wrapper over the Stooq CSV fetcher (None when unreachable).
+
+    Lets other modules (e.g. macro_terminal) reuse proven live symbols
+    without guessing new ones. Callers must treat None as "no live data".
+    """
+    return _get_stooq_latest(symbol)
+
+
 def _fetch_fii_dii() -> Dict[str, Any]:
     """
     Fetches FII/DII provisional data from NSE India's public API.

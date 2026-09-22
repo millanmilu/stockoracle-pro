@@ -3,8 +3,7 @@ import { X, Send, BrainCircuit } from 'lucide-react';
 import useStore from '../store/useStore';
 import { getThemeTokens } from '../utils/theme';
 import api from '../utils/api';
-
-const DEFAULT_TICKERS = ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'BHARTIARTL', 'ITC', 'AXISBANK', 'WIPRO', 'LT', 'HCLTECH'];
+import { readWatchlist, DEFAULT_WATCHLIST } from '../utils/watchlist';
 
 export default function ProRightPanel({ onClose }) {
   const selectedSymbol = useStore(s => s.selectedSymbol);
@@ -16,17 +15,20 @@ export default function ProRightPanel({ onClose }) {
   const [chatInput, setChatInput] = useState('');
   const [chatResponse, setChatResponse] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const [tickers, setTickers] = useState(() => readWatchlist(DEFAULT_WATCHLIST));
   const chatEndRef = useRef(null);
 
   const fetchQuotes = async () => {
     try {
+      const list = readWatchlist(DEFAULT_WATCHLIST);
+      setTickers(list);
       const results = await Promise.allSettled(
-        DEFAULT_TICKERS.map(t => api.get(`/api/stock/${t}/info`).then(r => r.data))
+        list.map(t => api.get(`/api/stock/${t}/info`).then(r => r.data))
       );
       const newQuotes = {};
       results.forEach((res, i) => {
         if (res.status === 'fulfilled' && res.value && !res.value.error) {
-          newQuotes[DEFAULT_TICKERS[i]] = res.value;
+          newQuotes[list[i]] = res.value;
         }
       });
       setQuotes(prev => ({ ...prev, ...newQuotes }));
@@ -59,7 +61,7 @@ export default function ProRightPanel({ onClose }) {
     }
   };
 
-  const filteredTickers = DEFAULT_TICKERS.filter(t => t.toLowerCase().includes(filter.toLowerCase()));
+  const filteredTickers = tickers.filter(t => t.toLowerCase().includes(filter.toLowerCase()));
 
   return (
     <div className="pro-right-panel">

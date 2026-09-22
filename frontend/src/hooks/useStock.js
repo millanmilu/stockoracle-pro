@@ -1,6 +1,6 @@
 import api from '../utils/api';
 import { useState, useCallback } from 'react';
-import { isGoldSymbol, isCryptoSymbol } from '../utils/chartHelpers';
+import { isGoldSymbol, isCryptoSymbol, normalizeInterval } from '../utils/chartHelpers';
 
 export function useStock() {
   const [loading, setLoading] = useState(false);
@@ -21,8 +21,11 @@ export function useStock() {
 
   const fetchHistory = useCallback(async (ticker, interval = '1d', timeframe = null) => {
     setHistoryError(null);
+    // Never request an interval the backend rejects (422) — normalize first
+    // so callers can never blank the chart with e.g. '3m'.
+    const cleanInterval = normalizeInterval(interval, '1d');
     try {
-      const params = { interval };
+      const params = { interval: cleanInterval };
       if (timeframe) params.timeframe = timeframe;
       const { data } = await api.get(`/api/stock/${ticker}/history`, { params });
       // API returns { data: [...], data_source: "angel_one" | "sqlite" | ... }
@@ -45,12 +48,12 @@ export function useStock() {
           '1s': '1s', '30s': '1m', '1m': '1m', '5m': '5m',
           '15m': '15m', '30m': '30m', '1h': '1h', '4h': '4h', '1d': '1d'
         };
-        const bIv = binanceIvMap[interval] || '1d';
+        const bIv = binanceIvMap[cleanInterval] || '1d';
         const bSymbol = isGoldSymbol(ticker) ? 'PAXGUSDT' : (ticker.toUpperCase().endsWith('USDT') ? ticker.toUpperCase() : 'BTCUSDT');
         const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${bSymbol}&interval=${bIv}&limit=500`);
         const json = await res.json();
         if (Array.isArray(json) && json.length > 0) {
-          const isIntraday = interval !== '1d';
+          const isIntraday = cleanInterval !== '1d';
           const candles = json.map(k => {
             const timeMs = k[0];
             const d = new Date(timeMs);

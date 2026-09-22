@@ -23,21 +23,48 @@ function useWindowSize() {
   }, []);
   return width;
 }
-import useStore from '../store/useStore';
-import { getThemeTokens } from '../utils/theme';
+/** Human label for the replay cursor bar: epoch seconds → HH:MM, daily dates as-is. */
+function formatReplayBarLabel(t) {
+  if (t == null) return '';
+  if (typeof t === 'number' && Number.isFinite(t)) {
+    try {
+      return new Date(t * 1000).toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+    } catch {
+      return String(t);
+    }
+  }
+  return String(t).slice(0, 10);
+}
+import useStore from '../store/useStore';import { getThemeTokens } from '../utils/theme';
 import { useStock } from '../hooks/useStock';
+import api from '../utils/api';
 import ChartToolbar from './chart/ChartToolbar';
 import ChartCanvas from './chart/ChartCanvas';
+import ChartTradeBar from './chart/ChartTradeBar';
+import ChartTradeDocket from './chart/ChartTradeDocket';
 import CandleCountdown from './chart/CandleCountdown';
 import IndicatorModal from './chart/IndicatorModal';
 import IndicatorParamsModal from './chart/IndicatorParamsModal';
 import AIDashboard from './chart/AIDashboard';
 import OscillatorPane from './chart/OscillatorPane';
 import VolumePane from './chart/VolumePane';
+import toast from 'react-hot-toast';
+import { Crosshair } from 'lucide-react';
+import ReplayBar, { REPLAY_SPEEDS } from './chart/ReplayBar';
+import VolumeProfileOverlay from './chart/VolumeProfileOverlay';
 import DrawingTools from './chart-tools/DrawingTools';
 import ChartSettingsModal from './ChartSettingsModal';
 import { DEFAULT_ACTIVE_INDICATORS, INDICATOR_DEFINITIONS } from './chart/indicatorDefinitions';
-import { toChartTime, getSessionBucketStart, isCryptoSymbol, subscribeLiveTick } from '../utils/chartHelpers';
+import { getEngineFallbackId } from './chart/indicatorSettingsSchema';
+import { getCachedCandles, setCachedCandles } from '../utils/chartDataCache';
+import { toChartTime, getSessionBucketStart, isCryptoSymbol, subscribeLiveTick, sanitizeCandles, isAppendableTime, compareChartTime, INTERVAL_SLOT_SEC, computeFillSlots, normalizeInterval } from '../utils/chartHelpers';
 
 
 /**
@@ -63,10 +90,11 @@ export default function LiveChartView() {
   const isMobile = windowWidth < 640;
   const isTablet = windowWidth >= 640 && windowWidth < 1024;
 
-  const [interval, setIntervalState] = useState(() => selectedInterval || '1m');
+  const [interval, setIntervalState] = useState(() => normalizeInterval(selectedInterval, '1m'));
   const setInterval = (newIv) => {
-    setIntervalState(newIv);
-    setSelectedInterval?.(newIv);
+    const clean = normalizeInterval(newIv, interval);
+    setIntervalState(clean);
+    setSelectedInterval?.(clean);
   };
   const [candles, setCandles] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -93,7 +121,16 @@ export default function LiveChartView() {
   const [indicatorValues, setIndicatorValues] = useState({});
   const [showIndicatorModal, setShowIndicatorModal] = useState(false);
   const [indicatorSettings, setIndicatorSettings] = useState(null); // { id, name, engineId, params }
-  const [indicatorParamOverrides, setIndicatorParamOverrides] = useState({});
+  const [indicatorParamOverrides, setIndicatorParamOverrides] = useState(() => {
+    try {
+      const saved = localStorage.getItem('stockoracle_indicator_overrides');
+      if (!saved) return {};
+      const parsed = JSON.parse(saved);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
   const [chartType, setChartType] = useState('candlestick');
   const [priceScaleMode, setPriceScaleMode] = useState('normal');
   const [invertScale, setInvertScale] = useState(false);
@@ -106,13 +143,64 @@ export default function LiveChartView() {
   const [volumeHeight, setVolumeHeight] = useState(132);
   const [timezone, setTimezone] = useState('Asia/Kolkata');
 
+  // ── Live On-Chart Paper Trading ──────────────────────────────────────────
+  const [showTradeBar, setShowTradeBar] = useState(true);
+  const [isTradeBarCollapsed, setIsTradeBarCollapsed] = useState(false);
+  const [showTradeDocket, setShowTradeDocket] = useState(false);
+  const [paperPositions, setPaperPositions] = useState([]);
+  const [paperAccount, setPaperAccount] = useState(null);
+
+  const fetchPaperData = useCallback(async () => {
+    try {
+      const [posRes, accRes] = await Promise.all([
+        api.get('/api/paper/positions').catch(() => ({ data: [] })),
+        api.get('/api/paper/account').catch(() => ({ data: null })),
+      ]);
+      setPaperPositions(Array.isArray(posRes.data) ? posRes.data : []);
+      if (accRes.data) setPaperAccount(accRes.data);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchPaperData();
+    const intervalId = setInterval(fetchPaperData, 10000);
+    return () => clearInterval(intervalId);
+  }, [fetchPaperData]);
+
+  // ── Bar Replay (TradingView parity) ──────────────────────────────────────
+  // replayIndex = last VISIBLE bar (null = live). The chart surfaces render
+  // `chartCandles` (history capped at the cursor) while full `candles` keep
+  // growing underneath, so exiting replay is instant and lossless.
+  const [replayIndex, setReplayIndex] = useState(null);
+  const [replayPlaying, setReplayPlaying] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState(3); // index into REPLAY_SPEEDS (1x)
+  const [isJumpMode, setIsJumpMode] = useState(false);
+  const replayIndexRef = useRef(null);
+  replayIndexRef.current = replayIndex;
+  const isReplaying = replayIndex != null;
+  const chartCandles = useMemo(
+    () => (isReplaying ? candles.slice(0, Math.max(0, Math.min(replayIndex + 1, candles.length))) : candles),
+    [candles, replayIndex, isReplaying],
+  );
+
 
   // Filter active indicators to all oscillator sub-panes (RSI, MACD, Stoch, CCI, etc.)
+  // TradingView Visibility tab: hidden on unchecked timeframes.
   const activeOscillators = useMemo(() => {
+    const norm = String(interval || '').toLowerCase();
     return activeIndicators
       .map(id => INDICATOR_DEFINITIONS.find(item => item.id === id))
-      .filter(item => item && item.type === 'oscillator');
-  }, [activeIndicators]);
+      .filter(item => item && item.type === 'oscillator')
+      .filter((item) => {
+        const ov = indicatorParamOverrides[item.id] || {};
+        for (const [k, v] of Object.entries(ov)) {
+          if (k.toLowerCase() === `__vis_${norm}` && v === false) return false;
+        }
+        return true;
+      });
+  }, [activeIndicators, indicatorParamOverrides, interval]);
 
   // AI indicators (AIDashboard strip)
   const showAIDashboard = useMemo(() => {
@@ -166,17 +254,43 @@ export default function LiveChartView() {
     } catch {}
   }, [activeIndicators]);
 
+  // Persist indicator settings (Inputs + Style + Visibility) — TradingView parity
+  useEffect(() => {
+    try {
+      localStorage.setItem('stockoracle_indicator_overrides', JSON.stringify(indicatorParamOverrides));
+    } catch {}
+  }, [indicatorParamOverrides]);
+
   // 1. Fetch & Staged Historical Data Loading
+  // Instant restore: the in-memory cache (same JS session) paints the last
+  // good candles synchronously on remount (app-view switches), then the
+  // network refresh replaces them — the chart never sits blank.
   const loadHistory = useCallback(async (symbol, iv) => {
     const seq = ++historySeqRef.current;
     const alive = () => historySeqRef.current === seq;
-    setLoading(true);
+
+    const cached = getCachedCandles(symbol, iv);
+    if (cached) {
+      setCandles(cached.candles);
+      setDataSource(cached.dataSource || 'cache');
+      setLoading(false);
+      const lastCached = cached.candles[cached.candles.length - 1];
+      if (lastCached) {
+        lastVerifiedPriceRef.current = lastCached.close;
+        recentPricesRef.current = [lastCached.close];
+        activeCandleRef.current = { ...lastCached };
+      }
+    } else {
+      setLoading(true);
+    }
     setError(null);
-    activeCandleRef.current = null;
-    liveCandleTimeRef.current = null;
-    lastVerifiedPriceRef.current = null;
-    recentPricesRef.current = [];
-    spikeCountRef.current = 0;
+    if (!cached) {
+      activeCandleRef.current = null;
+      liveCandleTimeRef.current = null;
+      lastVerifiedPriceRef.current = null;
+      recentPricesRef.current = [];
+      spikeCountRef.current = 0;
+    }
 
     try {
       // Fetch full available history for the selected interval
@@ -218,23 +332,13 @@ export default function LiveChartView() {
         }
       }
 
-      // Ensure strictly sorted by time and duplicate-free
-      formatted.sort((a, b) => {
-        const timeA = typeof a.time === 'string' ? a.time : Number(a.time);
-        const timeB = typeof b.time === 'string' ? b.time : Number(b.time);
-        return timeA < timeB ? -1 : timeA > timeB ? 1 : 0;
-      });
-
-      const deduplicated = [];
-      for (let i = 0; i < formatted.length; i++) {
-        if (i === 0 || formatted[i].time !== formatted[i - 1].time) {
-          deduplicated.push(formatted[i]);
-        } else {
-          deduplicated[deduplicated.length - 1] = formatted[i];
-        }
-      }
+      // Ensure strictly sorted by time and duplicate-free. sanitizeCandles
+      // additionally drops type-mixed times (BusinessDay string vs UTCTimestamp)
+      // which lightweight-charts rejects with "data must be asc ordered by time".
+      const deduplicated = sanitizeCandles(formatted);
 
       setCandles(deduplicated);
+      setCachedCandles(symbol, iv, deduplicated, source);
 
       // Seed activeCandleRef and last verified reference price
       if (deduplicated.length > 0) {
@@ -245,8 +349,12 @@ export default function LiveChartView() {
       }
     } catch (err) {
       if (!alive()) return;
+      // Never blank a visible chart on a failed refresh — keep the cached
+      // candles and surface the error badge only.
+      const hadCached = getCachedCandles(symbol, iv);
+      if (!hadCached) setCandles([]);
+      else setLoading(false);
       setError(err?.message || 'Failed to load stock history');
-      setCandles([]);
     } finally {
       if (alive()) setLoading(false);
     }
@@ -256,6 +364,28 @@ export default function LiveChartView() {
   useEffect(() => {
     loadHistory(selectedSymbol, interval);
   }, [selectedSymbol, interval, loadHistory]);
+
+  // Tab-return guard: if the user comes back (browser tab or app view) to an
+  // empty chart that is not already loading, reload once.
+  const candlesLenRef = useRef(0);
+  candlesLenRef.current = candles.length;
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      if (loadingRef.current || candlesLenRef.current > 0) return;
+      loadHistory(symbolRef.current, intervalRef.current);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', onVisible);
+    window.addEventListener('focus', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', onVisible);
+      window.removeEventListener('focus', onVisible);
+    };
+  }, [loadHistory]);
 
   // Keep imperative refs in sync for the render-free tick path
   useEffect(() => {
@@ -270,26 +400,35 @@ export default function LiveChartView() {
       drawingCandleRef.current = null;
       return;
     }
+    let cancelled = false;
     let attempts = 0;
     const sync = () => {
+      if (cancelled) return;
       try {
         const chart = chartCanvasRef.current?.getChart?.() || null;
         const series = chartCanvasRef.current?.getCandleSeries?.() || null;
-        if (chart && drawingChartRef.current !== chart) {
+        if (chart && !chart.__isDisposed && drawingChartRef.current !== chart) {
           drawingChartRef.current = chart;
           setDrawingRefsTick((t) => t + 1);
+        } else if (!chart || chart.__isDisposed) {
+          drawingChartRef.current = null;
         }
-        if (series && drawingCandleRef.current !== series) {
+        if (series && !series.__isDisposed && drawingCandleRef.current !== series) {
           drawingCandleRef.current = series;
           setDrawingRefsTick((t) => t + 1);
+        } else if (!series || series.__isDisposed) {
+          drawingCandleRef.current = null;
         }
-        if ((!chart || !series) && attempts < 20) {
+        if ((!chart || !series) && attempts < 20 && !cancelled) {
           attempts += 1;
           setTimeout(sync, 250);
         }
       } catch {}
     };
     sync();
+    return () => {
+      cancelled = true;
+    };
   }, [loading, candles, interval, selectedSymbol]);
   useEffect(() => {
     symbolRef.current = selectedSymbol;
@@ -330,6 +469,45 @@ export default function LiveChartView() {
 
     const storeLiveTick = useStore.getState().livePrices?.[selectedSymbol] || {};
 
+    // Publishes a new bucket candle in ascending order, backfilling any slots
+    // skipped during feed stalls with flat carry-forward bars (volume 0) so
+    // the series stays slot-complete and no whitespace gap appears. Daily
+    // buckets and oversized skips are never filled (weekends/holidays and
+    // real outages must stay visible). Same-time calls only update in place
+    // (state updater returns prev → no re-render, render-free hot path kept).
+    const emitOrdered = (prevTime, prevClose, newCandle) => {
+      const slot = INTERVAL_SLOT_SEC[interval];
+      const flat = Number(prevClose);
+      const flatOk = isFinite(flat) && flat > 0;
+      const fills = (slot && flatOk && prevTime !== newCandle.time)
+        ? computeFillSlots(prevTime, newCandle.time, slot, { sameDayOnly: !isCrypto })
+            .map((t) => ({ time: t, open: flat, high: flat, low: flat, close: flat, volume: 0 }))
+        : [];
+      const ordered = [...fills, newCandle];
+      for (const c of ordered) {
+        // Frozen during Bar Replay — the replay cursor owns the chart surface.
+        if (replayIndexRef.current == null) chartCanvasRef.current?.updateActiveCandle(c);
+      }
+      activeCandleRef.current = newCandle;
+      try {
+        setCandles((prev) => {
+          if (!Array.isArray(prev)) return prev;
+          let out = prev;
+          let changed = false;
+          for (const c of ordered) {
+            if (out.length === 0) { out = [c]; changed = true; continue; }
+            const lastTime = out[out.length - 1].time;
+            if (lastTime === c.time) continue;
+            // Late bucket vs newer history — drop the whole publish.
+            if (!isAppendableTime(lastTime, c.time)) return prev;
+            out = [...out, c];
+            changed = true;
+          }
+          return changed ? out : prev;
+        });
+      } catch {}
+    };
+
     // 1. Direct Live Exchange Candle (e.g. from Binance continuous kline stream).
     // The incoming tick price always wins for close/high/low so sub-second
     // aggTrade ticks move the candle fluidly between exchange kline updates.
@@ -337,6 +515,16 @@ export default function LiveChartView() {
       const rawCandle = storeLiveTick.liveCandle;
       const formattedTime = toChartTime(rawCandle.time, isIntraday);
       if (formattedTime) {
+        // Guard: never regress activeCandleRef with a stale/out-of-order
+        // exchange bar — lightweight-charts `setData` throws
+        // "data must be asc ordered by time" if such a bar is appended.
+        const curActive = activeCandleRef.current;
+        if (curActive && curActive.time !== formattedTime) {
+          if (typeof curActive.time !== typeof formattedTime ||
+              compareChartTime(curActive.time, formattedTime) > 0) {
+            return;
+          }
+        }
         const o = Number(rawCandle.open);
         const c = ltp;
         const liveCandle = {
@@ -348,19 +536,8 @@ export default function LiveChartView() {
           close: c,
           volume: Number(rawCandle.volume || 0),
         };
-        activeCandleRef.current = liveCandle;
-        chartCanvasRef.current?.updateActiveCandle(liveCandle);
-        // Publish new exchange bars to state on rollover so panes recompute.
-        if (liveCandleTimeRef.current !== formattedTime) {
-          liveCandleTimeRef.current = formattedTime;
-          try {
-            setCandles((prev) => {
-              if (!Array.isArray(prev) || prev.length === 0) return [liveCandle];
-              if (prev[prev.length - 1].time === liveCandle.time) return prev;
-              return [...prev, liveCandle];
-            });
-          } catch {}
-        }
+        liveCandleTimeRef.current = formattedTime;
+        emitOrdered(curActive?.time, curActive?.close, liveCandle);
         return;
       }
     }
@@ -384,9 +561,20 @@ export default function LiveChartView() {
         active.high = Math.max(Number(active.high), ltp);
         active.low = Math.min(Number(active.low), ltp);
         active.close = ltp;
-        chartCanvasRef.current?.updateActiveCandle(active);
+        // Frozen during Bar Replay — the replay cursor owns the chart surface.
+        if (replayIndexRef.current == null) chartCanvasRef.current?.updateActiveCandle(active);
       }
     } else if (currentBucketTime && canUpdateCandle) {
+      // Guard: drop stale buckets (client clock behind server history, late
+      // ticks, or interval-switch races). Appending a time <= active.time
+      // would make `candles` non-ascending and crash lightweight-charts
+      // `setData` with "data must be asc ordered by time".
+      if (active && active.time !== currentBucketTime) {
+        if (typeof active.time !== typeof currentBucketTime ||
+            compareChartTime(active.time, currentBucketTime) > 0) {
+          return;
+        }
+      }
       // Only spawn a NEW session candle during market hours with verified live ticks or 24/7 crypto
       const isContinuation = active?.time && (
         typeof active.time === 'number' && typeof currentBucketTime === 'number'
@@ -408,20 +596,11 @@ export default function LiveChartView() {
         close: ltp,
         volume: (!isIntraday && Number(storeLiveTick.volume) > 0) ? Number(storeLiveTick.volume) : 0,
       };
-      activeCandleRef.current = newCandle;
-      chartCanvasRef.current?.updateActiveCandle(newCandle);
-      // Publish the new bucket to React state so overlay/oscillator/volume
-      // panes recompute their series (they derive from the `candles` prop).
-      // One render per bucket rollover — the per-tick path stays render-free.
-      // The SAME object reference is stored: ticks mutate it in place, so
-      // future recomputes always see fresh OHLC without extra renders.
-      try {
-        setCandles((prev) => {
-          if (!Array.isArray(prev) || prev.length === 0) return [newCandle];
-          if (prev[prev.length - 1].time === newCandle.time) return prev;
-          return [...prev, newCandle];
-        });
-      } catch {}
+      // Ordered publish: backfills stall-skipped slots, updates the chart
+      // imperatively, and stores the SAME object reference in state so ticks
+      // mutate it in place (future recomputes see fresh OHLC, one render
+      // per bucket rollover — per-tick path stays render-free).
+      emitOrdered(active?.time, active?.close, newCandle);
     }
   }, []);
 
@@ -515,24 +694,69 @@ export default function LiveChartView() {
     setHiddenIndicators((prev) => prev.filter((item) => item !== id));
   }, []);
 
+  // Applied-list ordering drives oscillator pane order and overlay draw order.
+  const handleMoveIndicator = useCallback((id, direction) => {
+    setActiveIndicators((prev) => {
+      const from = prev.indexOf(id);
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= prev.length) return prev;
+      const next = [...prev];
+      next.splice(from, 1);
+      next.splice(to, 0, id);
+      return next;
+    });
+  }, []);
+
   const handleOpenIndicatorSettings = useCallback((indicator) => {
-    if (!indicator?.engineId && !indicator?.params) return;
+    // TradingView parity: EVERY indicator has settings (Inputs/Style/Visibility).
+    if (!indicator) return;
     setIndicatorSettings(indicator);
   }, []);
 
   const handleSaveIndicatorParams = useCallback((id, overrides) => {
     setIndicatorParamOverrides((prev) => {
       const next = { ...prev, [id]: overrides };
+      try {
+        localStorage.setItem('stockoracle_indicator_overrides', JSON.stringify(next));
+      } catch {}
       return next;
     });
   }, []);
 
-  // Resolve an indicator definition with user parameter overrides applied.
+  // Resolve an indicator definition with user overrides applied.
+  // Flat overrides: plain keys → inputs/params, `__*` keys → style/visibility
+  // (engine ignores `__` keys, chart layers split them out for rendering).
   const resolveDefinition = useCallback((indicator) => {
     if (!indicator) return indicator;
     const overrides = indicatorParamOverrides[indicator.id];
     if (!overrides || Object.keys(overrides).length === 0) return indicator;
-    return { ...indicator, params: { ...(indicator.params || {}), ...overrides } };
+    const inputs = {};
+    const stylePatch = {};
+    for (const [k, v] of Object.entries(overrides)) {
+      if (k.startsWith('__')) stylePatch[k] = v;
+      else inputs[k] = v;
+    }
+    let next = { ...indicator, params: { ...(indicator.params || {}), ...inputs } };
+    if (!next.engineId && Object.keys(inputs).length) {
+      const fb = getEngineFallbackId(next.id);
+      if (fb) next = { ...next, engineId: fb };
+    }
+    if (stylePatch.__color) next = { ...next, color: stylePatch.__color };
+    if (stylePatch.__lineWidth != null) next = { ...next, lineWidth: stylePatch.__lineWidth };
+    if (stylePatch.__lineStyle != null) next = { ...next, lineStyle: stylePatch.__lineStyle };
+    // Per-subline colors (__sub_{i}_color) for BB/KC/Ichimoku/levels
+    const subKeys = Object.keys(stylePatch).filter((k) => k.startsWith('__sub_'));
+    if (subKeys.length && (next.subLines || next.levels)) {
+      const applySubs = (list) => list.map((sub, i) => {
+        const c = stylePatch[`__sub_${i}_color`];
+        return c ? { ...sub, color: c } : sub;
+      });
+      if (next.subLines) next = { ...next, subLines: applySubs(next.subLines) };
+      if (next.levels) next = { ...next, levels: applySubs(next.levels) };
+    }
+    // Attach raw visibility flags for pane filtering (ChartCanvas/OscillatorPane)
+    next = { ...next, _visFlags: stylePatch };
+    return next;
   }, [indicatorParamOverrides]);
 
   // Synchronized Visible Logical Range with loop guard across all stacked panes
@@ -541,13 +765,30 @@ export default function LiveChartView() {
     isSyncingRangeRef.current = true;
     try {
       if (source !== 'main') {
-        chartCanvasRef.current?.setVisibleLogicalRange(range);
+        try {
+          const chart = chartCanvasRef.current?.getChart?.();
+          if (chart && !chart.__isDisposed) {
+            chartCanvasRef.current?.setVisibleLogicalRange(range);
+          }
+        } catch {}
       }
       Object.entries(oscPaneRefs.current).forEach(([oscType, paneRef]) => {
-        if (source !== oscType) paneRef?.setVisibleLogicalRange(range);
+        if (source !== oscType) {
+          try {
+            const chart = paneRef?.getChart?.();
+            if (chart && !chart.__isDisposed) {
+              paneRef?.setVisibleLogicalRange(range);
+            }
+          } catch {}
+        }
       });
       if (source !== 'volume') {
-        volumePaneRef.current?.setVisibleLogicalRange(range);
+        try {
+          const chart = volumePaneRef.current?.getChart?.();
+          if (chart && !chart.__isDisposed) {
+            volumePaneRef.current?.setVisibleLogicalRange(range);
+          }
+        } catch {}
       }
     } finally {
       requestAnimationFrame(() => { isSyncingRangeRef.current = false; });
@@ -557,13 +798,30 @@ export default function LiveChartView() {
   // Synchronized Crosshair Hairline across main chart and sub-panes
   const handleCrosshairMove = useCallback(({ x, time, source }) => {
     if (source !== 'main') {
-      chartCanvasRef.current?.setSyncedCrosshair({ x, time, source });
+      try {
+        const chart = chartCanvasRef.current?.getChart?.();
+        if (chart && !chart.__isDisposed) {
+          chartCanvasRef.current?.setSyncedCrosshair({ x, time, source });
+        }
+      } catch {}
     }
     Object.entries(oscPaneRefs.current).forEach(([oscType, paneRef]) => {
-      if (source !== oscType) paneRef?.setSyncedCrosshair({ x, time, source });
+      if (source !== oscType) {
+        try {
+          const chart = paneRef?.getChart?.();
+          if (chart && !chart.__isDisposed) {
+            paneRef?.setSyncedCrosshair({ x, time, source });
+          }
+        } catch {}
+      }
     });
     if (source !== 'volume') {
-      volumePaneRef.current?.setSyncedCrosshair({ x, time, source });
+      try {
+        const chart = volumePaneRef.current?.getChart?.();
+        if (chart && !chart.__isDisposed) {
+          volumePaneRef.current?.setSyncedCrosshair({ x, time, source });
+        }
+      } catch {}
     }
   }, []);
 
@@ -591,6 +849,141 @@ export default function LiveChartView() {
     chartCanvasRef.current?.fitContent();
   }, []);
 
+  // ── Bar Replay transport ─────────────────────────────────────────────────
+  const exitReplay = useCallback(() => {
+    setReplayPlaying(false);
+    setReplayIndex(null);
+    setIsJumpMode(false);
+  }, []);
+
+  const startReplay = useCallback(() => {
+    if (!Array.isArray(candles) || candles.length < 5) return;
+    // Begin ~60 bars back so there is room to step/play forward.
+    setReplayIndex(Math.max(0, candles.length - 61));
+    setReplayPlaying(false);
+    setIsJumpMode(false);
+    toast.success('Bar Replay started (Space: Play/Pause, →/←: Step, Esc: Exit)');
+  }, [candles]);
+
+  const stepReplay = useCallback((delta) => {
+    setReplayPlaying(false);
+    setReplayIndex((prev) => {
+      if (prev == null) return prev;
+      return Math.max(0, Math.min(candles.length - 1, prev + delta));
+    });
+  }, [candles.length]);
+
+  const seekReplay = useCallback((i) => {
+    setReplayPlaying(false);
+    setReplayIndex(() => Math.max(0, Math.min(candles.length - 1, Number(i) || 0)));
+  }, [candles.length]);
+
+  const cycleReplaySpeed = useCallback(() => {
+    setReplaySpeed((s) => (s + 1) % REPLAY_SPEEDS.length);
+  }, []);
+
+  const handleChartClick = useCallback((param) => {
+    if (!isJumpMode || !param || !param.time || !Array.isArray(candles)) return;
+    const clickedTime = param.time;
+    const idx = candles.findIndex((c) => c.time === clickedTime);
+    if (idx !== -1) {
+      setReplayIndex(idx);
+      setReplayPlaying(false);
+      setIsJumpMode(false);
+      toast.success(`Replay jumped to ${formatReplayBarLabel(clickedTime)}`);
+    }
+  }, [isJumpMode, candles]);
+
+  // Auto-advance while playing; reaching the live edge pauses replay.
+  useEffect(() => {
+    if (!replayPlaying || replayIndex == null) return undefined;
+    if (replayIndex >= candles.length - 1) {
+      setReplayPlaying(false);
+      toast.success('Replay reached latest candle');
+      return undefined;
+    }
+    const id = window.setInterval(() => {
+      setReplayIndex((p) => {
+        if (p == null) return p;
+        if (p >= candles.length - 1) {
+          setReplayPlaying(false);
+          toast.success('Replay reached latest candle');
+          return p;
+        }
+        return p + 1;
+      });
+    }, REPLAY_SPEEDS[replaySpeed]?.ms || 500);
+    return () => window.clearInterval(id);
+  }, [replayPlaying, replayIndex, replaySpeed, candles.length]);
+
+  // Symbol / interval switches leave replay mode (fresh history).
+  useEffect(() => {
+    setReplayPlaying(false);
+    setReplayIndex(null);
+    setIsJumpMode(false);
+  }, [selectedSymbol, interval]);
+
+  // Bar Replay keyboard transport controls:
+  // Alt+R toggles, Space plays/pauses, Arrow keys step forward/back, Esc exits/cancels
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = document.activeElement?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || document.activeElement?.isContentEditable) return;
+
+      // Alt+R toggle
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && String(e.key || '').toLowerCase() === 'r') {
+        e.preventDefault();
+        if (replayIndexRef.current != null) exitReplay();
+        else startReplay();
+        return;
+      }
+
+      // Alt+V toggle Volume Profile (VPVR)
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && String(e.key || '').toLowerCase() === 'v') {
+        e.preventDefault();
+        setActiveIndicators((prev) => {
+          const exists = prev.includes('volume_profile');
+          const next = exists ? prev.filter((id) => id !== 'volume_profile') : [...prev, 'volume_profile'];
+          toast.success(exists ? 'Volume Profile removed' : 'Volume Profile (VPVR) added');
+          return next;
+        });
+        return;
+      }
+
+      // Transport shortcuts active ONLY while Replay mode is active
+      if (replayIndexRef.current != null) {
+        if (e.code === 'Space') {
+          e.preventDefault();
+          setReplayPlaying((p) => !p);
+          return;
+        }
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          stepReplay(e.shiftKey ? 10 : 1);
+          return;
+        }
+        if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          stepReplay(e.shiftKey ? -10 : -1);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          if (isJumpMode) {
+            setIsJumpMode(false);
+            toast.success('Jump mode cancelled');
+          } else {
+            exitReplay();
+            toast.success('Exited Bar Replay (Live)');
+          }
+          return;
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [startReplay, exitReplay, stepReplay, isJumpMode]);
+
   const handleToggleFullscreen = useCallback(() => {
     if (!containerRef.current) return;
     if (!document.fullscreenElement) {
@@ -609,9 +1002,32 @@ export default function LiveChartView() {
     return () => document.removeEventListener('fullscreenchange', onFsChange);
   }, []);
 
-  const curPrice = storeLiveTick?.price ?? (candles.length > 0 ? candles[candles.length - 1].close : null);
-  const dayChange = storeLiveTick?.change_pct ?? null;
-  const isLive = storeLiveTick?.is_live ?? wsLiveData;
+  const replayBar = isReplaying && chartCandles.length > 0 ? chartCandles[chartCandles.length - 1] : null;
+  const prevReplayBar = isReplaying && chartCandles.length > 1 ? chartCandles[chartCandles.length - 2] : null;
+  const curPrice = isReplaying
+    ? (replayBar?.close ?? null)
+    : (storeLiveTick?.price ?? (candles.length > 0 ? candles[candles.length - 1].close : null));
+  const dayChange = isReplaying
+    ? (replayBar && prevReplayBar && prevReplayBar.close ? ((replayBar.close - prevReplayBar.close) / prevReplayBar.close) * 100 : (replayBar?.change_pct ?? null))
+    : (storeLiveTick?.change_pct ?? null);
+  const isLive = isReplaying ? false : (storeLiveTick?.is_live ?? wsLiveData);
+
+  // Active position for currently viewed symbol with live mark-to-market P&L
+  const activeSymbolPosition = useMemo(() => {
+    const sym = String(selectedSymbol || '').toUpperCase().trim();
+    const found = paperPositions.find((p) => String(p.ticker || '').toUpperCase().trim() === sym);
+    if (!found) return null;
+    const entryPrice = Number(found.avg_buy_price || 0);
+    const ltp = Number(curPrice || found.current_price || entryPrice);
+    const pnl = Math.round((ltp - entryPrice) * found.shares * 100) / 100;
+    const pnlPct = Math.round(((ltp - entryPrice) / Math.max(0.01, entryPrice)) * 10000) / 100;
+    return {
+      ...found,
+      current_price: ltp,
+      unrealized_pnl: pnl,
+      unrealized_pnl_pct: pnlPct,
+    };
+  }, [paperPositions, selectedSymbol, curPrice]);
 
   return (
     <div
@@ -656,12 +1072,19 @@ export default function LiveChartView() {
         wsConnected={wsConnected}
         isMobile={isMobile}
         isTablet={isTablet}
+        isReplaying={isReplaying}
+        onToggleReplay={isReplaying ? exitReplay : startReplay}
+        showTradeBar={showTradeBar}
+        onToggleTradeBar={() => setShowTradeBar((p) => !p)}
+        showTradeDocket={showTradeDocket}
+        onToggleTradeDocket={() => setShowTradeDocket((p) => !p)}
+        paperPositionCount={paperPositions.length}
       />
 
       {/* AI Signal Dashboard Strip */}
       {showAIDashboard && (
         <AIDashboard
-          candles={candles}
+          candles={chartCandles}
           symbol={selectedSymbol}
           interval={interval}
         />
@@ -683,10 +1106,10 @@ export default function LiveChartView() {
         <DrawingTools
           chartRef={drawingChartRef}
           candleRef={drawingCandleRef}
-          candles={candles}
+          candles={chartCandles}
           symbol={selectedSymbol}
           interval={interval}
-          chartReady={!loading && candles.length > 0}
+          chartReady={!loading && chartCandles.length > 0}
           onOpenSettings={() => setShowSettingsModal(true)}
           isOpen={showDrawingTools}
           onToggleOpen={() => setShowDrawingTools((prev) => !prev)}
@@ -748,7 +1171,7 @@ export default function LiveChartView() {
 
             <ChartCanvas
               ref={chartCanvasRef}
-              candles={candles}
+              candles={chartCandles}
               activeCandleRef={activeCandleRef}
               interval={interval}
               selectedSymbol={selectedSymbol}
@@ -766,19 +1189,111 @@ export default function LiveChartView() {
               onRemoveIndicator={handleRemoveIndicator}
               onVisibleRangeChange={handleVisibleRangeChange}
               onCrosshairMove={handleCrosshairMove}
+              onChartClick={handleChartClick}
+              paperPosition={activeSymbolPosition}
             />
-            <CandleCountdown
-              chartRef={chartCanvasRef}
-              activeCandleRef={activeCandleRef}
-              selectedSymbol={selectedSymbol}
-              interval={interval}
-              currentPrice={curPrice}
-            />
+
+            {/* On-Chart Live Paper Trading Bar */}
+            {showTradeBar && (
+              <ChartTradeBar
+                symbol={selectedSymbol}
+                livePrice={curPrice}
+                activePosition={activeSymbolPosition}
+                availableCash={paperAccount?.cash_balance ?? 1000000.0}
+                onTradeExecuted={fetchPaperData}
+                isCollapsed={isTradeBarCollapsed}
+                onToggleCollapse={() => setIsTradeBarCollapsed((prev) => !prev)}
+              />
+            )}
+
+            {/* Replay Simulation Watermark */}
+            {isReplaying && (
+              <div style={{
+                position: 'absolute',
+                top: 14,
+                right: 60,
+                zIndex: 15,
+                pointerEvents: 'none',
+                opacity: 0.18,
+                fontSize: '1rem',
+                fontWeight: 900,
+                fontFamily: 'JetBrains Mono, monospace',
+                letterSpacing: '0.14em',
+                color: '#EF5350',
+                userSelect: 'none',
+              }}>
+                BAR REPLAY SIMULATION
+              </div>
+            )}
+
+            {/* Interactive Jump-to-Bar floating guide banner */}
+            {isJumpMode && (
+              <div style={{
+                position: 'absolute',
+                top: 14,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 60,
+                background: 'rgba(239, 83, 80, 0.95)',
+                color: '#FFFFFF',
+                padding: '5px 14px',
+                borderRadius: 20,
+                fontSize: '0.76rem',
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: '0 8px 24px rgba(239, 83, 80, 0.45)',
+                pointerEvents: 'none',
+                animation: 'replay-blink 2s ease-in-out infinite',
+              }}>
+                <Crosshair size={14} />
+                Click any candle on the chart to set cut point (Esc to cancel)
+              </div>
+            )}
+
+            {!isReplaying && (
+              <CandleCountdown
+                chartRef={chartCanvasRef}
+                activeCandleRef={activeCandleRef}
+                selectedSymbol={selectedSymbol}
+                interval={interval}
+                currentPrice={curPrice}
+              />
+            )}
+            {isReplaying && (
+              <ReplayBar
+                index={replayIndex}
+                total={candles.length}
+                playing={replayPlaying}
+                speed={replaySpeed}
+                barLabel={formatReplayBarLabel(chartCandles[chartCandles.length - 1]?.time)}
+                onPlayPause={() => setReplayPlaying((p) => !p)}
+                onStep={stepReplay}
+                onSeek={seekReplay}
+                onSpeed={cycleReplaySpeed}
+                onExit={exitReplay}
+                isMobile={isMobile}
+              />
+            )}
+            {activeIndicators.includes('volume_profile') && (
+              <VolumeProfileOverlay
+                chartRef={drawingChartRef}
+                candleRef={drawingCandleRef}
+                candles={chartCandles}
+                active
+                hidden={hiddenIndicators.includes('volume_profile')}
+                rows={indicatorParamOverrides['volume_profile']?.rows ?? 24}
+                valueAreaPercent={indicatorParamOverrides['volume_profile']?.value_area ?? 70}
+                isMobile={isMobile}
+              />
+            )}
           </div>
 
           <VolumePane
             ref={volumePaneRef}
-            candles={candles}
+            candles={chartCandles}
             height={volumeHeight}
             onHeightChange={setVolumeHeight}
             isHidden={!showVolume}
@@ -803,7 +1318,7 @@ export default function LiveChartView() {
                 }}
                 oscType={osc.oscType || osc.id}
                 definition={resolved}
-                candles={candles}
+                candles={chartCandles}
                 isHidden={hiddenIndicators.includes(osc.id)}
                 onToggleHide={() => handleToggleHideIndicator(osc.id)}
                 onClose={() => handleRemoveIndicator(osc.id)}
@@ -817,6 +1332,17 @@ export default function LiveChartView() {
         </div>
       </div>
 
+      {/* 2b. Bottom Collapsible Paper Trading Docket / Positions Panel */}
+      <ChartTradeDocket
+        isOpen={showTradeDocket}
+        onClose={() => setShowTradeDocket(false)}
+        positions={paperPositions}
+        account={paperAccount}
+        onRefresh={fetchPaperData}
+        selectedSymbol={selectedSymbol}
+        onSelectSymbol={handleSelectSymbol}
+      />
+
       {/* 3. Indicator Library Modal */}
       <IndicatorModal
         isOpen={showIndicatorModal}
@@ -828,6 +1354,7 @@ export default function LiveChartView() {
         onRemoveIndicator={handleRemoveIndicator}
         onClearAll={handleClearAllIndicators}
         onOpenSettings={handleOpenIndicatorSettings}
+        onMoveIndicator={handleMoveIndicator}
       />
 
       {/* 4. Indicator Parameter Settings Modal */}

@@ -1,8 +1,10 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { createChart, CrosshairMode } from 'lightweight-charts';
+import { CrosshairMode } from 'lightweight-charts';
+import { safeCreateChart } from '../../utils/safeChart';
 import { EyeOff, GripHorizontal } from 'lucide-react';
 import useStore from '../../store/useStore';
 import { getChartBaseOptions, getThemeTokens } from '../../utils/theme';
+import { PRICE_AXIS_WIDTH, sanitizeSeriesData } from '../../utils/chartHelpers';
 
 const MIN_HEIGHT = 92;
 const MAX_HEIGHT = 360;
@@ -42,8 +44,9 @@ const VolumePane = forwardRef(function VolumePane({
 
   useEffect(() => {
     try {
+      if (!chartRef.current || chartRef.current.__isDisposed) return;
       const base = getChartBaseOptions(theme);
-      chartRef.current?.applyOptions({
+      chartRef.current.applyOptions({
         layout: { background: { type: 'solid', color: 'transparent' }, textColor: base.layout.textColor },
         grid: base.grid,
         rightPriceScale: { borderColor: base.rightPriceScale.borderColor },
@@ -57,7 +60,11 @@ const VolumePane = forwardRef(function VolumePane({
   }, []);
 
   useImperativeHandle(ref, () => ({
-    setVisibleLogicalRange: (range) => range && chartRef.current?.timeScale().setVisibleLogicalRange(range),
+    setVisibleLogicalRange: (range) => {
+      if (!range || !chartRef.current || chartRef.current.__isDisposed) return;
+      try { chartRef.current.timeScale().setVisibleLogicalRange(range); } catch {}
+    },
+    getChart: () => (chartRef.current && !chartRef.current.__isDisposed ? chartRef.current : null),
     setSyncedCrosshair: ({ x, time, source }) => {
       if (source === 'volume') return;
       if (x != null && x > 0) {
@@ -84,11 +91,12 @@ const VolumePane = forwardRef(function VolumePane({
 
   useEffect(() => {
     if (!containerRef.current) return;
+    let disposed = false;
     const base = getChartBaseOptions(theme);
-    const chart = createChart(containerRef.current, {
+    const chart = safeCreateChart(containerRef.current, {
       layout: { background: { type: 'solid', color: 'transparent' }, textColor: base.layout.textColor, fontFamily: '"JetBrains Mono", monospace', fontSize: 10 },
       grid: base.grid,
-      rightPriceScale: { borderColor: base.rightPriceScale.borderColor, textColor: base.rightPriceScale.textColor, scaleMargins: { top: 0.08, bottom: 0.05 }, autoScale: true, minimumWidth: 72 },
+      rightPriceScale: { borderColor: base.rightPriceScale.borderColor, textColor: base.rightPriceScale.textColor, scaleMargins: { top: 0.08, bottom: 0.05 }, autoScale: true, minimumWidth: PRICE_AXIS_WIDTH },
       timeScale: { visible: false, borderColor: base.timeScale.borderColor, rightOffset: 12, barSpacing: 9, minBarSpacing: 0.5, lockVisibleTimeRangeOnResize: true },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' }, horzLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' } },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
@@ -120,24 +128,31 @@ const VolumePane = forwardRef(function VolumePane({
       onCrosshairMove({ x: param.point.x, time: param.time, source: 'volume' });
     });
     const ro = new ResizeObserver(entries => entries.forEach(entry => {
+      if (disposed) return;
       const { width, height: nextHeight } = entry.contentRect;
-      if (width > 0 && nextHeight > 0) chart.applyOptions({ width, height: nextHeight });
+      if (width > 0 && nextHeight > 0) {
+        try { chart.applyOptions({ width, height: nextHeight }); } catch {}
+      }
     }));
     ro.observe(containerRef.current);
-    return () => { ro.disconnect(); chart.remove(); chartRef.current = null; volumeRef.current = null; maRef.current = null; };
+    return () => { disposed = true; ro.disconnect(); try { chart.remove(); } catch {} chartRef.current = null; volumeRef.current = null; maRef.current = null; };
   }, [onCrosshairMove, onVisibleRangeChange, updateLegend]);
 
   useEffect(() => {
-    if (!volumeRef.current || !candles.length) return;
-    const data = candles.map(c => ({ time: c.time, value: Number(c.volume || 0), color: Number(c.close) >= Number(c.open) ? 'rgba(38,166,154,0.65)' : 'rgba(239,83,80,0.65)' }));
-    const maData = candles.map((c, index) => {
-      const slice = candles.slice(Math.max(0, index - volumeMA + 1), index + 1);
+    if (!volumeRef.current || volumeRef.current.__isDisposed || !candles.length) return;
+    // Defense-in-depth: out-of-order `candles` would crash setData with
+    // "data must be asc ordered by time". Sanitize first.
+    const ordered = sanitizeSeriesData(candles);
+    if (ordered.length === 0) return;
+    const data = sanitizeSeriesData(ordered.map(c => ({ time: c.time, value: Number(c.volume || 0), color: Number(c.close) >= Number(c.open) ? 'rgba(38,166,154,0.65)' : 'rgba(239,83,80,0.65)' })));
+    const maData = sanitizeSeriesData(ordered.map((c, index) => {
+      const slice = ordered.slice(Math.max(0, index - volumeMA + 1), index + 1);
       return { time: c.time, value: slice.reduce((sum, item) => sum + Number(item.volume || 0), 0) / slice.length };
-    });
-    volumeRef.current.setData(data);
-    maRef.current?.setData(maData);
-    volumeRef.current.applyOptions({ visible: !isHidden });
-    maRef.current?.applyOptions({ visible: !isHidden });
+    }));
+    try { volumeRef.current.setData(data); } catch {}
+    try { maRef.current?.setData(maData); } catch {}
+    try { volumeRef.current.applyOptions({ visible: !isHidden }); } catch {}
+    try { maRef.current?.applyOptions({ visible: !isHidden }); } catch {}
     updateLegend(candles[candles.length - 1]);
   }, [candles, isHidden, volumeMA, updateLegend]);
 

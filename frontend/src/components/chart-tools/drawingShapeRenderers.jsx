@@ -309,7 +309,7 @@ function renderFibTimezone({ points, handlers, drawing, toX, surface }) {
   );
 }
 
-function renderFibFan({ points, handlers, drawing }) {
+function renderFibFan({ points, handlers, drawing, surface }) {
   const [a, b] = points;
   if (!b) return null;
   const rays = G.fibFanRays(a, b);
@@ -318,23 +318,49 @@ function renderFibFan({ points, handlers, drawing }) {
   const span = Number(b.price ?? 0) - fromPrice;
   const fanPrices = {};
   rays.forEach((ray) => { fanPrices[ray.level] = fromPrice + span * ray.level; });
+  // TradingView extends every fan ray to the chart edge — the label stays at
+  // the anchor vertical (readable), the line runs to the surface boundary.
+  const edgeFor = (through) => {
+    if (!surface || !surface.width || !surface.height) return through;
+    try {
+      return G.edgeExit(a, through, surface);
+    } catch {
+      return through;
+    }
+  };
   return (
     <>
       <HitLine a={a} b={b} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
       <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} {...strokeProps(drawing, { width: 1, opacity: 0.45 })} style={{ pointerEvents: 'none' }} />
-      {rays.map((ray) => (
-        <g key={`fanray-${ray.level}`} style={{ pointerEvents: 'none' }}>
-          <line
-            x1={a.x}
-            y1={a.y}
-            x2={ray.x}
-            y2={ray.y}
-            stroke={drawing.color || '#38BDF8'}
-            strokeWidth={1}
-            strokeOpacity={0.75}
+      {rays.map((ray) => {
+        const edge = edgeFor({ x: ray.x, y: ray.y });
+        return (
+          <g key={`fanray-${ray.level}`} style={{ pointerEvents: 'none' }}>
+            <line
+              x1={a.x}
+              y1={a.y}
+              x2={edge.x}
+              y2={edge.y}
+              stroke={drawing.color || '#38BDF8'}
+              strokeWidth={1}
+              strokeOpacity={0.75}
+            />
+          </g>
+        );
+      })}
+      {/* Wide hit targets along each extended ray so the fan stays selectable */}
+      {rays.map((ray) => {
+        const edge = edgeFor({ x: ray.x, y: ray.y });
+        return (
+          <HitLine
+            key={`fanhit-${ray.level}`}
+            a={a}
+            b={edge}
+            onDown={handlers.onBodyDown}
+            onDoubleClick={handlers.onDoubleClick}
           />
-        </g>
-      ))}
+        );
+      })}
       {rays.map((ray) => (
         <Label
           key={`fanlbl-${ray.level}`}
@@ -392,25 +418,48 @@ function renderArc({ points, handlers, drawing }) {
   );
 }
 
-function renderGannFan({ points, handlers, drawing }) {
+function renderGannFan({ points, handlers, drawing, surface }) {
   const [a, b] = points;
   const rays = G.gannFanLines(a, b);
+  // TradingView runs every Gann ray to the chart edge; labels stay near the
+  // anchor vertical so they never pile up at the boundary.
+  const edgeFor = (through) => {
+    if (!surface || !surface.width || !surface.height) return through;
+    try {
+      return G.edgeExit(a, through, surface);
+    } catch {
+      return through;
+    }
+  };
   return (
     <>
       <HitLine a={a} b={b} onDown={handlers.onBodyDown} onDoubleClick={handlers.onDoubleClick} />
-      {rays.map((ray, index) => (
-        <g key={`ray-${ray.deg}`} style={{ pointerEvents: 'none' }}>
-          <line
-            x1={a.x}
-            y1={a.y}
-            x2={ray.end.x}
-            y2={ray.end.y}
-            stroke={drawing.color || '#38BDF8'}
-            strokeWidth={ray.deg === 45 ? Math.max(2, drawing.strokeWidth || 2) : 1}
-            strokeOpacity={ray.deg === 45 ? 0.95 : 0.55}
-          />
-          {index % 2 === 0 && <Label x={ray.end.x - 26} y={ray.end.y - 8} text={`${ray.deg}°`} color={drawing.color} />}
-        </g>
+      {rays.map((ray, index) => {
+        const edge = edgeFor(ray.end);
+        return (
+          <g key={`ray-${ray.deg}`} style={{ pointerEvents: 'none' }}>
+            <line
+              x1={a.x}
+              y1={a.y}
+              x2={edge.x}
+              y2={edge.y}
+              stroke={drawing.color || '#38BDF8'}
+              strokeWidth={ray.deg === 45 ? Math.max(2, drawing.strokeWidth || 2) : 1}
+              strokeOpacity={ray.deg === 45 ? 0.95 : 0.55}
+            />
+            {index % 2 === 0 && <Label x={ray.end.x - 26} y={ray.end.y - 8} text={`${ray.deg}°`} color={drawing.color} />}
+          </g>
+        );
+      })}
+      {/* Wide hit targets along each extended ray so the fan stays selectable */}
+      {rays.map((ray) => (
+        <HitLine
+          key={`gannhit-${ray.deg}`}
+          a={a}
+          b={edgeFor(ray.end)}
+          onDown={handlers.onBodyDown}
+          onDoubleClick={handlers.onDoubleClick}
+        />
       ))}
       <AnchorDots points={points} color={drawing.color} />
     </>
@@ -869,13 +918,42 @@ function renderBarsPattern({ points, handlers, drawing }) {
   );
 }
 
-// ── Range tools ─────────────────────────────────────────────────────────────
+// ── Range tools (TradingView parity — all respect Style/Visibility settings) ──
+function rangeFill(drawing, fallbackAlpha) {
+  if (drawing.backgroundVisible === false) return 'transparent';
+  const base = drawing.backgroundColor || drawing.color || '#38BDF8';
+  const alpha = drawing.backgroundOpacity ?? fallbackAlpha;
+  return tint(base, alpha);
+}
+function rangeStroke(drawing) {
+  if (drawing.borderVisible === false) return 'transparent';
+  return drawing.borderColor || drawing.color || '#38BDF8';
+}
+function statsText(stats, drawing, currency) {
+  const parts = [];
+  if (drawing.showStatsBars !== false) parts.push(`${stats.bars} bars`);
+  if (drawing.showStatsTime !== false && stats.durationMs) parts.push(G.formatDuration(stats.durationMs));
+  return parts.join(' · ');
+}
+function priceText(stats, drawing, currency) {
+  const showP = drawing.showStatsPrice !== false;
+  const showPct = drawing.showStatsPercent !== false;
+  if (showP && showPct) return `${G.formatSignedPrice(stats.delta, currency)} (${G.formatSignedPercent(stats.percent)})`;
+  if (showP) return G.formatSignedPrice(stats.delta, currency);
+  if (showPct) return G.formatSignedPercent(stats.percent);
+  return '';
+}
+
 function renderDateRange({ points, handlers, drawing, timeframeMs }) {
   const [a, b] = points;
   const stats = G.dateRangeStats(a, b, timeframeMs);
   const left = Math.min(a.x, b.x);
   const right = Math.max(a.x, b.x);
   const y = Math.min(a.y, b.y);
+  // TradingView parity: 50% time mid-line (vertical dashed at centre)
+  const midX = (a.x + b.x) / 2;
+  const showMid = (drawing.showMidLine !== false) && Math.abs(right - left) > 24;
+  const label = statsText({ bars: stats.bars, durationMs: stats.durationMs }, drawing);
   return (
     <>
       <HitPath
@@ -888,18 +966,42 @@ function renderDateRange({ points, handlers, drawing, timeframeMs }) {
         onDown={handlers.onBodyDown}
         onDoubleClick={handlers.onDoubleClick}
       />
-      <line x1={left} y1={y} x2={right} y2={y} stroke={drawing.color || '#38BDF8'} strokeWidth={1.5} style={{ pointerEvents: 'none' }} />
-      <line x1={left} y1={y - 22} x2={left} y2={y + 22} stroke={drawing.color || '#38BDF8'} strokeWidth={1.5} style={{ pointerEvents: 'none' }} />
-      <line x1={right} y1={y - 22} x2={right} y2={y + 22} stroke={drawing.color || '#38BDF8'} strokeWidth={1.5} style={{ pointerEvents: 'none' }} />
+      <line x1={left} y1={y} x2={right} y2={y} stroke={drawing.color || '#38BDF8'} strokeWidth={drawing.strokeWidth || 1.5} style={{ pointerEvents: 'none' }} />
+      <line x1={left} y1={y - 22} x2={left} y2={y + 22} stroke={drawing.color || '#38BDF8'} strokeWidth={drawing.strokeWidth || 1.5} style={{ pointerEvents: 'none' }} />
+      <line x1={right} y1={y - 22} x2={right} y2={y + 22} stroke={drawing.color || '#38BDF8'} strokeWidth={drawing.strokeWidth || 1.5} style={{ pointerEvents: 'none' }} />
+      {showMid && (
+        <line
+          x1={midX}
+          y1={y - 22}
+          x2={midX}
+          y2={y + 22}
+          stroke={drawing.color || '#38BDF8'}
+          strokeWidth={1}
+          strokeDasharray="4 3"
+          strokeOpacity={0.85}
+          style={{ pointerEvents: 'none' }}
+        />
+      )}
       <AnchorDots points={points} color={drawing.color} />
-      <Label
-        x={(left + right) / 2}
-        y={y - 16}
-        text={`${stats.bars} bars · ${G.formatDuration(stats.durationMs)}`}
-        color={drawing.color}
-        align="center"
-        bold
-      />
+      {label ? (
+        <Label
+          x={(left + right) / 2}
+          y={y - 16}
+          text={label}
+          color={drawing.color}
+          align="center"
+          bold
+        />
+      ) : null}
+      {showMid && (
+        <Label
+          x={midX}
+          y={y + 30}
+          text="50%"
+          color={drawing.color}
+          align="center"
+        />
+      )}
     </>
   );
 }
@@ -911,6 +1013,11 @@ function renderPriceRange({ points, handlers, drawing, currency }) {
   const right = Math.max(a.x, b.x);
   const top = Math.min(a.y, b.y);
   const bottom = Math.max(a.y, b.y);
+  // TradingView parity: 50% price mid-line (horizontal dashed at centre)
+  const midY = (a.y + b.y) / 2;
+  const midPrice = (Number(a.price ?? 0) + Number(b.price ?? 0)) / 2;
+  const showMid = (drawing.showMidLine !== false) && Math.abs(bottom - top) > 24;
+  const main = priceText(stats, drawing, currency);
   return (
     <>
       <HitPath
@@ -923,19 +1030,43 @@ function renderPriceRange({ points, handlers, drawing, currency }) {
         y={top}
         width={right - left}
         height={bottom - top}
-        fill={tint(drawing.color, 0.14)}
-        stroke={drawing.color || '#38BDF8'}
-        strokeWidth={1.5}
+        fill={rangeFill(drawing, 0.14)}
+        stroke={rangeStroke(drawing)}
+        strokeWidth={drawing.borderWidth ?? drawing.strokeWidth ?? 1.5}
         style={{ pointerEvents: 'none' }}
       />
+      {showMid && (
+        <line
+          x1={left}
+          y1={midY}
+          x2={right}
+          y2={midY}
+          stroke={drawing.color || '#38BDF8'}
+          strokeWidth={1}
+          strokeDasharray="4 3"
+          strokeOpacity={0.9}
+          style={{ pointerEvents: 'none' }}
+        />
+      )}
       <AnchorDots points={points} color={drawing.color} />
-      <Label
-        x={right + 6}
-        y={(top + bottom) / 2}
-        text={`${G.formatSignedPrice(stats.delta, currency)} (${G.formatSignedPercent(stats.percent)})`}
-        color={stats.delta >= 0 ? '#26A69A' : '#EF5350'}
-        bold
-      />
+      {main ? (
+        <Label
+          x={right + 6}
+          y={(top + bottom) / 2}
+          text={main}
+          color={stats.delta >= 0 ? '#26A69A' : '#EF5350'}
+          bold
+        />
+      ) : null}
+      {showMid && Number.isFinite(midPrice) && drawing.showPrices !== false && (
+        <Label
+          x={(left + right) / 2}
+          y={midY - 8}
+          text={`50% ${Number(midPrice).toFixed(2)}`}
+          color={drawing.color}
+          align="center"
+        />
+      )}
     </>
   );
 }
@@ -944,6 +1075,15 @@ function renderDatePriceRange({ points, handlers, drawing, currency, timeframeMs
   const [a, b] = points;
   const stats = G.measureStats(a, b, timeframeMs);
   const rect = G.normalizeRect(a, b);
+  // TradingView parity: 50% middle lines — horizontal (price equilibrium) +
+  // vertical (time midpoint), with the mid-price labelled.
+  const midX = (a.x + b.x) / 2;
+  const midY = (a.y + b.y) / 2;
+  const midPrice = (Number(a.price ?? 0) + Number(b.price ?? 0)) / 2;
+  const showMidH = (drawing.showMidLine !== false) && rect.height > 24;
+  const showMidV = (drawing.showMidLine !== false) && rect.width > 24;
+  const topLabel = statsText(stats, drawing, currency);
+  const bottomLabel = priceText(stats, drawing, currency);
   return (
     <>
       <HitPath
@@ -956,26 +1096,66 @@ function renderDatePriceRange({ points, handlers, drawing, currency, timeframeMs
         y={rect.y}
         width={rect.width}
         height={rect.height}
-        fill={tint(drawing.color, 0.1)}
-        stroke={drawing.color || '#38BDF8'}
-        strokeWidth={1.5}
+        fill={rangeFill(drawing, 0.1)}
+        stroke={rangeStroke(drawing)}
+        strokeWidth={drawing.borderWidth ?? drawing.strokeWidth ?? 1.5}
         style={{ pointerEvents: 'none' }}
       />
+      {showMidV && (
+        <line
+          x1={midX}
+          y1={rect.y}
+          x2={midX}
+          y2={rect.y + rect.height}
+          stroke={drawing.color || '#38BDF8'}
+          strokeWidth={1}
+          strokeDasharray="4 3"
+          strokeOpacity={0.65}
+          style={{ pointerEvents: 'none' }}
+        />
+      )}
+      {showMidH && (
+        <line
+          x1={rect.x}
+          y1={midY}
+          x2={rect.x + rect.width}
+          y2={midY}
+          stroke={drawing.color || '#38BDF8'}
+          strokeWidth={1}
+          strokeDasharray="4 3"
+          strokeOpacity={0.9}
+          style={{ pointerEvents: 'none' }}
+        />
+      )}
       <AnchorDots points={points} color={drawing.color} />
-      <Label
-        x={rect.x + rect.width / 2}
-        y={rect.y - 12}
-        text={`${stats.bars} bars · ${G.formatDuration(stats.durationMs)}`}
-        color={drawing.color}
-        align="center"
-        bold
-      />
-      <Label
-        x={rect.x + 8}
-        y={rect.y + rect.height + 10}
-        text={`${G.formatSignedPrice(stats.delta, currency)} (${G.formatSignedPercent(stats.percent)})`}
-        color={stats.delta >= 0 ? '#26A69A' : '#EF5350'}
-      />
+      {topLabel ? (
+        <Label
+          x={rect.x + rect.width / 2}
+          y={rect.y - 12}
+          text={topLabel}
+          color={drawing.color}
+          align="center"
+          bold
+        />
+      ) : null}
+      {showMidH && Number.isFinite(midPrice) && drawing.showPrices !== false && (
+        <Label
+          x={rect.x + rect.width / 2}
+          y={midY - 8}
+          text={`50% ${Number(midPrice).toFixed(2)}`}
+          color={drawing.color}
+          align="center"
+          bold
+        />
+      )}
+      {bottomLabel ? (
+        <Label
+          x={rect.x + 8}
+          y={rect.y + rect.height + 10}
+          text={bottomLabel}
+          color={stats.delta >= 0 ? '#26A69A' : '#EF5350'}
+        />
+      ) : null}
     </>
   );
 }

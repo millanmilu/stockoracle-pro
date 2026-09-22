@@ -1040,6 +1040,11 @@ input, select, textarea { font-family: inherit; font-size: 0.78rem; }
   .pro-search-input { width: 140px !important; }
 }
 
+/* Global horizontal-scroll strip without a visible scrollbar (touch swipe still works).
+   For narrow toolbars/intervals that must scroll instead of clipping. */
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
 /* Search inputs that ship their own clear button (e.g. the Indicators & Studies
    modal) must not also render the UA-native ✕ that Chromium/WebKit draws on
    input[type="search"] — otherwise two clear controls overlap. */

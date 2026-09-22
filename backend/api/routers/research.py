@@ -335,7 +335,11 @@ def get_corporate_actions(ticker: str):
 
 class ScreenerQueryRequest(BaseModel):
     formula_query: Optional[str] = "ROCE > 15 AND DebtToEquity < 1.0"
-    universe: Optional[str] = "NIFTY_500"
+    # Index-universe id (e.g. "NIFTY 50", "NIFTY MIDCAP"). None = whole
+    # tracked table (must stay default: previously this field was accepted
+    # but ignored, so defaulting it to an index would silently narrow every
+    # existing client's queries).
+    universe: Optional[str] = None
     tickers: Optional[List[str]] = None
     sort_by: Optional[str] = "market_cap_cr"
     sort_dir: Optional[str] = "DESC"
@@ -400,15 +404,12 @@ def execute_screener_query_endpoint(req: ScreenerQueryRequest):
     where_clause = parsed["where_clause"]
     params = dict(parsed["params"])
 
-    # Optional index-universe scoping: safe ticker IN-list with strict sanitization.
-    universe_tickers = None
-    if req.tickers:
-        import re as _re
-        universe_tickers = sorted({
-            t.upper().strip() for t in req.tickers
-            if isinstance(t, str) and _re.fullmatch(r"[A-Z0-9.\-]{1,25}", t.upper().strip())
-        })[:200]
-        if universe_tickers:
+    # Categorical index-universe scoping: `universe` id resolves server-side
+    # against official NSE constituents (backend/data/index_constituents.py).
+    # An explicit `tickers` list still wins when provided (legacy clients).
+    from backend.data.index_constituents import resolve_query_scope
+    universe_tickers = resolve_query_scope(req.tickers, req.universe)
+    if universe_tickers:
             placeholders = ", ".join(f":u_{i}" for i in range(len(universe_tickers)))
             for i, t in enumerate(universe_tickers):
                 params[f"u_{i}"] = t
@@ -426,11 +427,21 @@ def execute_screener_query_endpoint(req: ScreenerQueryRequest):
     return {
         "formula_query": formula,
         "ast": parsed["ast"],
+        "universe": req.universe,
         "universe_tickers": universe_tickers,
+        "universe_scoped_count": len(universe_tickers) if universe_tickers else None,
         "total": sql_res["total"],
         "count": sql_res["count"],
-        "results": sql_res["results"]
+        "results": sql_res["results"],
+        "universe_total": sql_res.get("universe_total", 0)
     }
+
+
+@router.get("/screener/universes")
+def list_screener_universes():
+    """Categorical scan universes with live constituent counts (drives the UI dropdown)."""
+    from backend.data.index_constituents import list_universes, AS_OF
+    return {"as_of": AS_OF, "universes": list_universes()}
 
 
 @router.post("/screener/refresh")
@@ -779,5 +790,10 @@ def simulate_scenario(ticker: str, req: dict):
     except FileNotFoundError:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=f"No trained model found for {t}. Train it first.")
+    except ValueError as e:
+        # Stale bundle / incompatible features: loud 422, never a silent 200.
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        return {"error": str(e)}
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"Simulation failed for {t}: {e}")

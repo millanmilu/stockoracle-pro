@@ -33,6 +33,7 @@ import {
   calculatePSAR,
   calculateADX,
 } from './chartIndicators.js';
+import { computeVolumeProfile } from './volumeProfile.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 1. Parameter Schema
@@ -687,6 +688,8 @@ const registry = [
   { id: 'cmf', kind: 'volume', name: 'Chaikin Money Flow', calc: (c, p) => calculateCMF(c, p.period) },
   { id: 'volume_delta', kind: 'volume', name: 'Volume Delta (estimated)', incremental: true, calc: (c) => calculateVolumeDelta(c) },
   { id: 'cvd', kind: 'volume', name: 'Cumulative Volume Delta (estimated)', incremental: true, calc: (c) => calculateCVD(c) },
+  // Profile (renders through the dedicated canvas overlay, not a line series)
+  { id: 'volume_profile', kind: 'volume', name: 'Volume Profile (Visible Range)', calc: (c, p) => computeVolumeProfile(c, { rows: p.rows, valueAreaPercent: p.value_area }) },
 ];
 
 function buildParameters(id) {
@@ -714,6 +717,7 @@ function buildParameters(id) {
     case 'std_dev': return { period: createParameter('period', 'Period', { defaultValue: 20, min: 1, max: 500, step: 1, integer: true }), source: createParameter('source', 'Source', { defaultValue: 'close', options: SOURCES }) };
     case 'roc': case 'momentum': return { period: createParameter('period', 'Period', { defaultValue: 10, min: 1, max: 500, step: 1, integer: true }), source: createParameter('source', 'Source', { defaultValue: 'close', options: SOURCES }) };
     case 'rel_volume': return { period: createParameter('period', 'Period', { defaultValue: 20, min: 1, max: 500, step: 1, integer: true }) };
+    case 'volume_profile': return { rows: createParameter('rows', 'Rows', { defaultValue: 24, min: 4, max: 200, step: 1, integer: true, description: 'Price rows in the histogram' }), value_area: createParameter('value_area', 'Value Area %', { defaultValue: 70, min: 1, max: 99, step: 1, integer: true, description: '% of volume inside VAH/VAL' }) };
     case 'adx': return { period: createParameter('period', 'Period', { defaultValue: 14, min: 1, max: 500, step: 1, integer: true }) };
     case 'obv': case 'cvd': case 'volume_delta': case 'cmf': case 'trix': case 'elder_ray':
       return {};

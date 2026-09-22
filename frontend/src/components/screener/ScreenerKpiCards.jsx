@@ -1,33 +1,56 @@
 import React from 'react';
 import { OVERVIEW_CARDS } from './screenerColumns';
+import { TN, num } from './terminalTheme';
 
-/**
- * Compact clickable market-overview cards. Every count comes from real rows.
- * Clicking a card applies its DSL filter (total clears filters).
- */
-export default function ScreenerKpiCards({ stats = {}, activeCard = 'total', onSelect }) {
+/* Compact institutional KPI strip: flat tiles, tabular numbers. */
+export function ScreenerKpiCards({ stats = {}, activeCard = 'total', onSelect }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(105px, 1fr))', gap: 8, width: '100%' }}>
+    <div
+      className="tn-kpi-strip"
+      role="list"
+      aria-label="Market overview metrics"
+      style={{ display: 'flex', flexWrap: 'wrap', gap: 6, width: '100%', maxWidth: '100%', boxSizing: 'border-box', overflow: 'visible', padding: '2px' }}
+    >
       {OVERVIEW_CARDS.map((card) => {
-        const value = stats[card.id] ?? 0;
+        // A missing count renders as an em dash: showing a hard 0 would claim
+        // "no stocks matched" when the truth is "no data for this metric".
+        const raw = stats[card.id];
+        const value = raw === null || raw === undefined ? '—' : raw;
         const active = activeCard === card.id;
+        const primary = card.id === 'total' || card.id === 'bullish' || card.id === 'ai_high_confidence';
         return (
           <button
             key={card.id}
             type="button"
+            role="listitem"
             onClick={() => onSelect && onSelect(card)}
             title={card.dsl ? `Apply filter: ${card.dsl}` : 'Clear filters'}
+            aria-pressed={active}
             style={{
-              background: active ? 'rgba(99,102,241,0.22)' : 'rgba(255,255,255,0.025)',
-              border: active ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.07)',
-              borderRadius: 10, padding: '8px 10px', cursor: 'pointer', textAlign: 'left',
+              flex: '1 1 96px',
+              minWidth: primary ? 96 : 84,
+              maxWidth: 160,
+              height: 58,
+              background: active ? 'rgba(124,140,248,0.12)' : TN.panel,
+              border: active ? '1px solid rgba(124,140,248,0.5)' : `1px solid ${TN.border}`,
+              borderTop: `2px solid ${active ? TN.accent : card.color}`,
+              borderRadius: TN.radius,
+              padding: '6px 10px',
+              cursor: 'pointer',
+              textAlign: 'left',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              gap: 2,
             }}
           >
-            <div style={{ fontSize: '0.58rem', color: '#64748B', fontWeight: 800, letterSpacing: '0.04em' }}>{card.label}</div>
-            <div style={{ fontSize: '1.1rem', fontWeight: 900, color: card.color, fontFamily: 'JetBrains Mono, monospace', marginTop: 1 }}>{value}</div>
+            <div style={{ fontSize: 10, color: TN.faint, fontWeight: 700, letterSpacing: '0.07em', whiteSpace: 'nowrap' }}>{card.label}</div>
+            <div style={num(primary ? 19 : 17, { fontWeight: 700, color: card.color, lineHeight: 1.1 })}>{value}</div>
           </button>
         );
       })}
     </div>
   );
 }
+
+export default ScreenerKpiCards;

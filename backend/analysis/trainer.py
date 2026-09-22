@@ -110,6 +110,98 @@ def train_pipeline(symbol: str) -> dict:
         "top_features": top_features
     }
 
+# Legacy feature names expected by bundles trained before the feature-engineering
+# rewrite (bb_pct_b -> bb_percent, roll_* removed, atr_14 removed). Maps each
+# legacy column to (source_column, is_multiplier): compat values are derived
+# from the same OHLCV history so old bundles keep working until retrained.
+LEGACY_FEATURE_MAP = {
+    "bb_pct_b": ("bb_percent", False),
+    "roll_mean_5": ("_roll_mean_5", False),
+    "roll_mean_10": ("_roll_mean_10", False),
+    "roll_mean_20": ("_roll_mean_20", False),
+    "roll_mean_50": ("_roll_mean_50", False),
+    "roll_std_5": ("_roll_std_5", False),
+    "roll_std_10": ("_roll_std_10", False),
+    "roll_std_20": ("roll_std_20", False),
+    "atr_14": ("_atr_14", False),
+}
+
+# Scenario-simulator override aliases: old override key ->
+# (live column, apply_as_multiplier). Multipliers scale the live value
+# (e.g. volatility 1.2x); plain values overwrite it.
+OVERRIDE_ALIASES = {
+    "sentiment_score": ("sentiment", False),
+    "sentiment": ("sentiment", False),
+    "volume_ratio": ("volume_sma_ratio", False),
+    "volume_sma_ratio": ("volume_sma_ratio", False),
+    "volatility": ("roll_std_20", True),
+}
+
+
+def _apply_legacy_feature_shim(df: pd.DataFrame) -> pd.DataFrame:
+    """Derives legacy bundle-era columns from current OHLCV history (in place-safe copy)."""
+    df = df.copy()
+    close = pd.to_numeric(df["close"], errors="coerce")
+    if "_roll_mean_5" not in df.columns:
+        for n in (5, 10, 20, 50):
+            df[f"_roll_mean_{n}"] = close.rolling(window=n, min_periods=1).mean()
+            if n != 20:
+                df[f"_roll_std_{n}"] = close.rolling(window=n, min_periods=1).std().fillna(0.0)
+    if "_atr_14" not in df.columns and {"high", "low", "close"} <= set(df.columns):
+        high = pd.to_numeric(df["high"], errors="coerce")
+        low = pd.to_numeric(df["low"], errors="coerce")
+        prev_close = close.shift(1)
+        tr = pd.concat([
+            high - low,
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ], axis=1).max(axis=1)
+        df["_atr_14"] = tr.rolling(window=14, min_periods=1).mean().fillna(0.0)
+    for legacy, (source, _) in LEGACY_FEATURE_MAP.items():
+        if legacy not in df.columns and source in df.columns:
+            df[legacy] = df[source]
+    return df
+
+
+def _apply_overrides(
+    latest_row: pd.DataFrame, override_features: dict, bundle_features=None
+) -> dict:
+    """Applies scenario overrides via OVERRIDE_ALIASES.
+
+    Returns {"applied": [...], "ignored": [...]} where ignored lists override
+    keys that mapped nowhere in the trained bundle's feature set (e.g. a
+    constant-history column the model gave zero weight, or an unknown key) —
+    so the UI can honestly show which sliders moved the prediction.
+    """
+    result = {"applied": [], "ignored": []}
+    if not override_features:
+        return result
+    bundle_set = set(bundle_features or [])
+    for k, v in override_features.items():
+        try:
+            target, as_multiplier = OVERRIDE_ALIASES.get(k, (k, False))
+        except Exception:
+            result["ignored"].append(str(k))
+            continue
+        if target not in latest_row.columns or (bundle_set and target not in bundle_set):
+            result["ignored"].append(str(k))
+            continue
+        try:
+            fval = float(v)
+        except (TypeError, ValueError):
+            result["ignored"].append(str(k))
+            continue
+        if not np.isfinite(fval):
+            result["ignored"].append(str(k))
+            continue
+        if as_multiplier:
+            latest_row.loc[:, target] = latest_row[target] * fval
+        else:
+            latest_row.loc[:, target] = fval
+        result["applied"].append(str(k))
+    return result
+
+
 def predict_future(symbol: str, override_features: dict = None) -> dict:
     """
     Loads the trained bundle (XGBoost + ElasticNet).
@@ -124,35 +216,32 @@ def predict_future(symbol: str, override_features: dict = None) -> dict:
         )
     with open(model_path, 'r') as f:
         bundle = json.load(f)
-        
+
     # Get latest features
     df = get_features(symbol)
     if df.empty:
         raise ValueError("Could not fetch latest data.")
-        
+
+    df = _apply_legacy_feature_shim(df)
     latest_row = df.iloc[[-1]].copy()
     current_price = float(latest_row['close'].iloc[0])
-    
-    # Apply overrides for simulation
-    if override_features:
-        for k, v in override_features.items():
-            if k in latest_row.columns:
-                latest_row[k] = v
-                
+
     # ElasticNet features must match what it was trained on
     en_features = bundle['elasticnet']['features']
-    # Filter latest_row to match training columns
-    try:
-        X_latest = latest_row[en_features]
-    except KeyError:
-        # Re-fetch features if columns mismatched, might happen if cache is old
-        df = get_features(symbol)
-        latest_row = df.iloc[[-1]].copy()
-        if override_features:
-            for k, v in override_features.items():
-                if k in latest_row.columns:
-                    latest_row[k] = v
-        X_latest = latest_row[en_features]
+    missing = [c for c in en_features if c not in latest_row.columns]
+    if missing:
+        raise ValueError(
+            f"Trained bundle expects features {missing} that cannot be derived "
+            f"from current data. Retrain with POST /api/train/{symbol}."
+        )
+
+    # Snapshot the un-overridden row so the scenario delta is measurable.
+    X_base = latest_row[en_features].copy()
+
+    # Apply overrides for simulation
+    override_report = _apply_overrides(latest_row, override_features, en_features)
+
+    X_latest = latest_row[en_features]
         
     # Predict with XGBoost
     xgb_json = bundle.get("xgboost")
@@ -170,24 +259,32 @@ def predict_future(symbol: str, override_features: dict = None) -> dict:
         except Exception:
             pass
         
-    # XGBoost requires DMatrix for booster inference
-    dtest = xgb.DMatrix(X_latest)
-    xgb_pred = booster.predict(dtest)[0]
-    
-    # Predict with ElasticNet (dot product + intercept manually since we just saved coef)
-    coef = np.array(bundle['elasticnet']['coef'])
-    intercept = bundle['elasticnet']['intercept']
-    en_pred = np.dot(X_latest.values, coef)[0] + intercept
-    
-    final_pred = float(xgb_pred + (0.15 * en_pred))
-    
+    def _infer(frame: pd.DataFrame) -> float:
+        # XGBoost requires DMatrix for booster inference
+        dtest = xgb.DMatrix(frame)
+        xgb_pred = booster.predict(dtest)[0]
+
+        # Predict with ElasticNet (dot product + intercept manually since we just saved coef)
+        coef = np.array(bundle['elasticnet']['coef'])
+        intercept = bundle['elasticnet']['intercept']
+        en_pred = np.dot(frame.values, coef)[0] + intercept
+
+        return float(xgb_pred + (0.15 * en_pred))
+
+    final_pred = _infer(X_latest)
+
     # Simple confidence bounds (e.g. +/- 1.5% of predicted price based on typical MAPE)
     confidence_margin = final_pred * 0.015
-    
-    return {
+
+    out = {
         "current_price": current_price,
         "predicted_price": round(final_pred, 2),
         "high_bound": round(final_pred + confidence_margin, 2),
-        "low_bound": round(final_pred - confidence_margin, 2)
+        "low_bound": round(final_pred - confidence_margin, 2),
     }
+    if override_features:
+        out["base_predicted_price"] = round(_infer(X_base), 2)
+        out["applied_overrides"] = override_report["applied"]
+        out["ignored_overrides"] = override_report["ignored"]
+    return out
 

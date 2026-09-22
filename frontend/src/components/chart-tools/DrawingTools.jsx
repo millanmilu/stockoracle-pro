@@ -7,8 +7,11 @@ import {
   RotateCcw, RotateCw, ArrowUpRight, ArrowDownRight, Layers
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import DrawingToolbar, { getToolbarWidth } from './DrawingToolbar';
+import DrawingToolbar, { getToolbarWidth, PINS_STORAGE_KEY, ToolIcon } from './DrawingToolbar';
+import FloatingFavoritesBar from './FloatingFavoritesBar';
 import DrawingShape from './DrawingShape';
+import DrawingSettingsModal from './DrawingSettingsModal';
+import { isDrawingVisibleOn } from './drawingSettingsSchema';
 import {
   CURSOR_TOOLS,
   DEFAULT_TOOL,
@@ -21,7 +24,7 @@ import {
   resolveShortcut,
 } from './drawingToolCatalog';
 import * as DG from '../../utils/drawingGeometry';
-import { isCryptoSymbol } from '../../utils/chartHelpers';
+import { PRICE_AXIS_WIDTH, isCryptoSymbol } from '../../utils/chartHelpers';
 
 const STORAGE_KEY = 'stockoracle_drawings_tv_v6';
 
@@ -51,11 +54,91 @@ function canonicalMs(t) {
   return Number.isFinite(ms) ? ms : null;
 }
 
+/** Bar duration in ms for every supported interval (0 = unknown). */
+const INTERVAL_MS = {
+  '1s': 1000,
+  '30s': 30 * 1000,
+  '1m': 60 * 1000,
+  '5m': 5 * 60 * 1000,
+  '15m': 15 * 60 * 1000,
+  '30m': 30 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
+  '4h': 4 * 60 * 60 * 1000,
+  '1d': 24 * 60 * 60 * 1000,
+};
+
+function intervalToMs(iv) {
+  return INTERVAL_MS[String(iv)] || 0;
+}
+
+/** Legacy drawing types anchored by a single start point (no end anchor). */
+const SINGLE_ANCHOR_LEGACY = new Set(['horizontal_line', 'horizontal_ray', 'text', 'sticker']);
+
+const anchorHasIdentity = (logical, time) => logical != null || time != null;
+
+/**
+ * One-time repair for drawings saved by older builds: drops entries that can
+ * never render correctly (anchors with neither a logical index nor a bar
+ * time — they would sit frozen at stale screen pixels and look permanently
+ * half-drawn). Everything salvageable passes through untouched.
+ */
+function repairDrawings(list) {
+  if (!Array.isArray(list)) return { clean: [], dropped: 0 };
+  const clean = [];
+  let dropped = 0;
+  for (const d of list) {
+    if (!d || typeof d.type !== 'string' || !d.type) {
+      dropped += 1;
+      continue;
+    }
+    if (Array.isArray(d.points)) {
+      const kept = d.points.filter((pt) => pt && anchorHasIdentity(pt.logical, pt.time));
+      const need = d.type === 'polyline' ? 2 : 3;
+      // Single-anchor extended tools (vertical_line, note, flag, …) need 1.
+      const spec = typeof getToolSpec === 'function' ? getToolSpec(d.type) : null;
+      const required = spec?.points === 1 ? 1 : need;
+      if (kept.length >= required) {
+        clean.push(kept.length === d.points.length ? d : { ...d, points: kept });
+      } else {
+        dropped += 1;
+      }
+      continue;
+    }
+    if (SINGLE_ANCHOR_LEGACY.has(d.type)) {
+      if (anchorHasIdentity(d.startLogical, d.startTime)) clean.push(d);
+      else dropped += 1;
+      continue;
+    }
+    if (anchorHasIdentity(d.startLogical, d.startTime) && anchorHasIdentity(d.endLogical, d.endTime)) {
+      clean.push(d);
+    } else {
+      dropped += 1;
+    }
+  }
+  return { clean, dropped };
+}
+
 // Single source of truth lives in drawingGeometry (FIB_LEVEL_STYLE) —
 // this alias keeps the legacy Fib renderer + preview on identical colors/labels.
 const FIBONACCI_LEVELS = DG.FIB_LEVEL_STYLE;
 
 const COLOR_PRESETS = ['#38BDF8', '#10B981', '#F59E0B', '#EF5350', '#A855F7', '#EC4899', '#FFFFFF', '#64748B'];
+
+/** Pinned favourite tool ids in toolbar order (shared with DrawingToolbar). */
+function readPinnedIds() {
+  try {
+    const raw = window.localStorage.getItem(PINS_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string' && getToolSpec(id)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Digit hotkey for the nth pinned favourite: 1..9 then 0. */
+export function pinDigitForIndex(i) {
+  return i >= 0 && i < 10 ? String((i + 1) % 10) : null;
+}
 
 export default function DrawingTools({
   chartRef,
@@ -110,7 +193,9 @@ export default function DrawingTools({
   const [draggingHandle, setDraggingHandle] = useState(null); // 'start' | 'end' | 'body' | 'target' | 'stop' | 'channel'
   const [dragStartPos, setDragStartPos] = useState(null);
 
-  // Magnet snapping: 'off' | 'weak' | 'strong' — TradingView's three-state magnet
+  // Magnet snapping: 'off' | 'weak' | 'strong' — TradingView's three-state magnet.
+  // Defaults to 'off' like TradingView (free placement); Alt+M or the magnet
+  // button cycles to weak/strong when you want OHLC snapping.
   const [magnetMode, setMagnetMode] = useState('off');
   const [snapIndicator, setSnapIndicator] = useState(null); // { x, y, price, label }
 
@@ -125,23 +210,17 @@ export default function DrawingTools({
   const [textEdit, setTextEdit] = useState(null); // { id } — inline text editing via double-click
   const [textEditVal, setTextEditVal] = useState('');
 
-  const timeframeMs = useMemo(() => {
-    switch (interval) {
-      case '1m': return 60 * 1000;
-      case '5m': return 5 * 60 * 1000;
-      case '15m': return 15 * 60 * 1000;
-      case '30m': return 30 * 60 * 1000;
-      case '1h': return 60 * 60 * 1000;
-      case '4h': return 4 * 60 * 60 * 1000;
-      case '1d': return 24 * 60 * 60 * 1000;
-      case '1w': return 7 * 24 * 60 * 60 * 1000;
-      case '1M': return 30 * 24 * 60 * 60 * 1000;
-      default: return 0;
-    }
-  }, [interval]);
+  const timeframeMs = useMemo(() => intervalToMs(interval), [interval]);
 
-  // Modifiers
-  const [stayInDrawMode, setStayInDrawMode] = useState(true);
+  // Modifiers — stayInDrawMode defaults to false (TradingView parity: auto-unselect after plotting)
+  const [stayInDrawMode, setStayInDrawMode] = useState(() => {
+    try {
+      const saved = localStorage.getItem('so_stay_in_draw_mode');
+      return saved !== null ? JSON.parse(saved) : false;
+    } catch {
+      return false;
+    }
+  });
   const [lockAllDrawings, setLockAllDrawings] = useState(false);
   const [hideAllDrawings, setHideAllDrawings] = useState(false);
 
@@ -182,6 +261,16 @@ export default function DrawingTools({
   const drawingsRef = useRef(drawings);
   drawingsRef.current = drawings;
   const dragSnapshotRef = useRef(null);
+  // True once the CURRENT gesture's mouse-up has committed. The release fires
+  // both the svg handler and the window-level handler below, so the commit
+  // must be idempotent — reset on every new gesture (mousedown / beginDrag).
+  const upHandledRef = useRef(true);
+  // True once the current drag actually moved something. A plain click on a
+  // shape selects it without pushing a no-op entry onto the undo stack.
+  const dragMovedRef = useRef(false);
+  // Whether a drag or a drawing gesture is in flight (mirror for the
+  // window-level listeners, which cannot see render-scope state).
+  const gestureActiveRef = useRef(false);
   // Body-move gesture origin: total data-space delta from gesture start is
   // applied to the snapshot every frame (never incremental), so long drags
   // can't accumulate rounding drift and drawings stay glued to bars.
@@ -197,6 +286,7 @@ export default function DrawingTools({
     pendingPoints,
     lockAllDrawings,
   };
+  gestureActiveRef.current = Boolean(draggingHandle || isDrawing);
   // All shape drags funnel through beginDrag, which snapshots the pre-drag
   // state as soon as any drag handle becomes active.
   useEffect(() => {
@@ -293,47 +383,68 @@ export default function DrawingTools({
 
   // Build a fully-anchored point from a mouse position + chart position.
   // Snapped positions already carry time/frac; raw positions derive them.
-  const toAnchor = useCallback((px, py, chartPt) => ({
-    x: px,
-    y: py,
-    logical: chartPt?.logical,
-    price: chartPt?.price,
-    time: chartPt?.time ?? timeForLogical(chartPt?.logical),
-    frac: chartPt?.frac ?? fracForLogical(chartPt?.logical),
-  }), [timeForLogical, fracForLogical]);
+  // `offMs` is the wall-clock exactness: sub-bar offset in MILLISECONDS from
+  // the anchor bar's epoch. Unlike `frac` (source-interval bar units, which
+  // shift meaning across timeframes), `offMs` resolves exactly on ANY
+  // interval — this is what keeps drawings glued across timeframe switches.
+  const toAnchor = useCallback((px, py, chartPt) => {
+    const frac = chartPt?.frac ?? fracForLogical(chartPt?.logical);
+    const srcMs = intervalToMs(interval);
+    const off = Number.isFinite(frac) && srcMs > 0 ? frac * srcMs : 0;
+    return {
+      x: px,
+      y: py,
+      logical: chartPt?.logical,
+      price: chartPt?.price,
+      time: chartPt?.time ?? timeForLogical(chartPt?.logical),
+      frac,
+      offMs: off,
+      tf: interval,
+    };
+  }, [timeForLogical, fracForLogical, interval]);
 
   // Effective logical for rendering: time-map hit wins (scroll/pan/append
   // stable), stored logical is the fallback (off-chart sketches).
   //
-  // ── Cross-timeframe resolution ──────────────────────────────────────────
-  // Drawings are shared across ALL intervals of a symbol (TradingView
-  // behavior). Bar `time` differs by interval (epoch seconds intraday vs
-  // 'YYYY-MM-DD' daily), so an exact time-map hit fails across intervals.
-  // Fall back to the nearest bar by canonical timestamp: price is
-  // interval-independent, and the bar identity only needs to land on the
-  // same session/day for the sketch to appear in the right place. The
-  // source-interval `frac` is dropped here — sub-bar offsets are meaningless
-  // in another interval's bar units.
-  const resolvedLogical = useCallback((storedLogical, storedTime, storedFrac) => {
+  // ── Cross-timeframe resolution (TradingView parity) ───────────────────────
+  // Drawings are shared across ALL intervals of a symbol. Every anchor stores
+  // `offMs` — its exact wall-clock offset in milliseconds from its bar — so a
+  // sketch lands on the same wall-clock instant on every timeframe, not just
+  // the same session. (The old bar-unit `frac` shifted meaning per interval,
+  // which is what made drawings "move" on timeframe switches; it survives
+  // only as a legacy fallback for anchors saved before `offMs` existed.)
+  const resolvedLogical = useCallback((storedLogical, storedTime, storedFrac, storedOffMs) => {
+    const off = Number(storedOffMs);
+    const hasOff = Number.isFinite(off) && off !== 0;
     if (storedTime != null && timeIndexMap.has(storedTime)) {
+      const idx = timeIndexMap.get(storedTime);
+      if (hasOff && timeframeMs > 0) return idx + off / timeframeMs;
       const f = Number(storedFrac);
-      return timeIndexMap.get(storedTime) + (Number.isFinite(f) ? f : 0);
+      return idx + (Number.isFinite(f) ? f : 0);
     }
-    const ms = canonicalMs(storedTime);
-    if (ms != null && msIndex.length > 0) {
+    const base = canonicalMs(storedTime);
+    if (base != null && msIndex.length > 0) {
+      // Fold the wall-clock offset in BEFORE the nearest-bar search so the
+      // search lands on the bar containing the true instant (e.g. a mid-day
+      // anchor from a daily chart lands mid-session on intraday, not at the
+      // session open plus a stale offset).
+      const target = hasOff ? base + off : base;
       let lo = 0;
       let hi = msIndex.length - 1;
       while (lo < hi) {
         const mid = (lo + hi) >> 1;
-        if (msIndex[mid][0] < ms) lo = mid + 1;
+        if (msIndex[mid][0] < target) lo = mid + 1;
         else hi = mid;
       }
       let best = lo;
-      if (lo > 0 && Math.abs(msIndex[lo - 1][0] - ms) <= Math.abs(msIndex[lo][0] - ms)) best = lo - 1;
+      if (lo > 0 && Math.abs(msIndex[lo - 1][0] - target) <= Math.abs(msIndex[lo][0] - target)) best = lo - 1;
+      if (hasOff && timeframeMs > 0) {
+        return msIndex[best][1] + (target - msIndex[best][0]) / timeframeMs;
+      }
       return msIndex[best][1];
     }
     return storedLogical;
-  }, [timeIndexMap, msIndex]);
+  }, [timeIndexMap, msIndex, timeframeMs]);
 
   // ── 2. True Magnet Snapping Engine ─────────────────────────────────────────
 
@@ -358,8 +469,8 @@ export default function DrawingTools({
       const candleX = timeScale.logicalToCoordinate(roundedIndex);
       if (candleX == null) return null;
 
-      // Weak mode only snaps within 40px; strong mode snaps to the nearest bar.
-      if (magnetMode !== 'strong' && Math.abs(x - candleX) > 40) return null;
+      // Weak mode only snaps within the snap radius; strong mode snaps to the nearest bar.
+      if (magnetMode !== 'strong' && Math.abs(x - candleX) > MAGNET_SNAP_RADIUS) return null;
 
       const o = Number(candle.open);
       const h = Number(candle.high);
@@ -516,7 +627,18 @@ export default function DrawingTools({
         } catch (_) {}
       }
     }
-    setDrawings(loaded || []);
+    // One-time repair: drop drawings that can NEVER render correctly — no
+    // bar identity at all (null logical AND null time, leftovers from older
+    // builds). They sit frozen at stale screen pixels and look permanently
+    // "broken"/half-drawn. Everything salvageable is kept as-is.
+    const repaired = repairDrawings(loaded || []);
+    if (repaired.dropped > 0) {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(repaired.clean));
+      } catch (_) {}
+      toast.success(`Purani ${repaired.dropped} tooti drawing saaf ki — ab shapes sahi dikhenge`);
+    }
+    setDrawings(repaired.clean);
     setUndoStack([]);
     setRedoStack([]);
     setSelectedDrawingId(null);
@@ -539,13 +661,20 @@ export default function DrawingTools({
 
   // One-time migration: drawings saved before time-anchoring only carry
   // logical indices. Backfill `time`/`frac` from the loaded candles so they
-  // lock onto bars and stop drifting on scroll. Runs when candles arrive.
+  // lock onto bars and stop drifting on scroll. Backfill runs ONLY when the
+  // drawing's stamped timeframe matches (or was never stamped) — backfilling
+  // from another timeframe's candles would bake the WRONG bar times into
+  // storage permanently, which is exactly what made sketches "move" on
+  // timeframe switches. The stamp is written on first backfill so later
+  // timeframe switches never rewrite it. `offMs` is deliberately NOT
+  // fabricated here; legacy bar-unit `frac` keeps those anchors working.
   const migratedForCandlesRef = useRef(null);
   useEffect(() => {
     if (!Array.isArray(candles) || candles.length === 0) return;
     if (migratedForCandlesRef.current === candles) return;
     let needsSave = false;
     const next = drawingsRef.current.map((d) => {
+      if (d.tf != null && d.tf !== interval) return d; // another TF's drawing — never touch
       if (Array.isArray(d.points)) {
         let touched = false;
         const pts = d.points.map((pt) => {
@@ -555,7 +684,7 @@ export default function DrawingTools({
           }
           return pt;
         });
-        if (touched) { needsSave = true; return { ...d, points: pts }; }
+        if (touched) { needsSave = true; return { ...d, points: pts, tf: d.tf ?? interval }; }
         return d;
       }
       let patch = null;
@@ -565,7 +694,7 @@ export default function DrawingTools({
       if (d.endLogical != null && d.endTime == null) {
         patch = { ...(patch || {}), endTime: timeForLogical(d.endLogical), endFrac: fracForLogical(d.endLogical) };
       }
-      if (patch) { needsSave = true; return { ...d, ...patch }; }
+      if (patch) { needsSave = true; return { ...d, ...patch, tf: d.tf ?? interval }; }
       return d;
     });
     migratedForCandlesRef.current = candles;
@@ -573,7 +702,7 @@ export default function DrawingTools({
       persistDrawings(next);
       setDrawings(next);
     }
-  }, [candles, persistDrawings, timeForLogical, fracForLogical]);
+  }, [candles, persistDrawings, timeForLogical, fracForLogical, interval]);
 
   const saveDrawingsWithHistory = useCallback((nextDrawings, pushToUndo = true) => {
     if (pushToUndo) {
@@ -637,11 +766,20 @@ export default function DrawingTools({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleUndo, handleRedo]);
 
-  // Helper for mouse/touch position
+  // Helper for mouse/touch position.
+  // NOTE: `touchend` carries no `touches` — coordinates live in
+  // `changedTouches`. Without this fallback every touch release resolved to
+  // NaN and the commit was silently discarded (nothing ever got placed).
+  const pickTouch = (e) => {
+    if (e?.touches && e.touches.length > 0) return e.touches[0];
+    if (e?.changedTouches && e.changedTouches.length > 0) return e.changedTouches[0];
+    return null;
+  };
   const getEventPos = (e) => {
     const rect = svgRef.current?.getBoundingClientRect() || e.currentTarget.getBoundingClientRect();
-    const clientX = e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
+    const t = pickTouch(e);
+    const clientX = t ? t.clientX : e.clientX;
+    const clientY = t ? t.clientY : e.clientY;
     return {
       x: clientX - rect.left,
       y: clientY - rect.top,
@@ -669,7 +807,8 @@ export default function DrawingTools({
     strokeWidth: activeStrokeWidth,
     lineStyle: activeLineStyle,
     text: EXTENDED_DEFAULT_TEXT[type] || '',
-  }), [activeColor, activeStrokeWidth, activeLineStyle]);
+    tf: interval,
+  }), [activeColor, activeStrokeWidth, activeLineStyle, interval]);
 
   /** True for cursor-only modes that never create drawings (cross/dot). */
   const isCursorMode = useCallback((toolId) => {
@@ -689,6 +828,9 @@ export default function DrawingTools({
   const beginDrag = useCallback((e, drawingId, handle) => {
     if (e?.preventDefault) e.preventDefault();
     if (e?.stopPropagation) e.stopPropagation();
+    // Left-button / touch drags only — right-click is reserved for the menu.
+    const isTouchDrag = Boolean(e?.touches && e.touches.length);
+    if (!isTouchDrag && e?.button != null && e.button !== 0) return false;
     setSelectedDrawingId(drawingId);
     if (lockAllDrawings) return false;
     // Per-drawing lock (TradingView): locked objects stay selectable so the
@@ -697,9 +839,23 @@ export default function DrawingTools({
     dragSnapshotRef.current = drawingsRef.current;
     bodyGestureRef.current = null; // fresh origin captured on first move frame
     setDraggingHandle(handle);
-    const clientX = e?.touches?.[0]?.clientX ?? e?.clientX ?? 0;
-    const clientY = e?.touches?.[0]?.clientY ?? e?.clientY ?? 0;
-    setDragStartPos({ x: clientX, y: clientY });
+    const downTouch = pickTouch(e);
+    const clientX = downTouch ? downTouch.clientX : (e?.clientX ?? 0);
+    const clientY = downTouch ? downTouch.clientY : (e?.clientY ?? 0);
+    // Store the gesture origin in SVG space (processMove works in SVG coords —
+    // mixing client coords here broke per-frame deltas like channel width).
+    let originX = clientX;
+    let originY = clientY;
+    try {
+      const r = svgRef.current?.getBoundingClientRect();
+      if (r) {
+        originX = clientX - r.left;
+        originY = clientY - r.top;
+      }
+    } catch (_) {}
+    setDragStartPos({ x: originX, y: originY });
+    upHandledRef.current = false;
+    dragMovedRef.current = false;
     setChartLocked(true);
     return true;
   }, [lockAllDrawings, setChartLocked]);
@@ -759,8 +915,8 @@ export default function DrawingTools({
   if (!coordCacheRef.current || coordCacheRef.current.tick !== syncTick || coordCacheRef.current.candles !== candles) {
     coordCacheRef.current = { tick: syncTick, candles, map: new Map() };
   }
-  const chartToCoordCached = (logical, price, fallbackX, fallbackY, time, frac) => {
-    const effLogical = resolvedLogical(logical, time, frac);
+  const chartToCoordCached = (logical, price, fallbackX, fallbackY, time, frac, offMs) => {
+    const effLogical = resolvedLogical(logical, time, frac, offMs);
     const cache = coordCacheRef.current;
     const key = `${effLogical}|${price}|${fallbackX}|${fallbackY}`;
     let hit = cache.map.get(key);
@@ -773,15 +929,15 @@ export default function DrawingTools({
   const resolveAnchorsCached = (drawing) => {
     if (Array.isArray(drawing.points)) {
       return drawing.points.map((point) => {
-        const { x, y } = chartToCoordCached(point.logical, point.price, point.x, point.y, point.time, point.frac);
-        return { x, y, logical: resolvedLogical(point.logical, point.time, point.frac), price: point.price };
+        const { x, y } = chartToCoordCached(point.logical, point.price, point.x, point.y, point.time, point.frac, point.offMs);
+        return { x, y, logical: resolvedLogical(point.logical, point.time, point.frac, point.offMs), price: point.price };
       });
     }
-    const start = chartToCoordCached(drawing.startLogical, drawing.startPrice, drawing.startX, drawing.startY, drawing.startTime, drawing.startFrac);
-    const end = chartToCoordCached(drawing.endLogical, drawing.endPrice, drawing.endX, drawing.endY, drawing.endTime, drawing.endFrac);
+    const start = chartToCoordCached(drawing.startLogical, drawing.startPrice, drawing.startX, drawing.startY, drawing.startTime, drawing.startFrac, drawing.startOffMs);
+    const end = chartToCoordCached(drawing.endLogical, drawing.endPrice, drawing.endX, drawing.endY, drawing.endTime, drawing.endFrac, drawing.endOffMs);
     return [
-      { x: start.x, y: start.y, logical: resolvedLogical(drawing.startLogical, drawing.startTime, drawing.startFrac), price: drawing.startPrice },
-      { x: end.x, y: end.y, logical: resolvedLogical(drawing.endLogical, drawing.endTime, drawing.endFrac), price: drawing.endPrice },
+      { x: start.x, y: start.y, logical: resolvedLogical(drawing.startLogical, drawing.startTime, drawing.startFrac, drawing.startOffMs), price: drawing.startPrice },
+      { x: end.x, y: end.y, logical: resolvedLogical(drawing.endLogical, drawing.endTime, drawing.endFrac, drawing.endOffMs), price: drawing.endPrice },
     ];
   };
 
@@ -876,6 +1032,10 @@ export default function DrawingTools({
   // ── 5. Mouse & Touch Drawing Handlers ──────────────────────────────────────
 
   const handleSvgMouseDown = (e) => {
+    // TradingView parity: only the left button (or touch) starts drawings and
+    // drags. Right/middle clicks must reach the context menu instead.
+    if (e && e.type && e.type.indexOf('mouse') === 0 && e.button !== 0) return;
+    upHandledRef.current = false; // new gesture — the next mouse-up may commit
     if (lockAllDrawings && !isCursorMode(activeTool)) {
       toast.error('Drawings are locked. Unlock to draw.');
       return;
@@ -915,19 +1075,27 @@ export default function DrawingTools({
       return;
     }
 
+    // No candles yet (loading / switching symbol): anchors would carry null
+    // logical+time and freeze at screen pixels forever, looking "moved" on
+    // every timeframe switch. Refuse instead of saving a broken drawing.
+    if (!chartReady || !Array.isArray(candles) || candles.length === 0) {
+      toast.error('Chart abhi load ho raha hai — candles aane ke baad draw karo');
+      return;
+    }
+
     e.preventDefault();
     e.stopPropagation();
     setChartLocked(true);
 
     // Instant click placement tools
     if (activeTool === 'text') {
-      setTextInputPos({ x: finalX, y: finalY, logical: chartPt.logical, price: chartPt.price, time: chartAnchor.time, frac: chartAnchor.frac });
+      setTextInputPos({ x: finalX, y: finalY, logical: chartPt.logical, price: chartPt.price, time: chartAnchor.time, frac: chartAnchor.frac, offMs: chartAnchor.offMs, tf: chartAnchor.tf });
       setTextInputVal('');
       return;
     }
 
     if (activeTool === 'smile') {
-      setStickerPos({ x: finalX, y: finalY, logical: chartPt.logical, price: chartPt.price, time: chartAnchor.time, frac: chartAnchor.frac });
+      setStickerPos({ x: finalX, y: finalY, logical: chartPt.logical, price: chartPt.price, time: chartAnchor.time, frac: chartAnchor.frac, offMs: chartAnchor.offMs, tf: chartAnchor.tf });
       setShowStickerMenu(true);
       return;
     }
@@ -940,6 +1108,8 @@ export default function DrawingTools({
         startPrice: chartPt.price,
         startTime: chartAnchor.time,
         startFrac: chartAnchor.frac,
+        startOffMs: chartAnchor.offMs,
+        tf: interval,
         startX: finalX,
         startY: finalY,
         color: activeColor,
@@ -962,6 +1132,8 @@ export default function DrawingTools({
         startPrice: chartPt.price,
         startTime: chartAnchor.time,
         startFrac: chartAnchor.frac,
+        startOffMs: chartAnchor.offMs,
+        tf: interval,
         startX: finalX,
         startY: finalY,
         color: activeColor,
@@ -1102,11 +1274,14 @@ export default function DrawingTools({
         startPrice: entryPrice,
         startTime: chartAnchor.time,
         startFrac: chartAnchor.frac,
+        startOffMs: chartAnchor.offMs,
+        tf: interval,
         endX: finalX + 180,
         endY: finalY,
         endLogical: chartPt.logical != null ? chartPt.logical + 15 : null,
         endTime: chartPt.logical != null ? timeForLogical(chartPt.logical + 15) : undefined,
         endFrac: chartPt.logical != null ? fracForLogical(chartPt.logical + 15) : 0,
+        endOffMs: chartPt.logical != null ? fracForLogical(chartPt.logical + 15) * intervalToMs(interval) : 0,
         targetPrice,
         stopPrice,
         color: isLong ? '#10B981' : '#EF5350',
@@ -1128,12 +1303,15 @@ export default function DrawingTools({
         startPrice: chartPt.price,
         startTime: chartAnchor.time,
         startFrac: chartAnchor.frac,
+        startOffMs: chartAnchor.offMs,
+        tf: interval,
         endX: finalX,
         endY: finalY,
         endLogical: chartPt.logical,
         endPrice: chartPt.price,
         endTime: chartAnchor.time,
         endFrac: chartAnchor.frac,
+        endOffMs: chartAnchor.offMs,
         channelWidth: 35,
         color: activeColor,
         strokeWidth: activeStrokeWidth,
@@ -1183,16 +1361,81 @@ export default function DrawingTools({
       : coordToChart(finalX, finalY);
     const moveTime = snap?.time ?? timeForLogical(chartPt.logical);
     const moveFrac = snap?.frac ?? fracForLogical(chartPt.logical);
+    const moveOffMs = Number.isFinite(moveFrac) && timeframeMs > 0 ? moveFrac * timeframeMs : 0;
 
     // ── Handle dragging existing item ──
     if (mh && mid && mpos && !mlock) {
-      const dx = finalX - mpos.x;
-      const dy = finalY - mpos.y;
-
+      // Rectangle corners (`rect:0..3` = TL,TR,BL,BR): the grabbed corner
+      // follows the cursor while the OPPOSITE corner stays fixed — a true box
+      // resize. Anchors are renormalised to (top-left, bottom-right) every
+      // frame so the box never flips or shears.
+      if (typeof mh === 'string' && mh.startsWith('rect:')) {
+        const index = Number(mh.slice(5));
+        const OPP = [3, 2, 1, 0];
+        const o = OPP[index] ?? 3;
+        bodyGestureRef.current = null;
+        dragMovedRef.current = true;
+        setDrawings((prev) =>
+          prev.map((d) => {
+            if (d.id !== mid) return d;
+            const sL = d.startLogical;
+            const sP = d.startPrice;
+            const eL = d.endLogical;
+            const eP = d.endPrice;
+            if (sL == null || eL == null || sP == null || eP == null) return d;
+            if (chartPt.logical == null || chartPt.price == null) return d;
+            const loL = Math.min(sL, eL);
+            const hiL = Math.max(sL, eL);
+            const loP = Math.min(sP, eP);
+            const hiP = Math.max(sP, eP);
+            const cornerL = [loL, hiL, loL, hiL];
+            const cornerP = [hiP, hiP, loP, loP];
+            const oL = cornerL[o];
+            const oP = cornerP[o];
+            const nL = chartPt.logical;
+            const nP = chartPt.price;
+            const nLoL = Math.min(oL, nL);
+            const nHiL = Math.max(oL, nL);
+            const nLoP = Math.min(oP, nP);
+            const nHiP = Math.max(oP, nP);
+            // Wall-clock identity follows the logical (time) axis: whichever
+            // side owns the edge logical owns the anchor time.
+            const rOL = Math.round(oL);
+            const oTime = timeForLogical(rOL) ?? null;
+            const oFrac = oL - rOL;
+            const oOff = timeframeMs > 0 ? oFrac * timeframeMs : 0;
+            const sFromO = nLoL === oL;
+            const eFromO = nHiL === oL;
+            const pS = chartToCoord(nLoL, nHiP, d.startX, d.startY);
+            const pE = chartToCoord(nHiL, nLoP, d.endX, d.endY);
+            return {
+              ...d,
+              startX: pS.x,
+              startY: pS.y,
+              startLogical: nLoL,
+              startPrice: nHiP,
+              startTime: sFromO ? oTime : moveTime,
+              startFrac: sFromO ? oFrac : moveFrac,
+              startOffMs: sFromO ? oOff : moveOffMs,
+              endX: pE.x,
+              endY: pE.y,
+              endLogical: nHiL,
+              endPrice: nLoP,
+              endTime: eFromO ? oTime : moveTime,
+              endFrac: eFromO ? oFrac : moveFrac,
+              endOffMs: eFromO ? oOff : moveOffMs,
+              tf: d.tf ?? interval,
+            };
+          })
+        );
+        setDragStartPos({ x: finalX, y: finalY });
+        return;
+      }
       // Handle/end/point drags pin directly to the cursor (time-anchored).
       if (mh === 'start' || mh === 'end' || mh === 'target' || mh === 'stop' ||
           (typeof mh === 'string' && mh.startsWith('point:'))) {
         bodyGestureRef.current = null;
+        dragMovedRef.current = true;
         setDrawings((prev) =>
           prev.map((d) => {
             if (d.id !== mid) return d;
@@ -1205,6 +1448,7 @@ export default function DrawingTools({
                 startPrice: chartPt.price,
                 startTime: moveTime,
                 startFrac: moveFrac,
+                startOffMs: moveOffMs,
               };
             }
             if (mh === 'end') {
@@ -1216,6 +1460,7 @@ export default function DrawingTools({
                 endPrice: chartPt.price,
                 endTime: moveTime,
                 endFrac: moveFrac,
+                endOffMs: moveOffMs,
               };
             }
             if (mh === 'target') {
@@ -1228,7 +1473,7 @@ export default function DrawingTools({
             if (typeof mh === 'string' && mh.startsWith('point:')) {
               const index = Number(mh.slice(6));
               const nextPoints = Array.isArray(d.points) ? d.points.slice() : [];
-              nextPoints[index] = { x: finalX, y: finalY, logical: chartPt.logical, price: chartPt.price, time: moveTime, frac: moveFrac };
+              nextPoints[index] = { x: finalX, y: finalY, logical: chartPt.logical, price: chartPt.price, time: moveTime, frac: moveFrac, offMs: moveOffMs, tf: interval };
               return { ...d, points: nextPoints };
             }
             return d;
@@ -1239,10 +1484,29 @@ export default function DrawingTools({
       }
       if (mh === 'channel') {
         bodyGestureRef.current = null;
+        dragMovedRef.current = true;
+        // Width = perpendicular distance from the cursor to the pre-drag
+        // median line (TradingView: grab the rail and pull). Resolved from the
+        // snapshot so fast drags never accumulate drift.
+        let nextWidth = 35;
+        try {
+          const snapshot = dragSnapshotRef.current || drawingsRef.current;
+          const origin = snapshot.find((d) => d.id === mid);
+          const A = chartToCoord(origin?.startLogical, origin?.startPrice, origin?.startX, origin?.startY);
+          const B = chartToCoord(origin?.endLogical, origin?.endPrice, origin?.endX, origin?.endY);
+          const mdx = (B?.x ?? 0) - (A?.x ?? 0);
+          const mdy = (B?.y ?? 0) - (A?.y ?? 0);
+          const len = Math.hypot(mdx, mdy);
+          if (len > 0.001 && A && B) {
+            nextWidth = Math.abs(((finalX - A.x) * -mdy + (finalY - A.y) * mdx) / len);
+          } else if (A) {
+            nextWidth = Math.abs(finalY - A.y);
+          }
+        } catch (_) {}
+        nextWidth = Math.max(10, nextWidth);
         setDrawings((prev) =>
-          prev.map((d) => (d.id === mid ? { ...d, channelWidth: Math.max(10, Math.abs(dy)) } : d))
+          prev.map((d) => (d.id === mid ? { ...d, channelWidth: nextWidth } : d))
         );
-        setDragStartPos({ x: finalX, y: finalY });
         return;
       }
       if (mh === 'body') {
@@ -1254,6 +1518,7 @@ export default function DrawingTools({
           setDragStartPos({ x: finalX, y: finalY });
           return;
         }
+        dragMovedRef.current = true;
         let gesture = bodyGestureRef.current;
         if (!gesture || gesture.drawingId !== mid) {
           gesture = {
@@ -1270,19 +1535,26 @@ export default function DrawingTools({
         const dPixX = finalX - gesture.originX;
         const dPixY = finalY - gesture.originY;
 
-        const shiftAnchor = (logical, price, time, frac, fx, fy) => {
-          if (logical == null && fx == null) return { logical, price, time, frac, x: fx, y: fy };
+        const shiftAnchor = (logical, price, time, frac, offMs, fx, fy) => {
+          if (logical == null && fx == null) return { logical, price, time, frac, offMs, x: fx, y: fy };
           const baseLogical = logical ?? gesture.originLogical;
           const basePrice = price ?? gesture.originPrice;
           const nextLogical = baseLogical != null && Number.isFinite(dLogical) ? baseLogical + dLogical : baseLogical;
           const nextPrice = basePrice != null && Number.isFinite(dPrice) ? basePrice + dPrice : basePrice;
-          // Keep time glued: recompute from the shifted logical when possible.
-          const resolvedTime = nextLogical != null ? (timeForLogical(nextLogical) ?? time) : time;
+          // Time follows the shifted logical. Past the first/last bar the
+          // time is left null on purpose so resolution falls back to the
+          // extrapolated logical — sticking to the OLD bar time would freeze
+          // that anchor and stretch the shape toward the drag direction.
+          const resolvedTime = nextLogical != null ? (timeForLogical(nextLogical) ?? null) : time;
           const nextFrac = nextLogical != null ? fracForLogical(nextLogical) : (frac ?? 0);
+          // offMs is re-derived from the new frac (frac × current bar size).
+          // Carrying the stale value double-counts the sub-bar offset and
+          // shears the shape a little more on every move.
+          const nextOff = nextLogical != null && timeframeMs > 0 ? nextFrac * timeframeMs : 0;
           const proj = (nextLogical != null && nextPrice != null)
             ? chartToCoord(nextLogical, nextPrice, (fx ?? 0) + dPixX, (fy ?? 0) + dPixY)
             : { x: (fx ?? 0) + dPixX, y: (fy ?? 0) + dPixY };
-          return { logical: nextLogical, price: nextPrice, time: resolvedTime, frac: nextFrac, x: proj.x, y: proj.y };
+          return { logical: nextLogical, price: nextPrice, time: resolvedTime, frac: nextFrac, offMs: nextOff, x: proj.x, y: proj.y };
         };
 
         setDrawings((prev) =>
@@ -1293,14 +1565,14 @@ export default function DrawingTools({
               return {
                 ...d,
                 points: originDrawing.points.map((pt) => {
-                  const s = shiftAnchor(pt.logical, pt.price, pt.time, pt.frac, pt.x, pt.y);
-                  return { x: s.x, y: s.y, logical: s.logical, price: s.price, time: s.time, frac: s.frac };
+                  const s = shiftAnchor(pt.logical, pt.price, pt.time, pt.frac, pt.offMs, pt.x, pt.y);
+                  return { x: s.x, y: s.y, logical: s.logical, price: s.price, time: s.time, frac: s.frac, offMs: s.offMs, tf: pt.tf ?? interval };
                 }),
               };
             }
             if (originDrawing.startLogical != null || originDrawing.startX != null) {
-              const s = shiftAnchor(originDrawing.startLogical, originDrawing.startPrice, originDrawing.startTime, originDrawing.startFrac, originDrawing.startX, originDrawing.startY);
-              const ePt = shiftAnchor(originDrawing.endLogical, originDrawing.endPrice, originDrawing.endTime, originDrawing.endFrac, originDrawing.endX, originDrawing.endY);
+              const s = shiftAnchor(originDrawing.startLogical, originDrawing.startPrice, originDrawing.startTime, originDrawing.startFrac, originDrawing.startOffMs, originDrawing.startX, originDrawing.startY);
+              const ePt = shiftAnchor(originDrawing.endLogical, originDrawing.endPrice, originDrawing.endTime, originDrawing.endFrac, originDrawing.endOffMs, originDrawing.endX, originDrawing.endY);
               return {
                 ...d,
                 startX: s.x,
@@ -1309,12 +1581,14 @@ export default function DrawingTools({
                 startPrice: s.price,
                 startTime: s.time,
                 startFrac: s.frac,
+                startOffMs: s.offMs,
                 endX: ePt.x,
                 endY: ePt.y,
                 endLogical: ePt.logical,
                 endPrice: ePt.price,
                 endTime: ePt.time,
                 endFrac: ePt.frac,
+                endOffMs: ePt.offMs,
                 targetPrice: d.targetPrice != null && Number.isFinite(dPrice) ? originDrawing.targetPrice + dPrice : d.targetPrice,
                 stopPrice: d.stopPrice != null && Number.isFinite(dPrice) ? originDrawing.stopPrice + dPrice : d.stopPrice,
               };
@@ -1329,7 +1603,7 @@ export default function DrawingTools({
 
     // ── Active drawing in progress ──
     if (!misDrawing || !mdraw) return;
-    const cursorAnchor = { x: finalX, y: finalY, logical: chartPt.logical, price: chartPt.price, time: moveTime, frac: moveFrac };
+    const cursorAnchor = toAnchor(finalX, finalY, { logical: chartPt.logical, price: chartPt.price, time: moveTime, frac: moveFrac });
 
     // Click-to-place preview: preview follows the cursor after the placed anchors
     if (mdraw.pending) {
@@ -1408,10 +1682,11 @@ export default function DrawingTools({
           endPrice: chartPt.price,
           endTime: moveTime,
           endFrac: moveFrac,
+          endOffMs: moveOffMs,
         };
       });
     }
-  }, [findMagnetSnap, coordToChart, chartToCoord, resolvedLogical, timeForLogical, fracForLogical, timeIndexMap, isFreehandType]);
+  }, [findMagnetSnap, coordToChart, chartToCoord, resolvedLogical, timeForLogical, fracForLogical, timeIndexMap, isFreehandType, timeframeMs, interval, toAnchor]);
 
   // Thin event wrapper: capture coordinates synchronously, defer all work to
   // one RAF flush per frame. preventDefault runs here (touch listeners are
@@ -1425,7 +1700,7 @@ export default function DrawingTools({
 
   const handleSvgMouseMove = (e) => {
     try { e.preventDefault(); } catch (_) {}
-    const t = e?.touches?.[0];
+    const t = pickTouch(e);
     pendingMoveRef.current = {
       clientX: t ? t.clientX : e.clientX,
       clientY: t ? t.clientY : e.clientY,
@@ -1457,27 +1732,30 @@ export default function DrawingTools({
     // Run any queued move first so the commit below sees the final pointer
     // position even if mouse-up beats the next animation frame.
     flushPendingMoveSync();
+    // Idempotency: the same release fires the svg handler AND the
+    // window-level handler — commit exactly once per gesture.
+    if (upHandledRef.current) return;
+    upHandledRef.current = true;
     if (draggingHandle) {
-      e.preventDefault();
-      e.stopPropagation();
+      if (e?.preventDefault) e.preventDefault();
+      if (e?.stopPropagation) e.stopPropagation();
       setDraggingHandle(null);
       setDragStartPos(null);
       bodyGestureRef.current = null;
       // Persist the live-dragged positions (from the ref mirror) while pushing
       // the pre-drag snapshot to undo — otherwise undo restores the same
       // post-drag state and drag appears to "snap back" / break undo.
+      // A click without movement only selects: no undo entry, no rewrite.
       const latest = drawingsRef.current;
       const snapshot = dragSnapshotRef.current;
       dragSnapshotRef.current = null;
-      if (snapshot) {
+      if (snapshot && dragMovedRef.current) {
         setUndoStack((prev) => [...prev.slice(-30), snapshot]);
         setRedoStack([]);
-        persistDrawings(latest);
-        // `latest` is already in state via the move handler; re-set to flush.
-        setDrawings(latest);
-      } else {
-        saveDrawingsWithHistory(latest, true);
       }
+      persistDrawings(latest);
+      // `latest` is already in state via the move handler; re-set to flush.
+      setDrawings(latest);
       setChartLocked(false);
       return;
     }
@@ -1493,8 +1771,8 @@ export default function DrawingTools({
       return;
     }
 
-    e.preventDefault();
-    e.stopPropagation();
+    if (e?.preventDefault) e.preventDefault();
+    if (e?.stopPropagation) e.stopPropagation();
 
     // Extended 2-anchor drags are already anchor pairs — validate the drag
     // distance and commit directly. This is the ONLY commit path for those
@@ -1513,10 +1791,10 @@ export default function DrawingTools({
         const ux = upSnap ? upSnap.x : up.x;
         const uy = upSnap ? upSnap.y : up.y;
         if (upSnap) {
-          b = { x: ux, y: uy, logical: upSnap.logical, price: upSnap.price, time: upSnap.time, frac: upSnap.frac ?? 0 };
+          b = { x: ux, y: uy, logical: upSnap.logical, price: upSnap.price, time: upSnap.time, frac: upSnap.frac ?? 0, offMs: 0, tf: interval };
         } else {
           const upt = coordToChart(ux, uy);
-          b = { x: ux, y: uy, ...upt, time: timeForLogical(upt.logical), frac: fracForLogical(upt.logical) };
+          b = toAnchor(ux, uy, { ...upt, time: timeForLogical(upt.logical), frac: fracForLogical(upt.logical) });
         }
       } catch (_) {}
       const moved = a && b
@@ -1531,6 +1809,7 @@ export default function DrawingTools({
       isDraggingRef.current = false;
       setCurrentDraw(null);
       setChartLocked(false);
+      toast('Shape banane ke liye chart par drag karo — sirf click se shape nahi banta', { id: 'shape-drag-hint' });
       return;
     }
 
@@ -1548,7 +1827,8 @@ export default function DrawingTools({
           : coordToChart(ux, uy);
         const upTime = upt.time ?? timeForLogical(upt.logical);
         const upFrac = upt.frac ?? fracForLogical(upt.logical);
-        commitDraw = { ...currentDraw, endX: ux, endY: uy, endLogical: upt.logical, endPrice: upt.price, endTime: upTime, endFrac: upFrac };
+        const upOffMs = Number.isFinite(upFrac) && timeframeMs > 0 ? upFrac * timeframeMs : 0;
+        commitDraw = { ...currentDraw, endX: ux, endY: uy, endLogical: upt.logical, endPrice: upt.price, endTime: upTime, endFrac: upFrac, endOffMs: upOffMs };
       } catch (_) {}
     }
 
@@ -1571,8 +1851,8 @@ export default function DrawingTools({
         // as a legacy drawing.
         if (!Array.isArray(commitDraw.points)) {
           commitExtendedDrawing(commitDraw.type, [
-            { x: commitDraw.startX, y: commitDraw.startY, logical: commitDraw.startLogical, price: commitDraw.startPrice, time: commitDraw.startTime, frac: commitDraw.startFrac },
-            { x: commitDraw.endX, y: commitDraw.endY, logical: commitDraw.endLogical, price: commitDraw.endPrice, time: commitDraw.endTime, frac: commitDraw.endFrac },
+            { x: commitDraw.startX, y: commitDraw.startY, logical: commitDraw.startLogical, price: commitDraw.startPrice, time: commitDraw.startTime, frac: commitDraw.startFrac, offMs: commitDraw.startOffMs, tf: commitDraw.tf ?? interval },
+            { x: commitDraw.endX, y: commitDraw.endY, logical: commitDraw.endLogical, price: commitDraw.endPrice, time: commitDraw.endTime, frac: commitDraw.endFrac, offMs: commitDraw.endOffMs, tf: commitDraw.tf ?? interval },
           ]);
           return;
         }
@@ -1582,6 +1862,10 @@ export default function DrawingTools({
       const updated = [...drawingsRef.current, commitDraw];
       saveDrawingsWithHistory(updated, true);
       setSelectedDrawingId(commitDraw.id);
+    } else {
+      // Degenerate gesture (a click without a drag): tell the user instead of
+      // silently swallowing it — this is the "place hi nahi ho raha" feeling.
+      toast('Shape banane ke liye chart par drag karo — sirf click se shape nahi banta', { id: 'shape-drag-hint' });
     }
 
     setIsDrawing(false);
@@ -1589,17 +1873,136 @@ export default function DrawingTools({
     setCurrentDraw(null);
     setChartLocked(false);
 
-    if (!stayInDrawMode && activeTool !== 'brush' && activeTool !== 'highlighter' && activeTool !== 'polyline') {
+    if (isValid && !stayInDrawMode && activeTool !== 'polyline') {
       setActiveTool(DEFAULT_TOOL);
     }
   };
+
+  // ── Window-level pointer capture (TradingView parity) ─────────────────────
+  // In cursor/selection modes the SVG overlay is click-through so the chart
+  // keeps panning — but then moves/releases over empty chart space never reach
+  // the svg handlers and anchor drags freeze mid-gesture. Mirroring the move
+  // and release on `window` keeps every drag glued to the cursor no matter
+  // what sits under the pointer. The mouse-up guard above makes the double
+  // delivery (svg + window) commit exactly once.
+  const svgMoveRef = useRef(null);
+  const svgUpRef = useRef(null);
+  svgMoveRef.current = handleSvgMouseMove;
+  svgUpRef.current = handleSvgMouseUp;
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (gestureActiveRef.current) {
+        svgMoveRef.current?.(e);
+        return;
+      }
+      // Hover (no gesture): only magnet-track when the pointer is over the
+      // overlay itself, so moving over side panels costs nothing.
+      try {
+        if (svgRef.current && e?.target instanceof Node && svgRef.current.contains(e.target)) {
+          svgMoveRef.current?.(e);
+        }
+      } catch (_) {}
+    };
+    const onUp = (e) => {
+      if (gestureActiveRef.current) svgUpRef.current?.(e);
+    };
+    const onBlur = () => {
+      // Pointer left the window mid-gesture (Alt+Tab, chrome UI): commit what
+      // we have instead of leaving a stuck drag behind.
+      if (gestureActiveRef.current) svgUpRef.current?.({});
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  // Touch equivalent while a drag is live (touchmove must be non-passive to
+  // keep the gesture from scrolling the page mid-drag).
+  useEffect(() => {
+    if (!draggingHandle) return undefined;
+    const onMove = (e) => svgMoveRef.current?.(e);
+    const onUp = (e) => svgUpRef.current?.(e);
+    window.addEventListener('touchmove', onMove, { passive: false });
+    window.addEventListener('touchend', onUp);
+    window.addEventListener('touchcancel', onUp);
+    return () => {
+      window.removeEventListener('touchmove', onMove);
+      window.removeEventListener('touchend', onUp);
+      window.removeEventListener('touchcancel', onUp);
+    };
+  }, [draggingHandle]);
+
+  // ── Click empty chart → deselect (TradingView parity) ─────────────────────
+  // In cursor modes the overlay is click-through, so empty-chart clicks never
+  // reach the svg deselect path and the selection would stick forever. Detect
+  // them on window instead: a press+release with <6px movement whose target
+  // sits inside the price pane but OUTSIDE the overlay (i.e. not on a shape,
+  // toolbar, menu or popup) clears the selection. Pans keep the selection.
+  const emptyClickRef = useRef(null);
+  useEffect(() => {
+    if (selectedDrawingId == null) return undefined;
+    const isEmptyPaneTarget = (t) => {
+      try {
+        const pane = mainPaneRef?.current;
+        if (!t || !(t instanceof Node) || !pane || !svgRef.current) return false;
+        return pane.contains(t) && !svgRef.current.contains(t);
+      } catch (_) {
+        return false;
+      }
+    };
+    const onDown = (e) => {
+      emptyClickRef.current = null;
+      if (e?.button != null && e.button !== 0) return; // left button / touch only
+      if (!isEmptyPaneTarget(e.target)) return;
+      emptyClickRef.current = {
+        x: e?.changedTouches?.[0]?.clientX ?? e?.clientX ?? 0,
+        y: e?.changedTouches?.[0]?.clientY ?? e?.clientY ?? 0,
+      };
+    };
+    const onUp = (e) => {
+      const start = emptyClickRef.current;
+      emptyClickRef.current = null;
+      if (!start || !isEmptyPaneTarget(e?.target)) return;
+      const cx = e?.changedTouches?.[0]?.clientX ?? e?.clientX ?? start.x;
+      const cy = e?.changedTouches?.[0]?.clientY ?? e?.clientY ?? start.y;
+      const dx = cx - start.x;
+      const dy = cy - start.y;
+      if (dx * dx + dy * dy > 36) return; // it was a pan — keep selection
+      setSelectedDrawingId(null);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchstart', onDown, { passive: true });
+    window.addEventListener('touchend', onUp);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchstart', onDown);
+      window.removeEventListener('touchend', onUp);
+    };
+  }, [selectedDrawingId, mainPaneRef]);
 
   /** Double-click finishes a click-to-place polyline (TradingView parity). */
   const handleSvgDoubleClick = (e) => {
     if (activeTool !== 'polyline' || !currentDraw?.pending) return;
     if (e?.preventDefault) e.preventDefault();
     if (e?.stopPropagation) e.stopPropagation();
-    const anchors = Array.isArray(pendingPoints) ? pendingPoints : [];
+    let anchors = Array.isArray(pendingPoints) ? pendingPoints.slice() : [];
+    // The double-click's own second mousedown already appended a near-duplicate
+    // anchor — drop it so the finished line ends where the user double-clicked.
+    if (anchors.length >= 2) {
+      const last = anchors[anchors.length - 1];
+      const prev = anchors[anchors.length - 2];
+      const dx = (last?.x ?? 0) - (prev?.x ?? 0);
+      const dy = (last?.y ?? 0) - (prev?.y ?? 0);
+      if (dx * dx + dy * dy < 64) anchors = anchors.slice(0, -1);
+    }
     if (anchors.length >= 2) {
       commitExtendedDrawing('polyline', anchors);
       toast.success('Polyline completed');
@@ -1650,7 +2053,7 @@ export default function DrawingTools({
           x: (pt.x || 0) + 18,
           y: (pt.y || 0) + 18,
           logical: nextLogical,
-          time: nextLogical != null ? timeForLogical(nextLogical) ?? pt.time : pt.time,
+          time: nextLogical != null ? timeForLogical(nextLogical) ?? null : pt.time,
           frac: nextLogical != null ? fracForLogical(nextLogical) : pt.frac,
         };
       });
@@ -1661,12 +2064,12 @@ export default function DrawingTools({
       dup.endY = (target.endY || 0) + 18;
       if (target.startLogical != null) {
         dup.startLogical = target.startLogical + 2;
-        dup.startTime = timeForLogical(dup.startLogical) ?? target.startTime;
+        dup.startTime = timeForLogical(dup.startLogical) ?? null;
         dup.startFrac = fracForLogical(dup.startLogical);
       }
       if (target.endLogical != null) {
         dup.endLogical = target.endLogical + 2;
-        dup.endTime = timeForLogical(dup.endLogical) ?? target.endTime;
+        dup.endTime = timeForLogical(dup.endLogical) ?? null;
         dup.endFrac = fracForLogical(dup.endLogical);
       }
     }
@@ -1755,15 +2158,49 @@ export default function DrawingTools({
     }
   }, [activeTool, isCursorMode, setChartLocked]);
 
+  const handleToggleStayInDrawMode = useCallback(() => {
+    setStayInDrawMode((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('so_stay_in_draw_mode', JSON.stringify(next));
+      } catch {}
+      toast(next ? 'Stay in Drawing Mode: ON' : 'Stay in Drawing Mode: OFF (Auto-unselect tool)', {
+        id: 'stay-draw-mode',
+      });
+      return next;
+    });
+  }, []);
+
   // Catalog Alt-shortcuts (Alt+T trendline, Alt+J h-line, …) activate the
-  // corresponding drawing tool. Alt-only (no Ctrl/Meta) and never while
-  // typing — so browser/OS chords and text fields are untouched. Placed
-  // after handleSelectTool so the dep array never hits a TDZ const.
+  // corresponding drawing tool, and plain digits 1..9,0 activate pinned
+  // favourite tools in pin order — both work from anywhere on the page except
+  // text fields. Alt-only (no Ctrl/Meta) and never while typing — so
+  // browser/OS chords and text fields are untouched. Placed after
+  // handleSelectTool so the dep array never hits a TDZ const.
   useEffect(() => {
-    const onToolShortcut = (e) => {
-      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+    const typing = () => {
       const tag = document.activeElement?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || document.activeElement?.isContentEditable) return;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || document.activeElement?.isContentEditable;
+    };
+    const onToolShortcut = (e) => {
+      if (typing()) return;
+      // Digit hotkeys for pinned favourites (no modifiers).
+      if (!e.altKey && !e.ctrlKey && !e.metaKey && /^[0-9]$/.test(e.key || '')) {
+        const pins = readPinnedIds();
+        const idx = e.key === '0' ? 9 : Number(e.key) - 1;
+        const id = pins[idx];
+        if (id && getToolSpec(id)) {
+          e.preventDefault();
+          handleSelectTool(id);
+        }
+        return;
+      }
+      if (!e.altKey || e.ctrlKey || e.metaKey) return;
+      if (e.shiftKey && (e.key === 'K' || e.key === 'k')) {
+        e.preventDefault();
+        handleToggleStayInDrawMode();
+        return;
+      }
       const toolId = resolveShortcut(e.key, { alt: true, shift: !!e.shiftKey });
       if (!toolId) return;
       e.preventDefault();
@@ -1771,7 +2208,7 @@ export default function DrawingTools({
     };
     window.addEventListener('keydown', onToolShortcut);
     return () => window.removeEventListener('keydown', onToolShortcut);
-  }, [handleSelectTool]);
+  }, [handleSelectTool, handleToggleStayInDrawMode]);
 
   const handleCycleMagnet = useCallback(() => {
     const next = nextMagnetMode(magnetMode);
@@ -1824,7 +2261,7 @@ export default function DrawingTools({
           x: (pt.x || 0) + dx,
           y: (pt.y || 0) + dy,
           logical: nextLogical,
-          time: nextLogical != null ? timeForLogical(nextLogical) ?? pt.time : pt.time,
+          time: nextLogical != null ? timeForLogical(nextLogical) ?? null : pt.time,
           frac: nextLogical != null ? fracForLogical(nextLogical) : pt.frac,
         };
       });
@@ -1835,12 +2272,12 @@ export default function DrawingTools({
       shifted.endY = (drawing.endY || 0) + dy;
       if (drawing.startLogical != null) {
         shifted.startLogical = drawing.startLogical + dLogical;
-        shifted.startTime = timeForLogical(shifted.startLogical) ?? drawing.startTime;
+        shifted.startTime = timeForLogical(shifted.startLogical) ?? null;
         shifted.startFrac = fracForLogical(shifted.startLogical);
       }
       if (drawing.endLogical != null) {
         shifted.endLogical = drawing.endLogical + dLogical;
-        shifted.endTime = timeForLogical(shifted.endLogical) ?? drawing.endTime;
+        shifted.endTime = timeForLogical(shifted.endLogical) ?? null;
         shifted.endFrac = fracForLogical(shifted.endLogical);
       }
     }
@@ -1869,6 +2306,27 @@ export default function DrawingTools({
     });
     if (drawingId != null) setSelectedDrawingId(drawingId);
   }, []);
+
+  // ── Empty-chart right-click → object menu (TradingView parity) ─────────────
+  // Same click-through problem as deselect: in cursor modes the overlay never
+  // sees the event (it lands on the chart canvas), so shape menus work but the
+  // background menu never opens. Catch it on window; clicks on shapes keep
+  // using their own menu (target inside the overlay → skipped here, no double).
+  // Placed after handleContextMenu so the dep array never hits a TDZ const.
+  useEffect(() => {
+    const onContext = (e) => {
+      try {
+        const t = e.target;
+        if (!t || t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
+        const pane = mainPaneRef?.current;
+        if (!pane || !svgRef.current) return;
+        if (!(t instanceof Node) || !pane.contains(t) || svgRef.current.contains(t)) return;
+        handleContextMenu(e, null);
+      } catch (_) {}
+    };
+    window.addEventListener('contextmenu', onContext);
+    return () => window.removeEventListener('contextmenu', onContext);
+  }, [mainPaneRef, handleContextMenu]);
 
   const copyDrawing = useCallback((id) => {
     const target = drawingsRef.current.find((d) => d.id === id);
@@ -1975,6 +2433,8 @@ export default function DrawingTools({
         startPrice: textInputPos.price,
         startTime: textInputPos.time ?? timeForLogical(textInputPos.logical),
         startFrac: textInputPos.frac ?? fracForLogical(textInputPos.logical),
+        startOffMs: textInputPos.offMs ?? 0,
+        tf: textInputPos.tf ?? interval,
         text: textInputVal.trim(),
         color: activeColor,
       };
@@ -1998,6 +2458,8 @@ export default function DrawingTools({
         startPrice: stickerPos.price,
         startTime: stickerPos.time ?? timeForLogical(stickerPos.logical),
         startFrac: stickerPos.frac ?? fracForLogical(stickerPos.logical),
+        startOffMs: stickerPos.offMs ?? 0,
+        tf: stickerPos.tf ?? interval,
         emoji,
       };
       saveDrawingsWithHistory([...drawingsRef.current, stickerDrawing]);
@@ -2011,6 +2473,16 @@ export default function DrawingTools({
 
   const selectedDrawing = drawings.find((d) => d.id === selectedDrawingId);
   const contextTarget = contextMenu ? drawings.find((d) => d.id === contextMenu.drawingId) : null;
+
+  // Favourite tools for the empty-chart right-click menu (fresh read per open
+  // so pins starred in the toolbar appear immediately).
+  const menuFavouriteTools = useMemo(() => {
+    if (!contextMenu || contextMenu.drawingId != null) return [];
+    return readPinnedIds()
+      .slice(0, 8)
+      .map((id, i) => ({ spec: getToolSpec(id), digit: pinDigitForIndex(i) }))
+      .filter((x) => x.spec);
+  }, [contextMenu]);
 
   // Registry preview anchors for the in-progress drawing — points-based shapes
   // use their live points directly; legacy start/end shapes are converted so
@@ -2038,7 +2510,7 @@ export default function DrawingTools({
         magnetMode={magnetMode}
         onCycleMagnet={handleCycleMagnet}
         stayInDrawMode={stayInDrawMode}
-        onToggleStayInDrawMode={() => setStayInDrawMode((prev) => !prev)}
+        onToggleStayInDrawMode={handleToggleStayInDrawMode}
         lockAllDrawings={lockAllDrawings}
         onToggleLockAll={handleToggleLockAll}
         hideAllDrawings={hideAllDrawings}
@@ -2053,6 +2525,16 @@ export default function DrawingTools({
         onToggleOpen={onToggleOpen}
         isMobile={isMobile}
       />
+
+      {/* ── TradingView-style floating favorite toolbar (starred tools) ── */}
+      {isOpen && (
+        <FloatingFavoritesBar
+          activeTool={activeTool}
+          onSelectTool={handleSelectTool}
+          toolbarWidth={toolbarWidth}
+          isMobile={isMobile}
+        />
+      )}
 
       {/* ── Selected Drawing Floating Context Action Toolbar ── */}
       {/* TradingView-style: appears on ANY selection (any active tool), hidden
@@ -2206,151 +2688,41 @@ export default function DrawingTools({
         </div>
       )}
 
-      {/* ── Drawing Settings Modal (TradingView-style per-object settings) ── */}
+      {/* ── Drawing Settings Modal — TradingView parity (Style/Text/Coordinates/Visibility, ALL tools) ── */}
       {drawingSettingsId && (() => {
         const target = drawings.find((d) => d.id === drawingSettingsId);
         if (!target) return null;
-        const patchTarget = (patch) => {
+        const patchTarget = (patch, opts) => {
+          if (opts?.reset) {
+            // Reset keeps identity + anchors, drops styling customizations.
+            const keep = { id: target.id, type: target.type };
+            if (Array.isArray(target.points)) keep.points = target.points;
+            ['startLogical', 'startPrice', 'startTime', 'startFrac', 'startOffMs', 'startX', 'startY',
+             'endLogical', 'endPrice', 'endTime', 'endFrac', 'endOffMs', 'endX', 'endY', 'tf'].forEach((k) => {
+              if (target[k] !== undefined) keep[k] = target[k];
+            });
+            const updated = drawingsRef.current.map((d) => (d.id === drawingSettingsId ? keep : d));
+            saveDrawingsWithHistory(updated, true);
+            return;
+          }
           const updated = drawingsRef.current.map((d) => (d.id === drawingSettingsId ? { ...d, ...patch } : d));
           saveDrawingsWithHistory(updated, true);
         };
-        const isLineLike = ['trendline', 'ray', 'extended_line', 'info_line', 'trend_angle', 'arrow'].includes(target.type);
-        const hasText = target.text !== undefined;
-        const sectionTitle = { fontSize: '0.62rem', fontWeight: 800, color: '#64748B', letterSpacing: '0.06em', marginBottom: 6 };
-        const rowLabel = { fontSize: '0.7rem', color: '#CBD5E1', minWidth: 92 };
         return (
-          <div
-            style={{ position: 'fixed', inset: 0, zIndex: 300, background: 'rgba(3,7,18,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-            onMouseDown={(e) => { if (e.target === e.currentTarget) setDrawingSettingsId(null); }}
-          >
-            <div style={{ width: 340, maxWidth: '92vw', maxHeight: '86vh', overflowY: 'auto', background: 'var(--bg-card, #0F172A)', border: '1px solid var(--border, rgba(99,102,241,0.3))', borderRadius: 12, padding: '16px 18px', boxShadow: '0 24px 60px rgba(0,0,0,0.6)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary, #F1F5F9)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  {String(target.type || '').replace(/_/g, ' ')} Settings
-                </span>
-                <button onClick={() => setDrawingSettingsId(null)} title="Close settings" style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', display: 'flex', padding: 2 }}>
-                  <X size={16} />
-                </button>
-              </div>
-
-              {/* Style */}
-              <div style={{ marginBottom: 14 }}>
-                <div style={sectionTitle}>STYLE</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <span style={rowLabel}>Color</span>
-                  <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
-                    {COLOR_PRESETS.map((c) => (
-                      <div
-                        key={c}
-                        onClick={() => patchTarget({ color: c })}
-                        title={c}
-                        style={{
-                          width: 18, height: 18, borderRadius: '50%', backgroundColor: c, cursor: 'pointer',
-                          border: target.color === c ? '2px solid #FFF' : '1px solid rgba(255,255,255,0.2)',
-                        }}
-                      />
-                    ))}
-                    <input
-                      type="color"
-                      value={/^#[0-9a-fA-F]{6}$/.test(target.color || '') ? target.color : '#2962FF'}
-                      onChange={(e) => patchTarget({ color: e.target.value })}
-                      title="Custom color"
-                      style={{ width: 26, height: 22, padding: 0, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4, background: 'transparent', cursor: 'pointer' }}
-                    />
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <span style={rowLabel}>Width</span>
-                  <input
-                    type="range" min={1} max={5} step={1}
-                    value={target.strokeWidth || 2}
-                    onChange={(e) => patchTarget({ strokeWidth: Number(e.target.value) })}
-                    style={{ flex: 1, accentColor: '#6366F1' }}
-                  />
-                  <span style={{ fontSize: '0.7rem', color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace', minWidth: 30, textAlign: 'right' }}>{target.strokeWidth || 2}px</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={rowLabel}>Line style</span>
-                  <div style={{ display: 'flex', gap: 4 }}>
-                    {['solid', 'dashed', 'dotted'].map((st) => (
-                      <button
-                        key={st}
-                        onClick={() => patchTarget({ lineStyle: st })}
-                        style={{
-                          padding: '3px 10px', borderRadius: 5, border: 'none',
-                          background: (target.lineStyle || 'solid') === st ? '#2962FF' : 'rgba(255,255,255,0.06)',
-                          color: '#FFF', fontSize: '0.66rem', fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
-                        }}
-                      >
-                        {st}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Text */}
-              {hasText && (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={sectionTitle}>TEXT</div>
-                  <input
-                    type="text"
-                    value={target.text || ''}
-                    onChange={(e) => patchTarget({ text: e.target.value })}
-                    placeholder="Label text…"
-                    style={{ width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, padding: '6px 10px', color: '#F1F5F9', fontSize: '0.74rem', outline: 'none', boxSizing: 'border-box' }}
-                  />
-                </div>
-              )}
-
-              {/* Line extensions */}
-              {isLineLike && (
-                <div style={{ marginBottom: 14 }}>
-                  <div style={sectionTitle}>LINE</div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.72rem', color: '#CBD5E1', marginBottom: 6, cursor: 'pointer' }}>
-                    <input type="checkbox" checked={target.extendLeft ?? false} onChange={(e) => patchTarget({ extendLeft: e.target.checked })} style={{ accentColor: '#6366F1' }} />
-                    Extend left
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.72rem', color: '#CBD5E1', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={target.extendRight ?? false} onChange={(e) => patchTarget({ extendRight: e.target.checked })} style={{ accentColor: '#6366F1' }} />
-                    Extend right
-                  </label>
-                </div>
-              )}
-
-              {/* Object */}
-              <div style={{ marginBottom: 4 }}>
-                <div style={sectionTitle}>OBJECT</div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.72rem', color: '#CBD5E1', marginBottom: 6, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={!!target.locked} onChange={(e) => patchTarget({ locked: e.target.checked })} style={{ accentColor: '#F59E0B' }} />
-                  Lock (anchors cannot move)
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.72rem', color: '#CBD5E1', cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={!hiddenIds.has(target.id)}
-                    onChange={() => {
-                      setHiddenIds((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(target.id)) next.delete(target.id);
-                        else next.add(target.id);
-                        return next;
-                      });
-                    }}
-                    style={{ accentColor: '#6366F1' }}
-                  />
-                  Visible on chart
-                </label>
-              </div>
-            </div>
-          </div>
+          <DrawingSettingsModal
+            drawing={target}
+            onPatch={patchTarget}
+            onClose={() => setDrawingSettingsId(null)}
+          />
         );
       })()}
 
       {/* ── High-Performance Interactive SVG Canvas ── */}
       {/* Pane-locked: height follows the main price pane so scroll/zoom maps 1:1.
           GPU-promoted (translateZ) for jank-free pans; only the top pane area
-          intercepts drawing gestures, sub-panes stay interactive. */}
+          intercepts drawing gestures, sub-panes stay interactive. The overlay
+          ends at the plot edge (PRICE_AXIS_WIDTH reserved) so drawings never
+          bleed over the right price scale — axis clicks reach the chart. */}
       {!hideAllDrawings && (
         <svg
           ref={svgRef}
@@ -2358,6 +2730,7 @@ export default function DrawingTools({
           onMouseMove={handleSvgMouseMove}
           onMouseUp={handleSvgMouseUp}
           onDoubleClick={handleSvgDoubleClick}
+          onContextMenu={(e) => handleContextMenu(e, null)}
           onTouchStart={handleSvgMouseDown}
           onTouchMove={handleSvgMouseMove}
           onTouchEnd={handleSvgMouseUp}
@@ -2366,15 +2739,20 @@ export default function DrawingTools({
             position: 'absolute',
             top: 0,
             left: isOpen ? toolbarWidth : 0,
-            right: 0,
+            right: PRICE_AXIS_WIDTH,
             bottom: 'auto',
-            width: isOpen ? `calc(100% - ${toolbarWidth}px)` : '100%',
+            width: isOpen ? `calc(100% - ${toolbarWidth + PRICE_AXIS_WIDTH}px)` : `calc(100% - ${PRICE_AXIS_WIDTH}px)`,
             height: paneHeight != null ? `${paneHeight}px` : '100%',
             maxHeight: '100%',
             overflow: 'hidden',
             zIndex: 45,
-            pointerEvents: !isCursorMode(activeTool) ? 'all' : (selectedDrawingId ? 'all' : 'none'),
-            cursor: !isCursorMode(activeTool) ? 'crosshair' : 'default',
+            // TradingView hit-testing: in cursor/selection modes the overlay is
+            // click-through ('none') so empty-space gestures reach the chart
+            // (pan/zoom keep working) while every drawing shape still receives
+            // events through its own explicit pointerEvents. In drawing modes
+            // the overlay captures everything ('all') to start new sketches.
+            pointerEvents: !isCursorMode(activeTool) ? 'all' : 'none',
+            cursor: !isCursorMode(activeTool) ? 'crosshair' : (activeTool === 'dot' ? 'crosshair' : 'default'),
             touchAction: 'none',
             transform: 'translateZ(0)',
             willChange: 'transform',
@@ -2384,6 +2762,8 @@ export default function DrawingTools({
           {drawings.map((d) => {
             // Per-drawing visibility (TradingView eye toggle) — hidden objects vanish.
             if (hiddenIds.has(d.id)) return null;
+            // TradingView Visibility tab — hidden on unchecked timeframes.
+            if (!isDrawingVisibleOn(d, interval)) return null;
             // ── Extended (TradingView tool-set) drawings render via the registry ──
             // Legacy types (trendline, fib, brush…) keep their bespoke JSX below.
             if (isExtendedTool(d.type)) {
@@ -2417,25 +2797,36 @@ export default function DrawingTools({
             }
 
             const isSelected = selectedDrawingId === d.id;
-            const pt1 = chartToCoordCached(d.startLogical, d.startPrice, d.startX, d.startY, d.startTime, d.startFrac);
-            const pt2 = chartToCoordCached(d.endLogical,   d.endPrice,   d.endX,   d.endY, d.endTime, d.endFrac);
+            const pt1 = chartToCoordCached(d.startLogical, d.startPrice, d.startX, d.startY, d.startTime, d.startFrac, d.startOffMs);
+            const pt2 = chartToCoordCached(d.endLogical,   d.endPrice,   d.endX,   d.endY, d.endTime, d.endFrac, d.endOffMs);
 
             const strokeDash = d.lineStyle === 'dashed' ? '6,6' : (d.lineStyle === 'dotted' ? '2,4' : (isSelected ? '4,4' : 'none'));
 
             // 1. Horizontal Line
             if (d.type === 'horizontal_line') {
               return (
-                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                <g
+                  key={d.id}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
+                >
                   <line
                     x1={0} y1={pt1.y} x2="100%" y2={pt1.y}
                     stroke="transparent" strokeWidth={16}
                     style={{ pointerEvents: 'stroke' }}
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                    onMouseDown={(e) => startBodyDrag(e, d.id)}
                   />
                   <line
                     x1={0} y1={pt1.y} x2="100%" y2={pt1.y}
                     stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 2}
                     strokeDasharray={strokeDash}
+                  />
+                  <circle
+                    cx={10} cy={pt1.y} r={isSelected ? 5 : 3.5}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    stroke="#131722" strokeWidth={1.5}
+                    style={{ pointerEvents: 'all', cursor: 'ns-resize' }}
+                    onMouseDown={(e) => beginLegacyDrag(e, d.id, 'start')}
                   />
                   <rect
                     x={8} y={pt1.y - 18} width={75} height={16} rx={3}
@@ -2451,12 +2842,16 @@ export default function DrawingTools({
             // 2. Horizontal Ray
             if (d.type === 'horizontal_ray') {
               return (
-                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                <g
+                  key={d.id}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
+                >
                   <line
                     x1={pt1.x} y1={pt1.y} x2="100%" y2={pt1.y}
                     stroke="transparent" strokeWidth={16}
                     style={{ pointerEvents: 'stroke' }}
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                    onMouseDown={(e) => startBodyDrag(e, d.id)}
                   />
                   <line
                     x1={pt1.x} y1={pt1.y} x2="100%" y2={pt1.y}
@@ -2478,12 +2873,16 @@ export default function DrawingTools({
             // 3. Trend Line
             if (d.type === 'trendline') {
               return (
-                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                <g
+                  key={d.id}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
+                >
                   <line
                     x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y}
                     stroke="transparent" strokeWidth={16}
                     style={{ pointerEvents: 'stroke' }}
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                    onMouseDown={(e) => startBodyDrag(e, d.id)}
                   />
                   <line
                     x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y}
@@ -2497,35 +2896,48 @@ export default function DrawingTools({
                     fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
                     stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) beginLegacyDrag(e, d.id, 'start'); }}
+                    onMouseDown={(e) => beginLegacyDrag(e, d.id, 'start')}
                   />
                   <circle
                     cx={pt2.x} cy={pt2.y} r={isSelected ? 6 : 4}
                     fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
                     stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) beginLegacyDrag(e, d.id, 'end'); }}
+                    onMouseDown={(e) => beginLegacyDrag(e, d.id, 'end')}
                   />
                 </g>
               );
             }
 
-            // 4. Trend Ray (Ray extending to infinity)
+            // 4. Trend Ray (Ray extending to the chart edge, TradingView parity)
             if (d.type === 'ray') {
-              const dx = pt2.x - pt1.x;
-              const dy = pt2.y - pt1.y;
-              const angle = Math.atan2(dy, dx);
-              const extendedLength = 3000;
-              const extX = pt1.x + Math.cos(angle) * extendedLength;
-              const extY = pt1.y + Math.sin(angle) * extendedLength;
+              let extPt = null;
+              try {
+                extPt = DG.edgeExit(pt1, pt2, surfaceSize);
+              } catch (_) {
+                extPt = null;
+              }
+              if (!extPt || !Number.isFinite(extPt.x) || !Number.isFinite(extPt.y)) {
+                const dx = pt2.x - pt1.x;
+                const dy = pt2.y - pt1.y;
+                const angle = Math.atan2(dy, dx);
+                const extendedLength = 3000;
+                extPt = { x: pt1.x + Math.cos(angle) * extendedLength, y: pt1.y + Math.sin(angle) * extendedLength };
+              }
+              const extX = extPt.x;
+              const extY = extPt.y;
 
               return (
-                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                <g
+                  key={d.id}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
+                >
                   <line
                     x1={pt1.x} y1={pt1.y} x2={extX} y2={extY}
                     stroke="transparent" strokeWidth={16}
                     style={{ pointerEvents: 'stroke' }}
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                    onMouseDown={(e) => startBodyDrag(e, d.id)}
                   />
                   <line
                     x1={pt1.x} y1={pt1.y} x2={extX} y2={extY}
@@ -2538,14 +2950,14 @@ export default function DrawingTools({
                     fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
                     stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) beginLegacyDrag(e, d.id, 'start'); }}
+                    onMouseDown={(e) => beginLegacyDrag(e, d.id, 'start')}
                   />
                   <circle
                     cx={pt2.x} cy={pt2.y} r={isSelected ? 6 : 4}
                     fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
                     stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) beginLegacyDrag(e, d.id, 'end'); }}
+                    onMouseDown={(e) => beginLegacyDrag(e, d.id, 'end')}
                   />
                 </g>
               );
@@ -2570,19 +2982,39 @@ export default function DrawingTools({
               const polyPoints = `${upperP1.x},${upperP1.y} ${upperP2.x},${upperP2.y} ${lowerP2.x},${lowerP2.y} ${lowerP1.x},${lowerP1.y}`;
 
               return (
-                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                <g
+                  key={d.id}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
+                >
                   {/* Channel Fill */}
                   <polygon
                     points={polyPoints}
                     fill="rgba(56, 189, 248, 0.08)"
                     stroke="none"
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                    onMouseDown={(e) => startBodyDrag(e, d.id)}
                   />
                   {/* Upper & Lower Channel Lines */}
                   <line x1={upperP1.x} y1={upperP1.y} x2={upperP2.x} y2={upperP2.y} stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 1.5} />
                   <line x1={lowerP1.x} y1={lowerP1.y} x2={lowerP2.x} y2={lowerP2.y} stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 1.5} />
                   {/* Median Line */}
                   <line x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y} stroke={d.color || '#38BDF8'} strokeWidth={1} strokeDasharray="4,4" />
+
+                  {/* Median endpoints — drag to reposition / resize the channel */}
+                  <circle
+                    cx={pt1.x} cy={pt1.y} r={isSelected ? 5 : 3.5}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    stroke="#131722" strokeWidth={1.5}
+                    style={{ pointerEvents: 'all', cursor: 'grab' }}
+                    onMouseDown={(e) => beginLegacyDrag(e, d.id, 'start')}
+                  />
+                  <circle
+                    cx={pt2.x} cy={pt2.y} r={isSelected ? 5 : 3.5}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    stroke="#131722" strokeWidth={1.5}
+                    style={{ pointerEvents: 'all', cursor: 'grab' }}
+                    onMouseDown={(e) => beginLegacyDrag(e, d.id, 'end')}
+                  />
 
                   {/* Channel Width Handle */}
                   {isSelected && (
@@ -2605,8 +3037,8 @@ export default function DrawingTools({
               const targetPrice = d.targetPrice || (isLong ? entryPrice * 1.03 : entryPrice * 0.97);
               const stopPrice   = d.stopPrice   || (isLong ? entryPrice * 0.985 : entryPrice * 1.015);
 
-              const targetCoord = chartToCoordCached(d.startLogical, targetPrice, pt1.x, pt1.y - 60, d.startTime, d.startFrac);
-              const stopCoord   = chartToCoordCached(d.startLogical, stopPrice, pt1.x, pt1.y + 40, d.startTime, d.startFrac);
+              const targetCoord = chartToCoordCached(d.startLogical, targetPrice, pt1.x, pt1.y - 60, d.startTime, d.startFrac, d.startOffMs);
+              const stopCoord   = chartToCoordCached(d.startLogical, stopPrice, pt1.x, pt1.y + 40, d.startTime, d.startFrac, d.startOffMs);
 
               const targetY = targetCoord.y;
               const stopY   = stopCoord.y;
@@ -2626,13 +3058,17 @@ export default function DrawingTools({
               const stopBoxHeight   = Math.abs(stopY - entryY);
 
               return (
-                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                <g
+                  key={d.id}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
+                >
                   {/* Target Box (Green) */}
                   <rect
                     x={startX} y={targetBoxTop} width={boxWidth} height={targetBoxHeight}
                     fill="rgba(16, 185, 129, 0.18)"
                     stroke="#10B981" strokeWidth={1}
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                    onMouseDown={(e) => startBodyDrag(e, d.id)}
                   />
 
                   {/* Stop Loss Box (Red) */}
@@ -2640,7 +3076,7 @@ export default function DrawingTools({
                     x={startX} y={stopBoxTop} width={boxWidth} height={stopBoxHeight}
                     fill="rgba(239, 83, 80, 0.18)"
                     stroke="#EF5350" strokeWidth={1}
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                    onMouseDown={(e) => startBodyDrag(e, d.id)}
                   />
 
                   {/* Entry Line */}
@@ -2676,6 +3112,16 @@ export default function DrawingTools({
                     style={{ pointerEvents: 'all', cursor: 'ns-resize' }}
                     onMouseDown={(e) => beginLegacyDrag(e, d.id, 'stop')}
                   />
+
+                  {/* Width Handle (right edge) — drag to extend the boxes in time */}
+                  {isSelected && (
+                    <circle
+                      cx={startX + boxWidth} cy={entryY} r={5}
+                      fill="#FFF" stroke="#2962FF" strokeWidth={1.5}
+                      style={{ pointerEvents: 'all', cursor: 'ew-resize' }}
+                      onMouseDown={(e) => beginLegacyDrag(e, d.id, 'end')}
+                    />
+                  )}
                 </g>
               );
             }
@@ -2692,7 +3138,8 @@ export default function DrawingTools({
                 <g
                   key={d.id}
                   style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
-                  onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                  onMouseDown={(e) => startBodyDrag(e, d.id)}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
                 >
                   {FIBONACCI_LEVELS.slice(0, -1).map((fib, idx) => {
                     const nextFib = FIBONACCI_LEVELS[idx + 1];
@@ -2700,16 +3147,18 @@ export default function DrawingTools({
                     const y2 = pt1.y < pt2.y ? minY + height * nextFib.level : maxY - height * nextFib.level;
                     const bandTop = Math.min(y1, y2);
                     const bandHeight = Math.abs(y2 - y1);
+                    if (d.backgroundVisible === false) return null;
                     return (
                       <rect
                         key={`band-${fib.level}`}
                         x={startX} y={bandTop} width={width} height={bandHeight}
                         fill={fib.fill}
+                        opacity={d.backgroundOpacity != null ? Math.min(1, d.backgroundOpacity * 8) : 1}
                       />
                     );
                   })}
 
-                  {FIBONACCI_LEVELS.map((fib) => {
+                  {(d.fibLevelsVisible ?? FIBONACCI_LEVELS.map((f) => f.level)).length >= 0 && FIBONACCI_LEVELS.filter((fib) => (d.fibLevelsVisible ?? FIBONACCI_LEVELS.map((f) => f.level)).includes(fib.level)).map((fib) => {
                     const y = pt1.y < pt2.y ? minY + height * fib.level : maxY - height * fib.level;
                     return (
                       <g key={fib.level}>
@@ -2731,8 +3180,16 @@ export default function DrawingTools({
 
                   {isSelected && (
                     <>
-                      <circle cx={pt1.x} cy={pt1.y} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={2} />
-                      <circle cx={pt2.x} cy={pt2.y} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={2} />
+                      <circle
+                        cx={pt1.x} cy={pt1.y} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={2}
+                        style={{ pointerEvents: 'all', cursor: 'grab' }}
+                        onMouseDown={(e) => beginLegacyDrag(e, d.id, 'start')}
+                      />
+                      <circle
+                        cx={pt2.x} cy={pt2.y} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={2}
+                        style={{ pointerEvents: 'all', cursor: 'grab' }}
+                        onMouseDown={(e) => beginLegacyDrag(e, d.id, 'end')}
+                      />
                     </>
                   )}
                 </g>
@@ -2741,7 +3198,7 @@ export default function DrawingTools({
 
             // 8. Freehand Brush
             if (d.type === 'brush' && d.points?.length > 1) {
-              const livePoints = d.points.map(pt => chartToCoordCached(pt.logical, pt.price, pt.x, pt.y, pt.time, pt.frac));
+              const livePoints = d.points.map(pt => chartToCoordCached(pt.logical, pt.price, pt.x, pt.y, pt.time, pt.frac, pt.offMs));
               const pathData = livePoints.reduce((acc, pt, i) => `${acc} ${i === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`, '');
               return (
                 <path
@@ -2752,7 +3209,8 @@ export default function DrawingTools({
                   strokeWidth={d.strokeWidth || 2}
                   strokeLinecap="round"
                   strokeLinejoin="round"
-                  onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                  onMouseDown={(e) => startBodyDrag(e, d.id)}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
                   style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
                 />
               );
@@ -2764,22 +3222,42 @@ export default function DrawingTools({
               const y = Math.min(pt1.y, pt2.y);
               const w = Math.abs(pt2.x - pt1.x);
               const h = Math.abs(pt2.y - pt1.y);
+              // Corners: 0=TL, 1=TR, 2=BL, 3=BR. Dragging a corner keeps the
+              // opposite corner fixed and redefines the box from
+              // (opposite, cursor) — a true box resize from the grabbed
+              // corner, like TradingView (handled by the `rect:i` branch in
+              // processMove).
+              const corners = [
+                { cx: x, cy: y },
+                { cx: x + w, cy: y },
+                { cx: x, cy: y + h },
+                { cx: x + w, cy: y + h },
+              ];
               return (
-                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}>
+                <g
+                  key={d.id}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
+                >
                   <rect
                     x={x} y={y} width={w} height={h}
-                    fill="rgba(56, 189, 248, 0.12)"
-                    stroke={d.color || '#38BDF8'}
-                    strokeWidth={d.strokeWidth || 1.5}
+                    fill={d.backgroundVisible === false ? 'transparent' : (d.backgroundColor || 'rgba(56, 189, 248, 0.12)')}
+                    fillOpacity={d.backgroundVisible === false ? 0 : undefined}
+                    stroke={d.borderVisible === false ? 'transparent' : (d.borderColor || d.color || '#38BDF8')}
+                    strokeWidth={d.borderWidth ?? d.strokeWidth ?? 1.5}
                     strokeDasharray={isSelected ? '4,4' : 'none'}
-                    onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                    onMouseDown={(e) => startBodyDrag(e, d.id)}
                   />
                   {isSelected && (
                     <>
-                      <circle cx={x} cy={y} r={4} fill="#FFF" stroke="#2962FF" strokeWidth={1} />
-                      <circle cx={x + w} cy={y} r={4} fill="#FFF" stroke="#2962FF" strokeWidth={1} />
-                      <circle cx={x} cy={y + h} r={4} fill="#FFF" stroke="#2962FF" strokeWidth={1} />
-                      <circle cx={x + w} cy={y + h} r={4} fill="#FFF" stroke="#2962FF" strokeWidth={1} />
+                      {corners.map((corner, i) => (
+                        <circle
+                          key={`corner-${i}`}
+                          cx={corner.cx} cy={corner.cy} r={4.5} fill="#FFF" stroke="#2962FF" strokeWidth={1.5}
+                          style={{ pointerEvents: 'all', cursor: (i === 0 || i === 3) ? 'nwse-resize' : 'nesw-resize' }}
+                          onMouseDown={(e) => beginLegacyDrag(e, d.id, `rect:${i}`)}
+                        />
+                      ))}
                     </>
                   )}
                 </g>
@@ -2803,17 +3281,36 @@ export default function DrawingTools({
                 : Math.max(1, Math.round(dx / 8));
 
               return (
-                <g key={d.id} style={{ pointerEvents: 'visiblePainted', cursor: 'pointer' }}>
+                <g
+                  key={d.id}
+                  style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
+                >
                   <rect
                     x={x} y={y} width={w} height={h}
                     fill={priceDelta >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,83,80,0.15)'}
                     stroke={priceDelta >= 0 ? '#10B981' : '#EF5350'}
                     strokeWidth={1}
                     strokeDasharray="3,3"
+                    onMouseDown={(e) => startBodyDrag(e, d.id)}
                   />
                   <text x={x + 6} y={y + 14} fill="#FFF" fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace">
                     {priceDelta >= 0 ? '+' : ''}{priceDelta.toFixed(2)} ({pricePercent.toFixed(2)}%) · {rulerBars} bars
                   </text>
+                  {isSelected && (
+                    <>
+                      <circle
+                        cx={pt1.x} cy={pt1.y} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={1.5}
+                        style={{ pointerEvents: 'all', cursor: 'grab' }}
+                        onMouseDown={(e) => beginLegacyDrag(e, d.id, 'start')}
+                      />
+                      <circle
+                        cx={pt2.x} cy={pt2.y} r={5} fill="#FFF" stroke="#2962FF" strokeWidth={1.5}
+                        style={{ pointerEvents: 'all', cursor: 'grab' }}
+                        onMouseDown={(e) => beginLegacyDrag(e, d.id, 'end')}
+                      />
+                    </>
+                  )}
                 </g>
               );
             }
@@ -2826,7 +3323,9 @@ export default function DrawingTools({
                   x={pt1.x} y={pt1.y}
                   fill={d.color || '#F0F0FF'}
                   fontSize="12" fontWeight="600" fontFamily="Inter, sans-serif"
-                  onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                  onMouseDown={(e) => startBodyDrag(e, d.id)}
+                  onDoubleClick={(e) => handleShapeDoubleClick(e, d)}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
                   style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer' }}
                 >
                   {d.text}
@@ -2841,7 +3340,8 @@ export default function DrawingTools({
                   key={d.id}
                   x={pt1.x - 10} y={pt1.y + 10}
                   fontSize="22"
-                  onMouseDown={(e) => { if (isCursorMode(activeTool)) startBodyDrag(e, d.id); }}
+                  onMouseDown={(e) => startBodyDrag(e, d.id)}
+                  onContextMenu={(e) => handleContextMenu(e, d.id)}
                   style={{ pointerEvents: 'visiblePainted', cursor: isSelected ? 'move' : 'pointer', userSelect: 'none' }}
                 >
                   {d.emoji}
@@ -3159,6 +3659,22 @@ export default function DrawingTools({
               </>
             ) : (
               <>
+                {menuFavouriteTools.length > 0 && (
+                  <>
+                    <div style={{ padding: '2px 8px 3px', color: '#38BDF8', fontSize: 9, fontWeight: 800, letterSpacing: 0.6 }}>
+                      ★ FAVORITE TOOLS
+                    </div>
+                    {menuFavouriteTools.map(({ spec, digit }) => (
+                      <MenuItem
+                        key={`fav-${spec.id}`}
+                        icon={<ToolIcon toolId={spec.id} size={13} />}
+                        label={digit ? `${spec.label}  [${digit}]` : spec.label}
+                        onClick={() => { handleSelectTool(spec.id); setContextMenu(null); }}
+                      />
+                    ))}
+                    <div style={{ height: 1, background: 'rgba(148,163,184,0.18)', margin: '4px 2px' }} />
+                  </>
+                )}
                 <MenuItem icon={<Copy size={13} />} label="Paste" disabled={!clipboard} onClick={() => { pasteClipboard(); setContextMenu(null); }} />
                 <MenuItem icon={<Trash2 size={13} />} label="Remove all" danger onClick={() => { handleClearAll(); setContextMenu(null); }} />
               </>

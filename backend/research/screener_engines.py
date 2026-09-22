@@ -914,6 +914,76 @@ def compute_ai_score(
     else:
         signal = "SELL"
 
+    # ── Structural Signal Verification ──────────────────────────────────────
+    # EMA position is a MANDATORY gating factor for directional signals.
+    # A BUY/STRONG BUY requires price to be above EMA 200 at minimum — RSI
+    # or MACD alone cannot override a bearish EMA structure.
+    # A SELL/AVOID requires price to be below EMA 200 at minimum.
+    # This eliminates confusing "BEARISH EMA trend + BUY signal" contradictions.
+    #
+    # EMA position score (ema_bull / ema_bear):
+    #   BULLISH_ALIGNED (price > EMA20 > EMA50 > EMA200) → 2  (strongest)
+    #   price > EMA 200                                   → 1
+    #   BEARISH_ALIGNED or price < EMA 200                → 0  (blocks BUY)
+    #
+    # Signal rules:
+    #   STRONG BUY → ema_bull = 2 (BULLISH_ALIGNED mandatory) + 1 more confirmation
+    #   BUY        → ema_bull ≥ 1 (price above EMA200 mandatory) + RSI or MACD bull
+    #   AVOID      → ema_bear ≥ 1
+    #   SELL       → ema_bear = 2 (BEARISH_ALIGNED mandatory) + 1 more confirmation
+    # ------------------------------------------------------------------
+    _ema_align = momentum.get("ema_alignment", "")
+    _close     = tech.get("_close")
+    _e200      = tech.get("ema_200")
+    _rsi       = tech.get("rsi_14")
+    _macd_bull = tech.get("macd_bullish")
+
+    # EMA position score (mandatory gate: price must be on the right side of EMA 200)
+    ema_bull = (2 if (_ema_align == "BULLISH_ALIGNED" and _close and _e200 and _close > _e200)
+                else 1 if (_close and _e200 and _close > _e200)
+                else 0)
+    ema_bear = (2 if (_ema_align == "BEARISH_ALIGNED" and _close and _e200 and _close < _e200)
+                else 1 if (_close and _e200 and _close < _e200)
+                else 0)
+
+    # Additional confirmations (momentum support)
+    rsi_bull = 1 if (_rsi is not None and _rsi > 50) else 0
+    rsi_bear = 1 if (_rsi is not None and _rsi < 50) else 0
+    macd_bull_conf = 1 if _macd_bull is True else 0
+    macd_bear_conf = 1 if _macd_bull is False else 0
+
+    bull_conf = ema_bull + rsi_bull + macd_bull_conf
+    bear_conf = ema_bear + rsi_bear + macd_bear_conf
+
+    # Apply gating: EMA position is non-negotiable
+    if signal in ("STRONG BUY", "BUY") and ema_bull == 0:
+        # EMA structure is bearish/flat — cannot issue a bullish signal
+        signal = "NEUTRAL"
+    elif signal == "STRONG BUY" and (ema_bull < 2 or bull_conf < 3):
+        # STRONG BUY needs full BULLISH_ALIGNED + additional momentum
+        signal = "BUY" if bull_conf >= 2 else "NEUTRAL"
+    elif signal == "BUY" and bull_conf < 2:
+        # BUY needs price > EMA200 + at least one more confirmation
+        signal = "NEUTRAL"
+    elif signal in ("SELL", "AVOID") and ema_bear == 0:
+        # EMA structure is bullish/flat — cannot issue a bearish signal
+        signal = "NEUTRAL"
+    elif signal == "SELL" and (ema_bear < 2 or bear_conf < 3):
+        signal = "AVOID" if bear_conf >= 2 else "NEUTRAL"
+    elif signal == "AVOID" and bear_conf < 2:
+        signal = "NEUTRAL"
+
+    # Swing structure gating: price structure and signal MUST NOT contradict.
+    # If the recent swing pivots form a lower-high/lower-low pattern (trend_hint == 'BEARISH'),
+    # the stock is in a pullback or distribution — it CANNOT be a BUY or STRONG BUY.
+    _trend_hint = str(struct.get("trend_hint") or "").upper()
+    if _trend_hint == "BEARISH" and signal in ("STRONG BUY", "BUY"):
+        signal = "NEUTRAL"
+    elif _trend_hint == "BULLISH" and signal in ("SELL", "AVOID"):
+        signal = "NEUTRAL"
+    # ── End verification ─────────────────────────────────────────────────────
+
+
     return {
         "ai_score": score,
         "ai_signal": signal,
@@ -1073,23 +1143,60 @@ def compute_market_breadth(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def compute_overview_cards(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """Clickable header cards — every count derived from real row fields."""
-    def _rsi(r):
-        v = r.get("rsi_14")
-        return float(v) if v is not None else 50.0
+def _card_num(r: Dict[str, Any], key: str) -> Optional[float]:
+    """Numeric field accessor that mirrors SQL NULL semantics.
 
-    total = len(rows)
-    bullish = sum(1 for r in rows if str(r.get("ai_signal") or "").upper() in ("BUY", "STRONG BUY"))
-    bearish = sum(1 for r in rows if str(r.get("ai_signal") or "").upper() in ("SELL", "AVOID"))
-    neutral = total - bullish - bearish
-    breakouts = sum(1 for r in rows if (r.get("distance_52w_high_pct") or -100) >= -2.0 or (r.get("breakout_52w_high") == 1))
-    breakdowns = sum(1 for r in rows if (r.get("distance_52w_low_pct") or 100) <= 2.0 or (r.get("breakdown_52w_low") == 1))
-    vol_surges = sum(1 for r in rows if (r.get("volume_ratio_20d") or 1.0) >= 1.5)
-    oversold = sum(1 for r in rows if _rsi(r) < 35)
-    overbought = sum(1 for r in rows if _rsi(r) > 70)
-    high_mom = sum(1 for r in rows if _rsi(r) >= 55 and (r.get("volume_ratio_20d") or 0) >= 1.2)
-    ai_high = sum(1 for r in rows if (r.get("ai_consensus_score") or 0) >= 80)
+    Returns None for missing / non-numeric values so every comparison below
+    behaves exactly like the SQL comparison the card's DSL compiles to
+    (SQL three-valued logic never matches NULL).
+    """
+    v = r.get(key)
+    if v is None or v == "":
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def compute_overview_cards(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Clickable header cards — every count derived from real row fields.
+
+    INVARIANT: each count MUST equal the number of rows the frontend gets when
+    the matching card in ``frontend/src/components/screener/screenerColumns.js``
+    (``OVERVIEW_CARDS``) is clicked and its ``dsl`` is executed by
+    ``backend/research/screener_dsl.parse_screener_query``.
+
+    Therefore:
+      * every predicate below uses the SAME field and the SAME operator as the
+        card DSL (``>`` stays ``>``, never silently promoted to ``>=``), and
+      * NULL / missing values are excluded exactly like SQL does — never
+        defaulted to a neutral value (a default would inflate the count and the
+        card would lie about how many rows are behind it).
+
+    Keep this table and OVERVIEW_CARDS in lockstep; change one, change both.
+    """
+    n = lambda r, k: _card_num(r, k)  # noqa: E731 - terse alias, local only
+
+    def _cmp(r, key, op, val):
+        v = n(r, key)
+        if v is None:
+            return False
+        return v > val if op == ">" else v < val
+
+    total = len(rows)                                                  # TOTAL
+    bullish = sum(1 for r in rows if _cmp(r, "ai_consensus_score", ">", 65))          # AIConsensus > 65
+    bearish = sum(1 for r in rows if _cmp(r, "ai_consensus_score", "<", 45))          # AIConsensus < 45
+    neutral = sum(1 for r in rows if (lambda v: v is not None and 45 <= v <= 65)(n(r, "ai_consensus_score")))
+    breakouts = sum(1 for r in rows if _cmp(r, "distance_52w_high_pct", ">", -2))      # Distance52WHigh > -2
+    breakdowns = sum(1 for r in rows if _cmp(r, "distance_52w_low_pct", "<", 2))       # Distance52WLow < 2
+    vol_surges = sum(1 for r in rows if _cmp(r, "volume_ratio_20d", ">", 1.5))         # VolumeRatio20D > 1.5
+    oversold = sum(1 for r in rows if _cmp(r, "rsi_14", "<", 35))                      # RSI14 < 35
+    overbought = sum(1 for r in rows if _cmp(r, "rsi_14", ">", 70))                    # RSI14 > 70
+    high_mom = sum(                                                                   # RSI14 > 55 AND VolumeRatio20D > 1.2
+        1 for r in rows if _cmp(r, "rsi_14", ">", 55) and _cmp(r, "volume_ratio_20d", ">", 1.2)
+    )
+    ai_high = sum(1 for r in rows if _cmp(r, "ai_consensus_score", ">", 80))           # AIConsensus > 80
     return {
         "total": total, "bullish": bullish, "bearish": bearish, "neutral": neutral,
         "breakouts": breakouts, "breakdowns": breakdowns, "volume_surges": vol_surges,

@@ -18,6 +18,7 @@ import {
   calculateKAMA,
   calculateALMA,
   calculateAnchoredVWAP,
+  calculateVWAP,
   calculateDonchian,
   calculateStoch,
   calculateCCI,
@@ -241,5 +242,51 @@ describe('Performance', () => {
     for (const ind of getAllIndicators()) calculateById(ind.id, candles);
     const elapsed = Date.now() - start;
     assert.ok(elapsed < 5000, `full catalog under 5s (took ${elapsed}ms)`);
+  });
+});
+
+describe('VWAP session anchoring', () => {
+  const D = 86400 * 3; // epoch-seconds offset — 1970-01-04, a stable UTC day
+  const mk = (times, prices, vols) => times.map((t, i) => ({
+    time: t,
+    open: prices[i], high: prices[i] + 1, low: prices[i] - 1, close: prices[i],
+    volume: vols[i],
+  }));
+
+  it('resets cumulators at each calendar-day boundary', () => {
+    const candles = mk(
+      [D, D + 60, D + 120, D + 86400, D + 86460],
+      [100, 100, 100, 200, 200],
+      [100, 100, 100, 400, 400],
+    );
+    const pts = calculateVWAP(candles);
+    // First bar of a session anchors at its own typical price.
+    assert.equal(pts[0].value, 100);
+    // Day-2 first bar RESETS — legacy cumulative code would have given ~157.14.
+    assert.equal(pts[3].value, 200);
+    // Day-2 bars stay within day-2's volume-weighted mean (no cross-day drift).
+    assert.equal(pts[4].value, 200);
+  });
+
+  it('treats zero-volume bars as negligible weight (fallback weight 1)', () => {
+    const candles = mk([D, D + 60], [100, 110], [0, 0]);
+    const pts = calculateVWAP(candles);
+    assert.equal(pts[0].value, 100);
+    // Zero volume → fallback weight 1: (100*1 + 110*1) / 2 = 105
+    assert.equal(pts[1].value, 105);
+  });
+
+  it('keeps cumulative behaviour for index-based times (no real timestamps)', () => {
+    const candles = makeCandles(30); // time: 0..29 — engine's default generator
+    const pts = calculateVWAP(candles);
+    let cumVol = 0;
+    let cumPV = 0;
+    candles.forEach((c, i) => {
+      const vol = Number(c.volume || 1);
+      const tp = (c.high + c.low + c.close) / 3;
+      cumVol += vol;
+      cumPV += tp * vol;
+      assert.ok(Math.abs(pts[i].value - cumPV / cumVol) < 0.011, `bar ${i}`);
+    });
   });
 });

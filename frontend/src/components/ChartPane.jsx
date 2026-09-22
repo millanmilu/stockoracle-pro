@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
-import { createChart, ColorType, LineStyle, CrosshairMode } from 'lightweight-charts';
+import { ColorType, LineStyle, CrosshairMode } from 'lightweight-charts';
+import { safeCreateChart } from '../utils/safeChart';
 import api from '../utils/api';
 import { 
   Maximize2, Minimize2, Sparkles, TrendingUp,
@@ -188,7 +189,7 @@ export default function ChartPane({
   useEffect(() => {
     if (!containerRef.current) return;
 
-    const chart = createChart(containerRef.current, {
+    const chart = safeCreateChart(containerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: '#090C18' },
         textColor: '#9CA3AF',
@@ -281,8 +282,8 @@ export default function ChartPane({
       if (width > 0 && height > 0) {
         if (animationFrameId) cancelAnimationFrame(animationFrameId);
         animationFrameId = requestAnimationFrame(() => {
-          if (chartRef.current) {
-            chart.applyOptions({ width, height });
+          if (chartRef.current && !chartRef.current.__isDisposed) {
+            try { chart.applyOptions({ width, height }); } catch {}
           }
         });
       }
@@ -294,24 +295,23 @@ export default function ChartPane({
     return () => {
       if (animationFrameId) cancelAnimationFrame(animationFrameId);
       resizeObserver.disconnect();
-      chart.remove();
+      try { chart.remove(); } catch {}
       chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
     };
   }, [isDaily]);
 
   // ── Populate Series Data & Forecast Cone ───────────────────────────────────
   useEffect(() => {
-    if (!candleSeriesRef.current || history.length === 0) return;
+    if (!candleSeriesRef.current || candleSeriesRef.current.__isDisposed || history.length === 0) return;
 
-    const formattedCandles = [];
-    const formattedVolumes = [];
-    const seenTimes = new Set();
+    const byTime = new Map();
 
     for (let i = 0; i < history.length; i++) {
       const bar = history[i];
       const time = toChartTime(bar.date, !isDaily);
-      if (seenTimes.has(time)) continue;
-      seenTimes.add(time);
+      if (time == null || time === '') continue;
 
       const o = Number(bar.open);
       const h = Number(bar.high);
@@ -320,42 +320,56 @@ export default function ChartPane({
       const v = Number(bar.volume || 0);
 
       if (o > 0 && h > 0 && l > 0 && c > 0) {
-        formattedCandles.push({ time, open: o, high: h, low: l, close: c });
-        formattedVolumes.push({
-          time,
-          value: v,
-          color: c >= o ? 'rgba(16,185,129,0.3)' : 'rgba(239,83,80,0.3)',
-        });
+        // Last occurrence wins for duplicate timestamps.
+        byTime.set(time, { time, open: o, high: h, low: l, close: c, _vol: v });
       }
     }
 
-    candleSeriesRef.current.setData(formattedCandles);
+    // Strictly ascending by time — lightweight-charts `setData` throws
+    // "Assertion failed: data must be asc ordered by time" otherwise.
+    // Also enforce a single time type (daily strings vs intraday numbers).
+    let formattedCandles = [...byTime.values()].sort((a, b) => (
+      a.time < b.time ? -1 : a.time > b.time ? 1 : 0
+    ));
+    if (formattedCandles.length > 0) {
+      const dominant = typeof formattedCandles[0].time;
+      formattedCandles = formattedCandles.filter((c) => typeof c.time === dominant);
+    }
+    const formattedVolumes = formattedCandles.map((c) => ({
+      time: c.time,
+      value: c._vol,
+      color: c.close >= c.open ? 'rgba(16,185,129,0.3)' : 'rgba(239,83,80,0.3)',
+    }));
+    formattedCandles = formattedCandles.map(({ _vol, ...c }) => c);
+    if (formattedCandles.length === 0) return;
+
+    try { candleSeriesRef.current.setData(formattedCandles); } catch (e) { console.warn('ChartPane setData failed:', e); return; }
     if (showVolume && volumeSeriesRef.current) {
-      volumeSeriesRef.current.setData(formattedVolumes);
+      try { volumeSeriesRef.current.setData(formattedVolumes); } catch {}
     } else {
-      volumeSeriesRef.current?.setData([]);
+      try { volumeSeriesRef.current?.setData([]); } catch {}
     }
 
     // Overlays
     if (showSMA && smaSeriesRef.current) {
-      smaSeriesRef.current.setData(computeSMA(formattedCandles, 20));
+      try { smaSeriesRef.current.setData(computeSMA(formattedCandles, 20)); } catch {}
     } else {
-      smaSeriesRef.current?.setData([]);
+      try { smaSeriesRef.current?.setData([]); } catch {}
     }
 
     if (showEMA && emaSeriesRef.current) {
-      emaSeriesRef.current.setData(computeEMA(formattedCandles, 20));
+      try { emaSeriesRef.current.setData(computeEMA(formattedCandles, 20)); } catch {}
     } else {
-      emaSeriesRef.current?.setData([]);
+      try { emaSeriesRef.current?.setData([]); } catch {}
     }
 
     if (showBB && bbUpperSeriesRef.current && bbLowerSeriesRef.current) {
       const bb = computeBB(formattedCandles, 20, 2);
-      bbUpperSeriesRef.current.setData(bb.upper);
-      bbLowerSeriesRef.current.setData(bb.lower);
+      try { bbUpperSeriesRef.current.setData(bb.upper); } catch {}
+      try { bbLowerSeriesRef.current.setData(bb.lower); } catch {}
     } else {
-      bbUpperSeriesRef.current?.setData([]);
-      bbLowerSeriesRef.current?.setData([]);
+      try { bbUpperSeriesRef.current?.setData([]); } catch {}
+      try { bbLowerSeriesRef.current?.setData([]); } catch {}
     }
 
     // ── Interactive Multi-Step AI Forecast Prediction Cone ──
@@ -391,13 +405,13 @@ export default function ChartPane({
         lowerTrajectory.push({ time: stepTime, value: Number(Math.max(stepLower, 0.1).toFixed(2)) });
       }
 
-      predLineRef.current?.setData(predTrajectory);
-      upperLineRef.current?.setData(upperTrajectory);
-      lowerLineRef.current?.setData(lowerTrajectory);
+      try { predLineRef.current?.setData(predTrajectory); } catch {}
+      try { upperLineRef.current?.setData(upperTrajectory); } catch {}
+      try { lowerLineRef.current?.setData(lowerTrajectory); } catch {}
     } else {
-      predLineRef.current?.setData([]);
-      upperLineRef.current?.setData([]);
-      lowerLineRef.current?.setData([]);
+      try { predLineRef.current?.setData([]); } catch {}
+      try { upperLineRef.current?.setData([]); } catch {}
+      try { lowerLineRef.current?.setData([]); } catch {}
     }
 
     if (chartRef.current && formattedCandles.length > 0) {
@@ -434,19 +448,21 @@ export default function ChartPane({
         transition: 'border 0.2s, box-shadow 0.2s',
       }}
     >
-      {/* ── Pane Top Toolbar ── */}
+      {/* ── Pane Top Toolbar (wraps on narrow panes so nothing clips) ── */}
       <div style={{
-        height: 38,
+        minHeight: 38,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '0 10px',
+        flexWrap: 'wrap',
+        rowGap: 4,
+        padding: '4px 10px',
         backgroundColor: '#0C1022',
         borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
         userSelect: 'none',
       }}>
         {/* Symbol Selector & LTP */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flexShrink: 1 }}>
           <div style={{ position: 'relative' }}>
             <button
               onClick={(e) => { e.stopPropagation(); setShowSymbolPicker(!showSymbolPicker); }}
@@ -474,7 +490,7 @@ export default function ChartPane({
                   top: '100%',
                   left: 0,
                   marginTop: 4,
-                  width: 180,
+                  width: 'min(180px, 70vw)',
                   backgroundColor: '#0F172A',
                   border: '1px solid rgba(99, 102, 241, 0.4)',
                   borderRadius: 6,
@@ -548,8 +564,8 @@ export default function ChartPane({
           )}
         </div>
 
-        {/* Timeframe Intervals */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'rgba(255,255,255,0.03)', padding: '2px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.06)' }}>
+        {/* Timeframe Intervals (scrolls horizontally instead of clipping) */}
+        <div className="no-scrollbar" style={{ display: 'flex', alignItems: 'center', gap: 3, background: 'rgba(255,255,255,0.03)', padding: '2px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.06)', overflowX: 'auto', maxWidth: '100%', flexShrink: 1, minWidth: 0 }}>
           {INTERVALS.map((tf) => (
             <button
               key={tf.value}

@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
-import { createChart, CrosshairMode } from 'lightweight-charts';
+import { CrosshairMode } from 'lightweight-charts';
+import { safeCreateChart } from '../../utils/safeChart';
 import { Eye, EyeOff, X } from 'lucide-react';
 import { calculateById } from '../../utils/indicatorEngine';
 import useStore from '../../store/useStore';
 import { getChartBaseOptions, getThemeTokens } from '../../utils/theme';
+import { PRICE_AXIS_WIDTH, sanitizeSeriesData } from '../../utils/chartHelpers';
+import '../../utils/aiIndicatorEngine.js';
 
 /**
  * OscillatorPane — Universal Sub-Pane for All Oscillator Types
@@ -20,6 +23,9 @@ import { getChartBaseOptions, getThemeTokens } from '../../utils/theme';
  */
 
 const OSC_CONFIG = {
+  ai_trend:      { label: 'AI Trend',         color: '#22D3EE', hasSignal: false, hasBands: [20, -20], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: true },
+  ai_momentum:  { label: 'AI Momentum',      color: '#A855F7', hasSignal: false, hasBands: [30, -30], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: true },
+  ai_exhaustion:{ label: 'AI Exhaustion',    color: '#F87171', hasSignal: false, hasBands: [60, -60], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: true },
   rsi:          { label: 'RSI (14)',         color: '#A855F7', hasSignal: false, hasBands: [70, 30], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: false },
   macd:         { label: 'MACD (12,26,9)',   color: '#06B6D4', hasSignal: true,  hasBands: null,     zeroLine: true  },
   stoch:        { label: 'Stoch (14,3)',     color: '#3B82F6', hasSignal: true,  hasBands: [80, 20], bandColors: ['rgba(239,83,80,0.5)','rgba(16,185,129,0.5)'], zeroLine: false },
@@ -55,9 +61,13 @@ function arr(points) {
 
 function fieldPoints(candles, field) {
   if (!field) return [];
-  return candles
+  return sanitizeSeriesData(candles
     .filter((c) => c[field] != null && !isNaN(Number(c[field])))
-    .map((c) => ({ time: c.time, value: Number(c[field]) }));
+    .map((c) => ({ time: c.time, value: Number(c[field]) })));
+}
+
+function sanitizePts(points) {
+  return sanitizeSeriesData(Array.isArray(points) ? points : []);
 }
 
 /**
@@ -83,9 +93,9 @@ function resolveSeries(oscType, definition, candles) {
     case 'macd': {
       if (engine) {
         return {
-          main: arr(engine.macd),
-          signal: arr(engine.signal),
-          hist: arr(engine.histogram || engine.hist),
+          main: sanitizePts(arr(engine.macd)),
+          signal: sanitizePts(arr(engine.signal)),
+          hist: sanitizePts(arr(engine.histogram || engine.hist)),
         };
       }
       return {
@@ -97,7 +107,7 @@ function resolveSeries(oscType, definition, candles) {
     case 'stoch':
     case 'stoch_rsi': {
       if (engine && engine.k) {
-        return { main: arr(engine.k), signal: arr(engine.d) };
+        return { main: sanitizePts(arr(engine.k)), signal: sanitizePts(arr(engine.d)) };
       }
       const kField = oscType === 'stoch' ? (def.field || 'stoch_k') : (def.field || 'stoch_rsi_k');
       const dField = oscType === 'stoch' ? (def.signalField || 'stoch_d') : (def.signalField || 'stoch_rsi_d');
@@ -105,7 +115,7 @@ function resolveSeries(oscType, definition, candles) {
     }
     case 'adx': {
       if (engine && engine.adx) {
-        return { main: arr(engine.adx), signal: arr(engine.plusDI), signal2: arr(engine.minusDI) };
+        return { main: sanitizePts(arr(engine.adx)), signal: sanitizePts(arr(engine.plusDI)), signal2: sanitizePts(arr(engine.minusDI)) };
       }
       return {
         main: fieldPoints(candles, def.field || 'adx'),
@@ -120,18 +130,18 @@ function resolveSeries(oscType, definition, candles) {
       };
     }
     case 'cmf': {
-      const main = engine ? arr(engine) : fieldPoints(candles, def.field || 'cmf');
+      const main = engine ? sanitizePts(arr(engine)) : fieldPoints(candles, def.field || 'cmf');
       return { main, hist: main };
     }
     case 'rsi': case 'mfi': case 'cci': case 'williams_r': case 'obv': case 'atr':
     case 'roc': case 'momentum': case 'trix': case 'hist_vol': case 'std_dev':
     case 'bb_width': case 'choppiness': case 'rel_volume': case 'volume_delta':
     case 'cvd': {
-      const main = engine ? arr(engine) : fieldPoints(candles, def.field || oscType);
+      const main = engine ? sanitizePts(arr(engine)) : fieldPoints(candles, def.field || oscType);
       return { main };
     }
     default:
-      return { main: engine ? arr(engine) : fieldPoints(candles, def.field || oscType) };
+      return { main: engine ? sanitizePts(arr(engine)) : fieldPoints(candles, def.field || oscType) };
   }
 }
 
@@ -148,12 +158,17 @@ export default forwardRef(function OscillatorPane({
   const containerRef   = useRef(null);
   const chartRef       = useRef(null);
   const seriesRefs     = useRef({});
+  const seriesDataRef  = useRef({ main: [] });
   const syncedHairRef  = useRef(null);
   const isHoveringRef  = useRef(false);
   const candlesRef     = useRef(candles);
   const theme = useStore(s => s.theme);
   const tk = getThemeTokens(theme);
   const cfg = OSC_CONFIG[oscType] || OSC_CONFIG.rsi;
+  // TradingView Style tab: definition color/width/style overrides win over static config.
+  const effColor = definition?.color || cfg.color;
+  const effWidth = definition?.lineWidth ?? 1.5;
+  const effStyle = definition?.lineStyle ?? 0;
 
   useEffect(() => {
     try {
@@ -226,9 +241,12 @@ export default forwardRef(function OscillatorPane({
         val1Ref.current.style.color = Number(candle.cmf) >= 0 ? '#10B981' : '#EF5350';
       }
     } else {
-      // Engine-only oscillators
-      const data = resolveSeries(oscType, definition, [candle]);
-      const last = data.main[data.main.length - 1];
+      // Engine-backed oscillators (incl. advanced AI): read the precomputed
+      // full series — recomputing on a single hovered candle would always be
+      // INPUT_SHORT. Falls back to the latest value when unmatched.
+      const series = seriesDataRef.current.main || [];
+      const pt = candle ? series.find((p) => p.time === candle.time) : null;
+      const last = pt || series[series.length - 1];
       if (val1Ref.current) val1Ref.current.textContent = fmt(last?.value);
     }
   }, [oscType, cfg.color, definition]);
@@ -240,7 +258,7 @@ export default forwardRef(function OscillatorPane({
 
   useImperativeHandle(ref, () => ({
     setVisibleLogicalRange: (range) => {
-      if (chartRef.current && range) {
+      if (chartRef.current && !chartRef.current.__isDisposed && range) {
         try { chartRef.current.timeScale().setVisibleLogicalRange(range); } catch {}
       }
     },
@@ -259,19 +277,20 @@ export default forwardRef(function OscillatorPane({
         resetLegendToLatest();
       }
     },
-    getChart: () => chartRef.current,
+    getChart: () => (chartRef.current && !chartRef.current.__isDisposed ? chartRef.current : null),
   }), [oscType, updateLegend, resetLegendToLatest]);
 
   // Chart creation
   useEffect(() => {
     if (!containerRef.current) return;
+    let disposed = false;
 
     const base = getChartBaseOptions(theme);
-    const chart = createChart(containerRef.current, {
+    const chart = safeCreateChart(containerRef.current, {
       height: 130,
       layout: { background: { type: 'solid', color: 'transparent' }, textColor: base.layout.textColor, fontFamily: '"JetBrains Mono", monospace', fontSize: 10 },
       grid: base.grid,
-      rightPriceScale: { borderColor: base.rightPriceScale.borderColor, textColor: base.rightPriceScale.textColor, scaleMargins: { top: 0.12, bottom: 0.12 }, autoScale: true, alignLabels: true, minimumWidth: 72 },
+      rightPriceScale: { borderColor: base.rightPriceScale.borderColor, textColor: base.rightPriceScale.textColor, scaleMargins: { top: 0.12, bottom: 0.12 }, autoScale: true, alignLabels: true, minimumWidth: PRICE_AXIS_WIDTH },
       timeScale: { visible: false, borderColor: 'rgba(99,102,241,0.12)', lockVisibleTimeRangeOnResize: true, rightOffset: 12, barSpacing: 9, minBarSpacing: 0.5, shiftVisibleRangeOnNewBar: false },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' }, horzLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' } },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
@@ -289,7 +308,7 @@ export default forwardRef(function OscillatorPane({
     } else {
       const precision = oscType === 'obv' || oscType === 'cvd' || oscType === 'volume_delta' ? 0 : oscType === 'cmf' || oscType === 'trix' ? 4 : oscType === 'roc' || oscType === 'momentum' ? 2 : 1;
       const minMove = precision === 0 ? 1 : precision === 4 ? 0.0001 : 0.1;
-      refs.main = chart.addLineSeries({ color: cfg.color, lineWidth: 1.5, priceFormat: { type: 'price', precision, minMove } });
+      refs.main = chart.addLineSeries({ color: effColor, lineWidth: effWidth, lineStyle: effStyle, priceFormat: { type: 'price', precision, minMove } });
     }
 
     // Add reference bands
@@ -347,13 +366,14 @@ export default forwardRef(function OscillatorPane({
     });
 
     const ro = new ResizeObserver((entries) => {
+      if (disposed) return;
       for (const e of entries) {
-        if (e.contentRect.width > 0) { chart.applyOptions({ width: e.contentRect.width }); }
+        if (e.contentRect.width > 0) { try { chart.applyOptions({ width: e.contentRect.width }); } catch {} }
       }
     });
     ro.observe(containerRef.current);
 
-    return () => { ro.disconnect(); chart.remove(); chartRef.current = null; seriesRefs.current = {}; };
+    return () => { disposed = true; ro.disconnect(); try { chart.remove(); } catch {} chartRef.current = null; seriesRefs.current = {}; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [oscType]);
 
@@ -361,9 +381,10 @@ export default forwardRef(function OscillatorPane({
   const seriesData = useMemo(() => resolveSeries(oscType, definition, candles), [oscType, definition, candles]);
 
   useEffect(() => {
-    if (!chartRef.current || !candles || candles.length === 0) return;
+    if (!chartRef.current || chartRef.current.__isDisposed || !candles || candles.length === 0) return;
     const refs = seriesRefs.current;
     const { main, signal, signal2, hist } = seriesData;
+    seriesDataRef.current = { main, signal, signal2, hist };
 
     try {
       const set = (series, data) => { if (series) { try { series.setData(Array.isArray(data) ? data : []); } catch {} } };
@@ -395,8 +416,9 @@ export default forwardRef(function OscillatorPane({
         set(refs.signal, signal);
       }
 
-      // Visibility
+      // Visibility + live style (TradingView Style tab)
       Object.values(refs).forEach(s => { try { s?.applyOptions({ visible: !isHidden }); } catch {} });
+      try { refs.main?.applyOptions({ color: effColor, lineWidth: effWidth, lineStyle: effStyle }); } catch {}
       resetLegendToLatest();
     } catch {}
   }, [seriesData, oscType, isHidden, resetLegendToLatest]);

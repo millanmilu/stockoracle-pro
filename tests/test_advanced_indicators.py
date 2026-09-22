@@ -94,6 +94,44 @@ def test_volume_weighted_indicators():
     assert (flat_mfi == 50.0).all()
 
 
+def test_vwap_session_reset_intraday():
+    """VWAP must reset at calendar-day boundaries — session-anchored, not chart-history-cumulative."""
+    ts1 = pd.date_range("2026-09-18 09:15", periods=3, freq="5min", tz="Asia/Kolkata")
+    ts2 = pd.date_range("2026-09-19 09:15", periods=2, freq="5min", tz="Asia/Kolkata")
+    dates = pd.DatetimeIndex(list(ts1) + list(ts2))
+    prices = [100.0, 100.0, 100.0, 200.0, 200.0]
+    df = pd.DataFrame({
+        "date": dates,
+        "high": [p + 1.0 for p in prices],
+        "low": [p - 1.0 for p in prices],
+        "close": prices,
+        "volume": [100.0, 100.0, 100.0, 400.0, 400.0],
+    })
+    vwap = calculate_vwap(df)
+    tp = (df["high"] + df["low"] + df["close"]) / 3.0
+
+    assert len(vwap) == 5
+    assert not vwap.isna().any()
+    # First bar of each session anchors at its own typical price.
+    assert abs(vwap.iloc[0] - tp.iloc[0]) < 1e-9
+    # Day-2 first bar RESETS — legacy cumulative code would have given ~157.14 here.
+    assert abs(vwap.iloc[3] - tp.iloc[3]) < 1e-9
+    # Day-1 last bar averages within day-1 only.
+    day1_expect = float((100.0 * tp.iloc[0] + 100.0 * tp.iloc[1] + 100.0 * tp.iloc[2]) / 300.0)
+    assert abs(vwap.iloc[2] - day1_expect) < 1e-9
+    # Day-2 last bar averages within day-2 only.
+    day2_expect = float((400.0 * tp.iloc[3] + 400.0 * tp.iloc[4]) / 800.0)
+    assert abs(vwap.iloc[4] - day2_expect) < 1e-9
+
+
+def test_vwap_daily_bars_equal_typical_price():
+    """Daily bars are their own session: VWAP == typical price per bar."""
+    df = make_test_df(20)
+    vwap = calculate_vwap(df)
+    tp = (df["high"] + df["low"] + df["close"]) / 3.0
+    assert np.allclose(vwap.values, tp.values)
+
+
 def test_momentum_indicators():
     """Verify Stochastic, CCI, Williams %R, and ROC."""
     df = make_test_df(30)

@@ -76,13 +76,17 @@ export default function CandleCountdown({ chartRef, activeCandleRef, selectedSym
     return () => window.clearInterval(timer);
   }, [activeCandleRef, interval, selectedSymbol]);
 
+  // TradingView parity: the countdown sits directly BELOW the live price
+  // label, docked to the slim right price axis (same 56px strip).
   useEffect(() => {
     let frame;
     const position = () => {
       const badge = badgeRef.current;
       const coordinate = chartRef?.current?.getPriceCoordinate?.(currentPrice);
       if (badge && coordinate != null && Number.isFinite(coordinate)) {
-        badge.style.top = `${Math.max(8, coordinate - 15)}px`;
+        const paneH = badge.parentElement?.clientHeight || 600;
+        const top = Math.min(Math.max(8, coordinate + 16), Math.max(8, paneH - 26));
+        badge.style.top = `${top}px`;
         badge.style.display = label === 'MARKET CLOSED' ? 'none' : 'block';
       }
       frame = requestAnimationFrame(position);
@@ -91,5 +95,5 @@ export default function CandleCountdown({ chartRef, activeCandleRef, selectedSym
     return () => cancelAnimationFrame(frame);
   }, [chartRef, currentPrice, label]);
 
-  return <div ref={badgeRef} role="status" aria-live="polite" style={{ position: 'absolute', right: 78, display: 'none', padding: '3px 6px', border: '1px solid rgba(125,211,252,0.24)', borderRadius: 4, background: 'rgba(8,15,29,0.9)', color: '#BAE6FD', font: '600 10px JetBrains Mono, monospace', pointerEvents: 'none', zIndex: 18, whiteSpace: 'nowrap' }}>{label}</div>;
+  return <div ref={badgeRef} role="status" aria-live="polite" style={{ position: 'absolute', right: 2, display: 'none', width: 52, textAlign: 'center', padding: '2px 0', border: '1px solid rgba(125,211,252,0.24)', borderRadius: 4, background: 'rgba(8,15,29,0.9)', color: '#BAE6FD', font: '600 9px JetBrains Mono, monospace', pointerEvents: 'none', zIndex: 18, whiteSpace: 'nowrap' }}>{label}</div>;
 }

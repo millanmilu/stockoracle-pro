@@ -232,9 +232,5 @@ export const DEFAULT_FILTERS = {
   sortBy: 'ai_score',
   sortDir: 'desc',
   search: '',
-  page: 1,
-  pageSize: 25
 };
 
-export const DEFAULT_PAGE_SIZE = 25;
-export const PAGE_SIZE_OPTIONS = [15, 25, 50, 100, 200];

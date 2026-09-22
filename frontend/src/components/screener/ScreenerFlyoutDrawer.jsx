@@ -1,19 +1,38 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { X, TrendingUp, TrendingDown, DollarSign, Bell, Sparkles, ArrowUpRight } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { X, TrendingUp, TrendingDown, DollarSign, Sparkles, ArrowUpRight } from 'lucide-react';
 import api from '../../utils/api';
 import toast from 'react-hot-toast';
+import { TN, panel, sectionTitle, btn, btnPrimary, btnGreen, chip, num } from './terminalTheme';
 
-const gridCell = { background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: 8, padding: '9px 11px' };
-const gridLabel = { fontSize: '0.6rem', color: '#64748B', fontWeight: 700 };
+const DRAWER_W_KEY = 'stockoracle_drawer_w';
+const loadDrawerW = () => {
+  try {
+    const v = Number(localStorage.getItem(DRAWER_W_KEY));
+    if (Number.isFinite(v)) return Math.max(320, Math.min(680, v));
+  } catch (_) {}
+  return 440;
+};
+
+const gridCell = { background: 'rgba(148,163,184,0.04)', border: `1px solid ${TN.border}`, borderRadius: TN.radius, padding: '7px 9px' };
+const gridLabel = { fontSize: 10, color: TN.faint, fontWeight: 700, letterSpacing: '0.06em' };
 const fmt = (v, d = 1) => (v === null || v === undefined ? 'N/A' : Number(v).toFixed(d));
 
+/**
+ * Right-side stock detail drawer. Tabs: Overview / AI Analysis / Details.
+ * The AI tab frames every output as model analysis with confidence, and
+ * each AI indicator row is explicitly LIVE (backed by a real field) or
+ * UNAVAILABLE (no model wired) — never fabricated.
+ * Resizable via the left-edge grip; width is remembered.
+ */
 export default function ScreenerFlyoutDrawer({ stock, onClose, onNavigateChart, onNavigateFundamentals, onAddWatchlist, onAnalyzeAI }) {
   const [detail, setDetail] = useState(stock);
   const [loading, setLoading] = useState(false);
   const [paperShares, setPaperShares] = useState(10);
   const [paperLoading, setPaperLoading] = useState(false);
+  const [tab, setTab] = useState('overview');
+  const [width, setWidth] = useState(() => loadDrawerW());
 
-  useEffect(() => { setDetail(stock); }, [stock]);
+  useEffect(() => { setDetail(stock); setTab('overview'); }, [stock?.ticker]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!stock?.ticker) return;
@@ -31,7 +50,22 @@ export default function ScreenerFlyoutDrawer({ stock, onClose, onNavigateChart, 
     };
     fetchDetail();
     return () => { cancelled = true; };
-  }, [stock?.ticker]);
+  }, [stock?.ticker]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const beginResize = useCallback((e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = width;
+    const clampW = (v) => Math.max(320, Math.min(680, Math.round(v)));
+    const onMove = (mv) => setWidth(clampW(startW + (startX - mv.clientX)));
+    const onUp = (mv) => {
+      try { localStorage.setItem(DRAWER_W_KEY, String(clampW(startW + (startX - mv.clientX)))); } catch (_) {}
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [width]);
 
   const why = useMemo(() => {
     if (!detail) return [];
@@ -83,101 +117,236 @@ export default function ScreenerFlyoutDrawer({ stock, onClose, onNavigateChart, 
 
   const scoreBar = (label, v, color) => (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ width: 86, fontSize: '0.62rem', color: '#94A3B8' }}>{label}</span>
-      <div style={{ flex: 1, height: 5, borderRadius: 3, background: '#060913', overflow: 'hidden' }}>
-        <div style={{ width: `${Math.max(0, Math.min(100, Number(v) || 0))}%`, background: color, height: '100%' }} />
+      <span style={{ width: 92, fontSize: 11, color: TN.muted }}>{label}</span>
+      <div style={{ flex: 1, height: 4, borderRadius: 2, background: TN.inset, overflow: 'hidden' }}>
+        {v != null && <div style={{ width: `${Math.max(0, Math.min(100, Number(v) || 0))}%`, background: color, height: '100%' }} />}
       </div>
-      <span style={{ width: 34, textAlign: 'right', fontSize: '0.64rem', color: '#E2E8F0', fontFamily: 'JetBrains Mono, monospace' }}>{v ?? 'N/A'}</span>
+      <span style={num(11, { width: 40, textAlign: 'right', color: TN.text })}>{v ?? 'N/A'}</span>
     </div>
   );
 
+  // AI indicator registry: `get` reads the real backing field; null/undefined
+  // means no model is wired and the row renders UNAVAILABLE. `blurb` documents
+  // inputs → output without claiming a calculation that doesn't exist.
+  const aiIndicators = [
+    { name: 'AI Signal Engine', get: () => d.ai_signal != null ? `${d.ai_signal} · score ${d.ai_consensus_score ?? '—'}` : null, blurb: 'Trend + momentum + volume + structure confluence → BUY/SELL/HOLD with entry/SL/TP.' },
+    { name: 'AI Trend Detector', get: () => d.trend_hint ?? (d.ai_trend_score != null ? `score ${d.ai_trend_score}` : null), blurb: 'EMA structure + ADX regime → UPTREND / DOWNTREND / RANGE.' },
+    { name: 'AI Support / Resistance', get: () => d.support_price != null || d.resistance_price != null ? `S ${d.support_price ?? '—'} · R ${d.resistance_price ?? '—'}` : null, blurb: 'Swing clusters + volume-at-price → scored zones.' },
+    { name: 'AI Breakout Detector', get: () => d.breakout_strength != null ? `strength ${d.breakout_strength}` : null, blurb: 'Compression + volume confirmation → breakout direction and trigger.' },
+    { name: 'AI Momentum Score', get: () => d.momentum_state ?? (d.ai_momentum_score != null ? `score ${d.ai_momentum_score}` : null), blurb: 'RSI + MACD + Stochastic composite → accelerating / exhausted.' },
+    { name: 'AI Market Regime', get: () => d.market_regime != null ? `${d.market_regime}${d.regime_confidence != null ? ` (${d.regime_confidence}%)` : ''}` : null, blurb: 'ADX + choppiness + volatility → TREND / RANGE / BREAKOUT / HIGH-VOL.' },
+    { name: 'AI Pattern Recognition', get: () => d.ai_pattern_score != null ? `score ${d.ai_pattern_score}` : (d.structure_label ?? null), blurb: 'Pivot geometry + volume shape → classical patterns with invalidation.' },
+    { name: 'AI Volume Anomaly', get: () => d.volume_ratio_20d != null ? `${d.volume_ratio_20d}x${d.volume_breakout ? ' · breakout' : ''}` : null, blurb: 'Relative volume vs 20-day baseline → unusual-activity flag.' },
+    { name: 'AI Sentiment Engine', get: () => d.sentiment_label ?? null, blurb: 'News flow aggregation → sentiment label with article count.' },
+    { name: 'AI Reversal Detector', get: () => null, blurb: 'Divergence + wick + overextension model — not wired to this row.' },
+    { name: 'AI Multi-Timeframe Alignment', get: () => null, blurb: 'Per-timeframe confluence stack — not wired to this row.' },
+    { name: 'AI Price Forecast', get: () => null, blurb: 'Volatility-conditioned path bands — not wired to this row.' },
+  ];
+
+  const detailGroups = [
+    { title: 'Technical', rows: [['RSI 14', d.rsi_14], ['MACD Hist', d.macd_hist], ['MACD XO', d.macd_crossover], ['EMA 50', d.ema_50], ['EMA 200', d.ema_200], ['EMA Trend', d.ema_alignment], ['ADX 14', d.adx_14], ['ATR %', d.atr_pct], ['Supertrend', d.supertrend_dir != null ? (Number(d.supertrend_dir) > 0 ? 'BULL' : 'BEAR') : null], ['Stoch %K', d.stoch_k], ['CCI 20', d.cci_20], ['ROC 12', d.roc_12], ['Williams %R', d.williams_r], ['RS/NIFTY %', d.rs_vs_nifty_pct], ['Momentum', d.momentum_state], ['52W Pos %', d.pos_52w_pct]] },
+    { title: 'Fundamental', rows: [['P/E', d.pe_ratio], ['P/B', d.pb_ratio], ['ROE %', d.roe_pct], ['ROCE %', d.roce_pct], ['D/E', d.debt_to_equity], ['Sales 3Y %', d.sales_growth_3y], ['Profit 3Y %', d.profit_growth_3y], ['MktCap Cr', d.market_cap_cr], ['MktCap Cat', d.market_cap_cat]] },
+    { title: 'Structure & Sentiment', rows: [['Structure', d.structure_label], ['Regime', d.market_regime], ['Support', d.support_price], ['Resistance', d.resistance_price], ['Breakout Str', d.breakout_strength], ['Retest', d.retest_status], ['News Sentiment', d.sentiment_label], ['News Count', d.news_count]] },
+  ];
+
   return (
-    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: '440px', maxWidth: '94vw', background: '#090D1C', borderLeft: '1px solid rgba(99,102,241,0.3)', boxShadow: '-10px 0 30px rgba(0,0,0,0.7)', zIndex: 200, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '14px 18px', borderBottom: '1px solid rgba(255,255,255,0.08)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#0C1124' }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '1.15rem', fontWeight: 800, color: '#FFF' }}>{d.ticker}</span>
-            <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(99,102,241,0.15)', color: '#818CF8', fontSize: '0.62rem', fontWeight: 700 }}>{d.market_cap_cat || 'NSE'}</span>
-            {d.data_status && d.data_status !== 'OK' && (
-              <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(245,158,11,0.15)', color: '#F59E0B', fontSize: '0.6rem', fontWeight: 800 }}>{d.data_status === 'N/A' ? 'N/A' : 'STALE DATA'}</span>
-            )}
-          </div>
-          <div style={{ fontSize: '0.7rem', color: '#94A3B8', marginTop: 2 }}>{d.name || d.ticker} • {d.sector || 'Diversified'}</div>
-        </div>
-        <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, color: '#94A3B8', cursor: 'pointer', padding: '6px', display: 'flex' }}><X size={16} /></button>
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto', padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '12px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div className="tn-drawer" style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width, maxWidth: '94vw', background: TN.panel, borderLeft: `1px solid ${TN.borderStrong}`, boxShadow: '-12px 0 32px rgba(0,0,0,0.6)', zIndex: 200, display: 'flex', flexDirection: 'column' }}>
+      <div className="tn-drawer-grip" onMouseDown={beginResize} title="Drag to resize" />
+      <div style={{ padding: '12px 16px 0', borderBottom: `1px solid ${TN.border}`, background: TN.panelAlt }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
           <div>
-            <div style={{ fontSize: '0.64rem', color: '#64748B', fontWeight: 700 }}>PRICE {loading ? '(loading detail…)' : ''}</div>
-            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#F1F5F9', fontFamily: 'JetBrains Mono, monospace' }}>₹{Number(currPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-            <div style={{ fontSize: '0.64rem', color: '#64748B' }}>MktCap ₹{Number(d.market_cap_cr || 0).toLocaleString('en-IN')} Cr</div>
-          </div>
-          <div style={{ padding: '6px 12px', borderRadius: 8, background: isPositive ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)', color: isPositive ? '#10B981' : '#EF4444', display: 'flex', alignItems: 'center', gap: 4, fontWeight: 800 }}>
-            {isPositive ? <TrendingUp size={15} /> : <TrendingDown size={15} />}{isPositive ? '+' : ''}{fmt(d.change_1d_pct, 2)}%
-          </div>
-        </div>
-
-        <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.12), rgba(168,85,247,0.12))', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 10, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 7 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: '#A855F7', fontWeight: 800 }}><Sparkles size={13} /> AI SCORE {d.ai_consensus_score != null ? d.ai_consensus_score : 'N/A'} • {d.ai_signal || 'N/A'}</span>
-            <span style={{ fontSize: '0.62rem', color: '#94A3B8' }}>Conf {d.ai_confidence_score ?? 'N/A'}</span>
-          </div>
-          {scoreBar('Technical', confluence?.components?.trend ?? d.ai_trend_score, '#38BDF8')}
-          {scoreBar('Momentum', confluence?.components?.momentum ?? d.ai_momentum_score, '#34D399')}
-          {scoreBar('Volume', confluence?.components?.volume, '#A855F7')}
-          {scoreBar('Structure', confluence?.components?.structure ?? d.ai_pattern_score, '#F59E0B')}
-          {scoreBar('Confluence', d.confluence_score, '#818CF8')}
-          {(confluence?.positives?.length || confluence?.negatives?.length) ? (
-            <div style={{ fontSize: '0.66rem', color: '#CBD5E1', lineHeight: 1.5 }}>
-              {(confluence.positives || []).slice(0, 4).map((p, i) => <div key={`p${i}`}>+ {p}</div>)}
-              {(confluence.negatives || []).slice(0, 3).map((n, i) => <div key={`n${i}`} style={{ color: '#FCA5A5' }}>- {n}</div>)}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 18, fontWeight: 700, color: TN.text }}>{d.ticker}</span>
+              <span style={chip()}>{d.market_cap_cat || 'NSE'}</span>
+              {d.data_status && d.data_status !== 'OK' && (
+                <span style={chip('warn')}>{d.data_status === 'N/A' ? 'N/A' : 'STALE DATA'}</span>
+              )}
             </div>
-          ) : null}
+            <div style={{ fontSize: 12, color: TN.muted, marginTop: 2 }}>{d.name || d.ticker} · {d.sector || 'Diversified'}</div>
+          </div>
+          <button onClick={onClose} aria-label="Close details" style={{ background: 'transparent', border: `1px solid ${TN.border}`, borderRadius: TN.radius, color: TN.muted, cursor: 'pointer', padding: 5, display: 'flex' }}><X size={15} /></button>
         </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
-          {[['Trend', d.trend_hint], ['Momentum', d.momentum_state], ['Structure', d.structure_label], ['Regime', d.market_regime ? `${d.market_regime} (${d.regime_confidence ?? '?'}%)` : 'N/A'],
-            ['RSI', d.rsi_14], ['ADX', d.adx_14], ['ATR %', d.atr_pct != null ? `${d.atr_pct}%` : 'N/A'], ['Rel Vol', d.volume_ratio_20d != null ? `${d.volume_ratio_20d}x` : 'N/A'],
-            ['52W Pos', d.pos_52w_pct != null ? `${d.pos_52w_pct}%` : 'N/A'], ['Support', d.support_price != null ? `₹${d.support_price}` : 'N/A'],
-            ['Resistance', d.resistance_price != null ? `₹${d.resistance_price}` : 'N/A'], ['News', d.sentiment_label || 'N/A'],
-          ].map(([k, v]) => (
-            <div key={k} style={gridCell}><div style={gridLabel}>{k.toUpperCase()}</div><div style={{ fontSize: '0.85rem', fontWeight: 800, color: '#E2E8F0', marginTop: 2 }}>{v ?? 'N/A'}</div></div>
+        <div className="tn-tabs" role="tablist" aria-label="Stock detail tabs">
+          {[['overview', 'Overview'], ['ai', 'AI Analysis'], ['details', 'Details']].map(([id, label]) => (
+            <button key={id} role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`tn-tab${tab === id ? ' active' : ''}`}>{label}</button>
           ))}
         </div>
-
-        <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: 10, padding: '12px 14px' }}>
-          <div style={{ fontSize: '0.7rem', fontWeight: 800, color: '#A5B4FC', marginBottom: 6 }}>WHY THIS STOCK?</div>
-          {why.length ? (
-            <ol style={{ margin: 0, paddingLeft: 18, fontSize: '0.7rem', color: '#CBD5E1', lineHeight: 1.55 }}>
-              {why.map((w, i) => <li key={i}>{w}</li>)}
-            </ol>
-          ) : (
-            <div style={{ fontSize: '0.68rem', color: '#64748B' }}>Traceable reasons appear once the institutional pipeline backfills this row. No claims are shown without data.</div>
-          )}
-        </div>
-
-        <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, padding: '12px 14px' }}>
-          <div style={{ fontSize: '0.72rem', color: '#F1F5F9', fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><DollarSign size={13} color="#10B981" /> Quick Paper Trade</div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
-            <span style={{ fontSize: '0.66rem', color: '#94A3B8' }}>Qty:</span>
-            <input type="number" min="1" max="1000" value={paperShares} onChange={(e) => setPaperShares(e.target.value)} style={{ width: 70, background: '#060913', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 4, padding: '4px 8px', color: '#F1F5F9', fontSize: '0.76rem' }} />
-            <span style={{ fontSize: '0.66rem', color: '#64748B' }}>≈ ₹{(currPrice * (parseInt(paperShares, 10) || 0)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
-          </div>
-          <button onClick={handleQuickPaperTrade} disabled={paperLoading} style={{ width: '100%', padding: '7px 12px', borderRadius: 6, background: '#10B981', color: '#FFF', border: 'none', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>Buy Market</button>
-        </div>
-
-        <button onClick={handleCreateAlert} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)', color: '#F59E0B', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
-          <Bell size={13} /> Set Price Alert (+5% Target)
-        </button>
       </div>
 
-      <div style={{ padding: '12px 18px', borderTop: '1px solid rgba(255,255,255,0.08)', background: '#0C1124', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-        <button onClick={() => onNavigateChart(d.ticker)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 12px', borderRadius: 6, background: 'rgba(56,189,248,0.12)', border: '1px solid rgba(56,189,248,0.3)', color: '#38BDF8', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>Open Chart <ArrowUpRight size={12} /></button>
-        <button onClick={() => onNavigateFundamentals(d.ticker)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 12px', borderRadius: 6, background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', color: '#818CF8', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>Fundamentals <ArrowUpRight size={12} /></button>
-        <button onClick={() => onAddWatchlist && onAddWatchlist(d)} style={{ padding: '8px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', color: '#CBD5E1', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>Add to Watchlist</button>
-        <button onClick={() => onAnalyzeAI && onAnalyzeAI(d)} style={{ padding: '8px 12px', borderRadius: 6, background: 'rgba(168,85,247,0.12)', border: '1px solid rgba(168,85,247,0.3)', color: '#C084FC', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>Analyze with AI</button>
+      <div className="tn-scroll" style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {tab === 'overview' && (
+          <>
+            <div style={panel({ padding: '10px 12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' })}>
+              <div>
+                <div style={{ fontSize: 10, color: TN.faint, fontWeight: 700, letterSpacing: '0.06em' }}>PRICE{loading ? ' (LOADING…)' : ''}</div>
+                <div style={num(22, { fontWeight: 700, color: TN.text })}>₹{Number(currPrice || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                <div style={{ fontSize: 11, color: TN.faint }}>MktCap ₹{Number(d.market_cap_cr || 0).toLocaleString('en-IN')} Cr</div>
+              </div>
+              <div style={{ padding: '5px 10px', borderRadius: TN.radius, background: isPositive ? TN.upDim : TN.downDim, border: `1px solid ${isPositive ? 'rgba(34,197,94,0.35)' : 'rgba(248,113,113,0.35)'}`, color: isPositive ? TN.up : TN.down, display: 'flex', alignItems: 'center', gap: 4, fontWeight: 700, fontSize: 13 }}>
+                {isPositive ? <TrendingUp size={14} /> : <TrendingDown size={14} />}{isPositive ? '+' : ''}{fmt(d.change_1d_pct, 2)}%
+              </div>
+            </div>
+
+            <div style={panel({ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 })}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: TN.ai, fontWeight: 700 }}><Sparkles size={13} /> AI {d.ai_consensus_score != null ? d.ai_consensus_score : 'N/A'} · {d.ai_signal || 'N/A'}</span>
+                <span style={{ fontSize: 11, color: TN.muted }}>Conf {d.ai_confidence_score ?? 'N/A'}</span>
+              </div>
+              {scoreBar('Momentum', confluence?.components?.momentum ?? d.ai_momentum_score, TN.up)}
+              {scoreBar('Volume', confluence?.components?.volume, TN.ai)}
+              {scoreBar('Confluence', d.confluence_score, TN.accent)}
+            </div>
+
+            <div style={panel({ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 4 })}>
+              {[
+                ['Trend', d.trend_hint ? String(d.trend_hint).charAt(0) + String(d.trend_hint).slice(1).toLowerCase() : null],
+                ['Momentum', d.momentum_state ? String(d.momentum_state).charAt(0) + String(d.momentum_state).slice(1).toLowerCase() : null],
+                ['Sentiment', d.sentiment_label],
+                ['Volume', d.volume_ratio_20d != null ? (d.volume_ratio_20d >= 1.5 ? 'Elevated' : d.volume_ratio_20d >= 1.0 ? 'Normal' : 'Quiet') : null],
+                ['Regime', d.market_regime],
+                ['Signal', d.ai_signal],
+              ].map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                  <span style={{ color: TN.faint, letterSpacing: '0.06em', fontWeight: 700 }}>{k.toUpperCase()}</span>
+                  <span style={{ color: TN.text, fontWeight: 700 }}>{v ?? 'N/A'}</span>
+                </div>
+              ))}
+              <div style={{ height: 1, background: TN.border, margin: '3px 0' }} />
+              {[
+                ['Support', d.support_price != null ? '₹' + d.support_price : null],
+                ['Resistance', d.resistance_price != null ? '₹' + d.resistance_price : null],
+              ].map(([k, v]) => (
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                  <span style={{ color: TN.faint, letterSpacing: '0.06em', fontWeight: 700 }}>{k.toUpperCase()}</span>
+                  <span style={num(11, { color: TN.text, fontWeight: 700 })}>{v ?? 'N/A'}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={panel({ padding: '10px 12px' })}>
+              <div style={sectionTitle({ color: TN.accent, marginBottom: 6 })}>AI explanation</div>
+              {why.length ? (
+                <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: '#C3CEDD', lineHeight: 1.55, listStyle: 'disc' }}>
+                  {why.map((w, i) => <li key={i}>{w}</li>)}
+                </ul>
+              ) : (
+                <div style={{ fontSize: 12, color: TN.faint }}>Traceable reasons appear once the institutional pipeline backfills this row. No claims are shown without data.</div>
+              )}
+            </div>
+
+            <div style={panel({ padding: '10px 12px' })}>
+              <div style={{ fontSize: 12, color: TN.text, fontWeight: 700, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}><DollarSign size={13} color={TN.up} /> Quick Paper Trade</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 11, color: TN.muted }}>Qty:</span>
+                <input type="number" min="1" max="1000" value={paperShares} onChange={(e) => setPaperShares(e.target.value)} style={{ width: 70, background: TN.inset, border: `1px solid ${TN.borderStrong}`, borderRadius: TN.radius, padding: '4px 8px', color: TN.text, fontSize: 12 }} />
+                <span style={{ fontSize: 11, color: TN.faint }}>≈ ₹{(currPrice * (parseInt(paperShares, 10) || 0)).toLocaleString('en-IN', { maximumFractionDigits: 0 })}</span>
+              </div>
+              <button onClick={handleQuickPaperTrade} disabled={paperLoading} style={btnGreen({ width: '100%', justifyContent: 'center' })}>Buy Market</button>
+            </div>
+          </>
+        )}
+
+        {tab === 'ai' && (
+          <>
+            <div style={panel({ padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6 })}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <span style={sectionTitle({ color: TN.ai })}>Model analysis — not certainty</span>
+                <span style={num(20, { fontWeight: 700, color: TN.text })}>{d.ai_consensus_score ?? 'N/A'}<span style={{ fontSize: 11, color: TN.faint }}> / 100</span></span>
+              </div>
+              {scoreBar('Trend', confluence?.components?.trend ?? d.ai_trend_score, TN.info)}
+              {scoreBar('Momentum', confluence?.components?.momentum ?? d.ai_momentum_score, TN.up)}
+              {scoreBar('Volume', confluence?.components?.volume, TN.ai)}
+              {scoreBar('Structure', confluence?.components?.structure ?? d.ai_pattern_score, TN.warn)}
+              {scoreBar('Confluence', d.confluence_score, TN.accent)}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: TN.muted }}>
+                <span>Sentiment: <strong style={{ color: TN.text }}>{d.sentiment_label ?? 'N/A'}</strong></span>
+                <span>News: <strong style={{ color: TN.text }}>{d.news_count ?? 'N/A'}</strong></span>
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+              {[['Regime', d.market_regime], ['Signal', d.ai_signal], ['Confidence', d.ai_confidence_score != null ? `${d.ai_confidence_score}%` : null]].map(([k, v]) => (
+                <div key={k} style={gridCell}><div style={gridLabel}>{k.toUpperCase()}</div><div style={{ fontSize: 13, fontWeight: 700, color: TN.text, marginTop: 2 }}>{v ?? 'N/A'}</div></div>
+              ))}
+            </div>
+
+            {(confluence?.positives?.length || confluence?.negatives?.length) ? (
+              <div style={panel({ padding: '10px 12px', fontSize: 12, color: '#C3CEDD', lineHeight: 1.55 })}>
+                <div style={sectionTitle({ marginBottom: 6 })}>Supporting / opposing factors</div>
+                {(confluence.positives || []).slice(0, 5).map((p, i) => <div key={`p${i}`}>+ {p}</div>)}
+                {(confluence.negatives || []).slice(0, 4).map((n, i) => <div key={`n${i}`} style={{ color: '#FCA5A5' }}>− {n}</div>)}
+              </div>
+            ) : null}
+
+            <div style={panel({ padding: '10px 12px' })}>
+              <div style={sectionTitle({ marginBottom: 6 })}>Why? — model read</div>
+              {why.length ? (
+                <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#C3CEDD', lineHeight: 1.55 }}>
+                  {why.map((w, i) => <li key={i}>{w}</li>)}
+                </ol>
+              ) : (
+                <div style={{ fontSize: 12, color: TN.faint }}>No model explanation stored for this row yet.</div>
+              )}
+            </div>
+
+            <div style={panel({ padding: '10px 12px' })}>
+              <div style={sectionTitle({ marginBottom: 6 })}>AI indicators — availability</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {aiIndicators.map((ind) => {
+                  const value = ind.get();
+                  return (
+                    <div key={ind.name} style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 8px', background: 'rgba(148,163,184,0.04)', border: `1px solid ${TN.border}`, borderRadius: TN.radius }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: TN.text }}>{ind.name}</span>
+                        {value != null
+                          ? <span style={chip('ai')}>{String(value)}</span>
+                          : <span style={chip()}>UNAVAILABLE</span>}
+                      </div>
+                      <div style={{ fontSize: 11, color: TN.faint }}>{ind.blurb}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: TN.faint, lineHeight: 1.5 }}>
+                UNAVAILABLE means no model output is wired for this row — the indicator is shown as a placeholder rather than a prediction. Scores are model analysis, not financial advice; always check confidence and supporting factors.
+              </div>
+            </div>
+            <button onClick={() => onAnalyzeAI && onAnalyzeAI(d)} style={btn(false, { justifyContent: 'center', color: TN.ai })}>
+              Open AI Prediction <ArrowUpRight size={12} />
+            </button>
+          </>
+        )}
+
+        {tab === 'details' && (
+          <>
+            <button onClick={() => onNavigateFundamentals(d.ticker)} style={btn(false, { justifyContent: 'center' })}>
+              Open full Fundamentals <ArrowUpRight size={12} />
+            </button>
+            {detailGroups.map((g) => {
+              const present = g.rows.filter(([, v]) => v !== null && v !== undefined && v !== '');
+              return (
+                <div key={g.title} style={panel({ padding: '10px 12px' })}>
+                  <div style={sectionTitle({ marginBottom: 8 })}>{g.title}</div>
+                  {present.length ? (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+                      {present.map(([k, v]) => (
+                        <div key={k} style={gridCell}><div style={gridLabel}>{k.toUpperCase()}</div><div style={{ fontSize: 13, fontWeight: 700, color: TN.text, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis' }}>{String(v)}</div></div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 12, color: TN.faint }}>No {g.title.toLowerCase()} fields stored for this row.</div>
+                  )}
+                </div>
+              );
+            })}
+          </>
+        )}
+      </div>
+
+      <div style={{ padding: '10px 16px', borderTop: `1px solid ${TN.border}`, background: TN.panelAlt, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+        <button onClick={() => onNavigateChart(d.ticker)} style={btnPrimary({ justifyContent: 'center' })}>Open Chart</button>
+        <button onClick={handleCreateAlert} title="Alert at +5% above current price" style={btn(false, { justifyContent: 'center' })}>Alert</button>
+        <button onClick={() => onAddWatchlist && onAddWatchlist(d)} style={btn(false, { justifyContent: 'center' })}>Watch</button>
       </div>
     </div>
   );

@@ -1818,21 +1818,21 @@ def upsert_screener_daily_metric(row_data: dict) -> None:
         "name": row_data.get("name", ticker),
         "sector": row_data.get("sector"),
         "industry": row_data.get("industry"),
-        "market_cap_cr": float(row_data.get("market_cap_cr", 10000.0) or 10000.0),
-        "market_cap_cat": str(row_data.get("market_cap_cat", "MID")),
+        "market_cap_cr": float(row_data["market_cap_cr"]) if row_data.get("market_cap_cr") is not None else None,
+        "market_cap_cat": str(row_data["market_cap_cat"]) if row_data.get("market_cap_cat") else None,
         "close_price": float(row_data.get("close_price", 100.0) or 100.0),
-        "change_1d_pct": float(row_data.get("change_1d_pct", 0.0) or 0.0),
-        "change_1w_pct": float(row_data.get("change_1w_pct", 0.0) or 0.0),
-        "change_1m_pct": float(row_data.get("change_1m_pct", 0.0) or 0.0),
-        "change_1y_pct": float(row_data.get("change_1y_pct", 0.0) or 0.0),
-        "distance_52w_high_pct": float(row_data.get("distance_52w_high_pct", -5.0) or -5.0),
-        "distance_52w_low_pct": float(row_data.get("distance_52w_low_pct", 25.0) or 25.0),
-        "rsi_14": float(row_data.get("rsi_14", 50.0) or 50.0),
-        "macd_signal": str(row_data.get("macd_signal", "BULLISH")),
+        "change_1d_pct": float(row_data["change_1d_pct"]) if row_data.get("change_1d_pct") is not None else None,
+        "change_1w_pct": float(row_data["change_1w_pct"]) if row_data.get("change_1w_pct") is not None else None,
+        "change_1m_pct": float(row_data["change_1m_pct"]) if row_data.get("change_1m_pct") is not None else None,
+        "change_1y_pct": float(row_data["change_1y_pct"]) if row_data.get("change_1y_pct") is not None else None,
+        "distance_52w_high_pct": float(row_data["distance_52w_high_pct"]) if row_data.get("distance_52w_high_pct") is not None else None,
+        "distance_52w_low_pct": float(row_data["distance_52w_low_pct"]) if row_data.get("distance_52w_low_pct") is not None else None,
+        "rsi_14": float(row_data["rsi_14"]) if row_data.get("rsi_14") is not None else None,
+        "macd_signal": str(row_data["macd_signal"]) if row_data.get("macd_signal") else None,
         "sma_20": float(row_data["sma_20"]) if row_data.get("sma_20") is not None else None,
         "sma_50": float(row_data["sma_50"]) if row_data.get("sma_50") is not None else None,
         "sma_200": float(row_data["sma_200"]) if row_data.get("sma_200") is not None else None,
-        "volume_ratio_20d": float(row_data.get("volume_ratio_20d", 1.0) or 1.0),
+        "volume_ratio_20d": float(row_data["volume_ratio_20d"]) if row_data.get("volume_ratio_20d") is not None else None,
         "pe_ratio": float(row_data["pe_ratio"]) if row_data.get("pe_ratio") is not None else None,
         "pb_ratio": float(row_data["pb_ratio"]) if row_data.get("pb_ratio") is not None else None,
         "roe_pct": float(row_data["roe_pct"]) if row_data.get("roe_pct") is not None else None,
@@ -1843,9 +1843,9 @@ def upsert_screener_daily_metric(row_data: dict) -> None:
         "pcr": float(row_data["pcr"]) if row_data.get("pcr") is not None else None,
         "max_pain": float(row_data["max_pain"]) if row_data.get("max_pain") is not None else None,
         "iv": float(row_data["iv"]) if row_data.get("iv") is not None else None,
-        "ai_consensus_score": float(row_data.get("ai_consensus_score", 60.0) or 60.0),
-        "ai_signal": str(row_data.get("ai_signal", "BUY")),
-        "ai_confidence_score": float(row_data.get("ai_confidence_score", 75.0) or 75.0),
+        "ai_consensus_score": float(row_data["ai_consensus_score"]) if row_data.get("ai_consensus_score") is not None else None,
+        "ai_signal": str(row_data["ai_signal"]) if row_data.get("ai_signal") else None,
+        "ai_confidence_score": float(row_data["ai_confidence_score"]) if row_data.get("ai_confidence_score") is not None else None,
         "updated_at": now_str,
     }
 
@@ -1936,6 +1936,18 @@ def execute_screener_sql_query(
         "pos_52w_pct", "distance_52w_high_pct", "ema_50", "ema_200",
         "stoch_k", "cci_20", "roc_12", "hist_vol_20", "breakout_strength",
         "regime_confidence", "rs_vs_nifty_pct", "ticker", "sector",
+        # ── Must cover EVERY sortable column the screener UI exposes ──
+        # Any key missing here is silently ORDER BY'd by market_cap_cr while the
+        # client still re-sorts the returned page, so the user sees a truncated
+        # (wrong) ranking. Keep this set a superset of
+        # frontend/src/components/screener/screenerColumns.js ALL_COLUMNS keys.
+        "name", "trend_hint", "ai_signal", "macd_hist", "macd_crossover",
+        "ema_9", "ema_20", "ema_alignment", "supertrend_dir", "stoch_d",
+        "williams_r", "momentum_state", "volume_breakout", "structure_label",
+        "market_regime", "support_price", "resistance_price", "retest_status",
+        "bb_width_pct", "bb_position", "vwap_dist_pct", "high_52w", "low_52w",
+        "ai_trend_score", "ai_momentum_score", "ai_pattern_score",
+        "sentiment_label", "news_count", "distance_52w_low_pct",
     }
     safe_sort = sort_by if sort_by in allowed_sorts else "market_cap_cr"
     safe_dir = "ASC" if str(sort_dir).upper() == "ASC" else "DESC"
@@ -1957,7 +1969,7 @@ def execute_screener_sql_query(
             FROM screener_daily_metrics
             WHERE {named_where}
             ORDER BY {safe_sort} {safe_dir}
-            LIMIT {max(1, min(limit, 2000))} OFFSET {max(0, offset)}
+            LIMIT {max(1, min(limit, 5000))} OFFSET {max(0, offset)}
         """
 
         count_sql = f"""
@@ -1971,11 +1983,16 @@ def execute_screener_sql_query(
             total = int(total_res[0]) if total_res and total_res[0] is not None else 0
             rows = session.execute(text(query_sql), bind_params).mappings().all()
             results = [dict(r) for r in rows]
+            # Unfiltered universe size so callers can show "N of M stocks" and
+            # users can tell filter-excluded apart from missing-data rows.
+            univ_res = session.execute(text("SELECT COUNT(*) FROM screener_daily_metrics")).first()
+            universe_total = int(univ_res[0]) if univ_res and univ_res[0] is not None else 0
 
         return {
             "total": total,
             "count": len(results),
             "results": results,
+            "universe_total": universe_total,
         }
     except Exception as e:
         logger.warning("execute_screener_sql_query error for where=%s: %s", where_clause, e)
@@ -1983,6 +2000,7 @@ def execute_screener_sql_query(
             "total": 0,
             "count": 0,
             "results": [],
+            "universe_total": 0,
         }
 
 

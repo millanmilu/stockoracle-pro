@@ -1,0 +1,36 @@
+.mit-grid{display:grid;grid-template-columns:minmax(0,1.32fr) minmax(0,1fr) minmax(0,1fr);gap:10px;align-items:start}
+@media(max-width:1280px){.mit-grid{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.mit-grid>.mit-col-r{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.mit-grid>.mit-col-r>.mit-card{margin:0}}
+@media(max-width:860px){.mit-grid{grid-template-columns:minmax(0,1fr)}.mit-order-ai{order:-2}.mit-grid>.mit-col-r{display:flex;flex-direction:column}}
+.mit-card{background:rgba(13,18,36,.88);border:1px solid rgba(148,163,184,.14);border-radius:7px;overflow:hidden}
+.mit-card-h{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:7px 11px;border-bottom:1px solid rgba(148,163,184,.12)}
+.mit-card-t{font-size:.65rem;font-weight:800;letter-spacing:.08em;color:#CBD5E1;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.mit-card-b{padding:9px 11px}
+.mit-live-dot{width:6px;height:6px;border-radius:50%;background:#10B981;box-shadow:0 0 6px #10B981;animation:mitPulse 2s ease-in-out infinite;flex-shrink:0}
+@keyframes mitPulse{0%,100%{opacity:1}50%{opacity:.35}}
+.mit-ai-scan{position:relative;overflow:hidden}
+.mit-ai-scan::after{content:'';position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,rgba(129,140,248,.16) 50%,transparent 70%);animation:mitScan 1.3s linear infinite;pointer-events:none}
+@keyframes mitScan{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.mit-spin{animation:mitSpin 1s linear infinite}@keyframes mitSpin{to{transform:rotate(360deg)}}
+.mit-flash{animation:mitFlash 1.8s ease}@keyframes mitFlash{0%{background:rgba(129,140,248,.22)}100%{background:transparent}}
+.mit-chipbtn{cursor:pointer;border:1px solid rgba(148,163,184,.2);background:rgba(15,23,42,.6);color:#94A3B8;border-radius:4px;padding:2px 8px;font-size:.62rem;font-weight:700;transition:all .12s;white-space:nowrap}
+.mit-chipbtn:hover{color:#E2E8F0;border-color:rgba(129,140,248,.5)}
+.mit-chipbtn.on{color:#fff;background:rgba(99,102,241,.2);border-color:rgba(129,140,248,.6)}
+.mit-news-scroll{scrollbar-width:thin;scrollbar-color:rgba(129,140,248,.35) transparent}
+.mit-news-scroll::-webkit-scrollbar{width:4px}.mit-news-scroll::-webkit-scrollbar-thumb{background:rgba(129,140,248,.3);border-radius:3px}
+.mit-sources-bar{display:flex;gap:4px;overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;-ms-overflow-style:none}
+.mit-sources-bar::-webkit-scrollbar{display:none}
+.mit-article-card{background:rgba(9,13,30,.58);border:1px solid rgba(148,163,184,.12);border-radius:5px;padding:6px 9px;display:flex;flex-direction:column;gap:3px;transition:background .15s ease,border-color .15s ease}
+.mit-article-card:hover{background:rgba(15,23,42,.92);border-color:rgba(148,163,184,.28)}
+.mit-line-clamp-1{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis}
+.mit-line-clamp-2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis}
+.mit-skel{background:linear-gradient(90deg,rgba(148,163,184,.08) 25%,rgba(148,163,184,.16) 50%,rgba(148,163,184,.08) 75%);background-size:200% 100%;animation:mitSkel 1.2s linear infinite;border-radius:4px}
+@keyframes mitSkel{from{background-position:200% 0}to{background-position:-200% 0}}
+.mit-sel{background:rgba(9,13,30,.9);border:1px solid rgba(148,163,184,.22);color:#E2E8F0;border-radius:4px;padding:3px 6px;font-size:.62rem;font-weight:600;outline:none;max-width:100%}
+.mit-inp{background:rgba(9,13,30,.9);border:1px solid rgba(148,163,184,.22);color:#E2E8F0;border-radius:4px;padding:4px 8px;font-size:.66rem;outline:none;width:100%}
+.mit-inp:focus,.mit-sel:focus{border-color:rgba(129,140,248,.6)}
+.mit-tip{position:relative}.mit-tip:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:#1E293B;border:1px solid rgba(129,140,248,.4);color:#E2E8F0;font-size:.60rem;font-weight:600;padding:3px 7px;border-radius:4px;white-space:nowrap;z-index:60;pointer-events:none}
+.mit-bar{height:5px;border-radius:3px;background:rgba(148,163,184,.14);overflow:hidden}
+.mit-bar>i{display:block;height:100%;border-radius:3px;transition:width .6s ease}
+[data-theme="light"] .mit-card{background:#fff;border-color:rgba(15,23,42,.1)}
+[data-theme="light"] .mit-card-h{border-bottom-color:rgba(15,23,42,.08)}
+[data-theme="light"] .mit-sel,[data-theme="light"] .mit-inp,[data-theme="light"] .mit-chipbtn{background:#F1F5F9;color:#0F172A;border-color:rgba(15,23,42,.15)}

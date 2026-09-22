@@ -1,7 +1,13 @@
 import React from 'react';
-import { SlidersHorizontal, Filter, Download, Save, Dices, Bell } from 'lucide-react';
+import { Filter, Download, Save, FlaskConical, Bell } from 'lucide-react';
 import { REFRESH_OPTIONS } from './screenerColumns';
+import { TN, panel, btn, btnGreen, input } from './terminalTheme';
 
+/**
+ * Institutional screener header. Flat two-row bar:
+ * title + live status + actions, then universe/search/refresh controls.
+ * Render-only — all props and callbacks unchanged.
+ */
 export default function ScreenerHeaderBar({
   filtersOpen,
   onToggleFilters,
@@ -14,8 +20,6 @@ export default function ScreenerHeaderBar({
   universe = 'ALL NSE',
   onUniverseChange,
   universes = ['ALL NSE'],
-  search = '',
-  onSearch,
   refreshMode = 'manual',
   onRefreshMode,
   onExportCsv,
@@ -26,54 +30,44 @@ export default function ScreenerHeaderBar({
   loading = false,
 }) {
   const live = wsState === 'live' || feedLive;
+  const wsLabel = wsState === 'connecting' || wsState === 'reconnecting'
+    ? 'RECONNECTING'
+    : live ? '● LIVE' : '○ OFFLINE';
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: 'linear-gradient(180deg, rgba(15,23,42,0.6) 0%, rgba(9,13,28,0.8) 100%)', border: '1px solid rgba(99,102,241,0.15)', borderRadius: 14, padding: '10px 14px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 34, height: 34, borderRadius: 9, background: 'linear-gradient(135deg, #6366F1, #06B6D4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <SlidersHorizontal size={18} color="#FFF" />
+    <div style={panel({ padding: '7px 12px', display: 'flex', flexDirection: 'column', gap: 7 })}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 16, fontWeight: 700, color: TN.text, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Institutional Screener</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: TN.accent, border: `1px solid rgba(124,140,248,0.4)`, background: 'rgba(124,140,248,0.10)', borderRadius: 3, padding: '1px 5px' }}>PRO</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: live ? TN.up : TN.down }}>{wsLabel}</span>
           </div>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: '1.05rem', fontWeight: 900, color: '#FFF' }}>Institutional Screener</span>
-              <span style={{ padding: '2px 8px', borderRadius: 6, background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.4)', color: '#A5B4FC', fontSize: '0.62rem', fontWeight: 800 }}>PRO</span>
-              <span style={{ padding: '2px 8px', borderRadius: 6, background: live ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.12)', border: `1px solid ${live ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.35)'}`, color: live ? '#10B981' : '#F87171', fontSize: '0.62rem', fontWeight: 800 }}>
-                {wsState === 'connecting' ? 'RECONNECTING' : live ? '● LIVE' : '○ OFFLINE'}
-              </span>
-              <span style={{ padding: '2px 8px', borderRadius: 6, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#94A3B8', fontSize: '0.62rem', fontWeight: 700 }}>
-                Market: {marketStatus}
-              </span>
-            </div>
-            <div style={{ fontSize: '0.66rem', color: '#64748B', marginTop: 2 }}>
-              {scannedCount.toLocaleString('en-IN')} stocks scanned
-              {dataAsOf ? <> • Last update: <strong style={{ color: '#A5B4FC' }}>{dataAsOf}</strong></> : null}
-              <span style={{ color: feedLive ? '#10B981' : '#F59E0B' }}> • Data: {feedLive ? 'LIVE' : 'CACHED'}</span>
-            </div>
+          <div style={{ fontSize: 11, color: TN.faint }}>
+            {scannedCount.toLocaleString('en-IN')} stocks scanned · {dataAsOf ? <>{dataAsOf} · </> : null}NSE
+            <span style={{ color: feedLive ? TN.up : TN.warn }}> · {feedLive ? 'LIVE' : 'CACHED'}</span>
+            <span style={{ color: TN.faint }}> · Market: {marketStatus}</span>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <button type="button" onClick={onToggleFilters} style={btn(filtersOpen)}><Filter size={13} /> Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}</button>
-          <button type="button" onClick={onOpenSaveModal} style={btn(false)}><Save size={13} /> Save</button>
-          <button type="button" onClick={onExportCsv} style={btn(false)}><Download size={13} /> Export</button>
-          <button type="button" onClick={onCreateAlert} style={btn(false)}><Bell size={13} /> Alert</button>
-          <button type="button" onClick={onOpenBacktestModal} style={greenBtn}><Dices size={13} /> Backtest</button>
+          <button type="button" onClick={onOpenSaveModal} style={btn()}><Save size={13} /> Save</button>
+          <button type="button" onClick={onExportCsv} style={btn()}><Download size={13} /> Export</button>
+          <button type="button" onClick={onCreateAlert} style={btn()}><Bell size={13} /> Alert</button>
+          <button type="button" onClick={onOpenBacktestModal} style={btnGreen()}><FlaskConical size={13} /> Backtest</button>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 7, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select value={universe} onChange={(e) => onUniverseChange && onUniverseChange(e.target.value)} style={sel} title="Exchange universe">
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <select value={universe} onChange={(e) => onUniverseChange && onUniverseChange(e.target.value)} title="Exchange universe" style={input({ height: 28, padding: '0 8px' })}>
           {universes.map((u) => <option key={u} value={u}>{u}</option>)}
         </select>
-        <select value="Equity" disabled style={{ ...sel, opacity: 0.7 }} title="Asset class"><option>Equity</option></select>
-        <input value={search} onChange={(e) => onSearch && onSearch(e.target.value)} placeholder="Search Symbol / Company" style={{ ...sel, minWidth: 190 }} />
-        <select value={refreshMode} onChange={(e) => onRefreshMode && onRefreshMode(e.target.value)} style={sel} title="Auto refresh">
+        {/* No search box here — the results toolbar (next to "Rank by" and the
+            match counter) owns the single search input; two inputs bound to the
+            same state were confusing and could drift out of sync. */}
+        <select value={refreshMode} onChange={(e) => onRefreshMode && onRefreshMode(e.target.value)} title="Auto refresh" style={input({ height: 28, padding: '0 8px' })}>
           {REFRESH_OPTIONS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
         </select>
-        <button type="button" onClick={onRefresh} disabled={loading} style={btn(false)}>{loading ? 'Scanning…' : 'Refresh'}</button>
+        <button type="button" onClick={onRefresh} disabled={loading} style={btn(false, { opacity: loading ? 0.6 : 1 })}>{loading ? 'Scanning…' : 'Refresh'}</button>
       </div>
     </div>
   );
 }
-
-const btn = (active) => ({ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 8, background: active ? 'rgba(99,102,241,0.25)' : 'rgba(255,255,255,0.04)', color: active ? '#A5B4FC' : '#CBD5E1', border: active ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.08)', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 700 });
-const greenBtn = { display: 'flex', alignItems: 'center', gap: 5, padding: '6px 13px', borderRadius: 8, background: 'linear-gradient(135deg, #10B981, #059669)', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 800 };
-const sel = { background: '#060913', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, padding: '5px 9px', color: '#F1F5F9', fontSize: '0.7rem', outline: 'none' };

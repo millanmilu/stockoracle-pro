@@ -119,33 +119,62 @@ def get_task_status_endpoint(task_id: str):
 @router.get("/stock/{ticker}/backtest")
 def get_stock_backtest(
     ticker: str,
+    strategy: str = "ai_ensemble",
     initial_capital: float = 100000.0,
+    position_size_pct: float = 100.0,
     entry_threshold: float = 0.015,
     stop_loss: float = 0.04,
     take_profit: float = 0.08,
+    trailing_stop_pct: float = 0.0,
     bearish_exit_threshold: float = -0.01,
     train_test_split: float = 0.70,
     max_holding_days: int = 20,
+    fast_period: int = 9,
+    slow_period: int = 21,
+    rsi_oversold: float = 30.0,
+    rsi_overbought: float = 70.0,
+    atr_multiplier: float = 2.0,
+    slippage_bps: float = 10.0,
+    commission_bps: float = 5.0,
 ):
     """
-    Runs an out-of-sample walk-forward backtest on the trained XGBoost ensemble.
-    All strategy parameters are configurable. No look-ahead bias.
+    Runs an institutional out-of-sample walk-forward backtest across 6 quantitative strategies.
+    Supports AI ML Ensemble, EMA Golden Cross, RSI+BB Mean Reversion, 20D Breakout, MACD, and Supertrend.
+    All risk & execution parameters are configurable with zero look-ahead bias.
     """
     t = ticker.upper().strip()
-    df = fetch_stock_data(t, period="2Y")
-    if df is None or len(df) < 80:
-        raise HTTPException(status_code=404, detail=f"Insufficient history for '{t}'.")
+    df = fetch_stock_data(t, period="ALL")
+    if df is None or len(df) < 60:
+        from backend.data.database import get_historical_prices
+        df = get_historical_prices(t)
+
+    if df is None or len(df) < 60:
+        raise HTTPException(status_code=404, detail=f"Insufficient history for '{t}'. Need ≥ 60 trading days.")
+
     require_real_data(df, t, "backtest")
-    return run_backtest(
+    res = run_backtest(
         df, t,
+        strategy=strategy,
         initial_capital=initial_capital,
+        position_size_pct=position_size_pct,
         entry_threshold=entry_threshold,
         stop_loss=stop_loss,
         take_profit=take_profit,
+        trailing_stop_pct=trailing_stop_pct,
         bearish_exit_threshold=bearish_exit_threshold,
         train_test_split=train_test_split,
         max_holding_days=max_holding_days,
+        fast_period=fast_period,
+        slow_period=slow_period,
+        rsi_oversold=rsi_oversold,
+        rsi_overbought=rsi_overbought,
+        atr_multiplier=atr_multiplier,
+        slippage_bps=slippage_bps,
+        commission_bps=commission_bps,
     )
+    if "error" in res:
+        raise HTTPException(status_code=400, detail=res["error"])
+    return res
 
 
 

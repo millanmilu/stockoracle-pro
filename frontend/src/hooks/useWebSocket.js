@@ -177,15 +177,34 @@ export function useWebSocket(onMessage) {
       vol: 0,
     };
 
+    // Binance edge/endpooint fallbacks: some networks/ISPs block :9443 or a
+    // specific edge POP. Rotate on failed attempts. The backend WS keeps
+    // ~1Hz crypto ticks flowing meanwhile, so the chart never goes stale.
+    const streams = `${binanceStreamSym}@ticker/${binanceStreamSym}@kline_${bInterval}/${binanceStreamSym}@aggTrade`;
+    const cryptoWsUrls = [
+      `wss://stream.binance.com:9443/stream?streams=${streams}`,
+      `wss://stream.binance.com:443/stream?streams=${streams}`,
+      `wss://data-stream.binance.vision/stream?streams=${streams}`,
+    ];
+    let urlIdx = 0;
+    let backoffMs = 2000;
+    const BACKOFF_MAX = 30000;
+
     const connectCryptoWs = () => {
       if (!active) return;
       try {
-        const streamUrl = `wss://stream.binance.com:9443/stream?streams=${binanceStreamSym}@ticker/${binanceStreamSym}@kline_${bInterval}/${binanceStreamSym}@aggTrade`;
+        const streamUrl = cryptoWsUrls[urlIdx % cryptoWsUrls.length];
+        let didOpen = false;
+        let gotMessage = false;
         ws = new WebSocket(streamUrl);
         cryptoWsRef.current = ws;
 
+        ws.onopen = () => { didOpen = true; };
+
         ws.onmessage = (e) => {
           if (!active) return;
+          // Healthy stream: reset backoff so the next failure retries fast.
+          if (!gotMessage) { gotMessage = true; backoffMs = 2000; }
           try {
             const msg = JSON.parse(e.data);
             const stream = msg.stream || '';
@@ -298,7 +317,13 @@ export function useWebSocket(onMessage) {
 
         ws.onclose = () => {
           if (active) {
-            reconnectTimer = setTimeout(connectCryptoWs, 3000);
+            // Never established (browser: "closed before the connection is
+            // established") → rotate to the next endpoint/edge.
+            if (!didOpen) urlIdx += 1;
+            const jitter = Math.random() * 1000;
+            const wait = Math.min(backoffMs + jitter, BACKOFF_MAX);
+            backoffMs = Math.min(backoffMs * 1.6, BACKOFF_MAX);
+            reconnectTimer = setTimeout(connectCryptoWs, wait);
           }
         };
       } catch (_) {}

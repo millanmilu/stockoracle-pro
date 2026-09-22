@@ -15,6 +15,15 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
   const [indices, setIndices] = useState([]);
   const [tapeUnavailable, setTapeUnavailable] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  // Mobile layout (<=640px): badge + marquee collapse, search goes fluid.
+  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 640);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)');
+    const onChange = (e) => setIsMobile(e.matches);
+    setIsMobile(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   // Search state
   const [query, setQuery] = useState('');
@@ -125,14 +134,15 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
       `}</style>
 
       {/* Left: Brand + Active Symbol + Quick Search */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, position: 'relative', zIndex: 110 }}>
-        <button onClick={onToggleSidebar} style={{ background: 'transparent', border: 'none', color: tk.topbarMuted, cursor: 'pointer', display: 'flex', padding: 2 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 10, flexShrink: 1, minWidth: 0, position: 'relative', zIndex: 110 }}>
+        <button onClick={onToggleSidebar} style={{ background: 'transparent', border: 'none', color: tk.topbarMuted, cursor: 'pointer', display: 'flex', padding: 2, flexShrink: 0 }}>
           <Menu size={18} />
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 800, fontSize: '0.88rem', color: tk.topbarText, letterSpacing: '-0.01em' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 800, fontSize: '0.88rem', color: tk.topbarText, letterSpacing: '-0.01em', flexShrink: 0 }}>
           <Zap size={16} color="#6366F1" fill="#6366F1" />
-          <span>StockOracle Pro</span>
+          {!isMobile && <span>StockOracle Pro</span>}
         </div>
+        {!isMobile && (
         <div style={{
           background: isGoldSymbol(selectedSymbol) ? 'rgba(250,204,21,0.14)' : (isCryptoSymbol(selectedSymbol) ? 'rgba(245,158,11,0.14)' : 'rgba(99,102,241,0.14)'),
           border: `1px solid ${isGoldSymbol(selectedSymbol) ? 'rgba(250,204,21,0.35)' : (isCryptoSymbol(selectedSymbol) ? 'rgba(245,158,11,0.35)' : 'rgba(99,102,241,0.3)')}`,
@@ -141,13 +151,15 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
           fontSize: '0.66rem',
           color: isGoldSymbol(selectedSymbol) ? '#FACC15' : (isCryptoSymbol(selectedSymbol) ? '#F59E0B' : '#818CF8'),
           fontWeight: 800,
-          fontFamily: 'JetBrains Mono, monospace'
+          fontFamily: 'JetBrains Mono, monospace',
+          flexShrink: 0
         }}>
           {isGoldSymbol(selectedSymbol) ? 'COM:XAUUSD' : (isCryptoSymbol(selectedSymbol) ? `CRYPTO:${selectedSymbol}` : `NSE:${selectedSymbol}`)}
         </div>
+        )}
 
-        {/* Compact Search Input */}
-        <div style={{ position: 'relative', width: 145 }} ref={searchRef}>
+        {/* Compact Search Input — fluid on mobile so it never gets pushed out */}
+        <div style={{ position: 'relative', width: isMobile ? undefined : 145, flex: isMobile ? '1 1 auto' : undefined, minWidth: 0 }} ref={searchRef}>
           <Search size={11} style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)', color: tk.topbarMuted }} />
           <input
             type="text"
@@ -161,7 +173,7 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
               position: 'absolute',
               top: 'calc(100% + 5px)',
               left: 0,
-              width: 240,
+              width: 'min(240px, 70vw)',
               background: tk.searchResultsBg,
               border: '1px solid rgba(99,102,241,0.3)',
               borderRadius: 8,
@@ -213,8 +225,9 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
         </div>
       </div>
 
-      {/* Center: Infinite Seamless Running Marquee Ticker */}
-      <div style={{ flex: 1, overflow: 'hidden', position: 'relative', height: '100%', display: 'flex', alignItems: 'center', margin: '0 8px' }}>
+      {/* Center: Infinite Seamless Running Marquee Ticker (hidden on mobile to protect search) */}
+      {!isMobile && (
+      <div style={{ flex: 1, overflow: 'hidden', position: 'relative', height: '100%', display: 'flex', alignItems: 'center', margin: '0 8px', minWidth: 0 }}>
         {/* Subtle Fade Edges */}
         <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 20, background: `linear-gradient(90deg, ${tk.topbarBg}, transparent)`, zIndex: 2, pointerEvents: 'none' }} />
         <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 20, background: `linear-gradient(270deg, ${tk.topbarBg}, transparent)`, zIndex: 2, pointerEvents: 'none' }} />
@@ -281,17 +294,21 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
           </div>
         )}
       </div>
+      )}
 
 
-      {/* Right: Actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, position: 'relative', zIndex: 110 }}>
+      {/* Right: Actions (Watchlist toggle hidden on mobile — panel is display:none there) */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 8, flexShrink: 0, position: 'relative', zIndex: 110 }}>
         <ThemeToggle />
+        {!isMobile && (
         <button onClick={toggleFullscreen} title="Toggle fullscreen" style={{ background: 'transparent', border: 'none', color: tk.topbarMuted, cursor: 'pointer', display: 'flex', padding: 3 }}>
           {isFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
         </button>
+        )}
         <button onClick={onOpenCommandPalette} style={{ background: tk.inputBg, border: `1px solid ${tk.inputBorder}`, padding: '3px 7px', borderRadius: 4, color: tk.topbarMuted, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.68rem' }}>
-          <Search size={11} /> ⌘K
+          <Search size={11} /> {!isMobile && '⌘K'}
         </button>
+        {!isMobile && (
         <button
           onClick={onToggleRight}
           title="Toggle Watchlist & AI Copilot"
@@ -311,6 +328,7 @@ export default function ProTopBar({ onToggleSidebar, onToggleRight, onOpenComman
         >
           <Bookmark size={12} /> Watchlist
         </button>
+        )}
       </div>
     </div>
   );

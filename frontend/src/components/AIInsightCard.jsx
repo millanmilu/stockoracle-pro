@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import useStore from '../store/useStore';
 import api from '../utils/api';
 import { Sparkles } from 'lucide-react';
@@ -8,11 +8,75 @@ export default function AIInsightCard() {
   const selectedSymbol = useStore(s => s.selectedSymbol);
   const predictionData = useStore(s => s.predictionData);
   const setPredictionData = useStore(s => s.setPredictionData);
+  const setTrainingStatus = useStore(s => s.setTrainingStatus);
   const [explainData, setExplainData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState(null);
   const [aiExplanation, setAiExplanation] = useState(null);
   const [explanationLoading, setExplanationLoading] = useState(false);
+  const [training, setTraining] = useState(false);
+  const [trainMsg, setTrainMsg] = useState(null);
+  const trainTimerRef = useRef(null);
+
+  const stopTrainPolling = () => {
+    if (trainTimerRef.current) {
+      clearInterval(trainTimerRef.current);
+      trainTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => () => { stopTrainPolling(); }, []);
+
+  const refetchExplain = async () => {
+    try {
+      const expRes = await api.get(`/api/stock/${selectedSymbol}/explain`);
+      if (expRes.data && typeof expRes.data === 'object' && !expRes.data.detail) {
+        setExplainData(expRes.data);
+      } else {
+        setExplainData({});
+      }
+    } catch {
+      setExplainData({});
+    }
+  };
+
+  const handleTrainModel = async () => {
+    if (training) return;
+    stopTrainPolling();
+    setTraining(true);
+    setTrainMsg(null);
+    try {
+      const { data } = await api.post(`/api/train/${selectedSymbol}`);
+      const taskId = data?.task_id;
+      if (!taskId) throw new Error('Training did not return a task id.');
+      setTrainingStatus({ ticker: selectedSymbol, progress: 0 });
+      trainTimerRef.current = setInterval(async () => {
+        try {
+          const { data: st } = await api.get(`/api/task/${taskId}/status`);
+          setTrainingStatus({ ticker: selectedSymbol, progress: st?.progress ?? 0 });
+          if (st?.status === 'completed') {
+            stopTrainPolling();
+            setTraining(false);
+            setTrainingStatus(null);
+            setTrainMsg(`Model trained${st?.mape != null ? ` (MAPE ${Number(st.mape).toFixed(2)}%)` : ''} — loading drivers…`);
+            await refetchExplain();
+            setTrainMsg(null);
+          } else if (st?.status === 'failed') {
+            stopTrainPolling();
+            setTraining(false);
+            setTrainingStatus(null);
+            setTrainMsg(st?.error || 'Training failed. Retry once — needs 100+ days of history.');
+          }
+        } catch {
+          // Keep polling; a single status miss is not fatal.
+        }
+      }, 3000);
+    } catch (err) {
+      console.error('Training start failed', err);
+      setTraining(false);
+      setTrainMsg(err.response?.data?.detail || 'Could not start training for this stock.');
+    }
+  };
 
   const fetchInsights = async () => {
     setLoading(true);
@@ -49,6 +113,10 @@ export default function AIInsightCard() {
   };
 
   useEffect(() => {
+    stopTrainPolling();
+    setTraining(false);
+    setTrainMsg(null);
+    setTrainingStatus(null);
     fetchInsights();
   }, [selectedSymbol]);
 
@@ -141,8 +209,30 @@ export default function AIInsightCard() {
                 );
               })
           ) : (
-            <div style={{ fontSize: '0.78rem', color: '#64748B', fontStyle: 'italic', padding: '8px 0' }}>
-              No trained XGBoost model found for {selectedSymbol}. Train via Model Manager to evaluate feature attribution.
+            <div style={{ fontSize: '0.78rem', color: '#64748B', padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <span style={{ fontStyle: 'italic' }}>
+                No trained XGBoost model found for {selectedSymbol} — price forecast above uses the statistical fallback.
+              </span>
+              <div>
+                <button
+                  onClick={handleTrainModel}
+                  disabled={training}
+                  style={{
+                    padding: '6px 14px', borderRadius: '6px',
+                    background: training ? '#334155' : '#0ea5e9',
+                    color: '#fff', border: 'none',
+                    cursor: training ? 'default' : 'pointer',
+                    fontSize: '0.78rem', fontWeight: 700,
+                  }}
+                >
+                  {training ? 'Training…' : 'Train XGBoost Model'}
+                </button>
+              </div>
+              {trainMsg && (
+                <span style={{ fontSize: '0.75rem', color: trainMsg.startsWith('Model trained') ? '#34D399' : '#F87171' }}>
+                  {trainMsg}
+                </span>
+              )}
             </div>
           )}
         </div>

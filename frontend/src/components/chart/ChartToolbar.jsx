@@ -1,11 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Activity, BarChart2, Check, ChevronDown, ChevronRight, Fullscreen, Maximize2,
-  PenTool, RotateCcw, Settings, SlidersHorizontal, Zap,
+  Activity, BarChart2, Check, ChevronDown, ChevronRight, Fullscreen, History, Maximize2,
+  PenTool, RotateCcw, Settings, SlidersHorizontal, Zap, Wallet,
 } from 'lucide-react';
 import { DRAWING_TOOL_GROUPS, getToolSpec } from '../chart-tools/drawingToolCatalog';
 import SymbolSearchModal from '../chart-tools/SymbolSearchModal';
-import { isGoldSymbol, isCryptoSymbol } from '../../utils/chartHelpers';
+import { isGoldSymbol, isCryptoSymbol, isSupportedInterval } from '../../utils/chartHelpers';
 import api from '../../utils/api';
 import useStore from '../../store/useStore';
 import { getThemeTokens } from '../../utils/theme';
@@ -19,19 +19,21 @@ const CHART_TYPES = [
   { id: 'baseline', label: 'Baseline' },
 ];
 
+// Only intervals the backend serves (anything else 422s and blanks the chart
+// into a dead empty state). 3m/2h/1w/1M stay hidden until backend + bucket
+// math support them.
 const TIMEFRAME_OPTIONS = [
   { label: '1m', value: '1m' },
-  { label: '3m', value: '3m' },
   { label: '5m', value: '5m' },
   { label: '15m', value: '15m' },
   { label: '30m', value: '30m' },
   { label: '1H', value: '1h' },
-  { label: '2H', value: '2h' },
   { label: '4H', value: '4h' },
   { label: '1D', value: '1d' },
-  { label: '1W', value: '1w' },
-  { label: '1M', value: '1M' },
 ];
+
+export { TIMEFRAME_OPTIONS };
+export const isIntervalSupported = isSupportedInterval;
 
 const drawGroupHeader = { padding: '6px 9px 3px', color: '#475569', fontSize: 9, fontWeight: 800, letterSpacing: '0.08em' };
 
@@ -56,6 +58,10 @@ export default function ChartToolbar({
   onPriceScaleModeChange = () => {}, showDrawingTools = true, onToggleDrawingTools = () => {}, onOpenSettings = () => {},
   activeDrawingTool = 'crosshair', onSelectDrawingTool = () => {},
   showVolume = true, onToggleVolume = () => {}, isMobile = false, isTablet = false,
+  isReplaying = false, onToggleReplay = () => {},
+  showTradeBar = true, onToggleTradeBar = () => {},
+  showTradeDocket = false, onToggleTradeDocket = () => {},
+  paperPositionCount = 0,
 }) {
   const [openMenu, setOpenMenu] = useState(null);
   const [openDrawGroup, setOpenDrawGroup] = useState(null);
@@ -112,8 +118,8 @@ export default function ChartToolbar({
   const isGold = isGoldSymbol(selectedSymbol);
   const isBtc = !isGold && isCrypto;
   const currSym = isCrypto ? '$' : '₹';
-  const liveState = isLive ? 'LIVE' : (wsConnected ? 'RECONNECTING' : 'OFFLINE');
-  const liveColor = isLive ? '#059669' : (wsConnected ? '#D97706' : tk.toolbarMuted);
+  const liveState = isReplaying ? 'REPLAY' : (isLive ? 'LIVE' : (wsConnected ? 'RECONNECTING' : 'OFFLINE'));
+  const liveColor = isReplaying ? '#EF5350' : (isLive ? '#059669' : (wsConnected ? '#D97706' : tk.toolbarMuted));
   const formatPrice = value => value == null || Number.isNaN(Number(value)) ? '—' : Number(value).toLocaleString(isCrypto ? 'en-US' : 'en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const drawToolLabel = getToolSpec(activeDrawingTool)?.label || 'Draw';
 
@@ -193,8 +199,11 @@ export default function ChartToolbar({
       })}</Menu>}</div></Group>
       <Group><span style={sectionLabel}>SCALE</span>{['normal', 'log', 'percentage'].map(mode => <button key={mode} type="button" onClick={() => onPriceScaleModeChange(mode)} title={`${mode === 'normal' ? 'Auto' : mode === 'percentage' ? 'Percentage' : 'Logarithmic'} scale`} style={{ ...chipButton, background: priceScaleMode === mode ? 'rgba(2,132,199,0.14)' : 'transparent', color: priceScaleMode === mode ? tk.toolbarActive : tk.toolbarMuted, fontWeight: 700 }}>{mode === 'normal' ? 'Auto' : mode === 'percentage' ? '%' : 'Log'}</button>)}</Group>
       <button type="button" onClick={onToggleVolume} title={showVolume ? 'Hide volume panel' : 'Show volume panel'} aria-label={showVolume ? 'Hide volume panel' : 'Show volume panel'} style={{ ...compactButton, color: showVolume ? tk.toolbarActive : tk.toolbarMuted, background: showVolume ? 'rgba(56,189,248,0.14)' : 'transparent', fontWeight: showVolume ? 700 : 400 }}><BarChart2 size={14} />{!isMobile && 'Volume'}</button>
+      <button type="button" onClick={onToggleReplay} title="Bar Replay — step through history bar by bar (Alt+R)" aria-label="Bar Replay" style={{ ...compactButton, color: isReplaying ? '#EF5350' : tk.toolbarMuted, background: isReplaying ? 'rgba(239,83,80,0.14)' : 'transparent', fontWeight: isReplaying ? 700 : 400 }}><History size={14} />{!isMobile && 'Replay'}</button>
+      <button type="button" onClick={onToggleTradeBar} title="Live Paper Trade Bar on Chart" aria-label="Paper Trade Bar" style={{ ...compactButton, color: showTradeBar ? '#10B981' : tk.toolbarMuted, background: showTradeBar ? 'rgba(16,185,129,0.14)' : 'transparent', fontWeight: showTradeBar ? 800 : 400 }}><Zap size={14} />{!isMobile && 'Trade'}</button>
+      <button type="button" onClick={onToggleTradeDocket} title="Paper Positions & Trade History Panel" aria-label="Paper Positions Panel" style={{ ...compactButton, color: showTradeDocket ? '#818CF8' : tk.toolbarMuted, background: showTradeDocket ? 'rgba(99,102,241,0.14)' : 'transparent', fontWeight: showTradeDocket ? 800 : 400 }}><Wallet size={14} />{!isMobile && 'Panel'}{paperPositionCount > 0 && <span style={{ ...countBadge, background: '#10B981', color: '#FFFFFF' }}>{paperPositionCount}</span>}</button>
       {isMobile && <button type="button" onClick={() => setOpenMenu(openMenu === 'more' ? null : 'more')} title="More chart controls" aria-label="More chart controls" style={{ ...themedIconButton(tk), marginLeft: 'auto' }}><SlidersHorizontal size={15} /></button>}
-      {openMenu === 'more' && <Menu align="right"><MenuItem onClick={onOpenIndicators} icon={<Activity size={14} />}>Indicators {activeIndicatorCount > 0 && `(${activeIndicatorCount})`}</MenuItem><MenuItem onClick={onOpenSettings} icon={<Settings size={14} />}>Chart Settings</MenuItem><MenuItem onClick={onResetZoom} icon={<RotateCcw size={14} />}>Focus latest candles</MenuItem></Menu>}
+      {openMenu === 'more' && <Menu align="right"><MenuItem onClick={onOpenIndicators} icon={<Activity size={14} />}>Indicators {activeIndicatorCount > 0 && `(${activeIndicatorCount})`}</MenuItem><MenuItem onClick={onToggleTradeBar} icon={<Zap size={14} />}>Toggle Trade Bar</MenuItem><MenuItem onClick={onToggleTradeDocket} icon={<Wallet size={14} />}>Paper Trading Panel</MenuItem><MenuItem onClick={onOpenSettings} icon={<Settings size={14} />}>Chart Settings</MenuItem><MenuItem onClick={onResetZoom} icon={<RotateCcw size={14} />}>Focus latest candles</MenuItem></Menu>}
     </div>
   </div>;
 }

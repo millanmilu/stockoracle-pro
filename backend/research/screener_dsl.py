@@ -231,6 +231,32 @@ class ScreenerQueryParser:
             raise ValueError(f"Unknown metric or field '{ident_tok[1]}'. Whitelisted metrics: {', '.join(sorted(set(FIELD_MAP.keys()))[:15])}...")
 
         sql_col = FIELD_MAP[raw_field]
+
+        # Data-availability predicate: `FIELD IS NULL` / `FIELD IS NOT NULL`.
+        # Lets users explicitly find stocks missing a metric (e.g. small-caps
+        # without scraped fundamentals) instead of those rows silently
+        # vanishing from every numeric filter (SQL NULL comparisons never match).
+        nxt = self.peek()
+        if nxt and nxt[0] == "IDENT" and str(nxt[1]).upper() == "IS":
+            self.consume("IDENT")
+            neg = False
+            peek2 = self.peek()
+            if peek2 and peek2[0] == "LOGIC" and peek2[1] == "NOT":
+                self.consume("LOGIC")
+                neg = True
+            null_tok = self.peek()
+            if not null_tok or null_tok[0] != "IDENT" or str(null_tok[1]).upper() != "NULL":
+                raise ValueError(f"Expected NULL after 'IS{' NOT' if neg else ''}' for field '{ident_tok[1]}'")
+            self.consume("IDENT")
+            op = "IS NOT NULL" if neg else "IS NULL"
+            return f"{sql_col} {op}", {
+                "type": "COMPARISON",
+                "field": raw_field,
+                "column": sql_col,
+                "operator": op,
+                "value": None,
+            }
+
         op_tok = self.consume("OP")
         op = op_tok[1]
         val_tok = self.peek()

@@ -1,12 +1,17 @@
 import React, { useEffect, useRef, useImperativeHandle, forwardRef, useCallback, useMemo } from 'react';
-import { createChart, CrosshairMode, PriceScaleMode } from 'lightweight-charts';
+import { CrosshairMode, PriceScaleMode, LineStyle } from 'lightweight-charts';
+import { safeCreateChart } from '../../utils/safeChart';
 import { Eye, EyeOff, X } from 'lucide-react';
-import { CHART_OPTIONS, CANDLE_STYLE, isCryptoSymbol } from '../../utils/chartHelpers';
+import { CHART_OPTIONS, CANDLE_STYLE, isCryptoSymbol, sanitizeCandles, sanitizeSeriesData, compareChartTime } from '../../utils/chartHelpers';
+import '../../utils/aiIndicatorEngine.js';
+import { getAISupportResistance, getAIBreakoutMarkers, getAIReversalMarkers, getAIPatternMarkers } from '../../utils/aiIndicatorEngine.js';
 import { getChartBaseOptions, getThemeTokens, applyChartTheme } from '../../utils/theme';
 import useStore from '../../store/useStore';
 import { INDICATOR_DEFINITIONS } from './indicatorDefinitions';
 import { calculateById } from '../../utils/indicatorEngine';
+import { getEngineFallbackId } from './indicatorSettingsSchema';
 import { detectSMC } from '../../utils/marketStructure';
+import { analyzeSignal } from '../../utils/aiSignalEngine';
 
 /**
  * Format volume into readable K / L / Cr
@@ -17,6 +22,19 @@ function formatVolume(vol) {
   if (vol >= 100000) return `${(vol / 100000).toFixed(2)}L`;
   if (vol >= 1000) return `${(vol / 1000).toFixed(1)}K`;
   return vol.toLocaleString();
+}
+
+/**
+ * Decimals for price display (axis labels + OHLC legend), TradingView-style:
+ * large prices drop the noisy decimals (88125 not 88125.00), small coins
+ * keep them (0.15 stays 0.15). Equities are always whole rupees.
+ */
+function decimalsForPrice(value, isCrypto) {
+  if (!isCrypto) return 0;
+  const a = Math.abs(Number(value) || 0);
+  if (a >= 1000) return 0;
+  if (a >= 100) return 1;
+  return 2;
 }
 
 /**
@@ -79,25 +97,42 @@ function formatIndicatorValue(def, candle, currSym = '₹', engineValue = null) 
 }
 
 /**
- * Resolve the display data for a single overlay indicator. Prefers server
- * computed fields when present; otherwise computes the series client-side
- * from the modular engine (`engineId`).
+ * Resolve the display data for a single overlay indicator. When the user has
+ * overridden inputs (TradingView Inputs tab), the client engine wins over the
+ * stale server field so custom periods actually recompute; otherwise the
+ * server field is preferred for speed.
  */
 function resolveOverlayData(def, candles) {
+  const hasCustomInputs = def.params && Object.keys(def.params).length > 0;
+  if (def.engineId && hasCustomInputs) {
+    const result = calculateById(def.engineId, candles, def.params || {});
+    if (result.valid && result.points) {
+      const arr = result.points.main || result.points;
+      if (Array.isArray(arr)) {
+        const pts = arr
+          .filter((p) => p && p.value != null && !isNaN(Number(p.value)))
+          .map((p) => ({ time: p.time, value: Number(p.value) }));
+        if (pts.length) return sanitizeSeriesData(pts);
+      }
+    }
+    // Fall through to server field if engine yields nothing.
+  }
   const colField = def.field;
   if (colField) {
-    return candles
+    const pts = candles
       .filter((c) => c[colField] != null && !isNaN(Number(c[colField])))
       .map((c) => ({ time: c.time, value: Number(c[colField]) }));
+    if (pts.length) return sanitizeSeriesData(pts);
   }
   if (def.engineId) {
     const result = calculateById(def.engineId, candles, def.params || {});
     if (!result.valid || !result.points) return [];
     const arr = result.points.main || result.points;
     if (!Array.isArray(arr)) return [];
-    return arr
+    const pts = arr
       .filter((p) => p && p.value != null && !isNaN(Number(p.value)))
       .map((p) => ({ time: p.time, value: Number(p.value) }));
+    return sanitizeSeriesData(pts);
   }
   return [];
 }
@@ -107,7 +142,11 @@ function resolveOverlayData(def, candles) {
  * Creates primary price series based on chart type
  */
 function createPrimarySeries(chart, type, isCrypto) {
-  const minMove = isCrypto ? 0.01 : 0.05;
+  // NSE equities show rounded whole-rupee labels on the right price axis
+  // (slim axis, no decimal clutter); crypto keeps 2-decimal precision.
+  const priceFormat = isCrypto
+    ? { type: 'price', precision: 2, minMove: 0.01 }
+    : { type: 'price', precision: 0, minMove: 1 };
   if (type === 'hollow') {
     return chart.addCandlestickSeries({
       ...CANDLE_STYLE,
@@ -117,7 +156,7 @@ function createPrimarySeries(chart, type, isCrypto) {
       downColor: '#EF5350',
       borderDownColor: '#EF5350',
       wickDownColor: '#EF5350',
-      priceFormat: { type: 'price', precision: 2, minMove },
+      priceFormat,
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
@@ -129,7 +168,7 @@ function createPrimarySeries(chart, type, isCrypto) {
     return chart.addBarSeries({
       upColor: '#26A69A',
       downColor: '#EF5350',
-      priceFormat: { type: 'price', precision: 2, minMove },
+      priceFormat,
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
@@ -141,7 +180,7 @@ function createPrimarySeries(chart, type, isCrypto) {
     return chart.addLineSeries({
       color: '#38BDF8',
       lineWidth: 2,
-      priceFormat: { type: 'price', precision: 2, minMove },
+      priceFormat,
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
@@ -155,7 +194,7 @@ function createPrimarySeries(chart, type, isCrypto) {
       bottomColor: 'rgba(56, 189, 248, 0.01)',
       lineColor: '#38BDF8',
       lineWidth: 2,
-      priceFormat: { type: 'price', precision: 2, minMove },
+      priceFormat,
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
@@ -172,7 +211,7 @@ function createPrimarySeries(chart, type, isCrypto) {
       bottomLineColor: '#EF5350',
       bottomFillColor1: 'rgba(239, 83, 80, 0.05)',
       bottomFillColor2: 'rgba(239, 83, 80, 0.28)',
-      priceFormat: { type: 'price', precision: 2, minMove },
+      priceFormat,
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
@@ -182,7 +221,7 @@ function createPrimarySeries(chart, type, isCrypto) {
   // Default 'candlestick'
   return chart.addCandlestickSeries({
     ...CANDLE_STYLE,
-    priceFormat: { type: 'price', precision: 2, minMove },
+    priceFormat,
     lastValueVisible: true,
     priceLineVisible: true,
     priceLineWidth: 1,
@@ -219,6 +258,8 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   onRemoveIndicator = () => {},
   onVisibleRangeChange = () => {},
   onCrosshairMove = () => {},
+  onChartClick = () => {},
+  paperPosition = null,
 }, ref) {
   const containerRef = useRef(null);
   const chartInstanceRef = useRef(null);
@@ -226,9 +267,31 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   const syncedHairlineRef = useRef(null);
   const indicatorSeriesRef = useRef({}); // id -> series or array of series
   const smcSeriesRef = useRef({}); // id -> SMC marker/price-line series group
+  const aiZoneSeriesRef = useRef({}); // id -> AI S/R zone price-line series group
+  const aiSeriesRef = useRef({}); // id -> AI overlay series group (signal levels, S/R zones)
   const engineValueRef = useRef({}); // id -> last computed engine value (legend)
+  const paperPriceLinesRef = useRef({ entry: null, stopLoss: null, target: null });
   const chartTypeRef = useRef(chartType);
   chartTypeRef.current = chartType;
+  const intervalRef = useRef(interval);
+  intervalRef.current = interval;
+  const timezoneRef = useRef(timezone);
+  timezoneRef.current = timezone;
+  const appliedPrecisionRef = useRef(null); // last priceFormat precision pushed to the series
+
+  // Push matching priceFormat (axis labels + crosshair + last-value tag) to
+  // the primary series. No-ops unless the decimal count actually changed.
+  const syncSeriesPrecision = useCallback((dec) => {
+    const series = candleSeriesRef.current;
+    if (!series || dec == null) return;
+    if (appliedPrecisionRef.current === dec) return;
+    appliedPrecisionRef.current = dec;
+    try {
+      series.applyOptions({
+        priceFormat: { type: 'price', precision: dec, minMove: dec === 0 ? 1 : 1 / Math.pow(10, dec) },
+      });
+    } catch {}
+  }, []);
 
   // DOM refs for zero-latency legend updates without triggering React re-renders
   const openRef = useRef(null);
@@ -254,36 +317,88 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   }, [theme]);
 
 
-  // Filter active indicators to only include overlays (not oscillators which live in sub-panes),
-  // applying per-indicator parameter overrides so custom params reflect in rendering.
-  const overlayIndicators = useMemo(() => {
+  // Resolve active catalog definitions once (shared by overlays, zones, markers).
+  // TradingView parity: flat overrides split into inputs (engine params) +
+  // style (`__color`, `__lineWidth`, `__sub_{i}_color`) + visibility
+  // (`__vis_{interval} === false` hides on that timeframe).
+  const resolvedActive = useMemo(() => {
+    const normIv = String(interval || '').toLowerCase();
     return activeIndicators
       .map(id => {
         const def = INDICATOR_DEFINITIONS.find(item => item.id === id);
         if (!def) return null;
         const overrides = indicatorOverrides[id];
-        if (overrides && Object.keys(overrides).length) {
-          return { ...def, params: { ...(def.params || {}), ...overrides } };
+        if (!overrides || !Object.keys(overrides).length) return def;
+        // Visibility gate
+        for (const [k, v] of Object.entries(overrides)) {
+          if (k.toLowerCase() === `__vis_${normIv}` && v === false) return null;
         }
-        return def;
+        const inputs = {};
+        const stylePatch = {};
+        for (const [k, v] of Object.entries(overrides)) {
+          if (k.startsWith('__')) stylePatch[k] = v;
+          else inputs[k] = v;
+        }
+        let next = { ...def, params: { ...(def.params || {}), ...inputs } };
+        // Engine fallback: legacy field-based indicators recompute via the
+        // client engine when the user customized inputs (else server field).
+        if (!next.engineId && Object.keys(inputs).length) {
+          const fb = getEngineFallbackId(next.id);
+          if (fb) next = { ...next, engineId: fb };
+        }
+        if (stylePatch.__color) next = { ...next, color: stylePatch.__color };
+        if (stylePatch.__lineWidth != null) next = { ...next, lineWidth: stylePatch.__lineWidth };
+        if (stylePatch.__lineStyle != null) next = { ...next, lineStyle: stylePatch.__lineStyle };
+        const subKeys = Object.keys(stylePatch).filter((k) => k.startsWith('__sub_'));
+        if (subKeys.length && (next.subLines || next.levels)) {
+          const applySubs = (list) => list.map((sub, i) => {
+            const c = stylePatch[`__sub_${i}_color`];
+            return c ? { ...sub, color: c } : sub;
+          });
+          if (next.subLines) next = { ...next, subLines: applySubs(next.subLines) };
+          if (next.levels) next = { ...next, levels: applySubs(next.levels) };
+        }
+        return next;
       })
-      .filter(item => item && !['oscillator', 'smc', 'ai', 'custom'].includes(item.type));
-  }, [activeIndicators, indicatorOverrides]);
+      .filter(Boolean);
+  }, [activeIndicators, indicatorOverrides, interval]);
+
+  // Filter active indicators to only include overlays (not oscillators which live in sub-panes),
+  // applying per-indicator parameter overrides so custom params reflect in rendering.
+  // Advanced AI forecast bands render here too (price-scale by construction).
+  // The volume profile (type 'profile') renders through its own canvas overlay
+  // in LiveChartView — excluded here so no line series is created for it.
+  const overlayIndicators = useMemo(() => {
+    return resolvedActive
+      .filter(item => (!['oscillator', 'smc', 'ai', 'custom', 'profile'].includes(item.type))
+        || (item.type === 'ai' && item.aiOverlay === 'bands'));
+  }, [resolvedActive]);
 
   // Market Structure / SMC overlays are rendered separately from the price legend.
   const smcIndicators = useMemo(() => {
-    return activeIndicators
-      .map(id => {
-        const def = INDICATOR_DEFINITIONS.find(item => item.id === id);
-        if (!def) return null;
-        const overrides = indicatorOverrides[id];
-        if (overrides && Object.keys(overrides).length) {
-          return { ...def, params: { ...(def.params || {}), ...overrides } };
-        }
-        return def;
-      })
-      .filter(item => item && item.type === 'smc');
-  }, [activeIndicators, indicatorOverrides]);
+    return resolvedActive
+      .filter(item => item.type === 'smc');
+  }, [resolvedActive]);
+
+  // Advanced AI overlays: zones (S/R lines) and markers (breakout/reversal/pattern).
+  // ai_reversal lives in an oscillator sub-pane but still contributes EXH markers.
+  const aiZoneIndicators = useMemo(() => {
+    return resolvedActive
+      .filter(item => item.type === 'ai' && item.aiOverlay === 'zones');
+  }, [resolvedActive]);
+  const aiMarkerIndicators = useMemo(() => {
+    return resolvedActive
+      .filter(item => (item.type === 'ai' && item.aiOverlay === 'markers') || item.id === 'ai_reversal');
+  }, [resolvedActive]);
+
+  // AI indicators that draw real overlays on the price pane (defs flagged
+  // chartOverlay). Their price levels come from analyzeSignal at render time.
+  // Advanced AI studies (aiOverlay line/bands/zones/markers) render through
+  // their own engine-backed layers below — excluded here to avoid doubles.
+  const aiOverlays = useMemo(() => {
+    return resolvedActive
+      .filter(item => item.type === 'ai' && item.chartOverlay && !item.aiOverlay);
+  }, [resolvedActive]);
 
   // Update top-left legend in DOM at 0ms latency
   const isCrypto = isCryptoSymbol(selectedSymbol);
@@ -296,18 +411,19 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     const l = Number(candle.low);
     const c = Number(candle.close);
     const v = Number(candle.volume || 0);
+    const dec = decimalsForPrice(c, isCrypto);
 
-    if (openRef.current && !isNaN(o)) openRef.current.textContent = `${currSym}${o.toFixed(2)}`;
-    if (highRef.current && !isNaN(h)) highRef.current.textContent = `${currSym}${h.toFixed(2)}`;
-    if (lowRef.current && !isNaN(l)) lowRef.current.textContent = `${currSym}${l.toFixed(2)}`;
-    if (closeRef.current && !isNaN(c)) closeRef.current.textContent = `${currSym}${c.toFixed(2)}`;
+    if (openRef.current && !isNaN(o)) openRef.current.textContent = `${currSym}${o.toFixed(dec)}`;
+    if (highRef.current && !isNaN(h)) highRef.current.textContent = `${currSym}${h.toFixed(dec)}`;
+    if (lowRef.current && !isNaN(l)) lowRef.current.textContent = `${currSym}${l.toFixed(dec)}`;
+    if (closeRef.current && !isNaN(c)) closeRef.current.textContent = `${currSym}${c.toFixed(dec)}`;
 
     const diff = c - o;
     const chgPct = o > 0 ? (diff / o) * 100 : 0;
     const isUp = diff >= 0;
     const sign = isUp ? '+' : '';
     if (chgRef.current && !isNaN(diff)) {
-      chgRef.current.textContent = `${sign}${currSym}${diff.toFixed(2)} (${sign}${chgPct.toFixed(2)}%)`;
+      chgRef.current.textContent = `${sign}${currSym}${diff.toFixed(dec)} (${sign}${chgPct.toFixed(2)}%)`;
       chgRef.current.style.color = isUp ? '#26A69A' : '#EF5350';
     }
     if (volRef.current) {
@@ -330,7 +446,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         el.textContent = formatIndicatorValue(ind, candle, currSym, engineValueRef.current[ind.id]);
       }
     });
-  }, [overlayIndicators, currSym]);
+  }, [overlayIndicators, currSym, isCrypto]);
 
   // Reset legend to latest candle or active candle
   const resetLegendToLatest = useCallback(() => {
@@ -351,11 +467,13 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   crosshairMoveRef.current = onCrosshairMove;
   const visibleRangeRef = useRef(onVisibleRangeChange);
   visibleRangeRef.current = onVisibleRangeChange;
+  const chartClickRef = useRef(onChartClick);
+  chartClickRef.current = onChartClick;
 
   // Expose imperative methods to parent controller
   useImperativeHandle(ref, () => ({
     fitContent: () => {
-      if (chartInstanceRef.current) {
+      if (chartInstanceRef.current && !chartInstanceRef.current.__isDisposed) {
         try {
           const totalBars = candlesRef.current?.length || 0;
           if (totalBars > 0) {
@@ -371,7 +489,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       }
     },
     updateActiveCandle: (candle) => {
-      if (candleSeriesRef.current && candle && candle.time) {
+      if (candleSeriesRef.current && !candleSeriesRef.current.__isDisposed && candle && candle.time) {
         try {
           const lastCandle = candlesRef.current && candlesRef.current.length > 0
             ? candlesRef.current[candlesRef.current.length - 1]
@@ -418,7 +536,9 @@ const ChartCanvas = forwardRef(function ChartCanvas({
               candlesRef.current.push({ ...candle, open: o, high: h, low: l, close: c });
               if (!isHoveringRef.current) {
                 try {
-                  chartInstanceRef.current?.timeScale().scrollToRealtime();
+                  if (chartInstanceRef.current && !chartInstanceRef.current.__isDisposed) {
+                    chartInstanceRef.current.timeScale().scrollToRealtime();
+                  }
                 } catch {}
               }
             } else if (lastIdx < 0) {
@@ -434,7 +554,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       }
     },
     setVisibleLogicalRange: (range) => {
-      if (chartInstanceRef.current && range) {
+      if (chartInstanceRef.current && !chartInstanceRef.current.__isDisposed && range) {
         try {
           chartInstanceRef.current.timeScale().setVisibleLogicalRange(range);
         } catch {}
@@ -462,10 +582,10 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         resetLegendToLatest();
       }
     },
-    getChart: () => chartInstanceRef.current,
-    getCandleSeries: () => candleSeriesRef.current,
+    getChart: () => (chartInstanceRef.current && !chartInstanceRef.current.__isDisposed ? chartInstanceRef.current : null),
+    getCandleSeries: () => (candleSeriesRef.current && !candleSeriesRef.current.__isDisposed ? candleSeriesRef.current : null),
     getPriceCoordinate: (price) => {
-      if (!candleSeriesRef.current || price == null) return null;
+      if (!candleSeriesRef.current || candleSeriesRef.current.__isDisposed || price == null) return null;
       try {
         return candleSeriesRef.current.priceToCoordinate(Number(price));
       } catch {
@@ -483,11 +603,13 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   // 1. Initialize Lightweight Charts instance
   useEffect(() => {
     if (!containerRef.current) return;
+    let disposed = false;
+    let fitRaf = null;
 
     containerRef.current.innerHTML = '';
 
     const themeOpts = getChartBaseOptions(theme);
-    const chart = createChart(containerRef.current, {
+    const chart = safeCreateChart(containerRef.current, {
       ...CHART_OPTIONS,
       ...themeOpts,
       rightPriceScale: { ...CHART_OPTIONS.rightPriceScale, ...themeOpts.rightPriceScale },
@@ -511,11 +633,11 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       timeScale: {
         ...CHART_OPTIONS.timeScale,
         ...themeOpts.timeScale,
-        timeVisible: interval !== '1d',
-        secondsVisible: interval === '1s' || interval === '30s',
+        timeVisible: intervalRef.current !== '1d',
+        secondsVisible: intervalRef.current === '1s' || intervalRef.current === '30s',
         tickMarkFormatter: (time) => {
           if (typeof time === 'number') {
-            const tz = timezone || 'Asia/Kolkata';
+            const tz = timezoneRef.current || 'Asia/Kolkata';
             const d = new Date(time * 1000);
             return d.toLocaleTimeString('en-IN', {
               timeZone: tz,
@@ -531,13 +653,14 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         dateFormat: 'yyyy-MM-dd',
         timeFormatter: (time) => {
           if (typeof time === 'number') {
-            const tz = timezone || 'Asia/Kolkata';
+            const tz = timezoneRef.current || 'Asia/Kolkata';
             const d = new Date(time * 1000);
+            const curIv = intervalRef.current;
             return d.toLocaleTimeString('en-IN', {
               timeZone: tz,
               hour: '2-digit',
               minute: '2-digit',
-              second: (interval === '1s' || interval === '30s') ? '2-digit' : undefined,
+              second: (curIv === '1s' || curIv === '30s') ? '2-digit' : undefined,
               hour12: false,
             });
           }
@@ -596,16 +719,28 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       if (range) visibleRangeRef.current(range, 'main');
     });
 
+    // Chart Click Event (e.g. for Jump to Bar in Replay mode)
+    chart.subscribeClick((param) => {
+      if (param && param.time) {
+        chartClickRef.current?.(param);
+      }
+    });
+
     // Resize Observer
     let hasFittedInitial = false;
     const resizeObserver = new ResizeObserver((entries) => {
+      if (disposed) return;
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (width > 0 && height > 0) {
-          chart.applyOptions({ width, height });
+          try { chart.applyOptions({ width, height }); } catch { return; }
           if (!hasFittedInitial && candlesRef.current && candlesRef.current.length > 0) {
             hasFittedInitial = true;
-            requestAnimationFrame(() => {
+            if (fitRaf != null) {
+              try { cancelAnimationFrame(fitRaf); } catch {}
+            }
+            fitRaf = requestAnimationFrame(() => {
+              if (disposed || chart.__isDisposed) return;
               try {
                 const totalBars = candlesRef.current.length;
                 const visibleCount = Math.min(totalBars, 80);
@@ -622,18 +757,21 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      disposed = true;
+      if (fitRaf != null) { try { cancelAnimationFrame(fitRaf); } catch {} fitRaf = null; }
       resizeObserver.disconnect();
-      chart.remove();
+      try { chart.remove(); } catch {}
       chartInstanceRef.current = null;
       candleSeriesRef.current = null;
       indicatorSeriesRef.current = {};
       smcSeriesRef.current = {};
+      aiSeriesRef.current = {};
     };
-  }, [interval]);
+  }, []);
 
   // Update timeScale options when interval changes
   useEffect(() => {
-    if (chartInstanceRef.current) {
+    if (chartInstanceRef.current && !chartInstanceRef.current.__isDisposed) {
       try {
         chartInstanceRef.current.timeScale().applyOptions({
           timeVisible: interval !== '1d',
@@ -653,57 +791,153 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     }
 
     try {
-      const formattedCandles = candles.map((c) => ({
+      // Defense-in-depth: LiveChartView already sorts/dedupes and drops
+      // stale live buckets, but any out-of-order bar here would throw
+      // "Assertion failed: data must be asc ordered by time" and crash the
+      // app. Sanitize so setData always receives strictly ascending data.
+      const rawFormatted = candles.map((c) => ({
         time: c.time,
         open: Number(c.open),
         high: Number(c.high),
         low: Number(c.low),
         close: Number(c.close),
       }));
+      const formattedCandles = sanitizeCandles(rawFormatted);
+      if (formattedCandles.length === 0) return;
 
       if (['line', 'area', 'baseline'].includes(chartTypeRef.current)) {
-        candleSeriesRef.current.setData(candles.map(c => ({ time: c.time, value: Number(c.close) })));
+        try {
+          candleSeriesRef.current.setData(sanitizeSeriesData(
+            formattedCandles.map(c => ({ time: c.time, value: Number(c.close) }))
+          ));
+        } catch {}
       } else {
-        candleSeriesRef.current.setData(formattedCandles);
+        try {
+          candleSeriesRef.current.setData(formattedCandles);
+        } catch (e) {
+          console.warn('Error setting chart data:', e);
+        }
       }
 
-      candlesRef.current = candles.map((c, i) => ({
-        ...c,
-        time: formattedCandles[i].time,
-        open: formattedCandles[i].open,
-        high: formattedCandles[i].high,
-        low: formattedCandles[i].low,
-        close: formattedCandles[i].close,
-      }));
+      const byTime = new Map(formattedCandles.map((c) => [c.time, c]));
+      candlesRef.current = candles
+        .filter((c) => byTime.has(c.time))
+        .map((c) => {
+          const f = byTime.get(c.time);
+          return { ...c, time: f.time, open: f.open, high: f.high, low: f.low, close: f.close };
+        });
+      // Ensure the imperative cache itself stays ascending (deduped above).
+      candlesRef.current = sanitizeCandles(candlesRef.current);
 
       const totalBars = formattedCandles.length;
       const prev = candlesMetaRef.current;
+      const isSameDataset = prev.firstTime != null && formattedCandles[0].time === prev.firstTime;
       const isIncrementalAppend =
-        prev.firstTime != null &&
-        formattedCandles[0].time === prev.firstTime &&
+        isSameDataset &&
         totalBars >= prev.length &&
         totalBars - prev.length <= 2;
       candlesMetaRef.current = { firstTime: formattedCandles[0].time, length: totalBars };
-      if (!isIncrementalAppend && totalBars > 0) {
+
+      if (!isSameDataset && totalBars > 0) {
+        // Initial symbol/interval load: fit default 80 bars
         const visibleCount = Math.min(totalBars, 80);
-        chartInstanceRef.current?.timeScale().setVisibleLogicalRange({
-          from: totalBars - visibleCount,
-          to: totalBars + 4,
-        });
-        chartInstanceRef.current?.priceScale('right').applyOptions({ autoScale: true });
+        if (chartInstanceRef.current && !chartInstanceRef.current.__isDisposed) {
+          try {
+            chartInstanceRef.current.timeScale().setVisibleLogicalRange({
+              from: totalBars - visibleCount,
+              to: totalBars + 4,
+            });
+            chartInstanceRef.current.priceScale('right').applyOptions({ autoScale: true });
+          } catch {}
+        }
+      } else if (isSameDataset && chartInstanceRef.current && !chartInstanceRef.current.__isDisposed && totalBars > 0) {
+        // Same dataset (replay stepping or live ticks): preserve user's zoom span
+        try {
+          const currentRange = chartInstanceRef.current.timeScale().getVisibleLogicalRange();
+          if (currentRange) {
+            const span = Math.max(10, currentRange.to - currentRange.from);
+            // If the bar moves past the right viewport edge, smoothly follow forward
+            if (totalBars >= currentRange.to - 2) {
+              chartInstanceRef.current.timeScale().setVisibleLogicalRange({
+                from: (totalBars + 4) - span,
+                to: totalBars + 4,
+              });
+            } else if (totalBars < currentRange.from + 2) {
+              // If stepping backwards past the left edge, bring into view
+              chartInstanceRef.current.timeScale().setVisibleLogicalRange({
+                from: Math.max(0, totalBars - Math.round(span * 0.7)),
+                to: totalBars + Math.round(span * 0.3),
+              });
+            }
+          }
+        } catch (_) {}
       }
+
+      // Match axis decimals to price magnitude (BTC 88125, not 88125.00).
+      const lastClose = formattedCandles[formattedCandles.length - 1]?.close;
+      syncSeriesPrecision(decimalsForPrice(lastClose, isCrypto));
 
       // Seed initial legend values
       resetLegendRef.current();
     } catch (err) {
       console.warn('Error setting chart data:', err);
     }
-  }, [candles]);
+  }, [candles, isCrypto, syncSeriesPrecision]);
+
+  // Tab-return restore: browsers may discard the canvas bitmap while the tab
+  // is hidden, leaving a blank chart even though candle state is intact.
+  // On return, re-apply the container size and re-push the last good data.
+  useEffect(() => {
+    const restore = () => {
+      if (document.visibilityState && document.visibilityState !== 'visible') return;
+      const chart = chartInstanceRef.current;
+      const series = candleSeriesRef.current;
+      const host = containerRef.current;
+      if (!chart || chart.__isDisposed || !series || series.__isDisposed || !host) return;
+      try {
+        const w = host.clientWidth;
+        const h = host.clientHeight;
+        if (w > 0 && h > 0) {
+          if (typeof chart.resize === 'function') chart.resize(w, h);
+          else chart.applyOptions({ width: w, height: h });
+        }
+      } catch {}
+      try {
+        const rows = candlesRef.current;
+        if (Array.isArray(rows) && rows.length > 0) {
+          const safe = sanitizeCandles(rows.map((c) => ({
+            time: c.time,
+            open: Number(c.open),
+            high: Number(c.high),
+            low: Number(c.low),
+            close: Number(c.close),
+          })));
+          if (safe.length) {
+            if (['line', 'area', 'baseline'].includes(chartTypeRef.current)) {
+              series.setData(sanitizeSeriesData(
+                safe.map((c) => ({ time: c.time, value: Number(c.close) })),
+              ));
+            } else {
+              series.setData(safe);
+            }
+          }
+        }
+      } catch {}
+    };
+    document.addEventListener('visibilitychange', restore);
+    window.addEventListener('pageshow', restore);
+    window.addEventListener('focus', restore);
+    return () => {
+      document.removeEventListener('visibilitychange', restore);
+      window.removeEventListener('pageshow', restore);
+      window.removeEventListener('focus', restore);
+    };
+  }, []);
 
   // Dynamic Chart Type Switcher (Candles, Hollow, Bar, Line, Area, Baseline)
   useEffect(() => {
     const chart = chartInstanceRef.current;
-    if (!chart) return;
+    if (!chart || chart.__isDisposed) return;
 
     try {
       const range = chart.timeScale().getVisibleLogicalRange();
@@ -712,22 +946,26 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       }
       const newSeries = createPrimarySeries(chart, chartType, isCrypto);
       candleSeriesRef.current = newSeries;
-
+      appliedPrecisionRef.current = null; // fresh series carries default format
       if (candlesRef.current && candlesRef.current.length > 0) {
-        if (['line', 'area', 'baseline'].includes(chartType)) {
-          newSeries.setData(candlesRef.current.map(c => ({
-            time: c.time,
-            value: Number(c.close),
-          })));
-        } else {
-          newSeries.setData(candlesRef.current.map(c => ({
+        const lastC = candlesRef.current[candlesRef.current.length - 1];
+        syncSeriesPrecision(decimalsForPrice(lastC?.close, isCrypto));
+        try {
+          const safe = sanitizeCandles(candlesRef.current.map(c => ({
             time: c.time,
             open: Number(c.open),
             high: Number(c.high),
             low: Number(c.low),
             close: Number(c.close),
           })));
-        }
+          if (['line', 'area', 'baseline'].includes(chartType)) {
+            newSeries.setData(sanitizeSeriesData(
+              safe.map(c => ({ time: c.time, value: Number(c.close) }))
+            ));
+          } else if (safe.length) {
+            newSeries.setData(safe);
+          }
+        } catch {}
       }
 
       if (range) {
@@ -736,11 +974,11 @@ const ChartCanvas = forwardRef(function ChartCanvas({
     } catch (err) {
       console.warn('Error switching chart type:', err);
     }
-  }, [chartType, isCrypto]);
+  }, [chartType, isCrypto, syncSeriesPrecision]);
 
   // Apply Price Scale Mode (Normal, Logarithmic, Percentage) & Invert
   useEffect(() => {
-    if (!chartInstanceRef.current) return;
+    if (!chartInstanceRef.current || chartInstanceRef.current.__isDisposed) return;
     try {
       const mode = priceScaleMode === 'log'
         ? PriceScaleMode.Logarithmic
@@ -761,7 +999,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   // Dynamically manage and render Indicator Overlays
   useEffect(() => {
     const chart = chartInstanceRef.current;
-    if (!chart || !candles || candles.length === 0) return;
+    if (!chart || chart.__isDisposed || !candles || candles.length === 0) return;
 
     const currentSeriesMap = indicatorSeriesRef.current;
 
@@ -787,10 +1025,21 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       }
     });
 
+    // Remove AI zone overlays that are no longer active
+    Object.keys(aiZoneSeriesRef.current).forEach((id) => {
+      if (!activeIndicators.includes(id)) {
+        const group = aiZoneSeriesRef.current[id];
+        (group?.lineSeries || []).forEach((s) => { try { chart.removeSeries(s); } catch {} });
+        delete aiZoneSeriesRef.current[id];
+      }
+    });
+
     // 2. Add or update active overlay indicators
+    // Advanced AI forecast joins via aiOverlay 'bands' (median ±1σ paths).
     overlayIndicators.forEach((def) => {
       const id = def.id;
       const isHidden = hiddenIndicators.includes(id);
+      const kind = def.type === 'ai' ? (def.aiOverlay || 'info') : def.type;
 
       // ── Standard single-line overlay ──────────────────────────────────────
       if (def.type === 'overlay') {
@@ -798,14 +1047,48 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         if (!series) {
           series = chart.addLineSeries({
             color: def.color, lineWidth: def.lineWidth || 1.5,
+            lineStyle: def.lineStyle ?? 0,
             priceLineVisible: false, lastValueVisible: true, title: def.shortName,
           });
           currentSeriesMap[id] = series;
         }
-        series.applyOptions({ visible: !isHidden });
+        series.applyOptions({ visible: !isHidden, color: def.color, lineWidth: def.lineWidth || 1.5, lineStyle: def.lineStyle ?? 0 });
         const data = resolveOverlayData(def, candles);
         if (data.length) engineValueRef.current[id] = data[data.length - 1].value;
         try { series.setData(data); } catch {}
+
+      // ── AI forecast bands (median ±1σ path incl. future bars) ─────────────
+      } else if (kind === 'bands') {
+        let bandList = currentSeriesMap[id];
+        if (!bandList) {
+          const mkBand = (color, style, title) => chart.addLineSeries({
+            color, lineWidth: 1.5, lineStyle: style,
+            priceLineVisible: false, lastValueVisible: false, title,
+          });
+          bandList = [
+            mkBand(def.color || '#FBBF24', 0, `${def.shortName} median`),
+            mkBand('rgba(56,189,248,0.75)', 2, `${def.shortName} +1σ`),
+            mkBand('rgba(56,189,248,0.75)', 2, `${def.shortName} −1σ`),
+          ];
+          // Median first for legend focus; bands carry no price line.
+          bandList[0].applyOptions({ lineWidth: 2, lastValueVisible: true });
+          currentSeriesMap[id] = bandList;
+        }
+        let fc = { median: [], upper: [], lower: [] };
+        try {
+          const res = calculateById(def.engineId || 'ai_forecast', candles, def.params || {});
+          if (res.valid && res.points) fc = { median: [], upper: [], lower: [], ...res.points };
+        } catch {}
+        const legs = [
+          sanitizeSeriesData((fc.median || []).map((p) => ({ time: p.time, value: Number(p.value) }))),
+          sanitizeSeriesData((fc.upper || []).map((p) => ({ time: p.time, value: Number(p.value) }))),
+          sanitizeSeriesData((fc.lower || []).map((p) => ({ time: p.time, value: Number(p.value) }))),
+        ];
+        bandList.forEach((s, idx) => {
+          s.applyOptions({ visible: !isHidden });
+          try { if (legs[idx].length) s.setData(legs[idx]); } catch {}
+        });
+        if (legs[0].length) engineValueRef.current[id] = legs[0][legs[0].length - 1].value;
 
       // ── Multi-line overlay (BB, KC, Donchian) ─────────────────────────────
       } else if (def.type === 'overlay_multi') {
@@ -819,7 +1102,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         seriesList.forEach((s, idx) => {
           s.applyOptions({ visible: !isHidden });
           const sub = def.subLines[idx];
-          const data = candles.filter((c) => c[sub.field] != null && !isNaN(Number(c[sub.field]))).map((c) => ({ time: c.time, value: Number(c[sub.field]) }));
+          const data = sanitizeSeriesData(candles.filter((c) => c[sub.field] != null && !isNaN(Number(c[sub.field]))).map((c) => ({ time: c.time, value: Number(c[sub.field]) })));
           try { s.setData(data); } catch {}
         });
 
@@ -835,7 +1118,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         seriesList.forEach((s, idx) => {
           s.applyOptions({ visible: !isHidden });
           const lvl = def.levels[idx];
-          const data = candles.filter((c) => c[lvl.field] != null && !isNaN(Number(c[lvl.field]))).map((c) => ({ time: c.time, value: Number(c[lvl.field]) }));
+          const data = sanitizeSeriesData(candles.filter((c) => c[lvl.field] != null && !isNaN(Number(c[lvl.field]))).map((c) => ({ time: c.time, value: Number(c[lvl.field]) })));
           try { s.setData(data); } catch {}
         });
 
@@ -855,9 +1138,9 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         stSeries.applyOptions({ visible: !isHidden });
 
         // Continuous data for Supertrend line
-        const stData = candles
+        const stData = sanitizeSeriesData(candles
           .filter((c) => c[def.field] != null && !isNaN(Number(c[def.field])))
-          .map((c) => ({ time: c.time, value: Number(c[def.field]) }));
+          .map((c) => ({ time: c.time, value: Number(c[def.field]) })));
         try { stSeries.setData(stData); } catch {}
 
         // Set series color according to latest candle trend direction
@@ -870,7 +1153,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         // Reversal buy/sell signal markers at exact trend flips
         const markers = [];
         let prevDir = null;
-        candles.forEach((c) => {
+        sanitizeCandles(candles).forEach((c) => {
           if (c[def.field] == null || isNaN(Number(c[def.field])) || c[def.dirField] == null) return;
           const dir = Number(c[def.dirField]);
           if (prevDir !== null && dir !== prevDir) {
@@ -902,9 +1185,9 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           currentSeriesMap[id] = psarSeries;
         }
         psarSeries.applyOptions({ visible: !isHidden });
-        const psarData = candles
+        const psarData = sanitizeSeriesData(candles
           .filter(c => c[def.field] != null && !isNaN(Number(c[def.field])))
-          .map(c => ({ time: c.time, value: Number(c[def.field]) }));
+          .map(c => ({ time: c.time, value: Number(c[def.field]) })));
         try { psarSeries.setData(psarData); } catch {}
 
 
@@ -924,9 +1207,9 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         ichiList.forEach((s, idx) => {
           s.applyOptions({ visible: !isHidden });
           const sub = def.subLines[idx];
-          const data = candles
+          const data = sanitizeSeriesData(candles
             .filter(c => c[sub.field] != null && !isNaN(Number(c[sub.field])))
-            .map(c => ({ time: c.time, value: Number(c[sub.field]) }));
+            .map(c => ({ time: c.time, value: Number(c[sub.field]) })));
           try { s.setData(data); } catch {}
         });
       }
@@ -972,10 +1255,11 @@ const ChartCanvas = forwardRef(function ChartCanvas({
         s.applyOptions({ color: cfgLine.color, lineWidth: cfgLine.lineWidth, lineStyle: cfgLine.lineStyle, lastValueVisible: !!cfgLine.label });
         s.applyOptions({ visible: !isHidden });
         try {
-          s.setData([
+          const safeRange = sanitizeSeriesData([
             { time: candles[0].time, value: cfgLine.price },
             { time: candles[candles.length - 1].time, value: cfgLine.price },
           ]);
+          if (safeRange.length > 0) s.setData(safeRange);
         } catch {}
         if (cfgLine.label) {
           try {
@@ -985,8 +1269,238 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       });
     });
 
+    // 3b. Advanced AI S/R zones — fractal pivots clustered in ATR tolerance,
+    // scored by touches + volume + recency. Labeled lines span the full range.
+    aiZoneIndicators.forEach((def) => {
+      const id = def.id;
+      const isHidden = hiddenIndicators.includes(id);
+      let group = aiZoneSeriesRef.current[id];
+      if (!group) {
+        group = { lineSeries: [] };
+        aiZoneSeriesRef.current[id] = group;
+      }
+      let zones = [];
+      try {
+        zones = getAISupportResistance(candles, def.params || {});
+      } catch {}
+      const lineSeries = group.lineSeries;
+      while (lineSeries.length > zones.length) {
+        const s = lineSeries.pop();
+        try { chart.removeSeries(s); } catch {}
+      }
+      while (lineSeries.length < zones.length) {
+        lineSeries.push(chart.addLineSeries({ color: '#888', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }));
+      }
+      lineSeries.forEach((s, idx) => {
+        const z = zones[idx];
+        if (!z) return;
+        const zColor = z.side === 'S' ? '#10B981' : '#EF5350';
+        const label = `${z.side} ${Math.round(z.strength)}`;
+        s.applyOptions({ color: zColor, lineWidth: z.strength >= 70 ? 2 : 1, lineStyle: 2, lastValueVisible: true });
+        s.applyOptions({ visible: !isHidden });
+        try {
+          const safeRange = sanitizeSeriesData([
+            { time: candles[0].time, value: z.price },
+            { time: candles[candles.length - 1].time, value: z.price },
+          ]);
+          if (safeRange.length > 0) s.setData(safeRange);
+        } catch {}
+        try {
+          s.setMarkers([{ time: candles[candles.length - 1].time, position: 'inBar', color: zColor, shape: 'circle', text: label, size: 1 }]);
+        } catch {}
+      });
+    });
+
+    // Remove AI overlays that are no longer active
+    Object.keys(aiSeriesRef.current).forEach((id) => {
+      if (!activeIndicators.includes(id)) {
+        const g = aiSeriesRef.current[id];
+        (g?.lineSeries || []).forEach((ser) => { try { chart.removeSeries(ser); } catch {} });
+        delete aiSeriesRef.current[id];
+      }
+    });
+
+    // 4. Render AI overlays (type 'ai' with chartOverlay flag) — real price
+    // levels from analyzeSignal: Entry/SL/TP lines + direction marker, AI S/R.
+    aiOverlays.forEach((def) => {
+      const id = def.id;
+      const isHidden = hiddenIndicators.includes(id);
+      let group = aiSeriesRef.current[id];
+      if (!group) {
+        group = { lineSeries: [] };
+        aiSeriesRef.current[id] = group;
+      }
+
+      const firstC = candles[0];
+      const lastC = candles[candles.length - 1];
+      const sig = analyzeSignal(candles);
+
+      // Signal price levels (Entry/SL/TP) + current-direction marker.
+      // (Advanced ai_sr zones render in the dedicated AI-zones block below.)
+      if (sig.available && sig.entry != null) {
+        const bullish = sig.direction !== 'sell';
+        const dirInfo = sig.direction === 'buy'
+          ? { color: '#10B981', label: 'BUY', shape: 'arrowUp' }
+          : sig.direction === 'sell'
+            ? { color: '#EF5350', label: 'SELL', shape: 'arrowDown' }
+            : { color: '#F59E0B', label: 'NEUTRAL', shape: 'circle' };
+        const lines = [
+          { price: sig.entry, color: '#E2E8F0', label: 'AI Entry', style: 0 },
+          { price: sig.stopLoss, color: '#EF5350', label: 'AI SL', style: 2 },
+          { price: sig.takeProfit, color: '#10B981', label: 'AI TP', style: 2 },
+        ];
+        const want = lines.length + 1; // slot 0 hosts the direction marker
+        while (group.lineSeries.length < want) {
+          group.lineSeries.push(chart.addLineSeries({ color: '#888', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false }));
+        }
+        while (group.lineSeries.length > want) {
+          const extra = group.lineSeries.pop();
+          try { chart.removeSeries(extra); } catch {}
+        }
+        group.lineSeries.forEach((ser, idx) => {
+          ser.applyOptions({ visible: !isHidden });
+          if (idx === 0) { try { ser.setData([]); } catch {} return; }
+          const cfg = lines[idx - 1];
+          if (!cfg) { try { ser.setData([]); } catch {} return; }
+          ser.applyOptions({ color: cfg.color, lineStyle: cfg.style, lastValueVisible: false });
+          try {
+            ser.setData(sanitizeSeriesData([{ time: firstC.time, value: cfg.price }, { time: lastC.time, value: cfg.price }]));
+          } catch {}
+        });
+        try {
+          group.lineSeries[0].setMarkers([{
+            time: lastC.time,
+            position: bullish ? 'belowBar' : 'aboveBar',
+            color: dirInfo.color,
+            shape: dirInfo.shape,
+            text: dirInfo.label + ' ' + sig.probability + '%',
+            size: 1,
+          }]);
+        } catch {}
+      } else {
+        // Signal unavailable — clear stale levels.
+        group.lineSeries.forEach((ser) => { try { ser.setData([]); ser.setMarkers([]); } catch {} });
+      }
+    });
+
     resetLegendRef.current();
-  }, [activeIndicators, hiddenIndicators, overlayIndicators, smcIndicators, candles]);
+  }, [activeIndicators, hiddenIndicators, overlayIndicators, smcIndicators, aiOverlays, aiZoneIndicators, candles]);
+
+  // Advanced AI markers (breakout BRK / exhaustion EXH / pattern shapes),
+  // merged onto the primary price series. Re-applied on chart-type switches
+  // (which recreate the primary series) and every data rollover.
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series || series.__isDisposed) return;
+    if (!aiMarkerIndicators.length || !candlesRef.current?.length) {
+      try { series.setMarkers([]); } catch {}
+      return;
+    }
+    const resolvers = {
+      ai_breakout: getAIBreakoutMarkers,
+      ai_reversal: getAIReversalMarkers,
+      ai_pattern: getAIPatternMarkers,
+    };
+    const merged = [];
+    aiMarkerIndicators.forEach((def) => {
+      const fn = resolvers[def.id];
+      if (!fn) return;
+      try {
+        const ms = fn(candlesRef.current, def.params || {}) || [];
+        ms.forEach((m) => { if (m && m.time != null) merged.push(m); });
+      } catch {}
+    });
+    merged.sort((a, b) => compareChartTime(a.time, b.time));
+    try { series.setMarkers(merged); } catch {}
+  }, [candles, aiMarkerIndicators, chartType]);
+
+  // On-Chart Paper Trading Position Lines (Entry, Stop Loss, Target Price)
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    const lines = paperPriceLinesRef.current;
+
+    // Clean up previous price lines
+    if (lines.entry && series) {
+      try { series.removePriceLine(lines.entry); } catch {}
+      lines.entry = null;
+    }
+    if (lines.stopLoss && series) {
+      try { series.removePriceLine(lines.stopLoss); } catch {}
+      lines.stopLoss = null;
+    }
+    if (lines.target && series) {
+      try { series.removePriceLine(lines.target); } catch {}
+      lines.target = null;
+    }
+
+    if (!series || series.__isDisposed || !paperPosition) return;
+    const posTicker = String(paperPosition.ticker || '').toUpperCase().trim();
+    const curTicker = String(selectedSymbol || '').toUpperCase().trim();
+    if (posTicker !== curTicker) return;
+
+    try {
+      const entryPrice = Number(paperPosition.avg_buy_price || 0);
+      if (entryPrice > 0) {
+        const curP = Number(livePrice || paperPosition.current_price || entryPrice);
+        const pnl = Math.round((curP - entryPrice) * paperPosition.shares * 100) / 100;
+        const pnlPct = Math.round(((curP - entryPrice) / Math.max(0.01, entryPrice)) * 10000) / 100;
+        const isProfit = pnl >= 0;
+        const sign = isProfit ? '+' : '';
+
+        lines.entry = series.createPriceLine({
+          price: entryPrice,
+          color: isProfit ? '#10B981' : '#EF4444',
+          lineWidth: 2,
+          lineStyle: LineStyle ? LineStyle.Solid : 0,
+          axisLabelVisible: true,
+          title: `LONG ${paperPosition.shares} @ ₹${entryPrice.toFixed(1)} | P&L: ${sign}₹${pnl.toLocaleString('en-IN')} (${sign}${pnlPct}%)`,
+        });
+
+        if (paperPosition.stop_loss) {
+          const slP = Number(paperPosition.stop_loss);
+          const slLoss = Math.round((slP - entryPrice) * paperPosition.shares * 100) / 100;
+          lines.stopLoss = series.createPriceLine({
+            price: slP,
+            color: '#F43F5E',
+            lineWidth: 1,
+            lineStyle: LineStyle ? LineStyle.Dashed : 2,
+            axisLabelVisible: true,
+            title: `SL: ₹${slP.toFixed(1)} (${slLoss >= 0 ? '+' : ''}₹${slLoss})`,
+          });
+        }
+
+        if (paperPosition.target_price) {
+          const tpP = Number(paperPosition.target_price);
+          const tpGain = Math.round((tpP - entryPrice) * paperPosition.shares * 100) / 100;
+          lines.target = series.createPriceLine({
+            price: tpP,
+            color: '#10B981',
+            lineWidth: 1,
+            lineStyle: LineStyle ? LineStyle.Dashed : 2,
+            axisLabelVisible: true,
+            title: `TP: ₹${tpP.toFixed(1)} (+₹${tpGain})`,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Error rendering paper trade price lines:', err);
+    }
+
+    return () => {
+      if (lines.entry && series) {
+        try { series.removePriceLine(lines.entry); } catch {}
+        lines.entry = null;
+      }
+      if (lines.stopLoss && series) {
+        try { series.removePriceLine(lines.stopLoss); } catch {}
+        lines.stopLoss = null;
+      }
+      if (lines.target && series) {
+        try { series.removePriceLine(lines.target); } catch {}
+        lines.target = null;
+      }
+    };
+  }, [paperPosition, livePrice, selectedSymbol, chartType]);
 
   return (
     <div

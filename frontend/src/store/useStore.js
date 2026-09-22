@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { normalizeInterval } from '../utils/chartHelpers';
 
 const useStore = create(
   persist(
@@ -18,6 +19,8 @@ const useStore = create(
       setSelectedSymbol: (symbol) => set({
         selectedSymbol: String(symbol ?? '').toUpperCase().trim() || 'BTC',
       }),
+      // Interval is normalized: unsupported values (e.g. a stale persisted
+      // '3m') would 422 on /history and blank the chart into a dead state.
       setSelectedInterval: (iv) =>
         set((s) => {
           const updatedPrices = { ...s.livePrices };
@@ -26,7 +29,7 @@ const useStore = create(
               updatedPrices[k] = { ...updatedPrices[k], liveCandle: undefined };
             }
           });
-          return { selectedInterval: iv, livePrices: updatedPrices };
+          return { selectedInterval: normalizeInterval(iv), livePrices: updatedPrices };
         }),
       setPredictionData: (data)   => set({ predictionData: data }),
       setTrainingStatus: (status) => set({ trainingStatus: status }),

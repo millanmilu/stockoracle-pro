@@ -89,6 +89,35 @@ def test_sovereign_macro_dashboard():
     assert macro["yield_spread_bps"] > 0
     assert len(macro["correlations"]) >= 5
     assert len(macro["yield_curve_history"]) == 12
+    assert macro["as_of"]
+    assert all(set(r) >= {"symbol", "price", "status"} for r in macro["indices"])
+
+
+def test_sovereign_macro_live_path(monkeypatch):
+    """Live Stooq/Angel inputs flip statuses to LIVE and recompute the spread."""
+    import pandas as pd
+
+    import backend.analysis.macro_terminal as mt
+
+    mt._CACHE.clear()
+    mt._CACHE_TS = None
+    monkeypatch.setattr(mt, "_live_stooq", lambda s: {"10USY.B": 4.50, "usdiny.fx": 88.10, "^INVIX": 16.25}.get(s))
+    df = pd.DataFrame({"close": [25000.0, 25100.0]})
+    monkeypatch.setattr(mt, "_live_nifty_row",
+                        lambda: {"symbol": "NIFTY 50", "name": "NSE Benchmark", "price": 25100.0, "change_pct": 0.4, "status": "LIVE"})
+
+    macro = mt.get_sovereign_macro_dashboard()
+
+    assert macro["us_10y_yield"] == 4.50 and macro["us_10y_live"] is True
+    assert macro["yield_spread_bps"] == round((7.02 - 4.50) * 100, 1) > 0
+    by_sym = {r["symbol"]: r for r in macro["indices"]}
+    assert by_sym["NIFTY 50"]["status"] == "LIVE"
+    assert by_sym["INDIA VIX"] == {"symbol": "INDIA VIX", "name": "Volatility Index", "price": 16.25, "change_pct": None, "status": "LIVE"}
+    assert by_sym["USD / INR"]["price"] == 88.10
+    assert by_sym["SENSEX"]["status"] == "STATIC"  # no verified source — stays honest
+
+    mt._CACHE.clear()
+    mt._CACHE_TS = None
 
 
 def test_portfolio_quant_risk_cockpit():

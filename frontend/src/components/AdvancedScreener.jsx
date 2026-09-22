@@ -1,8 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useDeferredValue } from 'react';
 import useStore from '../store/useStore';
 import api from '../utils/api';
 import toast from 'react-hot-toast';
-import { Sparkles, Play, RefreshCw, Search, X } from 'lucide-react';
+import { Sparkles, Play, RefreshCw, Search, Save } from 'lucide-react';
+import './screener/terminal.css';
+import { TN, panel, sectionTitle, btn, btnPrimary, btnGreen, chip, input } from './screener/terminalTheme';
 
 import ScreenerHeaderBar from './screener/ScreenerHeaderBar';
 import ScreenerKpiCards from './screener/ScreenerKpiCards';
@@ -11,17 +13,32 @@ import ScreenerBreadthBar from './screener/ScreenerBreadthBar';
 import ScreenerFilters from './screener/ScreenerFilters';
 import ScreenerFilterBuilder, { newGroup, compileBuilderToDsl } from './screener/ScreenerFilterBuilder';
 import ScreenerTable from './screener/ScreenerTable';
-import ScreenerPagination from './screener/ScreenerPagination';
 import ScreenerFlyoutDrawer from './screener/ScreenerFlyoutDrawer';
 import ScreenerBulkBar from './screener/ScreenerBulkBar';
 import ScreenerBacktestModal from './screener/ScreenerBacktestModal';
 import ScreenerSaveModal from './screener/ScreenerSaveModal';
+import ScreenerColumnMenu from './screener/ScreenerColumnMenu';
+import ScreenerStatusBar from './screener/ScreenerStatusBar';
 import { INDEX_CONSTITUENTS } from '../constants/screenerConfig';
-import { COLUMN_GROUPS, PREBUILT_SCREENS, RANK_OPTIONS, OVERVIEW_CARDS } from './screener/screenerColumns';
+import { COLUMN_GROUPS, PREBUILT_SCREENS, RANK_OPTIONS, OVERVIEW_CARDS, ALL_COLUMNS, groupColumnsWithTicker } from './screener/screenerColumns';
 import { getWsUrl } from '../utils/api';
 
 const ALL_UNIVERSE = 'ALL NSE';
 const UNIVERSE_IDS = [ALL_UNIVERSE, ...Object.keys(INDEX_CONSTITUENTS)];
+const COLS_KEY = 'stockoracle_screener_cols_v1';
+
+const loadColConfig = () => {
+  try {
+    const raw = localStorage.getItem(COLS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return { order: parsed.order || {}, hidden: parsed.hidden || {}, widths: parsed.widths || {} };
+      }
+    }
+  } catch (_) {}
+  return { order: {}, hidden: {}, widths: {} };
+};
 
 export default function AdvancedScreener() {
   const setSelectedSymbol = useStore(s => s.setSelectedSymbol);
@@ -31,7 +48,6 @@ export default function AdvancedScreener() {
   const [queryMode, setQueryMode] = useState('visual');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [columnGroup, setColumnGroup] = useState('overview');
-  const [activeTab] = useState('all');
 
   // Universe / search / AI
   const [searchFilter, setSearchFilter] = useState('');
@@ -43,9 +59,13 @@ export default function AdvancedScreener() {
   const [sortColumn, setSortColumn] = useState('market_cap_cr');
   const [sortDirection, setSortDirection] = useState('desc');
   const [multiSort, setMultiSort] = useState([]);
-  const [rankBy, setRankBy] = useState('ai_consensus_score');
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(25);
+  // NOTE: there is deliberately no separate `rankBy` state. The dropdown is
+  // driven by `sortColumn`, otherwise clicking a column header changed the real
+  // sort while the dropdown kept displaying the previous ranking choice.
+  // NOTE: the pager bar (page/pageSize state) was removed — the table is
+  // virtualized now, so the full result set scrolls with ~30 rows in the DOM.
+  // Scroll position resets via ScreenerTable when the result set changes.
+  const tableScrollRef = useRef(null);
 
   // Visual sliders
   const [universe, setUniverse] = useState('ALL NSE');
@@ -63,17 +83,49 @@ export default function AdvancedScreener() {
   const [minVolRatio, setMinVolRatio] = useState(0.8);
   const [minAiScore, setMinAiScore] = useState(50);
 
+  // Which visual sliders the user actually moved. Only these become DSL
+  // conditions — previously ALL 11 were ANDed in every time, so merely opening
+  // Visual mode silently applied a preset-quality screen and reported 11
+  // "active filters" the user never set.
+  const [touchedFilters, setTouchedFilters] = useState(() => new Set());
+
+  // Setters that register a slider as intentional before updating it.
+  const visualSetters = useMemo(() => {
+    const wrap = (key, setter) => (value) => {
+      setTouchedFilters((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+      setter(value);
+    };
+    return {
+      setMinRoce: wrap('roce', setMinRoce),
+      setMinRoe: wrap('roe', setMinRoe),
+      setMaxPe: wrap('pe', setMaxPe),
+      setMaxPb: wrap('pb', setMaxPb),
+      setMaxDebt: wrap('debt', setMaxDebt),
+      setMinSalesGrowth: wrap('sales', setMinSalesGrowth),
+      setMinProfitGrowth: wrap('profit', setMinProfitGrowth),
+      setMinRsi: wrap('rsiMin', setMinRsi),
+      setMaxRsi: wrap('rsiMax', setMaxRsi),
+      setMinVolRatio: wrap('vol', setMinVolRatio),
+      setMinAiScore: wrap('ai', setMinAiScore),
+    };
+    // Setters returned by useState are stable, so this object is built once.
+  }, []);
+
   // Filter-builder groups (nested AND/OR/NOT)
   const [builderGroups, setBuilderGroups] = useState([newGroup()]);
   const [builderTopLogic, setBuilderTopLogic] = useState('AND');
   const [builderEnabled, setBuilderEnabled] = useState(false);
 
-  // Formula
-  const [formulaQuery, setFormulaQuery] = useState('MarketCap > 0 AND ROCE > 15 AND PE < 40');
+  // Formula — open by default so first load shows the whole tracked
+  // universe; user narrows down from there (matches initial runScreen + reset).
+  const [formulaQuery, setFormulaQuery] = useState('MarketCap > 0');
 
   // Results / presets / overview
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
+  // Server-side match/universe counts ("N of M stocks") — distinct from the
+  // client-side filtered processedResults length below.
+  const [queryMeta, setQueryMeta] = useState({ total: 0, universeTotal: 0 });
   const [overview, setOverview] = useState({ cards: {}, breadth: {}, sectors: [], market_status: 'UNKNOWN', feed_live: false, total: 0 });
   const [prebuiltTemplates, setPrebuiltTemplates] = useState([]);
   const [savedScreens, setSavedScreens] = useState([]);
@@ -84,6 +136,14 @@ export default function AdvancedScreener() {
   const [selectedTickers, setSelectedTickers] = useState(new Set());
   const [inspectedStock, setInspectedStock] = useState(null);
 
+  // Categorical universes (NIFTY 50 / MIDCAP / sectoral…) with live
+  // constituent counts from the backend (official NSE lists). Falls back to
+  // the bundled INDEX_CONSTITUENTS if the endpoint is unreachable.
+  const [universeOptions, setUniverseOptions] = useState(null);
+  const universeIds = useMemo(() => (
+    universeOptions ? universeOptions.map((u) => u.id) : UNIVERSE_IDS
+  ), [universeOptions]);
+
   // Live ticks
   const [liveTicks, setLiveTicks] = useState({});
   const [wsState, setWsState] = useState('idle');
@@ -93,6 +153,63 @@ export default function AdvancedScreener() {
   // Refresh mode
   const [refreshMode, setRefreshMode] = useState('manual');
   const refreshTimer = useRef(null);
+
+  // Column layout (order + visibility + widths), remembered per group
+  const [colConfig, setColConfig] = useState(() => loadColConfig());
+  const [showColumnMenu, setShowColumnMenu] = useState(false);
+  const persistCols = useCallback((next) => {
+    setColConfig(next);
+    try { localStorage.setItem(COLS_KEY, JSON.stringify(next)); } catch (_) {}
+  }, []);
+  const groupAllCols = useMemo(() => groupColumnsWithTicker(columnGroup), [columnGroup]);
+  const groupOrderedCols = useMemo(() => {
+    const order = colConfig.order[columnGroup] || [];
+    const known = new Set(groupAllCols.map((c) => c.key));
+    const ordered = order.filter((k) => known.has(k)).map((k) => groupAllCols.find((c) => c.key === k));
+    const rest = groupAllCols.filter((c) => !order.includes(c.key));
+    return [...ordered, ...rest];
+  }, [groupAllCols, colConfig.order, columnGroup]);
+  const groupHidden = colConfig.hidden[columnGroup] || [];
+  const groupVisibleKeys = groupHidden.length ? groupOrderedCols.map((c) => c.key).filter((k) => !groupHidden.includes(k)) : null;
+  const toggleColumn = useCallback((key) => {
+    const cur = colConfig.hidden[columnGroup] || [];
+    const next = cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key];
+    persistCols({ ...colConfig, hidden: { ...colConfig.hidden, [columnGroup]: next } });
+  }, [persistCols, colConfig, columnGroup]);
+  const moveColumn = useCallback((key, dir) => {
+    const base = (colConfig.order[columnGroup] && colConfig.order[columnGroup].length
+      ? colConfig.order[columnGroup]
+      : groupAllCols.map((c) => c.key));
+    const from = base.indexOf(key);
+    const to = from + dir;
+    if (from < 0 || to < 0 || to >= base.length) return;
+    const next = [...base];
+    next.splice(from, 1);
+    next.splice(to, 0, key);
+    persistCols({ ...colConfig, order: { ...colConfig.order, [columnGroup]: next } });
+  }, [persistCols, colConfig, columnGroup, groupAllCols]);
+  // Transient, during the drag: state only. Persisting on every mousemove meant
+  // ~60 synchronous localStorage writes per second while resizing a column.
+  const resizeColumn = useCallback((key, width) => {
+    setColConfig((prev) => ({ ...prev, widths: { ...prev.widths, [key]: width } }));
+  }, []);
+  // Committed once, on mouseup.
+  const commitColumnWidth = useCallback((key, width) => {
+    setColConfig((prev) => {
+      const next = { ...prev, widths: { ...prev.widths, [key]: width } };
+      try { localStorage.setItem(COLS_KEY, JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  }, []);
+  const resetWidths = useCallback(() => {
+    persistCols({ ...colConfig, widths: {} });
+    toast.success('Column widths reset.');
+  }, [persistCols, colConfig]);
+
+  // Collapsible upper panels so the table keeps the majority of the height
+  const [sectorsCollapsed, setSectorsCollapsed] = useState(false);
+  const [sectorsExpanded, setSectorsExpanded] = useState(false);
+  const [showAllChips, setShowAllChips] = useState(false);
 
   // Modals
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -121,25 +238,44 @@ export default function AdvancedScreener() {
       } catch (err) {
         console.error('Failed to load screener overview', err);
       }
-      runScreen('MarketCap > 0');
+      try {
+        const { data } = await api.get('/api/screener/universes');
+        if (Array.isArray(data.universes) && data.universes.length > 0) {
+          setUniverseOptions(data.universes);
+        }
+      } catch (err) {
+        console.error('Failed to load screener universes, using fallback', err);
+      }
+      runScreen('MarketCap > 0', ALL_UNIVERSE);
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Formula builders ──
+  // Only the sliders the user actually touched are emitted. Defaults therefore
+  // no longer silently exclude most of the universe, and the "Active filters"
+  // chip count finally reflects real intent.
   const buildVisualFormula = useCallback((sectorOverride = null) => {
     const sector = sectorOverride ?? selectedSector;
-    let parts = [
-      `ROCE > ${minRoce}`, `ROE > ${minRoe}`, `PE < ${maxPe}`, `PB < ${maxPb}`,
-      `DebtToEquity < ${maxDebt}`, `SalesGrowth3Y > ${minSalesGrowth}`,
-      `ProfitGrowth3Y > ${minProfitGrowth}`, `RSI14 > ${minRsi}`, `RSI14 < ${maxRsi}`,
-      `VolumeRatio20D > ${minVolRatio}`, `AIConsensus > ${minAiScore}`
-    ];
+    const parts = [];
+    const add = (key, expr) => { if (touchedFilters.has(key)) parts.push(expr); };
+    add('roce', `ROCE > ${minRoce}`);
+    add('roe', `ROE > ${minRoe}`);
+    add('pe', `PE < ${maxPe}`);
+    add('pb', `PB < ${maxPb}`);
+    add('debt', `DebtToEquity < ${maxDebt}`);
+    add('sales', `SalesGrowth3Y > ${minSalesGrowth}`);
+    add('profit', `ProfitGrowth3Y > ${minProfitGrowth}`);
+    add('rsiMin', `RSI14 > ${minRsi}`);
+    add('rsiMax', `RSI14 < ${maxRsi}`);
+    add('vol', `VolumeRatio20D > ${minVolRatio}`);
+    add('ai', `AIConsensus > ${minAiScore}`);
+    // Sector / market-cap are always explicit clicks, never defaults.
     if (sector !== 'ALL') parts.push(`Sector == '${sector}'`);
     if (marketCapCat !== 'ALL') parts.push(`MarketCapCat == '${marketCapCat}'`);
-    return parts.join(' AND ');
-  }, [minRoce, minRoe, maxPe, maxPb, maxDebt, minSalesGrowth, minProfitGrowth, minRsi, maxRsi, minVolRatio, minAiScore, selectedSector, marketCapCat]);
+    return parts.length ? parts.join(' AND ') : 'MarketCap > 0';
+  }, [minRoce, minRoe, maxPe, maxPb, maxDebt, minSalesGrowth, minProfitGrowth, minRsi, maxRsi, minVolRatio, minAiScore, selectedSector, marketCapCat, touchedFilters]);
 
   const activeFormula = useMemo(() => {
     if (queryMode === 'formula') return formulaQuery;
@@ -159,22 +295,31 @@ export default function AdvancedScreener() {
   }, [formulaQuery, activeFormula, queryMode]);
 
   // ── Run screen ──
-  const runScreen = async (query = null, tickersOverride = undefined) => {
+  // Category scoping is server-side: we send the universe id (e.g. "NIFTY 50",
+  // "NIFTY MIDCAP") and the backend resolves official NSE constituents.
+  const runScreen = async (query = null, universeId = null) => {
     setLoading(true);
     const activeQuery = query || activeFormula || 'MarketCap > 0';
-    const activeTickers = tickersOverride !== undefined
-      ? tickersOverride
-      : (universe !== ALL_UNIVERSE && INDEX_CONSTITUENTS[universe] ? INDEX_CONSTITUENTS[universe] : null);
+    const activeUniverse = universeId !== null && universeId !== undefined ? universeId : universe;
     try {
       const { data } = await api.post('/api/screener/query', {
         formula_query: activeQuery || 'MarketCap > 0',
-        tickers: activeTickers,
+        universe: activeUniverse !== ALL_UNIVERSE ? activeUniverse : null,
         sort_by: sortColumn || 'market_cap_cr',
         sort_dir: sortDirection === 'asc' ? 'ASC' : 'DESC',
-        limit: 1000,
+        // The client re-sorts what it receives, so asking for a
+        // limit smaller than the tracked universe would rank a truncated set
+        // and silently hide matches. 5000 covers the whole NSE equity list.
+        limit: 5000,
         offset: 0
       });
       setResults(data.results || []);
+      setQueryMeta({
+        total: data.total ?? (data.results || []).length,
+        universeTotal: data.universe_total ?? 0,
+        universe: data.universe ?? null,
+        universeScoped: data.universe_scoped_count ?? null,
+      });
     } catch (err) {
       console.error('Screener query error:', err);
       toast.error(err.response?.data?.detail || 'Screener query failed');
@@ -183,7 +328,33 @@ export default function AdvancedScreener() {
     }
   };
 
+  // ── Keep the newest runScreen reachable from timers ──
+  // The auto-refresh interval is (re)created only when refreshMode changes, so
+  // its closure would pin the formula/universe/sort of THAT render. Going
+  // through a ref guarantees a poll always executes the user's CURRENT screen
+  // instead of a stale one.
+  const runScreenRef = useRef(runScreen);
+  useEffect(() => { runScreenRef.current = runScreen; });
+
   // ── WebSocket live ticks (event-driven; refresh modes only re-query) ──
+  const wsRetryRef = useRef(null);
+  const wsAttemptRef = useRef(0);
+  const connectWsRef = useRef(null);
+
+  // Exponential backoff (2s -> 4s -> 8s -> 16s, capped at 30s). Previously a
+  // dropped socket only flipped the label to RECONNECTING and nothing ever
+  // retried, so live prices stayed dead until the user ran a new screen.
+  const scheduleReconnect = useCallback(() => {
+    if (wsRetryRef.current) return;
+    wsAttemptRef.current += 1;
+    const delay = Math.min(30000, 2000 * (2 ** (wsAttemptRef.current - 1)));
+    setWsState('reconnecting');
+    wsRetryRef.current = setTimeout(() => {
+      wsRetryRef.current = null;
+      if (connectWsRef.current) connectWsRef.current();
+    }, delay);
+  }, []);
+
   const connectWs = useCallback(() => {
     try { wsRef.current?.close(); } catch (_) {}
     setWsState('connecting');
@@ -192,10 +363,12 @@ export default function AdvancedScreener() {
       ws = new WebSocket(getWsUrl());
     } catch (_) {
       setWsState('offline');
+      scheduleReconnect();
       return null;
     }
     wsRef.current = ws;
     ws.onopen = () => {
+      wsAttemptRef.current = 0; // healthy again -> reset the backoff
       setWsState('live');
       const pending = pendingTickersRef.current;
       if (pending && pending.length > 0) {
@@ -211,35 +384,63 @@ export default function AdvancedScreener() {
         }
       } catch (_) {}
     };
-    ws.onclose = () => setWsState((s) => (s === 'live' ? 'reconnecting' : 'offline'));
-    ws.onerror = () => setWsState('reconnecting');
+    ws.onclose = () => {
+      // A superseded socket (replaced by connectWs, or closed on unmount) must
+      // not trigger a reconnect, otherwise every connect would spawn another.
+      if (wsRef.current !== ws) return;
+      setWsState((s) => (s === 'live' ? 'reconnecting' : 'offline'));
+      scheduleReconnect();
+    };
+    ws.onerror = () => { if (wsRef.current === ws) setWsState('reconnecting'); };
     return ws;
-  }, []);
+  }, [scheduleReconnect]);
+
+  useEffect(() => { connectWsRef.current = connectWs; }, [connectWs]);
 
   useEffect(() => {
     connectWs();
-    return () => { try { wsRef.current?.close(); } catch (_) {} wsRef.current = null; };
+    return () => {
+      if (wsRetryRef.current) { clearTimeout(wsRetryRef.current); wsRetryRef.current = null; }
+      const ws = wsRef.current;
+      wsRef.current = null; // marks the close as intentional for ws.onclose
+      try { ws?.close(); } catch (_) {}
+    };
   }, [connectWs]);
 
   useEffect(() => {
     if (!results || results.length === 0) return;
     const topTickers = results.slice(0, 50).map(r => r.ticker);
+    const allowed = new Set(topTickers);
+    // Bound the tick store: keyed by symbol it used to grow for every ticker
+    // ever subscribed in the session (unbounded memory, stale prices).
+    setLiveTicks((prev) => {
+      const next = {};
+      let changed = false;
+      Object.keys(prev).forEach((k) => {
+        if (allowed.has(k)) next[k] = prev[k];
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
       try { ws.send(JSON.stringify({ subscribe: topTickers })); } catch (_) {}
-    } else if (ws && ws.readyState === WebSocket.CONNECTING) {
-      pendingTickersRef.current = topTickers;
-    } else {
-      pendingTickersRef.current = topTickers;
-      connectWs();
+      return;
     }
+    // Not open: queue the subscription and make sure exactly one attempt is
+    // in flight (never a second socket while one is connecting/retrying).
+    pendingTickersRef.current = topTickers;
+    const state = ws ? ws.readyState : null;
+    if (state !== WebSocket.CONNECTING && !wsRetryRef.current) connectWs();
   }, [results, connectWs]);
 
   // Refresh modes (polling only when explicitly chosen; realtime = event-driven WS)
   useEffect(() => {
     if (refreshTimer.current) { clearInterval(refreshTimer.current); refreshTimer.current = null; }
     const ms = refreshMode === '5s' ? 5000 : refreshMode === '10s' ? 10000 : refreshMode === '30s' ? 30000 : refreshMode === '1m' ? 60000 : null;
-    if (ms) refreshTimer.current = setInterval(() => { runScreen(); }, ms);
+    // Through the ref so a poll always re-runs the CURRENT screen, not the one
+    // captured when this interval was created (stale formula/universe/sort).
+    if (ms) refreshTimer.current = setInterval(() => { runScreenRef.current(); }, ms);
     return () => { if (refreshTimer.current) clearInterval(refreshTimer.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshMode]);
@@ -256,7 +457,6 @@ export default function AdvancedScreener() {
           setFormulaQuery(data.formula_query);
           setQueryMode('formula');
           setActivePresetId(null);
-          setPage(1);
           runScreen(data.formula_query);
         }
         if ((data.unavailable_notes || []).length) {
@@ -280,7 +480,6 @@ export default function AdvancedScreener() {
     setFormulaQuery(aiPreview.formula_query);
     setQueryMode('formula');
     setActivePresetId(null);
-    setPage(1);
     runScreen(aiPreview.formula_query);
     setAiPreview(null);
   };
@@ -306,9 +505,19 @@ export default function AdvancedScreener() {
     if (!screenName.trim()) { toast.error('Please enter a screen name.'); return; }
     try {
       const activeQuery = queryMode === 'formula' ? formulaQuery : activeFormula;
+      // The backend already persists universe/sort_by/sort_dir and returns them
+      // from GET /screener/screens. Previously they were smuggled into the
+      // display name and never read back, so reopening a screen silently lost
+      // its universe and ranking. "ALL NSE" is stored verbatim; the backend
+      // resolves it to no scope (whole tracked table).
       await api.post('/api/screener/screens', {
-        name: `${screenName} [${columnGroup}|${sortColumn}:${sortDirection}|${universe}]`,
-        formula_query: activeQuery, is_public: true,
+        name: screenName.trim(),
+        description: `Columns: ${columnGroup}`,
+        formula_query: activeQuery,
+        universe,
+        sort_by: sortColumn,
+        sort_dir: sortDirection === 'asc' ? 'ASC' : 'DESC',
+        is_public: true,
       });
       toast.success('Screen saved successfully!');
       setShowSaveModal(false);
@@ -317,6 +526,29 @@ export default function AdvancedScreener() {
       setSavedScreens(res.data.saved_screens || []);
     } catch (err) {
       toast.error('Failed to save screen.');
+    }
+  };
+
+  // Saved screens can be removed again (DELETE /screener/screens/{id} existed
+  // but nothing in the UI ever called it).
+  const handleDeleteScreen = async (screenId, name) => {
+    try {
+      await api.delete(`/api/screener/screens/${screenId}`);
+      setSavedScreens((prev) => prev.filter((s) => s.id !== screenId));
+      toast.success(`Deleted screen: ${name}`);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to delete screen.');
+    }
+  };
+
+  const handleCopyShareLink = (token) => {
+    if (!token) { toast.error('This screen has no share token.'); return; }
+    const url = `${window.location.origin}/?screen=${token}`;
+    try {
+      navigator.clipboard?.writeText(url);
+      toast.success('Share link copied to clipboard.');
+    } catch (_) {
+      toast(url, { icon: '🔗' });
     }
   };
 
@@ -336,61 +568,104 @@ export default function AdvancedScreener() {
     }
   };
 
-  const applyPreset = (id, query, name) => {
+  // `meta` restores a saved screen's stored universe + ranking. Pre-built
+  // templates deliberately pass none: their informational `universe` field
+  // (NIFTY_500) must not silently narrow the user's current universe.
+  const applyPreset = (id, query, name, meta = null) => {
     setActivePresetId(id);
     setActiveCard('total');
     setFormulaQuery(query);
     setQueryMode('formula');
     setBuilderEnabled(false);
-    setPage(1);
-    runScreen(query);
+    setMultiSort([]);
+    if (meta) {
+      if (meta.universe) setUniverse(meta.universe);
+      if (meta.sort_by) {
+        setSortColumn(meta.sort_by);
+        setSortDirection(String(meta.sort_dir || 'DESC').toLowerCase() === 'asc' ? 'asc' : 'desc');
+      }
+    }
+    // meta.universe of "ALL NSE" is normalised to null (= whole tracked table)
+    // by runScreen itself.
+    runScreen(query, meta?.universe ?? null);
     toast.success(`Applied: ${name}`);
   };
 
   const applyCard = (card) => {
     setActiveCard(card.id);
     if (!card.dsl) {
-      setPage(1);
       runScreen('MarketCap > 0');
       return;
     }
     setFormulaQuery(card.dsl);
     setQueryMode('formula');
-    setPage(1);
     runScreen(card.dsl);
   };
 
   const handleUniverseChange = (universeId) => {
     setUniverse(universeId);
-    setPage(1);
-    const tickers = universeId !== ALL_UNIVERSE && INDEX_CONSTITUENTS[universeId] ? INDEX_CONSTITUENTS[universeId] : null;
-    runScreen(null, tickers);
+    if (universeId === ALL_UNIVERSE) {
+      // ALL NSE = the whole tracked universe: drop restrictive filters so
+      // every stock comes back (same as a filter reset, universe kept as ALL).
+      handleResetFilters();
+      return;
+    }
+    // Server resolves the universe id to official NSE constituents.
+    runScreen(null, universeId);
   };
 
   const handleResetFilters = () => {
     setMinRoce(0); setMinRoe(0); setMaxPe(100); setMaxPb(25); setMaxDebt(3.0);
     setMinSalesGrowth(-10); setMinProfitGrowth(-10); setMinRsi(0); setMaxRsi(100);
     setMinVolRatio(0.5); setMinAiScore(30); setSelectedSector('ALL'); setMarketCapCat('ALL');
+    // No slider counts as "touched" after a reset, so visual mode is back to the
+    // full universe instead of a default preset screen.
+    setTouchedFilters(new Set());
     setUniverse(ALL_UNIVERSE); setBuilderEnabled(false); setBuilderGroups([newGroup()]);
-    setFormulaQuery('MarketCap > 0'); setActivePresetId('all-nse'); setActiveCard('total'); setPage(1);
-    runScreen('MarketCap > 0', null);
+    setFormulaQuery('MarketCap > 0'); setActivePresetId('all-nse'); setActiveCard('total');
+    runScreen('MarketCap > 0', ALL_UNIVERSE);
     toast.success('Filters reset to default.');
   };
 
   const removeChip = (chip) => {
     const f = queryMode === 'formula' ? formulaQuery : activeFormula;
-    const next = f.split(/\s+AND\s+/i).filter((t) => t.trim() !== chip).join(' AND ') || 'MarketCap > 0';
+    const target = String(chip).trim();
+    // Split on AND/OR while KEEPING the joiners, otherwise dropping a chip out
+    // of an OR expression silently turned it into an AND chain (and a totally
+    // different result set than the chips implied).
+    const parts = f.split(/(\s+(?:AND|OR)\s+)/i);
+    const terms = parts.filter((_, i) => i % 2 === 0).map((t) => t.trim()).filter(Boolean);
+    const joiners = parts.filter((_, i) => i % 2 === 1).map((j) => j.trim().toUpperCase());
+    let next;
+    if (joiners.length !== terms.length - 1) {
+      // Defensive: unexpected shape -> fall back to the previous behaviour.
+      next = f.split(/\s+AND\s+/i).filter((t) => t.trim() !== target).join(' AND ');
+    } else {
+      // unit[i] = { joiner: joiner that preceded term i, term }
+      const units = terms.map((term, i) => ({ joiner: i === 0 ? null : joiners[i - 1], term }));
+      const kept = units.filter((u) => u.term !== target);
+      const out = [];
+      kept.forEach((u) => {
+        if (out.length === 0) { out.push(u.term); return; }
+        out.push(u.joiner || 'AND', u.term);
+      });
+      next = out.join(' ').trim();
+    }
+    next = next || 'MarketCap > 0';
     setFormulaQuery(next);
     setQueryMode('formula');
-    setPage(1);
     runScreen(next);
   };
 
   // ── Filter + multi-sort (client-side over last server query) ──
+  // Deferred so typing stays responsive: filtering + sorting the full universe
+  // on every keystroke used to block the input.
+  const deferredSearch = useDeferredValue(searchFilter);
+
   const processedResults = useMemo(() => {
     let list = [...results];
-    if (searchFilter.trim()) {
-      const q = searchFilter.toLowerCase();
+    const q = deferredSearch.trim().toLowerCase();
+    if (q) {
       list = list.filter(r => r.ticker?.toLowerCase().includes(q) || r.name?.toLowerCase().includes(q) || r.sector?.toLowerCase().includes(q));
     }
     if (multiSort.length > 0) {
@@ -416,12 +691,18 @@ export default function AdvancedScreener() {
     }
     // Rank numbers
     return list.map((r, i) => ({ ...r, _rank: i + 1 }));
-  }, [results, searchFilter, sortColumn, sortDirection, multiSort]);
+  }, [results, deferredSearch, sortColumn, sortDirection, multiSort]);
 
-  const paginatedRows = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return processedResults.slice(start, start + pageSize);
-  }, [processedResults, page, pageSize]);
+  // No paging: the virtualized table renders the full filtered set, so the
+  // header checkbox always toggles every matching row.
+  const toggleSelectAll = useCallback(() => {
+    setSelectedTickers((prev) => {
+      const allSelected = processedResults.every((r) => prev.has(r.ticker));
+      const next = new Set(prev);
+      processedResults.forEach((r) => (allSelected ? next.delete(r.ticker) : next.add(r.ticker)));
+      return next;
+    });
+  }, [processedResults]);
 
   const dataAsOf = useMemo(() => {
     let latest = null;
@@ -461,50 +742,88 @@ export default function AdvancedScreener() {
     else { setSortColumn(col); setSortDirection('desc'); }
   };
 
+  // The dropdown reflects the REAL current sort. If the sort came from a column
+  // header that isn't a curated preset, it is prepended so the control can never
+  // show a ranking that disagrees with the table.
+  const rankOptions = useMemo(() => {
+    if (RANK_OPTIONS.some((r) => r.id === sortColumn)) return RANK_OPTIONS;
+    const col = ALL_COLUMNS.find((c) => c.key === sortColumn);
+    return [{ id: sortColumn, label: `${col ? col.label : sortColumn} (column)` }, ...RANK_OPTIONS];
+  }, [sortColumn]);
+
   const rankByChange = (key) => {
-    setRankBy(key);
     setSortColumn(key);
     setSortDirection(key === 'rsi_14' ? 'asc' : 'desc');
     setMultiSort([]);
     toast.success(`Ranked by ${RANK_OPTIONS.find((r) => r.id === key)?.label || key}`);
   };
 
-  // Export visible columns only (current group); hidden columns are never exported
+  // The exact columns the user currently sees (group order + visibility).
+  // Exporting a hardcoded list while claiming "visible columns" made the CSV
+  // disagree with the table.
+  const exportColumns = useMemo(() => {
+    const order = colConfig.order[columnGroup] || [];
+    const ordered = order.length
+      ? [...groupAllCols].sort((a, b) => {
+          const ia = order.indexOf(a.key);
+          const ib = order.indexOf(b.key);
+          return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+        })
+      : groupAllCols;
+    return groupVisibleKeys ? ordered.filter((c) => groupVisibleKeys.includes(c.key)) : ordered;
+  }, [groupAllCols, groupVisibleKeys, colConfig.order, columnGroup]);
+
   const handleExportCsv = (dataToExport = processedResults) => {
     if (dataToExport.length === 0) { toast.error('No data to export.'); return; }
-    const headers = ['Rank', 'Ticker', 'Name', 'Sector', 'Price', 'Chg%', 'RelVol', 'RSI', 'MACD Hist', 'EMA Align', 'ADX', 'ATR%', '52W Pos', 'Structure', 'Regime', 'AI Score', 'AI Conf', 'Signal'];
-    const rows = [headers.join(',')];
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const headers = ['Rank', ...exportColumns.map((c) => c.label)];
+    const rows = [headers.map(esc).join(',')];
     dataToExport.forEach((r, i) => {
-      const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-      rows.push([
-        i + 1, esc(r.ticker), esc(r.name), esc(r.sector), r.close_price ?? '', r.change_1d_pct ?? '',
-        r.volume_ratio_20d ?? '', r.rsi_14 ?? '', r.macd_hist ?? '', esc(r.ema_alignment ?? ''),
-        r.adx_14 ?? '', r.atr_pct ?? '', r.pos_52w_pct ?? '', esc(r.structure_label ?? ''),
-        esc(r.market_regime ?? ''), r.ai_consensus_score ?? '', r.ai_confidence_score ?? '', esc(r.ai_signal ?? ''),
-      ].join(','));
+      // Raw values (not display-formatted) so the file stays analysable;
+      // missing values are left blank rather than invented.
+      const cells = exportColumns.map((c) => {
+        const v = r[c.key];
+        return v === null || v === undefined ? '' : v;
+      });
+      rows.push([r._rank ?? i + 1, ...cells].map(esc).join(','));
     });
     const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = `StockOracle_Screener_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    toast.success(`Exported ${dataToExport.length} stocks (visible columns)!`);
+    toast.success(`Exported ${dataToExport.length} stocks × ${exportColumns.length} visible columns.`);
   };
 
-  const handleAddWatchlist = (stock) => {
+  // Prefill the alert modal from a table row (submission still uses the real API)
+  const handleAlertFor = useCallback((stock) => {
+    const px = Math.round(Number(stock.close_price) || 0);
+    setAlertDraft({ ticker: stock.ticker || '', type: 'price_above', value: px ? String(px) : '' });
+    setShowAlertModal(true);
+  }, []);
+
+  const handleAddWatchlist = useCallback((stock) => {
     try {
-      const stored = JSON.parse(localStorage.getItem('stockoracle_custom_watchlist') || '[]');
-      if (!stored.includes(stock.ticker)) {
-        stored.push(stock.ticker);
-        localStorage.setItem('stockoracle_custom_watchlist', JSON.stringify(stored));
-        toast.success(`${stock.ticker} added to watchlist!`);
-      } else {
-        toast.error(`${stock.ticker} is already in your watchlist.`);
+      const ticker = String(stock?.ticker || '').trim();
+      const current = JSON.parse(localStorage.getItem('stockoracle_custom_watchlist') || '[]');
+
+      if (!ticker) {
+        toast.error('Ticker missing.');
+        return;
       }
+
+      const next = Array.from(new Set([...current.map(String), ticker.toUpperCase()]));
+      if (next.length === current.length) {
+        toast.error(`${ticker.toUpperCase()} is already in your watchlist.`);
+        return;
+      }
+
+      localStorage.setItem('stockoracle_custom_watchlist', JSON.stringify(next));
+      toast.success(`${ticker.toUpperCase()} added to watchlist!`);
     } catch (_) {
       toast.error('Failed to update watchlist.');
     }
-  };
+  }, []);
 
   const quickPills = [
     { id: 'all-nse', name: 'All NSE Equities', query: 'MarketCap > 0' },
@@ -515,8 +834,51 @@ export default function AdvancedScreener() {
     { id: 'low-debt', name: 'Low Debt Quality', query: 'DebtToEquity < 0.2 AND ROCE > 15' },
   ];
 
+  const visibleChips = showAllChips ? activeChips : activeChips.slice(0, 5);
+
+  // ── Stable handler identities ──
+  // ScreenerTableRow is React.memo'd, but inline arrow props changed identity on
+  // every render, so every visible row re-rendered on each live tick.
+  const processedResultsRef = useRef(processedResults);
+  useEffect(() => { processedResultsRef.current = processedResults; }, [processedResults]);
+
+  const toggleSelect = useCallback((sym) => {
+    setSelectedTickers((prev) => {
+      const next = new Set(prev);
+      if (next.has(sym)) next.delete(sym); else next.add(sym);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedTickers(new Set()), []);
+  const inspectStock = useCallback((stock) => setInspectedStock(stock), []);
+  const navigateChart = useCallback((sym) => {
+    setSelectedSymbol(sym);
+    setActiveView('Live Chart');
+    const row = processedResultsRef.current.find((r) => r.ticker === sym);
+    if (row && (row.rsi_14 ?? 50) < 30) toast.success('Chart opened — consider enabling RSI (screen flagged RSI < 30).');
+  }, [setSelectedSymbol, setActiveView]);
+  const navigateFundamentals = useCallback((sym) => {
+    setSelectedSymbol(sym);
+    setActiveView('Fundamentals');
+  }, [setSelectedSymbol, setActiveView]);
+
+  // Selection must track the visible result set: a ticker that dropped out of
+  // the screen used to stay selected, so bulk actions (watchlist, paper trades)
+  // silently operated on rows the user could no longer see.
+  useEffect(() => {
+    setSelectedTickers((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(processedResults.map((r) => r.ticker));
+      const next = new Set();
+      let changed = false;
+      prev.forEach((t) => { if (live.has(t)) next.add(t); else changed = true; });
+      return changed ? next : prev;
+    });
+  }, [processedResults]);
+
   return (
-    <div style={{ padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10, height: '100%', boxSizing: 'border-box', background: '#030712', color: '#F1F5F9' }}>
+    <div className="tn-scroll tn-screener-root" style={{ padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6, height: '100%', boxSizing: 'border-box', background: TN.bg, color: TN.text, overflowY: 'auto' }}>
       <ScreenerHeaderBar
         filtersOpen={filtersOpen}
         onToggleFilters={() => setFiltersOpen(!filtersOpen)}
@@ -528,14 +890,15 @@ export default function AdvancedScreener() {
         scannedCount={overview.total || results.length}
         universe={universe}
         onUniverseChange={handleUniverseChange}
-        universes={UNIVERSE_IDS}
-        search={searchFilter}
-        onSearch={(v) => { setSearchFilter(v); setPage(1); }}
+        universes={[ALL_UNIVERSE, ...universeIds.filter((u) => u !== ALL_UNIVERSE)]}
         refreshMode={refreshMode}
         onRefreshMode={setRefreshMode}
         onExportCsv={() => handleExportCsv(processedResults)}
         onOpenSaveModal={() => setShowSaveModal(true)}
-        onOpenBacktestModal={handleRunBacktest}
+        // Opening the modal must not fire a simulation: previously this button
+        // ran a backtest immediately, so the rebalance/friction controls inside
+        // could never be set before the first run.
+        onOpenBacktestModal={() => setShowBacktestModal(true)}
         onCreateAlert={() => setShowAlertModal(true)}
         onRefresh={() => runScreen()}
         loading={loading}
@@ -545,98 +908,162 @@ export default function AdvancedScreener() {
 
       <ScreenerBreadthBar breadth={overview.breadth?.total ? overview.breadth : null} />
 
-      {/* AI Natural Query with preview/edit */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, background: '#080D1F', padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(99,102,241,0.25)' }}>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#A855F7', fontSize: '0.74rem', fontWeight: 800, whiteSpace: 'nowrap' }}>
-            <Sparkles size={15} /> AI Natural Query:
+      {/* AI Screener — interpretation is always shown before anything is applied */}
+      <div style={panel({ padding: '7px 12px', display: 'flex', flexDirection: 'column', gap: 6, border: `1px solid rgba(167,139,250,0.25)` })}>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, color: TN.ai, fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0, paddingTop: 7 }}>
+            <Sparkles size={14} /> AI SCREENER
           </div>
-          <input type="text" value={aiPrompt} onChange={(e) => setAiPrompt(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAiTranslate(false)}
-            placeholder="e.g. 'Find large cap stocks with RSI below 40, price above 200 EMA and unusual volume...'"
-            style={{ flex: 1, background: 'transparent', border: 'none', color: '#F1F5F9', fontSize: '0.78rem', outline: 'none' }} />
-          <button onClick={() => handleAiTranslate(false)} disabled={aiLoading} style={{ padding: '5px 14px', borderRadius: 6, background: '#6366F1', color: '#FFF', border: 'none', fontSize: '0.72rem', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}>
-            {aiLoading ? <RefreshCw size={12} className="spin" /> : <Play size={12} />} Generate
-          </button>
+          <textarea
+            value={aiPrompt}
+            onChange={(e) => setAiPrompt(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiTranslate(false); } }}
+            rows={2}
+            placeholder="Find large-cap stocks with RSI below 40, price above EMA 200 and unusual volume…"
+            aria-label="Describe the screen you want in plain English"
+            style={input({ flex: 1, padding: '6px 10px', border: 'none', background: 'transparent', resize: 'none', lineHeight: 1.5 })}
+          />
+          <div style={{ display: 'flex', alignItems: 'flex-end', flexShrink: 0 }}>
+            <button onClick={() => handleAiTranslate(false)} disabled={aiLoading} style={btnPrimary({ opacity: aiLoading ? 0.6 : 1 })}>
+              {aiLoading ? <RefreshCw size={12} className="tn-spin" /> : <Play size={12} />} Generate
+            </button>
+          </div>
         </div>
         {aiPreview && (
-          <div style={{ background: '#060913', border: '1px solid rgba(168,85,247,0.3)', borderRadius: 8, padding: '8px 10px' }}>
-            <div style={{ fontSize: '0.64rem', color: '#C084FC', fontWeight: 800, marginBottom: 4 }}>GENERATED FILTERS (editable before execution)</div>
-            <div style={{ fontSize: '0.7rem', color: '#38BDF8', fontFamily: 'JetBrains Mono, monospace', marginBottom: 4 }}>{aiPreview.formula_query}</div>
-            {(aiPreview.filters_preview || []).length > 0 && (
-              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 6 }}>
-                {aiPreview.filters_preview.map((f, i) => (
-                  <span key={i} style={{ fontSize: '0.62rem', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', color: '#A5B4FC', borderRadius: 5, padding: '2px 7px' }}>
-                    {f.field} {f.operator} {String(f.value)}
-                  </span>
-                ))}
+          <div style={{ background: TN.inset, border: `1px solid rgba(167,139,250,0.30)`, borderRadius: TN.radius, padding: '8px 10px', display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 220, flex: 1 }}>
+              <div style={sectionTitle({ color: TN.ai, marginBottom: 5 })}>AI interpretation</div>
+              {(aiPreview.filters_preview || []).length > 0 ? (
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '2px 12px', fontSize: 11, marginBottom: 6 }}>
+                  {aiPreview.filters_preview.map((f, i) => (
+                    <React.Fragment key={i}>
+                      <span style={{ color: TN.faint }}>{f.field}</span>
+                      <span style={{ color: TN.text, fontFamily: TN.mono }}>{f.operator} {String(f.value)}</span>
+                    </React.Fragment>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ fontSize: 11, color: TN.muted, marginBottom: 6 }}>{aiPreview.explanation || 'No structured filters parsed.'}</div>
+              )}
+              {(aiPreview.unavailable_notes || []).map((n, i) => (
+                <div key={i} style={{ fontSize: 11, color: TN.warn, marginBottom: 3 }}>{n}</div>
+              ))}
+              {!!(aiPreview.filters_preview || []).length && aiPreview.explanation && (
+                <div style={{ fontSize: 11, color: TN.muted, marginBottom: 6 }}>{aiPreview.explanation}</div>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, justifyContent: 'flex-end', minWidth: 150 }}>
+              <div style={{ fontSize: 11, color: TN.info, fontFamily: TN.mono, overflow: 'hidden', textOverflow: 'ellipsis' }} title={aiPreview.formula_query}>{aiPreview.formula_query}</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button onClick={applyAiPreview} style={btnGreen()}>Apply Filters</button>
+                <button onClick={() => { setFormulaQuery(aiPreview.formula_query); setQueryMode('formula'); }} style={btn()}>Modify</button>
+                <button onClick={() => setAiPreview(null)} style={btn(false, { border: '1px solid transparent', background: 'transparent' })}>Cancel</button>
               </div>
-            )}
-            {(aiPreview.unavailable_notes || []).map((n, i) => (
-              <div key={i} style={{ fontSize: '0.66rem', color: '#F59E0B', marginBottom: 3 }}>{n}</div>
-            ))}
-            {aiPreview.explanation && <div style={{ fontSize: '0.66rem', color: '#94A3B8', marginBottom: 6 }}>{aiPreview.explanation}</div>}
-            <div style={{ display: 'flex', gap: 6 }}>
-              <button onClick={applyAiPreview} style={{ padding: '4px 12px', borderRadius: 6, background: '#10B981', color: '#FFF', border: 'none', fontSize: '0.68rem', fontWeight: 800, cursor: 'pointer' }}>Apply</button>
-              <button onClick={() => { setFormulaQuery(aiPreview.formula_query); setQueryMode('formula'); }} style={{ padding: '4px 12px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', color: '#CBD5E1', border: '1px solid rgba(255,255,255,0.1)', fontSize: '0.68rem', fontWeight: 700, cursor: 'pointer' }}>Edit as formula</button>
-              <button onClick={() => setAiPreview(null)} style={{ padding: '4px 12px', borderRadius: 6, background: 'transparent', color: '#64748B', border: 'none', fontSize: '0.68rem', cursor: 'pointer' }}>Cancel</button>
             </div>
           </div>
         )}
       </div>
 
       {/* Presets incl. 13 institutional templates */}
-      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 2, alignItems: 'center' }}>
-        <span style={{ fontSize: '0.64rem', color: '#64748B', fontWeight: 800, textTransform: 'uppercase', marginRight: 2 }}>Presets:</span>
-        {quickPills.map(p => (
-          <button key={p.id} onClick={() => applyPreset(p.id, p.query, p.name)} style={pill(activePresetId === p.id)}>{p.name}</button>
-        ))}
-        {(prebuiltTemplates.length ? prebuiltTemplates : PREBUILT_SCREENS.map((t) => ({ id: t.id, name: t.name, formula_query: t.query }))).map(tpl => (
-          <button key={tpl.id} onClick={() => applyPreset(tpl.id, tpl.formula_query, tpl.name)} style={pill(activePresetId === tpl.id)}>{tpl.name}</button>
-        ))}
-        {savedScreens.map(s => (
-          <button key={`saved-${s.id}`} onClick={() => applyPreset(`saved-${s.id}`, s.formula_query, s.name)} style={{ ...pill(activePresetId === `saved-${s.id}`), borderStyle: 'dashed' }}>{s.name}</button>
-        ))}
+      <div style={panel({ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 7 })}>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={sectionTitle()}>Screen presets</span>
+          <span style={{ fontSize: 11, color: TN.faint }}>
+            {quickPills.length + (prebuiltTemplates.length || PREBUILT_SCREENS.length) + savedScreens.length} saved views — one click applies the full filter set
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          {quickPills.map(p => (
+            <button key={p.id} onClick={() => applyPreset(p.id, p.query, p.name)} style={pill(activePresetId === p.id)}>{p.name}</button>
+          ))}
+          {(prebuiltTemplates.length ? prebuiltTemplates : PREBUILT_SCREENS.map((t) => ({ id: t.id, name: t.name, formula_query: t.query }))).map(tpl => (
+            <button key={tpl.id} onClick={() => applyPreset(tpl.id, tpl.formula_query, tpl.name)} style={pill(activePresetId === tpl.id)}>{tpl.name}</button>
+          ))}
+          {savedScreens.map(s => (
+            <span key={`saved-${s.id}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 0, flexShrink: 0 }}>
+              <button
+                onClick={() => applyPreset(`saved-${s.id}`, s.formula_query, s.name, { universe: s.universe, sort_by: s.sort_by, sort_dir: s.sort_dir })}
+                style={{ ...pill(activePresetId === `saved-${s.id}`), borderStyle: 'dashed', borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+                title={`${s.formula_query}${s.universe ? ` · universe ${s.universe}` : ''}${s.sort_by ? ` · ${s.sort_by} ${s.sort_dir}` : ''}`}
+              >
+                {s.name}
+              </button>
+              {/* Restore-universe/sort + share + delete: the backend already
+                  returned all of this, but no control ever surfaced it. */}
+              {s.share_token && (
+                <button
+                  type="button"
+                  onClick={() => handleCopyShareLink(s.share_token)}
+                  title="Copy public share link"
+                  aria-label={`Copy share link for ${s.name}`}
+                  style={{ ...pill(false), borderStyle: 'dashed', borderLeft: 'none', borderTopLeftRadius: 0, borderBottomLeftRadius: 0, padding: '3px 6px' }}
+                >
+                  🔗
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => handleDeleteScreen(s.id, s.name)}
+                title="Delete this saved screen"
+                aria-label={`Delete ${s.name}`}
+                style={{ ...pill(false), borderStyle: 'dashed', borderLeft: 'none', borderTopLeftRadius: 0, borderBottomLeftRadius: 0, padding: '3px 6px' }}
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
       </div>
 
       <ScreenerSectorChart
         rows={processedResults}
         sectors={overview.sectors || []}
         selectedSector={selectedSector}
+        collapsed={sectorsCollapsed}
+        onToggleCollapse={() => setSectorsCollapsed((v) => !v)}
+        expanded={sectorsExpanded}
+        onToggleExpanded={() => setSectorsExpanded((v) => !v)}
         onSelectSector={(sec) => {
           setSelectedSector(sec);
-          setPage(1);
           if (queryMode === 'visual' && !builderEnabled) runScreen(buildVisualFormula(sec));
         }}
       />
 
-      {/* Active filter chips */}
+      {/* Active filter chips — compact, one row, never overlaps tabs */}
       {activeChips.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', background: '#080D1E', padding: '7px 11px', borderRadius: 9, border: '1px solid rgba(255,255,255,0.06)' }}>
-          <span style={{ fontSize: '0.62rem', color: '#64748B', fontWeight: 800 }}>ACTIVE FILTERS ({activeChips.length}):</span>
-          {activeChips.map((c, i) => (
-            <span key={i} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.64rem', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', color: '#A5B4FC', borderRadius: 12, padding: '2px 6px 2px 9px', fontFamily: 'JetBrains Mono, monospace' }}>
+        <div style={panel({ padding: '6px 10px', display: 'flex', gap: 6, alignItems: 'center', overflowX: 'auto', width: '100%', minWidth: 0, boxSizing: 'border-box' })} className="tn-no-scrollbar">
+          <span style={sectionTitle({ whiteSpace: 'nowrap', flexShrink: 0 })}>Active filters ({activeChips.length})</span>
+          {visibleChips.map((c, i) => (
+            <span key={i} style={chip('default', { flexShrink: 0 })}>
               {c}
-              <button onClick={() => removeChip(c)} style={{ background: 'transparent', border: 'none', color: '#F87171', cursor: 'pointer', fontSize: '0.7rem', padding: 0 }}>×</button>
+              <button onClick={() => removeChip(c)} title={`Remove filter: ${c}`} aria-label={`Remove filter ${c}`} style={{ background: 'transparent', border: 'none', color: TN.down, cursor: 'pointer', fontSize: 12, padding: 0, lineHeight: 1 }}>×</button>
             </span>
           ))}
-          <button onClick={handleResetFilters} style={{ fontSize: '0.62rem', color: '#64748B', background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Clear all</button>
+          {activeChips.length > 5 && (
+            <button onClick={() => setShowAllChips((v) => !v)} style={{ fontSize: 11, color: TN.accent, background: 'transparent', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 }}>
+              {showAllChips ? 'Show less' : `+${activeChips.length - 5} more`}
+            </button>
+          )}
+          <span style={{ flex: '1 0 8px' }} />
+          <button onClick={() => setShowSaveModal(true)} title="Save this screen" style={{ ...btn(), height: 24, fontSize: 11, flexShrink: 0 }}><Save size={12} /> Save Screen</button>
+          <button onClick={handleResetFilters} style={{ fontSize: 11, color: TN.muted, background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline', whiteSpace: 'nowrap', flexShrink: 0 }}>Clear all</button>
         </div>
       )}
 
       {/* Filter drawer: sliders + builder + formula */}
       {filtersOpen && (
-        <div style={{ background: '#090D1C', border: '1px solid rgba(99,102,241,0.25)', borderRadius: 14, padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 6 }}>
+        <div style={panel({ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10, width: '100%', minWidth: 0, boxSizing: 'border-box' })}>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             {[['visual', 'Visual + Builder'], ['formula', 'Formula DSL']].map(([id, label]) => (
-              <button key={id} type="button" onClick={() => setQueryMode(id)} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: queryMode === id ? 'rgba(99,102,241,0.25)' : 'transparent', color: queryMode === id ? '#A5B4FC' : '#64748B', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer' }}>{label}</button>
+              <button key={id} type="button" onClick={() => setQueryMode(id)} style={btn(queryMode === id)}>{label}</button>
             ))}
             <span style={{ flex: 1 }} />
-            <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.66rem', color: '#94A3B8' }}>
-              <input type="checkbox" checked={builderEnabled} onChange={(e) => setBuilderEnabled(e.target.checked)} style={{ accentColor: '#6366F1' }} /> Advanced builder (AND/OR/NOT)
+            <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: TN.muted }}>
+              <input type="checkbox" checked={builderEnabled} onChange={(e) => setBuilderEnabled(e.target.checked)} style={{ accentColor: '#7C8CF8' }} /> Advanced builder (AND/OR/NOT)
             </label>
-            <button type="button" onClick={handleResetFilters} style={{ padding: '5px 10px', borderRadius: 6, background: 'rgba(255,255,255,0.05)', color: '#94A3B8', border: '1px solid rgba(255,255,255,0.1)', fontSize: '0.68rem', cursor: 'pointer' }}>Reset</button>
-            <button type="button" onClick={() => { setPage(1); runScreen(); }} disabled={loading} style={{ padding: '5px 14px', borderRadius: 6, background: '#10B981', color: '#FFF', border: 'none', fontSize: '0.7rem', fontWeight: 800, cursor: 'pointer' }}>{loading ? 'Running…' : 'Apply & Run'}</button>
-            <button type="button" onClick={() => setFiltersOpen(false)} style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer' }}>✕</button>
+            <button type="button" onClick={handleResetFilters} style={btn()}>Reset</button>
+            <button type="button" onClick={() => runScreen()} disabled={loading} style={btnGreen({ opacity: loading ? 0.6 : 1 })}>{loading ? 'Running…' : 'Apply & Run'}</button>
+            <button type="button" onClick={() => setFiltersOpen(false)} aria-label="Close filters" style={{ background: 'transparent', border: 'none', color: TN.faint, cursor: 'pointer' }}>✕</button>
           </div>
           {queryMode === 'visual' ? (
             <>
@@ -645,88 +1072,124 @@ export default function AdvancedScreener() {
               ) : (
                 <ScreenerFilters
                   universe={universe} setUniverse={setUniverse} onUniverseChange={handleUniverseChange}
+                  universeOptions={universeOptions}
                   selectedSector={selectedSector} setSelectedSector={setSelectedSector}
                   marketCapCat={marketCapCat} setMarketCapCat={setMarketCapCat}
-                  minRoce={minRoce} setMinRoce={setMinRoce} minRoe={minRoe} setMinRoe={setMinRoe}
-                  maxPe={maxPe} setMaxPe={setMaxPe} maxPb={maxPb} setMaxPb={setMaxPb}
-                  maxDebt={maxDebt} setMaxDebt={setMaxDebt} minSalesGrowth={minSalesGrowth} setMinSalesGrowth={setMinSalesGrowth}
-                  minProfitGrowth={minProfitGrowth} setMinProfitGrowth={setMinProfitGrowth}
-                  minRsi={minRsi} setMinRsi={setMinRsi} maxRsi={maxRsi} setMaxRsi={setMaxRsi}
-                  minVolRatio={minVolRatio} setMinVolRatio={setMinVolRatio} minAiScore={minAiScore} setMinAiScore={setMinAiScore}
-                  queryMode={queryMode} setQueryMode={setQueryMode} formulaQuery={formulaQuery} setFormulaQuery={setFormulaQuery}
-                  onResetFilters={handleResetFilters} onRunScreen={() => { setPage(1); runScreen(); }} loading={loading} onClose={() => setFiltersOpen(false)}
+                  minRoce={minRoce} setMinRoce={visualSetters.setMinRoce}
+                  minRoe={minRoe} setMinRoe={visualSetters.setMinRoe}
+                  maxPe={maxPe} setMaxPe={visualSetters.setMaxPe}
+                  maxPb={maxPb} setMaxPb={visualSetters.setMaxPb}
+                  maxDebt={maxDebt} setMaxDebt={visualSetters.setMaxDebt}
+                  minSalesGrowth={minSalesGrowth} setMinSalesGrowth={visualSetters.setMinSalesGrowth}
+                  minProfitGrowth={minProfitGrowth} setMinProfitGrowth={visualSetters.setMinProfitGrowth}
+                  minRsi={minRsi} setMinRsi={visualSetters.setMinRsi}
+                  maxRsi={maxRsi} setMaxRsi={visualSetters.setMaxRsi}
+                  minVolRatio={minVolRatio} setMinVolRatio={visualSetters.setMinVolRatio}
+                  minAiScore={minAiScore} setMinAiScore={visualSetters.setMinAiScore}
+                  touchedFilters={touchedFilters}
+                  activeFilterCount={activeChips.length}
                 />
               )}
             </>
           ) : (
             <div>
-              <textarea value={formulaQuery} onChange={(e) => setFormulaQuery(e.target.value)} rows={3} style={{ width: '100%', background: '#060913', border: '1px solid rgba(99,102,241,0.35)', borderRadius: 8, padding: '8px 12px', color: '#38BDF8', fontFamily: 'JetBrains Mono, monospace', fontSize: '0.74rem', outline: 'none' }} />
-              <div style={{ fontSize: '0.62rem', color: '#64748B', marginTop: 4 }}>Whitelisted: ROCE ROE PE PB DebtToEquity MarketCap RSI14 VolumeRatio20D EMA ADX ATR BB Stoch CCI ROC Williams MACD Supertrend Structure Regime Breakout Confluence AIConsensus RsNifty Sentiment… Unavailable fields show “Data unavailable for this condition.”</div>
+              <textarea value={formulaQuery} onChange={(e) => setFormulaQuery(e.target.value)} rows={3} style={input({ width: '100%', padding: '8px 10px', color: TN.info, fontFamily: TN.mono, fontSize: 12, boxSizing: 'border-box', resize: 'vertical' })} />
+              <div style={{ fontSize: 11, color: TN.faint, marginTop: 4 }}>Whitelisted: ROCE ROE PE PB DebtToEquity MarketCap RSI14 VolumeRatio20D EMA ADX ATR BB Stoch CCI ROC Williams MACD Supertrend Structure Regime Breakout Confluence AIConsensus RsNifty Sentiment… Unavailable fields show “Data unavailable for this condition.”</div>
             </div>
           )}
         </div>
       )}
 
-      {/* Column groups + rank + search */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, background: '#080D1E', padding: '8px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)' }}>
-        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-          {[{ id: 'overview', label: 'Overview' }, ...COLUMN_GROUPS.filter((g) => g.id !== 'overview')].map(t => (
-            <button key={t.id} onClick={() => setColumnGroup(t.id)} style={{ padding: '5px 11px', borderRadius: 6, border: 'none', background: columnGroup === t.id ? 'rgba(99,102,241,0.25)' : 'transparent', color: columnGroup === t.id ? '#818CF8' : '#64748B', fontSize: '0.68rem', fontWeight: columnGroup === t.id ? 800 : 500, cursor: 'pointer' }}>{t.label}</button>
-          ))}
+      {/* Category navigation + rank + search — tabs own full-width row, controls second row */}
+      <div style={panel({ padding: '2px 12px 6px', position: 'relative', display: 'flex', flexDirection: 'column', gap: 0, width: '100%', minWidth: 0, boxSizing: 'border-box', overflow: 'visible' })}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', width: '100%', minWidth: 0 }}>
+          <nav className="tn-tabs" aria-label="Column groups" style={{ display: 'flex', flex: '1 1 auto', minWidth: 0, overflow: 'visible', flexWrap: 'nowrap' }}>
+            {[{ id: 'overview', label: 'Overview' }, ...COLUMN_GROUPS.filter((g) => g.id !== 'overview')].map(t => (
+              <button key={t.id} onClick={() => setColumnGroup(t.id)} aria-pressed={columnGroup === t.id} className={`tn-tab${columnGroup === t.id ? ' active' : ''}`}>{t.label}</button>
+            ))}
+          </nav>
+          <div style={{ position: 'relative', flexShrink: 0, paddingBottom: 4, paddingLeft: 8 }}>
+            <button type="button" onClick={() => setShowColumnMenu((v) => !v)} aria-expanded={showColumnMenu} title="Show, hide and reorder columns" style={btn(showColumnMenu, { height: 26, whiteSpace: 'nowrap' })}>Columns{groupHidden.length ? ` (${groupOrderedCols.length - groupHidden.length}/${groupOrderedCols.length})` : ''} ▾</button>
+            {showColumnMenu && (
+              <>
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 110, cursor: 'default' }}
+                  onClick={() => setShowColumnMenu(false)}
+                  aria-hidden="true"
+                />
+                <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 120 }}>
+                  <ScreenerColumnMenu
+                    columns={groupOrderedCols}
+                    isVisible={(k) => !groupHidden.includes(k)}
+                    onToggle={toggleColumn}
+                    onMove={moveColumn}
+                    onResetWidths={resetWidths}
+                    onClose={() => setShowColumnMenu(false)}
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <label style={{ fontSize: '0.64rem', color: '#64748B', fontWeight: 700 }}>Rank by:</label>
-          <select value={rankBy} onChange={(e) => rankByChange(e.target.value)} style={{ background: '#060913', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, padding: '4px 8px', color: '#F1F5F9', fontSize: '0.68rem', outline: 'none' }}>
-            {RANK_OPTIONS.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, flexWrap: 'wrap', borderTop: `1px solid ${TN.border}`, marginTop: 2, width: '100%', minWidth: 0 }}>
+          <label style={{ fontSize: 11, color: TN.faint, fontWeight: 700, whiteSpace: 'nowrap' }}>Rank by:</label>
+          <select value={sortColumn} onChange={(e) => rankByChange(e.target.value)} style={input({ height: 26, padding: '0 6px', fontSize: 12 })}>
+            {rankOptions.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
           </select>
           {multiSort.length > 0 && (
-            <button onClick={() => setMultiSort([])} style={{ fontSize: '0.62rem', color: '#F59E0B', background: 'transparent', border: 'none', cursor: 'pointer' }}>Clear multi-sort ({multiSort.length})</button>
+            <button onClick={() => setMultiSort([])} style={{ fontSize: 11, color: TN.warn, background: 'transparent', border: 'none', cursor: 'pointer' }}>Clear multi-sort ({multiSort.length})</button>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.04)', borderRadius: 6, padding: '4px 10px', border: '1px solid rgba(255,255,255,0.08)' }}>
-            <Search size={12} color="#64748B" />
-            <input type="text" value={searchFilter} onChange={(e) => { setSearchFilter(e.target.value); setPage(1); }} placeholder="Search ticker, name..." style={{ background: 'transparent', border: 'none', color: '#F1F5F9', fontSize: '0.7rem', outline: 'none', width: 130 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, background: TN.inset, borderRadius: TN.radius, padding: '3px 8px', border: `1px solid ${TN.border}`, flex: '1 1 160px', minWidth: 140, maxWidth: 300 }}>
+            <Search size={12} color={TN.faint} />
+            <input type="text" value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)} placeholder="Search ticker, name…" aria-label="Filter results by ticker or name" style={{ background: 'transparent', border: 'none', color: TN.text, fontSize: 12, outline: 'none', width: '100%', minWidth: 0 }} />
           </div>
-          <div style={{ fontSize: '0.68rem', color: '#94A3B8', fontWeight: 600 }}><strong style={{ color: '#10B981', fontFamily: 'JetBrains Mono, monospace' }}>{processedResults.length}</strong> Matches</div>
+          <div style={{ fontSize: 12, color: TN.muted, fontWeight: 600, whiteSpace: 'nowrap', marginLeft: 'auto' }} title={queryMeta.universeTotal ? `${processedResults.length} after client filters · ${queryMeta.total} matched on server${queryMeta.universe ? ` · universe ${queryMeta.universe} (${queryMeta.universeScoped ?? '?'})` : ''} · ${queryMeta.universeTotal} stocks tracked` : undefined}><strong style={{ color: TN.up, fontFamily: TN.mono }}>{processedResults.length}</strong> matches{queryMeta.universe && queryMeta.universeScoped != null ? <span style={{ color: TN.faint }}> in {queryMeta.universe} ({queryMeta.universeScoped})</span> : queryMeta.universeTotal > 0 ? <span style={{ color: TN.faint }}> of {queryMeta.universeTotal} stocks</span> : null}</div>
         </div>
       </div>
 
-      {/* Results table */}
-      <div style={{ flex: 1, overflowY: 'auto', background: '#080D1E', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 10, minHeight: '380px', position: 'relative' }}>
+      {/* Results table — single vertical scroll root, horizontal inside.
+          Rows are virtualized: the full result set scrolls, only visible
+          rows sit in the DOM. Deliberately borderless/transparent so it reads
+          as page flow rather than a box — scrolling still stays inside this
+          container, keeping filters and the sticky header in view. */}
+      <div ref={tableScrollRef} className="tn-scroll" style={{ flex: '1 1 auto', minHeight: '55vh', overflowY: 'auto', overflowX: 'auto', background: 'transparent', border: 'none', borderRadius: 0, position: 'relative', width: '100%', minWidth: 0 }}>
         <ScreenerTable
-          rows={paginatedRows}
+          rows={processedResults}
           loading={loading}
           sortBy={sortColumn}
           sortDir={sortDirection}
           multiSort={multiSort}
           onSort={(col, e) => onSort(col, e)}
-          activeTab={activeTab}
           columnGroup={columnGroup}
+          visibleColumns={groupVisibleKeys}
+          columnOrder={colConfig.order[columnGroup] || null}
+          columnWidths={colConfig.widths}
+          onResizeColumn={resizeColumn}
+          onResizeCommit={commitColumnWidth}
           selectedTickers={selectedTickers}
-          onToggleSelect={(sym) => { setSelectedTickers(prev => { const next = new Set(prev); if (next.has(sym)) next.delete(sym); else next.add(sym); return next; }); }}
-          onToggleSelectAll={() => {
-            if (paginatedRows.every(r => selectedTickers.has(r.ticker))) {
-              setSelectedTickers(prev => { const next = new Set(prev); paginatedRows.forEach(r => next.delete(r.ticker)); return next; });
-            } else {
-              setSelectedTickers(prev => { const next = new Set(prev); paginatedRows.forEach(r => next.add(r.ticker)); return next; });
-            }
-          }}
-          onInspect={(stock) => setInspectedStock(stock)}
-          onNavigateChart={(sym) => {
-            const row = processedResults.find((r) => r.ticker === sym);
-            setSelectedSymbol(sym); setActiveView('Live Chart');
-            if (row && (row.rsi_14 ?? 50) < 30) toast.success('Chart opened — consider enabling RSI (screen flagged RSI < 30).');
-          }}
-          onNavigateFundamentals={(sym) => { setSelectedSymbol(sym); setActiveView('Fundamentals'); }}
+          onToggleSelect={toggleSelect}
+          onToggleSelectAll={toggleSelectAll}
+          onInspect={inspectStock}
+          onNavigateChart={navigateChart}
+          onNavigateFundamentals={navigateFundamentals}
+          onAddWatchlist={handleAddWatchlist}
+          onAlertFor={handleAlertFor}
           liveTicks={liveTicks}
+          scrollRef={tableScrollRef}
         />
       </div>
 
-      <ScreenerPagination totalItems={processedResults.length} page={page} setPage={setPage} pageSize={pageSize} setPageSize={setPageSize} />
+      <ScreenerStatusBar
+        wsState={wsState === 'live' ? 'live' : wsState}
+        feedLive={overview.feed_live}
+        matchCount={processedResults.length}
+        universe={universe}
+      />
 
       <ScreenerBulkBar
         selectedCount={selectedTickers.size}
         selectedTickers={Array.from(selectedTickers)}
-        onClearSelection={() => setSelectedTickers(new Set())}
+        onClearSelection={clearSelection}
         onExportSelected={() => { handleExportCsv(processedResults.filter(r => selectedTickers.has(r.ticker))); }}
         allResults={processedResults}
       />
@@ -735,8 +1198,8 @@ export default function AdvancedScreener() {
         <ScreenerFlyoutDrawer
           stock={inspectedStock}
           onClose={() => setInspectedStock(null)}
-          onNavigateChart={(sym) => { setSelectedSymbol(sym); setActiveView('Live Chart'); }}
-          onNavigateFundamentals={(sym) => { setSelectedSymbol(sym); setActiveView('Fundamentals'); }}
+          onNavigateChart={navigateChart}
+          onNavigateFundamentals={navigateFundamentals}
           onAddWatchlist={handleAddWatchlist}
           onAnalyzeAI={(s) => { setSelectedSymbol(s.ticker); setActiveView('AI Prediction'); }}
         />
@@ -758,13 +1221,13 @@ export default function AdvancedScreener() {
 
       {/* Alert-from-screener modal (real smart-alerts API) */}
       {showAlertModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(3,7,18,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 260 }}>
-          <div style={{ background: '#090D1C', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 14, padding: 20, width: 380, maxWidth: '92vw' }}>
-            <div style={{ fontSize: '0.9rem', fontWeight: 800, color: '#FFF', marginBottom: 4 }}>Create Alert from Screener</div>
-            <div style={{ fontSize: '0.66rem', color: '#64748B', marginBottom: 12 }}>Real alert evaluated by the backend scheduler. Examples: RSI crosses above 30, AI Score &gt; 80 with volume &gt; 2x.</div>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(2,4,10,0.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 260 }}>
+          <div style={{ background: TN.panel, border: `1px solid ${TN.borderStrong}`, borderRadius: TN.radius, padding: 18, width: 380, maxWidth: '92vw' }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: TN.text, marginBottom: 4 }}>Create Alert</div>
+            <div style={{ fontSize: 11, color: TN.faint, marginBottom: 12 }}>Evaluated by the backend scheduler. Examples: RSI crosses above 30, AI Score &gt; 80 with volume &gt; 2x.</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <label style={{ fontSize: '0.66rem', color: '#94A3B8' }}>Ticker<input value={alertDraft.ticker} onChange={(e) => setAlertDraft({ ...alertDraft, ticker: e.target.value })} placeholder="RELIANCE" style={inputStyle} /></label>
-              <label style={{ fontSize: '0.66rem', color: '#94A3B8' }}>Condition
+              <label style={{ fontSize: 11, color: TN.muted }}>Ticker<input value={alertDraft.ticker} onChange={(e) => setAlertDraft({ ...alertDraft, ticker: e.target.value })} placeholder="RELIANCE" style={inputStyle} /></label>
+              <label style={{ fontSize: 11, color: TN.muted }}>Condition
                 <select value={alertDraft.type} onChange={(e) => setAlertDraft({ ...alertDraft, type: e.target.value })} style={inputStyle}>
                   <option value="rsi_below">RSI crosses below</option>
                   <option value="rsi_above">RSI crosses above</option>
@@ -773,10 +1236,10 @@ export default function AdvancedScreener() {
                   <option value="volume_spike">Volume spike ratio above</option>
                 </select>
               </label>
-              <label style={{ fontSize: '0.66rem', color: '#94A3B8' }}>Threshold<input value={alertDraft.value} onChange={(e) => setAlertDraft({ ...alertDraft, value: e.target.value })} placeholder="30" style={inputStyle} /></label>
+              <label style={{ fontSize: 11, color: TN.muted }}>Threshold<input value={alertDraft.value} onChange={(e) => setAlertDraft({ ...alertDraft, value: e.target.value })} placeholder="30" style={inputStyle} /></label>
               <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-                <button onClick={handleCreateAlert} style={{ flex: 1, padding: '7px', borderRadius: 7, background: '#10B981', color: '#FFF', border: 'none', fontWeight: 800, cursor: 'pointer' }}>Create Alert</button>
-                <button onClick={() => setShowAlertModal(false)} style={{ padding: '7px 14px', borderRadius: 7, background: 'transparent', color: '#94A3B8', border: '1px solid rgba(255,255,255,0.1)', cursor: 'pointer' }}>Cancel</button>
+                <button onClick={handleCreateAlert} style={btnGreen({ flex: 1, justifyContent: 'center' })}>Create Alert</button>
+                <button onClick={() => setShowAlertModal(false)} style={btn()}>Cancel</button>
               </div>
             </div>
           </div>
@@ -786,5 +1249,5 @@ export default function AdvancedScreener() {
   );
 }
 
-const pill = (active) => ({ padding: '4px 10px', borderRadius: 14, background: active ? 'rgba(99,102,241,0.28)' : 'rgba(255,255,255,0.03)', border: active ? '1px solid #6366F1' : '1px solid rgba(255,255,255,0.06)', color: active ? '#A5B4FC' : '#94A3B8', fontSize: '0.66rem', fontWeight: active ? 800 : 500, cursor: 'pointer', whiteSpace: 'nowrap' });
-const inputStyle = { display: 'block', width: '100%', marginTop: 4, background: '#060913', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 7, padding: '7px 10px', color: '#F1F5F9', fontSize: '0.74rem', outline: 'none', boxSizing: 'border-box' };
+const pill = (active) => ({ padding: '3px 10px', borderRadius: 3, background: active ? 'rgba(124,140,248,0.14)' : 'rgba(148,163,184,0.05)', border: active ? '1px solid rgba(124,140,248,0.5)' : `1px solid ${TN.border}`, color: active ? TN.accent : TN.muted, fontSize: 11, fontWeight: active ? 700 : 500, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 });
+const inputStyle = { display: 'block', width: '100%', marginTop: 4, background: TN.inset, border: `1px solid ${TN.borderStrong}`, borderRadius: TN.radius, padding: '6px 10px', color: TN.text, fontSize: 12, outline: 'none', boxSizing: 'border-box' };

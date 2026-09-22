@@ -438,16 +438,40 @@ export function detectPatterns(candles) {
   return markers.slice(-25);
 }
 
+/**
+ * UTC calendar-day key for a candle time — accepts epoch seconds, epoch ms,
+ * or ISO date strings. Returns null when the time is not a usable timestamp
+ * (e.g. bare array indices), so callers keep cumulative behaviour.
+ */
+function vwapDayKey(time) {
+  let ms = null;
+  if (typeof time === 'number' && isFinite(time)) ms = time < 1e12 ? time * 1000 : time;
+  else if (typeof time === 'string') { const parsed = Date.parse(time); if (!isNaN(parsed)) ms = parsed; }
+  else if (time instanceof Date) ms = time.getTime();
+  if (ms == null || !isFinite(ms)) return null;
+  const d = new Date(ms);
+  return d.getUTCFullYear() * 10000 + d.getUTCMonth() * 100 + d.getUTCDate();
+}
+
 export function calculateVWAP(candles) {
   if (!candles || candles.length === 0) return [];
   const result = [];
   let cumVol = 0;
   let cumVolPrice = 0;
+  let prevDay = null;
 
   for (let i = 0; i < candles.length; i++) {
     const c = candles[i];
     const vol = Number(c.volume || 1);
     const typPrice = (Number(c.high) + Number(c.low) + Number(c.close)) / 3;
+    // Session anchoring: reset cumulators at each calendar-day boundary so
+    // VWAP tracks the current session instead of the entire chart history.
+    const day = vwapDayKey(c.time);
+    if (day != null && prevDay != null && day !== prevDay) {
+      cumVol = 0;
+      cumVolPrice = 0;
+    }
+    if (day != null) prevDay = day;
     cumVol += vol;
     cumVolPrice += typPrice * vol;
     result.push({

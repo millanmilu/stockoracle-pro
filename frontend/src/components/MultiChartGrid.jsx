@@ -20,6 +20,16 @@ export default function MultiChartGrid({ layout: controlledLayout, onLayoutChang
   const [activePaneId, setActivePaneId] = useState(0);
   const [maximizedPaneId, setMaximizedPaneId] = useState(null);
   const [panes, setPanes] = useState(DEFAULT_PANES);
+  // Narrow screens (<=640px): side-by-side panes would be ~170px wide and
+  // every pane toolbar/search would overflow — force single-column stacking.
+  const [isNarrow, setIsNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth <= 640);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 640px)');
+    const onChange = (e) => setIsNarrow(e.matches);
+    setIsNarrow(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   // Load saved grid state from localStorage
   useEffect(() => {
@@ -102,6 +112,12 @@ export default function MultiChartGrid({ layout: controlledLayout, onLayoutChang
   const getGridStyle = () => {
     if (maximizedPaneId !== null) {
       return { display: 'grid', gridTemplateColumns: '1fr', gridTemplateRows: '1fr', height: '100%', width: '100%', gap: 8, padding: 8 };
+    }
+    // Narrow screens: stack panes vertically (1 column, N rows) so each pane
+    // keeps full width for its toolbar + symbol search. Vertical scrolls.
+    if (isNarrow) {
+      const n = layout === '1x1' ? 1 : layout === '2x2' ? 4 : 2;
+      return { display: 'grid', gridTemplateColumns: '1fr', gridTemplateRows: `repeat(${n}, minmax(280px, 1fr))`, height: '100%', width: '100%', gap: 8, padding: 8, overflowY: 'auto' };
     }
     switch (layout) {
       case '1x2':

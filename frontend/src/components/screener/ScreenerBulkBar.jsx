@@ -1,7 +1,8 @@
 import React from 'react';
-import { Layers, Download, CheckSquare, X, DollarSign, BookmarkPlus } from 'lucide-react';
+import { Download, CheckSquare, X, DollarSign, BookmarkPlus } from 'lucide-react';
 import toast from 'react-hot-toast';
 import api from '../../utils/api';
+import { TN, btn } from './terminalTheme';
 
 export default function ScreenerBulkBar({ 
   selectedCount, 
@@ -49,8 +50,8 @@ export default function ScreenerBulkBar({
   const handleSaveToWatchlist = () => {
     try {
       const stored = JSON.parse(localStorage.getItem('stockoracle_custom_watchlist') || '[]');
-      const updated = Array.from(new Set([...stored, ...selectedTickers]));
-      localStorage.setItem('stockoracle_custom_watchlist', JSON.stringify(updated));
+      const updated = Array.from(new Set([...stored.map(String), ...selectedTickers.map(String)]));
+      localStorage.setItem('stockoracle_custom_watchlist', JSON.stringify(updated.map(t => String(t).trim().toUpperCase()).filter(Boolean)));
       toast.success(`Added ${selectedCount} stocks to Watchlist!`);
     } catch (e) {
       toast.error('Failed to save to Watchlist');
@@ -60,71 +61,51 @@ export default function ScreenerBulkBar({
   return (
     <div style={{
       position: 'fixed',
-      bottom: '24px',
+      bottom: 16,
       left: '50%',
       transform: 'translateX(-50%)',
-      background: '#0F172A',
-      border: '1px solid rgba(99,102,241,0.4)',
-      boxShadow: '0 10px 30px rgba(0,0,0,0.8), 0 0 20px rgba(99,102,241,0.25)',
-      borderRadius: 12,
-      padding: '8px 18px',
+      background: TN.panelAlt,
+      border: `1px solid ${TN.borderStrong}`,
+      boxShadow: '0 10px 28px rgba(0,0,0,0.6)',
+      borderRadius: TN.radius,
+      padding: '6px 12px',
       display: 'flex',
       alignItems: 'center',
-      gap: 14,
+      gap: 12,
       zIndex: 150,
-      animation: 'slideUp 0.2s ease-out'
+      maxWidth: '94vw',
+      flexWrap: 'wrap',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#A5B4FC', fontSize: '0.78rem', fontWeight: 800 }}>
-        <CheckSquare size={16} color="#6366F1" />
-        <span>{selectedCount} Selected</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: TN.accent, fontSize: 12, fontWeight: 700 }}>
+        <CheckSquare size={14} color={TN.accent} />
+        <span>{selectedCount} selected</span>
       </div>
 
-      <div style={{ height: 18, width: 1, background: 'rgba(255,255,255,0.15)' }} />
+      <div style={{ height: 18, width: 1, background: TN.border }} />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <button
-          onClick={handleSaveToWatchlist}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px',
-            borderRadius: 6, background: 'rgba(99,102,241,0.18)', border: '1px solid rgba(99,102,241,0.35)',
-            color: '#A5B4FC', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
-          }}
-        >
-          <BookmarkPlus size={13} /> Add to Watchlist
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <button onClick={handleSaveToWatchlist} style={btn(true)}>
+          <BookmarkPlus size={13} /> Watchlist
         </button>
 
-        <button
-          onClick={handleBulkPaperTrade}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px',
-            borderRadius: 6, background: 'linear-gradient(135deg, #10B981, #059669)', border: 'none',
-            color: '#FFF', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer'
-          }}
-        >
-          <DollarSign size={13} /> Paper Trade All (5 Qty)
+        <button onClick={handleBulkPaperTrade} style={btn(false, { background: 'rgba(34,197,94,0.14)', border: '1px solid rgba(34,197,94,0.40)', color: TN.up, fontWeight: 700 })}>
+          <DollarSign size={13} /> Paper Trade All (5)
         </button>
 
-        <button
-          onClick={onExportSelected}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 5, padding: '5px 12px',
-            borderRadius: 6, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.15)',
-            color: '#E2E8F0', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer'
-          }}
-        >
+        <button onClick={onExportSelected} style={btn()}>
           <Download size={13} /> Export CSV
         </button>
       </div>
 
       <button
         onClick={onClearSelection}
-        title="Deselect All"
+        title="Deselect all"
         style={{
-          background: 'transparent', border: 'none', color: '#94A3B8',
-          cursor: 'pointer', padding: 4, display: 'flex', marginLeft: 4
+          background: 'transparent', border: 'none', color: TN.muted,
+          cursor: 'pointer', padding: 4, display: 'flex', marginLeft: 2
         }}
       >
-        <X size={15} />
+        <X size={14} />
       </button>
     </div>
   );

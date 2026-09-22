@@ -155,7 +155,7 @@ MASTER_NSE_UNIVERSE = [
      "pcr": 1.45, "max_pain": 1480.0, "iv": 25.0, "ai_consensus_score": 91.0, "ai_signal": "STRONG BUY", "ai_confidence_score": 93.0},
 
     # ── Automobile ──
-    {"ticker": "TATAMOTORS", "name": "Tata Motors Ltd", "sector": "Automobile", "industry": "Commercial & Passenger Vehicles",
+    {"ticker": "TMPV", "name": "Tata Motors Passenger Vehicles Ltd", "sector": "Automobile", "industry": "Passenger & Electric Vehicles",
      "market_cap_cr": 340000.0, "market_cap_cat": "LARGE", "close_price": 945.0, "change_1d_pct": 2.10,
      "change_1w_pct": 4.5, "change_1m_pct": 11.2, "change_1y_pct": 56.4, "distance_52w_high_pct": -2.0,
      "distance_52w_low_pct": 68.0, "rsi_14": 68.2, "macd_signal": "BULLISH", "sma_20": 915.0, "sma_50": 880.0,
@@ -229,7 +229,7 @@ MASTER_NSE_UNIVERSE = [
      "sma_200": 295.0, "volume_ratio_20d": 0.78, "pe_ratio": 24.2, "pb_ratio": 7.4, "roe_pct": 29.5,
      "roce_pct": 38.4, "debt_to_equity": 0.01, "sales_growth_3y": 12.4, "profit_growth_3y": 14.8,
      "pcr": 1.10, "max_pain": 285.0, "iv": 15.4, "ai_consensus_score": 70.0, "ai_signal": "HOLD", "ai_confidence_score": 75.0},
-    {"ticker": "HUL", "name": "Hindustan Unilever Ltd", "sector": "FMCG", "industry": "Diversified FMCG",
+    {"ticker": "HINDUNILVR", "name": "Hindustan Unilever Ltd", "sector": "FMCG", "industry": "Diversified FMCG",
      "market_cap_cr": 510000.0, "market_cap_cat": "LARGE", "close_price": 2117.5, "change_1d_pct": -0.85,
      "change_1w_pct": -1.8, "change_1m_pct": -3.2, "change_1y_pct": -4.5, "distance_52w_high_pct": -14.2,
      "distance_52w_low_pct": 5.8, "rsi_14": 36.4, "macd_signal": "BEARISH", "sma_20": 2150.0, "sma_50": 2180.0,
@@ -271,7 +271,7 @@ MASTER_NSE_UNIVERSE = [
      "sma_200": 5100.0, "volume_ratio_20d": 2.45, "pe_ratio": 138.0, "pb_ratio": 48.0, "roe_pct": 38.5,
      "roce_pct": 32.4, "debt_to_equity": 0.45, "sales_growth_3y": 62.5, "profit_growth_3y": 142.0,
      "pcr": 1.85, "max_pain": 6850.0, "iv": 31.0, "ai_consensus_score": 96.0, "ai_signal": "STRONG BUY", "ai_confidence_score": 97.0},
-    {"ticker": "ZOMATO", "name": "Zomato Ltd", "sector": "Consumer / Internet", "industry": "Food Delivery & Quick Commerce",
+    {"ticker": "ETERNAL", "name": "Eternal Ltd", "sector": "Consumer / Internet", "industry": "Food Delivery & Quick Commerce",
      "market_cap_cr": 235000.0, "market_cap_cat": "LARGE", "close_price": 268.0, "change_1d_pct": 2.80,
      "change_1w_pct": 6.5, "change_1m_pct": 16.2, "change_1y_pct": 142.5, "distance_52w_high_pct": -0.8,
      "distance_52w_low_pct": 175.0, "rsi_14": 72.4, "macd_signal": "BULLISH", "sma_20": 252.0, "sma_50": 238.0,
@@ -385,11 +385,266 @@ MASTER_NSE_UNIVERSE = [
 ]
 
 
+# ── Small & low-price caps ────────────────────────────────────────────────
+# Curated NSE small caps (all < ₹10,000 Cr band). market_cap_cr is an
+# approximate reference value used ONLY for cap-band categorization —
+# price, returns, technicals and AI scores are always computed from real
+# Angel One OHLCV at refresh time. Fundamentals are intentionally None:
+# no verified source is wired, so the UI shows N/A instead of estimates.
+_SMALLCAP_ROWS = [
+    # (ticker, name, sector, industry, approx mcap ₹ Cr)
+    ("NCC", "NCC Ltd", "Infrastructure", "Construction", 8600.0),
+    ("PRAJIND", "Praj Industries Ltd", "Industrials", "Engineering", 7500.0),
+    ("EIDPARRY", "EID Parry (India) Ltd", "FMCG", "Sugar", 9500.0),
+    ("TRIVENI", "Triveni Engineering & Industries Ltd", "Industrials", "Sugar & Power", 5500.0),
+    ("BALRAMPURCHIN", "Balrampur Chini Mills Ltd", "FMCG", "Sugar", 6000.0),
+    ("GNFC", "Gujarat Narmada Valley Fertilizers & Chemicals Ltd", "Chemicals", "Fertilisers", 6500.0),
+    ("CHAMBLFERT", "Chambal Fertilisers & Chemicals Ltd", "Chemicals", "Fertilisers", 6000.0),
+    ("GSFC", "Gujarat State Fertilizers & Chemicals Ltd", "Chemicals", "Fertilisers", 5000.0),
+    ("RCF", "Rashtriya Chemicals & Fertilizers Ltd", "Chemicals", "Fertilisers", 8000.0),
+    ("NFL", "National Fertilizers Ltd", "Chemicals", "Fertilisers", 5500.0),
+    ("DEEPAKFERT", "Deepak Fertilisers & Petrochemicals Ltd", "Chemicals", "Fertilisers", 5500.0),
+    ("FACT", "Fertilisers & Chemicals Travancore Ltd", "Chemicals", "Fertilisers", 9000.0),
+    ("TANLA", "Tanla Platforms Ltd", "IT", "Software", 6200.0),
+    ("RATEGAIN", "RateGain Travel Technologies Ltd", "IT", "Travel Tech", 7000.0),
+    ("NEWGEN", "Newgen Software Technologies Ltd", "IT", "Software", 8000.0),
+    ("LATENTVIEW", "Latent View Analytics Ltd", "IT", "Analytics", 5000.0),
+    ("INTELLECT", "Intellect Design Arena Ltd", "IT", "BFSI Software", 7000.0),
+    ("ROUTE", "Route Mobile Ltd", "IT", "Communication", 6000.0),
+    ("SONATSOFTW", "Sonata Software Ltd", "IT", "Software", 2500.0),
+    ("RSYSTEMS", "R Systems International Ltd", "IT", "Software", 3000.0),
+    ("CYIENTDLM", "Cyient DLM Ltd", "Industrials", "Electronics", 5000.0),
+    ("AVALON", "Avalon Technologies Ltd", "Industrials", "Electronics", 2500.0),
+    ("SYRMA", "Syrma SGS Technology Ltd", "Industrials", "Electronics", 5000.0),
+    ("DATAPATTNS", "Data Patterns (India) Ltd", "Defence", "Electronics", 6000.0),
+    ("MTARTECH", "MTAR Technologies Ltd", "Defence", "Engineering", 4000.0),
+    ("PARAS", "Paras Defence & Space Technologies Ltd", "Defence", "Optics", 4000.0),
+    ("CENTUM", "Centum Electronics Ltd", "Industrials", "Electronics", 2500.0),
+    ("KNRCON", "KNR Constructions Ltd", "Infrastructure", "Roads", 4000.0),
+    ("HGINFRA", "H.G. Infra Engineering Ltd", "Infrastructure", "Roads", 2500.0),
+    ("PNCINFRATECH", "PNC Infratech Ltd", "Infrastructure", "Roads", 5000.0),
+    ("ASHOKA", "Ashoka Buildcon Ltd", "Infrastructure", "Roads", 2500.0),
+    ("PSPPROJECT", "PSP Projects Ltd", "Infrastructure", "Construction", 1500.0),
+    ("CAPACITE", "Capacite Infraprojects Ltd", "Infrastructure", "Construction", 1500.0),
+    ("PATELENG", "Patel Engineering Ltd", "Infrastructure", "Hydro", 2500.0),
+    ("MANINFRA", "Man Infraconstruction Ltd", "Infrastructure", "Realty", 2500.0),
+    ("IRCON", "Ircon International Ltd", "Infrastructure", "Railways", 9000.0),
+    ("RITES", "RITES Ltd", "Industrials", "Consulting", 8000.0),
+    ("NBCC", "NBCC (India) Ltd", "Infrastructure", "Construction", 9500.0),
+    ("MOIL", "MOIL Ltd", "Metals", "Mining", 8000.0),
+    ("NATIONALUM", "National Aluminium Company Ltd", "Metals", "Aluminium", 9500.0),
+    ("JINDALSAW", "Jindal Saw Ltd", "Metals", "Pipes", 8000.0),
+    ("MAHSEAMLES", "Maharashtra Seamless Ltd", "Metals", "Pipes", 4500.0),
+    ("WELCORP", "Welspun Corp Ltd", "Metals", "Pipes", 7000.0),
+    ("MSTC", "MSTC Ltd", "Metals", "Trading", 2500.0),
+    ("MMTC", "MMTC Ltd", "Metals", "Trading", 4000.0),
+    ("KIOCL", "KIOCL Ltd", "Metals", "Iron Ore", 2500.0),
+    ("MIDHANI", "Mishra Dhatu Nigam Ltd", "Defence", "Alloys", 2500.0),
+    ("COCHINSHIP", "Cochin Shipyard Ltd", "Defence", "Shipbuilding", 9000.0),
+    ("GESHIP", "Great Eastern Shipping Company Ltd", "Logistics", "Shipping", 8000.0),
+    ("CHENNPETRO", "Chennai Petroleum Corporation Ltd", "Energy", "Refining", 9000.0),
+    ("PTC", "PTC India Ltd", "Energy", "Power Trading", 4000.0),
+    ("TRITURBINE", "Triveni Turbine Ltd", "Industrials", "Turbines", 8000.0),
+    ("POWERMECH", "Power Mech Projects Ltd", "Industrials", "Power EPC", 2500.0),
+    ("INOXWIND", "Inox Wind Ltd", "Energy", "Wind", 6000.0),
+    ("SWSOLAR", "Sterling & Wilson Renewable Energy Ltd", "Energy", "Solar EPC", 4000.0),
+    ("ELGIEQUIP", "Elgi Equipments Ltd", "Industrials", "Compressors", 9000.0),
+    ("INGERRAND", "Ingersoll-Rand (India) Ltd", "Industrials", "Compressors", 5500.0),
+    ("GRINDWELL", "Grindwell Norton Ltd", "Industrials", "Abrasives", 8000.0),
+    ("ESABINDIA", "Esab India Ltd", "Industrials", "Welding", 6500.0),
+    ("TIMKEN", "Timken India Ltd", "Industrials", "Bearings", 7500.0),
+    ("KSB", "KSB Ltd", "Industrials", "Pumps", 5000.0),
+    ("KIRLOSENG", "Kirloskar Oil Engines Ltd", "Industrials", "Engines", 4000.0),
+    ("ELECON", "Elecon Engineering Company Ltd", "Industrials", "Gears", 6000.0),
+    ("KIRLOSBROS", "Kirloskar Brothers Ltd", "Industrials", "Pumps", 5000.0),
+    ("WPIL", "WPIL Ltd", "Industrials", "Pumps", 3000.0),
+    ("SHAKTIPUMP", "Shakti Pumps (India) Ltd", "Industrials", "Pumps", 4000.0),
+    ("ISGEC", "Isgec Heavy Engineering Ltd", "Industrials", "Engineering", 5000.0),
+    ("JBCHEPHARM", "J.B. Chemicals & Pharmaceuticals Ltd", "Pharma", "Formulations", 9000.0),
+    ("ERIS", "Eris Lifesciences Ltd", "Pharma", "Formulations", 7000.0),
+    ("FDC", "FDC Ltd", "Pharma", "Formulations", 5500.0),
+    ("SHILPAMED", "Shilpa Medicare Ltd", "Pharma", "API", 4500.0),
+    ("CAPLINPOINT", "Caplin Point Laboratories Ltd", "Pharma", "Formulations", 4000.0),
+    ("GRANULES", "Granules India Ltd", "Pharma", "Formulations", 5000.0),
+    ("STRIDES", "Strides Pharma Science Ltd", "Pharma", "Formulations", 5500.0),
+    ("HIKAL", "Hikal Ltd", "Pharma", "CRAMS", 3000.0),
+    ("AARTIDRUGS", "Aarti Drugs Ltd", "Pharma", "API", 2500.0),
+    ("SEQUENT", "Sequent Scientific Ltd", "Pharma", "Animal Health", 2500.0),
+    ("UNICHEMLAB", "Unichem Laboratories Ltd", "Pharma", "Formulations", 2500.0),
+    ("WOCKPHARMA", "Wockhardt Ltd", "Pharma", "Formulations", 4000.0),
+    ("KPRMILL", "K.P.R. Mill Ltd", "Textiles", "Apparel", 9000.0),
+    ("VTL", "Vardhman Textiles Ltd", "Textiles", "Yarn", 2500.0),
+    ("TRIDENT", "Trident Ltd", "Textiles", "Home Textiles", 6000.0),
+    ("WELSPUNLIV", "Welspun Living Ltd", "Textiles", "Home Textiles", 6000.0),
+    ("JKPAPER", "JK Paper Ltd", "Paper", "Paper", 3500.0),
+    ("TNPL", "Tamil Nadu Newsprint & Papers Ltd", "Paper", "Paper", 2500.0),
+    ("ANDHRAPAP", "Andhra Paper Ltd", "Paper", "Paper", 1500.0),
+    ("CCL", "CCL Products (India) Ltd", "FMCG", "Coffee", 4000.0),
+    ("DODLA", "Dodla Dairy Ltd", "FMCG", "Dairy", 5000.0),
+    ("PARAGMILK", "Parag Milk Foods Ltd", "FMCG", "Dairy", 1500.0),
+    ("VSTIND", "VST Industries Ltd", "FMCG", "Tobacco", 4000.0),
+    ("HATSUN", "Hatsun Agro Product Ltd", "FMCG", "Dairy", 9000.0),
+    ("DEVYANI", "Devyani International Ltd", "Consumer", "QSR", 8000.0),
+    ("WESTLIFE", "Westlife Foodworld Ltd", "Consumer", "QSR", 5000.0),
+    ("SAREGAMA", "Saregama India Ltd", "Media", "Music", 6000.0),
+    ("CERA", "Cera Sanitaryware Ltd", "Consumer", "Sanitaryware", 4500.0),
+    ("KAJARIACER", "Kajaria Ceramics Ltd", "Consumer", "Tiles", 7000.0),
+    ("SOMANYCERA", "Somany Ceramics Ltd", "Consumer", "Tiles", 2500.0),
+    ("GREENPLY", "Greenply Industries Ltd", "Consumer", "Plywood", 2500.0),
+    ("GREENPANEL", "Greenpanel Industries Ltd", "Consumer", "Panels", 1500.0),
+    ("GREENLAM", "Greenlam Industries Ltd", "Consumer", "Laminates", 5000.0),
+    ("CENTURYPLY", "Century Plyboards (India) Ltd", "Consumer", "Plywood", 9000.0),
+    ("NILKAMAL", "Nilkamal Ltd", "Consumer", "Furniture", 1500.0),
+    ("LAOPALA", "La Opala RG Ltd", "Consumer", "Glassware", 1500.0),
+    ("CAMPUS", "Campus Activewear Ltd", "Consumer", "Footwear", 5000.0),
+    ("REDTAPE", "Redtape Ltd", "Consumer", "Footwear", 1500.0),
+    ("VMART", "V-Mart Retail Ltd", "Retail", "Value Retail", 2500.0),
+    ("SHOPERSTOP", "Shoppers Stop Ltd", "Retail", "Department", 3500.0),
+    ("VIPIND", "V.I.P. Industries Ltd", "Consumer", "Luggage", 3500.0),
+    ("DOMS", "DOMS Industries Ltd", "Consumer", "Stationery", 6000.0),
+    ("MINDACORP", "Minda Corporation Ltd", "Auto", "Ancillaries", 5000.0),
+    ("SUPRAJIT", "Suprajit Engineering Ltd", "Auto", "Ancillaries", 4000.0),
+    ("JAMNAAUTO", "Jamna Auto Industries Ltd", "Auto", "Ancillaries", 2000.0),
+    ("SUBROS", "Subros Ltd", "Auto", "Ancillaries", 2500.0),
+    ("VARROC", "Varroc Engineering Ltd", "Auto", "Ancillaries", 5000.0),
+    ("FIEMIND", "Fiem Industries Ltd", "Auto", "Ancillaries", 2500.0),
+    ("PRICOLLTD", "Pricol Ltd", "Auto", "Ancillaries", 2500.0),
+    ("TALBROAUTO", "Talbros Automotive Components Ltd", "Auto", "Ancillaries", 1500.0),
+    ("CIEINDIA", "CIE Automotive India Ltd", "Auto", "Ancillaries", 7000.0),
+    ("LUMAXTECH", "Lumax Auto Technologies Ltd", "Auto", "Ancillaries", 1500.0),
+    ("MASFIN", "MAS Financial Services Ltd", "Finance", "NBFC", 4000.0),
+    ("MUTHOOTCAP", "Muthoot Capital Services Ltd", "Finance", "NBFC", 1500.0),
+    ("SBFC", "SBFC Finance Ltd", "Finance", "NBFC", 6000.0),
+    ("EQUITASBNK", "Equitas Small Finance Bank Ltd", "Banking", "SFB", 8000.0),
+    ("UJJIVAN", "Ujjivan Financial Services Ltd", "Banking", "SFB", 4000.0),
+    ("UJJIVANSFB", "Ujjivan Small Finance Bank Ltd", "Banking", "SFB", 7000.0),
+    ("CSBBANK", "CSB Bank Ltd", "Banking", "Private", 3500.0),
+    ("DCBBANK", "DCB Bank Ltd", "Banking", "Private", 3500.0),
+    ("KARURVYSYA", "Karur Vysya Bank Ltd", "Banking", "Private", 9000.0),
+    ("CUB", "City Union Bank Ltd", "Banking", "Private", 9000.0),
+    ("TMB", "Tamilnad Mercantile Bank Ltd", "Banking", "Private", 4000.0),
+    ("JKBANK", "Jammu & Kashmir Bank Ltd", "Banking", "PSU", 6000.0),
+    ("SOUTHBANK", "South Indian Bank Ltd", "Banking", "Private", 2500.0),
+    ("JMFINANCIL", "JM Financial Ltd", "Finance", "NBFC", 6000.0),
+    ("IIFLSEC", "IIFL Securities Ltd", "Finance", "Broking", 2500.0),
+    ("GEOJIT", "Geojit Financial Services Ltd", "Finance", "Broking", 1500.0),
+    ("NAM-INDIA", "Nippon Life India Asset Management Ltd", "Finance", "AMC", 8000.0),
+    ("PNBHOUSING", "PNB Housing Finance Ltd", "Finance", "Housing", 9000.0),
+    ("MANAPPURAM", "Manappuram Finance Ltd", "Finance", "Gold Loans", 9000.0),
+    ("PRUDENT", "Prudent Corporate Advisory Services Ltd", "Finance", "Wealth", 5000.0),
+    ("ANANDRATHI", "Anand Rathi Wealth Ltd", "Finance", "Wealth", 7000.0),
+    ("APTUS", "Aptus Value Housing Finance India Ltd", "Finance", "Housing", 8000.0),
+    ("HOMEFIRST", "Home First Finance Company India Ltd", "Finance", "Housing", 4000.0),
+    ("FIVESTAR", "Five-Star Business Finance Ltd", "Finance", "NBFC", 6000.0),
+    ("UGROCAP", "Ugro Capital Ltd", "Finance", "NBFC", 2000.0),
+    ("HCG", "Healthcare Global Enterprises Ltd", "Healthcare", "Hospitals", 4000.0),
+    ("VIJAYA", "Vijaya Diagnostic Centre Ltd", "Healthcare", "Diagnostics", 5000.0),
+    ("MEDPLUS", "Medplus Health Services Ltd", "Healthcare", "Pharmacy", 5000.0),
+    ("METROPOLIS", "Metropolis Healthcare Ltd", "Healthcare", "Diagnostics", 6000.0),
+    ("THYROCARE", "Thyrocare Technologies Ltd", "Healthcare", "Diagnostics", 4000.0),
+    ("SHALBY", "Shalby Ltd", "Healthcare", "Hospitals", 1500.0),
+    ("RAINBOW", "Rainbow Childrens Medicare Ltd", "Healthcare", "Hospitals", 5000.0),
+    ("KIMS", "Krishna Institute of Medical Sciences Ltd", "Healthcare", "Hospitals", 9000.0),
+    ("TCI", "Transport Corporation of India Ltd", "Logistics", "Logistics", 5000.0),
+    ("MAHLOG", "Mahindra Logistics Ltd", "Logistics", "Logistics", 2500.0),
+    ("SEAMEC", "Seamec Ltd", "Logistics", "Offshore", 1500.0),
+    ("SOBHA", "Sobha Ltd", "Realty", "Realty", 9000.0),
+    ("SUNTECK", "Sunteck Realty Ltd", "Realty", "Realty", 6000.0),
+    ("KOLTEPATIL", "Kolte-Patil Developers Ltd", "Realty", "Realty", 2500.0),
+    ("PURAVANKARA", "Puravankara Ltd", "Realty", "Realty", 4000.0),
+    ("ASHIANA", "Ashiana Housing Ltd", "Realty", "Realty", 1500.0),
+    ("VASCONEQ", "Vascon Engineers Ltd", "Realty", "Realty", 1000.0),
+    ("ARVIND", "Arvind Ltd", "Textiles", "Denim", 3500.0),
+    ("SHRIRAMPROP", "Shriram Properties Ltd", "Realty", "Realty", 1500.0),
+    ("SIGNATUREGLOBAL", "Signatureglobal (India) Ltd", "Realty", "Realty", 5000.0),
+    ("RUSTOMJEE", "Keystone Realtors Ltd", "Realty", "Realty", 5000.0),
+    ("TIPSINDLTD", "Tips Industries Ltd", "Media", "Music", 2500.0),
+    ("GTPL", "GTPL Hathway Ltd", "Media", "Cable", 1500.0),
+    ("TVTODAY", "TV Today Network Ltd", "Media", "Broadcasting", 2500.0),
+    ("NAVNETEDUL", "Navneet Education Ltd", "Media", "Education", 2500.0),
+    ("NOCIL", "NOCIL Ltd", "Chemicals", "Rubber Chem", 2000.0),
+    ("PHILIPCARB", "Phillips Carbon Black Ltd", "Chemicals", "Carbon", 3500.0),
+    ("GHCL", "GHCL Ltd", "Chemicals", "Soda Ash", 4000.0),
+    ("GUJALKALI", "Gujarat Alkalies & Chemicals Ltd", "Chemicals", "Chemicals", 2500.0),
+    ("RAIN", "Rain Industries Ltd", "Chemicals", "Carbon", 5000.0),
+    ("PCBL", "PCBL Chemical Ltd", "Chemicals", "Carbon", 6000.0),
+    ("SHARDACROP", "Sharda Cropchem Ltd", "Chemicals", "Agrochem", 2500.0),
+    ("ASTEC", "Astec Lifesciences Ltd", "Chemicals", "Agrochem", 1500.0),
+    ("RALLIS", "Rallis India Ltd", "Chemicals", "Agrochem", 3500.0),
+    ("GALAXYSURF", "Galaxy Surfactants Ltd", "Chemicals", "Surfactants", 6000.0),
+    ("JKLAKSHMI", "JK Lakshmi Cement Ltd", "Cement", "Cement", 4500.0),
+    ("VGUARD", "V-Guard Industries Ltd", "Consumer", "Electricals", 7000.0),
+    ("KEI", "KEI Industries Ltd", "Consumer", "Cables", 9000.0),
+    ("FINCABLES", "Finolex Cables Ltd", "Consumer", "Cables", 3500.0),
+    ("RRKABEL", "R R Kabel Ltd", "Consumer", "Cables", 7000.0),
+    ("SKIPPER", "Skipper Ltd", "Industrials", "Transmission", 4000.0),
+    ("TECHNOE", "Techno Electric & Engineering Company Ltd", "Industrials", "Power EPC", 4000.0),
+    ("CHALET", "Chalet Hotels Ltd", "Hospitality", "Hotels", 9000.0),
+    ("LEMONTREE", "Lemon Tree Hotels Ltd", "Hospitality", "Hotels", 9000.0),
+    ("QUESS", "Quess Corp Ltd", "Services", "Staffing", 3000.0),
+    ("TEAMLEASE", "TeamLease Services Ltd", "Services", "Staffing", 2500.0),
+    ("FIRSTSOURCE", "Firstsource Solutions Ltd", "Services", "BPO", 7000.0),
+    ("ECLERX", "eClerx Services Ltd", "Services", "KPO", 4000.0),
+    ("CMSINFO", "CMS Info Systems Ltd", "Services", "Cash Mgmt", 5000.0),
+    ("UFLEX", "UFlex Ltd", "Packaging", "Films", 5000.0),
+    ("POLYPLEX", "Polyplex Corporation Ltd", "Packaging", "Films", 4000.0),
+    ("GICRE", "General Insurance Corporation of India", "Insurance", "Reinsurance", 9000.0),
+    ("NIACL", "New India Assurance Company Ltd", "Insurance", "General", 9000.0),
+    ("MEDIASSIST", "Medi Assist Healthcare Services Ltd", "Insurance", "Health TPA", 4000.0),
+    ("OLECTRA", "Olectra Greentech Ltd", "Auto", "EV", 6000.0),
+    ("JBMA", "JBM Auto Ltd", "Auto", "Ancillaries", 4000.0),
+]
+
+SMALLCAP_UNIVERSE = [
+    {
+        "ticker": t, "name": n, "sector": s, "industry": i,
+        "market_cap_cr": m, "market_cap_cat": "SMALL",
+        "pe_ratio": None, "pb_ratio": None, "roe_pct": None, "roce_pct": None,
+        "debt_to_equity": None, "sales_growth_3y": None, "profit_growth_3y": None,
+    }
+    for (t, n, s, i, m) in _SMALLCAP_ROWS
+]
+
+MASTER_NSE_UNIVERSE.extend(SMALLCAP_UNIVERSE)
+
+# NSE symbol renames/demergers the curated list predates. The backfill CLI
+# (backend/data/expand_screener_universe.py) deletes rows keyed by the old
+# symbols; queries scoped to official constituents never match them anyway.
+SYMBOL_MIGRATIONS = {
+    "HUL": "HINDUNILVR",     # legacy alias symbol for Hindustan Unilever
+    "ZOMATO": "ETERNAL",     # Zomato Ltd rebranded to Eternal Ltd
+    "TATAMOTORS": "TMPV",    # Tata Motors demerger: passenger-vehicles entity
+}
+
+
 def seed_screener_metrics_table():
-    """Seeds the screener_daily_metrics table with 75+ top liquid NSE stocks."""
+    """Seeds the screener_daily_metrics table with top liquid + small-cap NSE stocks.
+    Preserves existing rows that already have verified technical indicators so static
+    seed numbers never overwrite real calculations.
+    """
+    from sqlalchemy import select
+    from backend.shared.database import get_db_session
+    from backend.shared.models import ScreenerDailyMetric
+
+    existing_enriched = set()
+    try:
+        with get_db_session() as session:
+            rows = session.execute(
+                select(ScreenerDailyMetric.ticker).where(ScreenerDailyMetric.ema_50.isnot(None))
+            ).all()
+            existing_enriched = {str(r[0]).upper().strip() for r in rows}
+    except Exception as exc:
+        logger.debug("Could not query existing enriched tickers: %s", exc)
+
+    seeded = 0
     for s in MASTER_NSE_UNIVERSE:
+        t = str(s.get("ticker", "")).upper().strip()
+        if t in existing_enriched:
+            continue
         upsert_screener_daily_metric(s)
-    logger.info("Successfully seeded %d stocks into screener_daily_metrics.", len(MASTER_NSE_UNIVERSE))
+        seeded += 1
+    logger.info("Seeded %d stocks into screener_daily_metrics (%d preserved with live indicators).",
+                seeded, len(existing_enriched))
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BrainCircuit, ChevronDown, ChevronUp, Target, ShieldAlert } from 'lucide-react';
 import { analyzeSignal } from '../../utils/aiSignalEngine';
 import { toChartTime } from '../../utils/chartHelpers';
+import { computeAIDashboardScores } from '../../utils/aiIndicatorEngine.js';
 import { useStock } from '../../hooks/useStock';
 
 const MTF_INTERVALS = [
@@ -55,6 +56,15 @@ export default function AIDashboard({
 
   // Current timeframe signal
   const signal = useMemo(() => analyzeSignal(candles), [candles]);
+
+  // Advanced per-engine scores (real computed values, not static docs)
+  const aiScores = useMemo(() => {
+    try {
+      return computeAIDashboardScores(candles);
+    } catch {
+      return { available: false };
+    }
+  }, [candles]);
 
   // Multi-timeframe alignment: fetch each interval and compute its signal.
   useEffect(() => {
@@ -165,6 +175,20 @@ export default function AIDashboard({
         />
       </div>
 
+      {/* Advanced engine scores — live reads from every AI study */}
+      {aiScores.available && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', marginTop: 6 }}>
+          <AIScoreChip label="TREND" value={aiScores.trend.available ? `${aiScores.trend.score > 0 ? '+' : ''}${aiScores.trend.score}` : '—'} title={aiScores.trend.label || 'n/a'} color={aiScores.trend.score > 20 ? '#10B981' : aiScores.trend.score < -20 ? '#EF5350' : '#F59E0B'} />
+          <AIScoreChip label="MOM" value={aiScores.momentum.available ? `${aiScores.momentum.score > 0 ? '+' : ''}${aiScores.momentum.score}` : '—'} title={aiScores.momentum.label || 'n/a'} color={aiScores.momentum.score > 30 ? '#10B981' : aiScores.momentum.score < -30 ? '#EF5350' : '#A855F7'} />
+          <AIScoreChip label="REGIME" value={aiScores.regime.available ? aiScores.regime.label : '—'} title={aiScores.regime.playbook || ''} color={aiScores.regime.label === 'TREND' ? '#10B981' : aiScores.regime.label === 'RANGE' ? '#F59E0B' : '#38BDF8'} />
+          <AIScoreChip label="EXH" value={aiScores.exhaustion.available ? `${aiScores.exhaustion.score > 0 ? '+' : ''}${aiScores.exhaustion.score}` : '—'} title={aiScores.exhaustion.label || 'n/a'} color={Math.abs(aiScores.exhaustion.score) >= 60 ? '#EF5350' : '#94A3B8'} />
+          <AIScoreChip label="BRK" value={aiScores.breakout.available ? aiScores.breakout.label : '—'} title={aiScores.breakout.impulse != null ? `impulse ${aiScores.breakout.impulse}` : ''} color={aiScores.breakout.label === 'SQUEEZE' ? '#F59E0B' : '#FB923C'} />
+          <AIScoreChip label="S/R" value={`${aiScores.sr.supports.length}S/${aiScores.sr.resistances.length}R`} title="AI support / resistance zones" color="#F472B6" />
+          <AIScoreChip label="PAT" value={aiScores.patterns.length ? aiScores.patterns.map((p) => p.name.split(' ')[0]).join(',') : '—'} title={aiScores.patterns.map((p) => `${p.name} ${p.direction} ${p.completion}%`).join(' · ') || 'no pattern'} color="#60A5FA" />
+          <AIScoreChip label="FCST" value={aiScores.forecast.available ? aiScores.forecast.direction : '—'} title={`${aiScores.forecast.bars}-bar path`} color="#FBBF24" />
+        </div>
+      )}
+
       {/* Expanded detail: MTF alignment + WHY */}
       {expanded && (
         <div style={{ marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -217,6 +241,21 @@ function Zone({ label, value, color, icon }) {
         {icon}{value ?? '—'}
       </span>
     </div>
+  );
+}
+
+function AIScoreChip({ label, value, title, color }) {
+  return (
+    <span title={title} style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '1px 7px', borderRadius: 3,
+      background: 'rgba(56,189,248,0.07)',
+      border: '1px solid rgba(56,189,248,0.22)',
+      fontSize: 9, fontWeight: 800, whiteSpace: 'nowrap',
+    }}>
+      <span style={{ color: '#64748B' }}>{label}</span>
+      <span style={{ color, fontFamily: 'JetBrains Mono, monospace' }}>{value}</span>
+    </span>
   );
 }
 

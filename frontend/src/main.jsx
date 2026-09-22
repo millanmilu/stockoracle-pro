@@ -3,13 +3,23 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './App.css'
 
-// Prevent benign browser ResizeObserver loop notifications from crashing React Error Boundaries
+// Prevent benign browser ResizeObserver loop and chart disposal race notifications from crashing React Error Boundaries
+const isDisposedError = (msg) =>
+  typeof msg === 'string' &&
+  (msg.includes('ResizeObserver') ||
+    msg.toLowerCase().includes('object is disposed') ||
+    msg.toLowerCase().includes('chart is disposed'));
+
 window.addEventListener('error', (e) => {
-  if (
-    e.message === 'ResizeObserver loop completed with undelivered notifications.' ||
-    e.message === 'ResizeObserver loop limit exceeded' ||
-    (typeof e.message === 'string' && e.message.includes('ResizeObserver'))
-  ) {
+  if (isDisposedError(e.message)) {
+    e.stopImmediatePropagation();
+    e.preventDefault();
+  }
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+  const reasonMsg = e.reason?.message || String(e.reason || '');
+  if (isDisposedError(reasonMsg)) {
     e.stopImmediatePropagation();
     e.preventDefault();
   }

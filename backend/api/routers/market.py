@@ -284,22 +284,32 @@ def get_stock_news(
     ticker: str,
     limit: int = Query(15, ge=1, le=50),
     source: Optional[str] = Query(None, description="Filter by publisher (e.g. Economic Times, Moneycontrol, LiveMint, Yahoo Finance, Google News)"),
-    sentiment: Optional[str] = Query(None, description="Filter by sentiment (Bullish, Bearish, Neutral)")
+    sentiment: Optional[str] = Query(None, description="Filter by sentiment (Bullish, Bearish, Neutral)"),
+    refresh: bool = Query(False, description="Force refresh and bypass server cache")
 ):
     """Returns multi-source real-time Indian stock market news aggregated across top financial publications."""
     from backend.data.news_multi_source import get_multi_source_news
-    return get_multi_source_news(ticker=ticker, limit=limit, source_filter=source, sentiment_filter=sentiment)
+    src_f = source if isinstance(source, str) else None
+    sent_f = sentiment if isinstance(sentiment, str) else None
+    ref_f = bool(refresh) if not hasattr(refresh, "default") else False
+    lim_f = limit if isinstance(limit, int) else 15
+    return get_multi_source_news(ticker=ticker, limit=lim_f, source_filter=src_f, sentiment_filter=sent_f, force_refresh=ref_f)
 
 
 @router.get("/market/news")
 def get_general_market_news(
     limit: int = Query(15, ge=1, le=50),
     source: Optional[str] = Query(None, description="Filter by publisher"),
-    sentiment: Optional[str] = Query(None, description="Filter by sentiment")
+    sentiment: Optional[str] = Query(None, description="Filter by sentiment"),
+    refresh: bool = Query(False, description="Force refresh and bypass server cache")
 ):
     """Returns broad Indian stock market & NSE headline news across multiple premier sources."""
     from backend.data.news_multi_source import get_multi_source_news
-    return get_multi_source_news(ticker=None, limit=limit, source_filter=source, sentiment_filter=sentiment)
+    src_f = source if isinstance(source, str) else None
+    sent_f = sentiment if isinstance(sentiment, str) else None
+    ref_f = bool(refresh) if not hasattr(refresh, "default") else False
+    lim_f = limit if isinstance(limit, int) else 15
+    return get_multi_source_news(ticker=None, limit=lim_f, source_filter=src_f, sentiment_filter=sent_f, force_refresh=ref_f)
 
 
 @router.get("/market/heatmap")

@@ -4,7 +4,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { getSessionBucketStart } from './chartHelpers.js';
+import { getSessionBucketStart, sanitizeSeriesData, sanitizeCandles, isAppendableTime, compareChartTime, computeFillSlots, INTERVAL_SLOT_SEC, normalizeInterval, isSupportedInterval, SUPPORTED_INTERVALS } from './chartHelpers.js';
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 const HOUR = 3600;
@@ -89,4 +89,127 @@ describe('getSessionBucketStart', () => {
       assert.equal(day2 - day1, DAY, 'identical wall-clock buckets on consecutive days are 24h apart');
     });
   });
+
+  describe('sanitizeSeriesData — asc-order crash regression', () => {
+    it('reproduces the reported crash: late bucket 1789805400 after 1789805580 is reordered, never descending', () => {
+      const prev = 1789805580;
+      const late = 1789805400;
+      assert.equal(isAppendableTime(prev, late), false, 'stale live bucket must not be appendable');
+      const sanitized = sanitizeSeriesData([
+        { time: prev, value: 100 },
+        { time: late, value: 101 },
+      ]);
+      assert.deepEqual(sanitized.map((p) => p.time), [late, prev]);
+      assert.ok(isAsc(sanitized), 'sanitized output must be ascending');
+    });
+
+    it('dedupes by time keeping the last occurrence', () => {
+      const out = sanitizeSeriesData([
+        { time: 100, value: 1 },
+        { time: 100, value: 2 },
+        { time: 101, value: 3 },
+      ]);
+      assert.deepEqual(out, [{ time: 100, value: 2 }, { time: 101, value: 3 }]);
+    });
+
+    it('sorts daily YYYY-MM-DD strings ascending', () => {
+      const out = sanitizeCandles([
+        { time: '2026-09-19', open: 1, high: 1, low: 1, close: 1 },
+        { time: '2026-09-17', open: 1, high: 1, low: 1, close: 1 },
+        { time: '2026-09-18', open: 1, high: 1, low: 1, close: 1 },
+      ]);
+      assert.deepEqual(out.map((c) => c.time), ['2026-09-17', '2026-09-18', '2026-09-19']);
+    });
+
+    it('drops type-mixed times (numbers vs strings cannot share one series)', () => {
+      const out = sanitizeSeriesData([
+        { time: 1789805580, value: 1 },
+        { time: '2026-09-19', value: 2 },
+        { time: 1789805600, value: 3 },
+      ]);
+      assert.ok(out.every((p) => typeof p.time === 'number'), 'only dominant number type kept');
+      assert.ok(isAsc(out));
+    });
+
+    it('isAppendableTime requires same type and strict increase', () => {
+      assert.equal(isAppendableTime(100, 101), true);
+      assert.equal(isAppendableTime(101, 100), false);
+      assert.equal(isAppendableTime(100, 100), false);
+      assert.equal(isAppendableTime('2026-09-18', '2026-09-19'), true);
+      assert.equal(isAppendableTime('2026-09-19', '2026-09-18'), false);
+      assert.equal(isAppendableTime(100, '2026-09-19'), false);
+      assert.equal(isAppendableTime(null, 100), true);
+      assert.equal(isAppendableTime(100, null), false);
+    });
+
+    it('compareChartTime orders equal/daily/intraday correctly', () => {
+      assert.equal(compareChartTime(100, 100), 0);
+      assert.equal(compareChartTime(100, 101), -1);
+      assert.equal(compareChartTime('2026-09-18', '2026-09-19'), -1);
+    });
+  });
+
+  describe('normalizeInterval — unsupported timeframe crash regression', () => {
+    it('accepts every backend-served interval', () => {
+      for (const iv of ['1s', '30s', '1m', '5m', '15m', '30m', '1h', '4h', '1d']) {
+        assert.equal(isSupportedInterval(iv), true);
+        assert.equal(normalizeInterval(iv), iv);
+      }
+      assert.deepEqual(SUPPORTED_INTERVALS, ['1s', '30s', '1m', '5m', '15m', '30m', '1h', '4h', '1d']);
+    });
+
+    it('coerces toolbar-only intervals that 422 the backend', () => {
+      // 3m/2h/1w/1M used to blank the chart into a dead empty state
+      for (const iv of ['3m', '2h', '1w', '1M', '', null, undefined, 'abc']) {
+        assert.equal(isSupportedInterval(iv), false);
+        assert.ok(isSupportedInterval(normalizeInterval(iv, '1m')), `normalized ${iv}`);
+      }
+      assert.equal(normalizeInterval('3m', '1m'), '1m');
+      assert.equal(normalizeInterval('1W', '1d'), '1d');
+    });
+  });
+
+  describe('computeFillSlots — live stall backfill (broken-candles regression)', () => {
+    it('fills skipped 1m slots between consecutive buckets', () => {
+      // buckets 10:00, then stall, tick at 10:04 -> fill 10:01..10:03
+      const t0 = 1789805400;
+      assert.deepEqual(
+        computeFillSlots(t0, t0 + 4 * 60, INTERVAL_SLOT_SEC['1m'], { sameDayOnly: false }),
+        [t0 + 60, t0 + 120, t0 + 180]
+      );
+    });
+
+    it('returns [] for adjacent buckets, stale buckets, and oversized skips', () => {
+      const t0 = 1789805400;
+      assert.deepEqual(computeFillSlots(t0, t0 + 60, 60, {}), []);
+      assert.deepEqual(computeFillSlots(t0 + 60, t0, 60, {}), []);
+      assert.deepEqual(computeFillSlots(t0, t0 + 60 * 60, 60, {}), []); // 59 skips > cap 15
+    });
+
+    it('returns [] for non-numeric times and unknown intervals', () => {
+      assert.deepEqual(computeFillSlots('2026-09-19', '2026-09-20', 60, {}), []);
+      assert.deepEqual(computeFillSlots(100, 200, undefined, {}), []);
+      assert.equal(INTERVAL_SLOT_SEC['1d'], undefined);
+      assert.equal(INTERVAL_SLOT_SEC['1s'], undefined);
+    });
+
+    it('sameDayOnly never bridges NSE overnights (IST)', () => {
+      // Friday 15:29 -> Monday 09:16 IST must stay a visible gap
+      const friClose = Math.floor(Date.UTC(2026, 7, 7, 9, 59) / 1000);
+      const monOpen = Math.floor(Date.UTC(2026, 7, 10, 3, 46) / 1000);
+      assert.deepEqual(computeFillSlots(friClose, monOpen, 60, { sameDayOnly: true }), []);
+      // ...but fills inside the same session day
+      assert.deepEqual(
+        computeFillSlots(friClose, friClose + 3 * 60, 60, { sameDayOnly: true }),
+        [friClose + 60, friClose + 120]
+      );
+    });
+  });
 });
+
+function isAsc(points) {
+  for (let i = 1; i < points.length; i++) {
+    if (!(points[i - 1].time < points[i].time)) return false;
+  }
+  return true;
+}

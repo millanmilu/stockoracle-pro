@@ -446,7 +446,16 @@ async def lifespan(app: FastAPI):
     # Note: Startup background prefetch and auto-population are disabled.
     # Data is strictly fetched on-demand from Angel One when the user searches/selects that stock.
 
-    background_tasks = [price_task, alert_task, keepalive_task]
+    # Daily screener metrics refresh (16:15 IST post-close; bootstraps when empty)
+    try:
+        from backend.research.screener_pipeline import run_screener_refresh_loop
+        background_tasks = [
+            price_task, alert_task, keepalive_task,
+            asyncio.create_task(run_screener_refresh_loop()),
+        ]
+    except Exception as exc:
+        logger.warning("Screener refresh daemon unavailable: %s", exc)
+        background_tasks = [price_task, alert_task, keepalive_task]
 
     # SmartAPI tick streamer (Phase 3): true tick-by-tick equity feed with
     # automatic reconnect. Falls back gracefully to REST polling when broker
