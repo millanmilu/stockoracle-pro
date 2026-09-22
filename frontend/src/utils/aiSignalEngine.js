@@ -81,12 +81,13 @@ export function analyzeSignal(candles) {
   let neutralVotes = 0;
   let buyWeight = 0;
   let sellWeight = 0;
+  let neutralWeight = 0;
 
   const vote = (s) => {
     signals.push(s);
     if (s.state === 'buy') { buyVotes += 1; buyWeight += s.weight; }
     else if (s.state === 'sell') { sellVotes += 1; sellWeight += s.weight; }
-    else neutralVotes += 1;
+    else { neutralVotes += 1; neutralWeight += s.weight; }
   };
 
   // ── 1. Trend: EMA 50 vs EMA 200 (golden/death cross filter) ─────────────
@@ -269,8 +270,11 @@ export function analyzeSignal(candles) {
   } catch { missing.push('ATR'); }
 
   // ── Aggregate ─────────────────────────────────────────────────────────────
-  const totalWeight = buyWeight + sellWeight;
-  const netScore = totalWeight > 0 ? Math.round(((buyWeight - sellWeight) / totalWeight) * 100) : 0;
+  // Total weight incorporates all evaluated sub-models (buy, sell, neutral)
+  // so a single indicator in a quiet/chop market cannot trigger false 100% conviction.
+  const totalWeight = buyWeight + sellWeight + neutralWeight;
+  const netDiff = buyWeight - sellWeight;
+  const netScore = totalWeight > 0 ? Math.round((netDiff / totalWeight) * 100) : 0;
 
   // Direction is decided by the weighted balance of conviction (not raw vote
   // counts) so strong trends are not neutralised by contrarian oscillator votes.
@@ -290,14 +294,15 @@ export function analyzeSignal(candles) {
   let stopLoss;
   let takeProfit;
   if (direction === 'buy') {
-    stopLoss = entry - useAtr * 1.5;
-    takeProfit = entry + useAtr * 3 * volRatio;
+    stopLoss = Math.max(0.01, entry - useAtr * 1.5);
+    takeProfit = Math.max(0.01, entry + useAtr * 3 * volRatio);
   } else if (direction === 'sell') {
-    stopLoss = entry + useAtr * 1.5;
-    takeProfit = entry - useAtr * 3 * volRatio;
+    stopLoss = Math.max(0.01, entry + useAtr * 1.5);
+    const rawTP = entry - useAtr * 3 * volRatio;
+    takeProfit = rawTP > 0.01 ? rawTP : Math.max(0.01, entry * 0.5);
   } else {
-    stopLoss = entry - useAtr * 1.5;
-    takeProfit = entry + useAtr * 1.5;
+    stopLoss = Math.max(0.01, entry - useAtr * 1.5);
+    takeProfit = Math.max(0.01, entry + useAtr * 1.5);
   }
   const risk = Math.abs(entry - stopLoss) || (useAtr * 1.5) || 1;
   const reward = Math.abs(takeProfit - entry) || (useAtr * 3) || 1;

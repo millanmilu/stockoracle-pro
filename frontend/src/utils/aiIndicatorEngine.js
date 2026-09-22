@@ -183,8 +183,12 @@ function pctRank(values, lookback = 100) {
   const win = values.filter(isFinite).slice(-lookback);
   if (win.length < 5) return 50;
   const last = win[win.length - 1];
-  const le = win.filter((v) => v <= last).length;
-  return (le / win.length) * 100;
+  let less = 0, equal = 0;
+  for (let i = 0; i < win.length; i++) {
+    if (win[i] < last) less++;
+    else if (Math.abs(win[i] - last) <= 1e-9) equal++;
+  }
+  return ((less + 0.5 * equal) / win.length) * 100;
 }
 
 // ── 1. AI Trend (−100…+100): EMA stack + ADX + Supertrend + MACD vote ────────
@@ -832,6 +836,7 @@ export function computeAIDashboardScores(candles) {
     const u = bb.upper?.[i]?.value, l = bb.lower?.[i]?.value;
     return m && isFinite(m.value) && isFinite(u) && isFinite(l) && Math.abs(m.value) > 0
       ? (u - l) / Math.abs(m.value) : null;
+  }).filter((v) => v != null);
   const atrArr = atrOf(candles, 14);
   const atrRank = pctRank(atrArr.filter((v) => v != null && isFinite(v)), 100);
   const regime = labelRegime(regV, pctRank(widths, 100), atrRank);

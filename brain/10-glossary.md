@@ -1,0 +1,33 @@
+# 10 — Glossary (Hinglish)
+
+- **OHLCV** — Open/High/Low/Close/Volume; ek candle ka data.
+- **LTP** — Last Traded Price; sabse taaza price.
+- **IST trading day** — NSE ka din (09:15–15:30 IST, Mon–Fri, holiday chhod ke).
+- **Candle/Bar** — ek time slice ka OHLCV (1m, 5m, 1h, 1d...).
+- **Intraday** — din ke andar ke chhote intervals; SQLite me save nahi hote.
+- **Slot-fill** — chhote missing minutes ko prev-close se bharna (vol 0).
+- **SMA/EMA** — average price lines; trend dikhati hain.
+- **RSI** — momentum 0–100; <30 oversold, >70 overbought.
+- **MACD** — trend momentum crossover.
+- **Bollinger Bands** — volatility ke upper/lower lines; %B batata hai price kaha hai.
+- **ATR/ADX** — volatility / trend-strength.
+- **VWAP** — volume-weighted average price (intraday benchmark).
+- **Supertrend** — volatility trail se BUY/SELL line.
+- **PCR** — Put-Call Ratio; options sentiment.
+- **Max Pain** — option writers ka sabse kam nuksaan wala strike.
+- **Greeks** — Delta/Gamma/Theta/Vega; option price sensitivity.
+- **DCF** — future cash flow se fair value.
+- **VaR/CVaR** — kitna loss ho sakta hai (risk).
+- **Sharpe/Sortino/Calmar** — return-per-risk scores.
+- **Drawdown** — peak se sabse bada girawat.
+- **Backtest** — purane data pe strategy ka trial.
+- **Walk-forward** — past pe train, future pe test (no cheating).
+- **Look-ahead bias** — future data se past me cheat karna (mana hai).
+- **Paper trading** — nakli paison se real-style trading (₹10L).
+- **Screener** — condition pe stocks filter (RSI, PE...).
+- **Heatmap** — poori market ka rang-biranga return map.
+- **VPVR** — price levels pe volume bars.
+- **Fear & Greed** — market sentiment meter.
+- **TTL cache** — kuch second/minute ke liye yaad rakha data.
+- **TimescaleDB** — time-series ke liye Postgres extension.
+- **Celery/Redis** — background jobs + queue.
