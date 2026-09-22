@@ -33,6 +33,9 @@ _ALLOWED_USER_IDS: frozenset = frozenset(
     u.strip() for u in os.environ.get("ALLOWED_USER_IDS", _DEFAULT_USER).split(",") if u.strip()
 )
 
+# One-time loud warning when the API runs OPEN (no server key configured).
+_warned_open_api = False
+
 
 def verify_api_key(
     header_key: Optional[str] = Security(_api_key_header),
@@ -46,8 +49,27 @@ def verify_api_key(
     query param is deprecated (leaks into server/proxy logs) — prefer the
     X-API-Key header; query usage is logged once as a warning.
     """
-    global _warned_query_key
+    global _warned_query_key, _warned_open_api
     server_key = (settings.API_KEY or "").strip()
+    if not server_key:
+        # Dev convenience: no key configured → endpoints stay open. But the
+        # default ENVIRONMENT is "production", so an unset key in prod would
+        # silently expose trading/broker endpoints — shout loudly, once.
+        if not _warned_open_api:
+            _warned_open_api = True
+            env = (getattr(settings, "ENVIRONMENT", "?") or "?").strip()
+            if str(env).lower() == "production":
+                logger.error(
+                    "SECURITY: API_KEY is not set while ENVIRONMENT=production — "
+                    "all API endpoints are running OPEN (no auth). Set API_KEY "
+                    "in backend/.env to enforce X-API-Key authentication."
+                )
+            else:
+                logger.warning(
+                    "API_KEY is not set — API endpoints are open (dev mode, "
+                    "ENVIRONMENT=%s).", env,
+                )
+        return
     if server_key:
         key = (header_key or "").strip() or None
         if query_key and not header_key:

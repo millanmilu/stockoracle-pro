@@ -25,7 +25,13 @@ from backend.api._guards import require_real_data
 logger = logging.getLogger("StockOracle.API.Research")
 
 
-router = APIRouter(prefix="/api", tags=["Research & Analytics"])
+router = APIRouter(
+    prefix="/api",
+    tags=["Research & Analytics"],
+    # Analytics endpoints feed trading decisions — require API key in prod
+    # (same enforcement as the ML router; no-op in dev when no key is set).
+    dependencies=[Security(verify_api_key)],
+)
 
 
 class ScanFilterRequest(BaseModel):

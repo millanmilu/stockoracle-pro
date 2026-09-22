@@ -776,12 +776,16 @@ def fetch_crypto_data(ticker: str, period: str = "ALL", interval: str = "1d") ->
             return intra_db
 
     # 5. Baseline seed data fallback (for isolated environments without internet)
+    # Charts-only: seed is NEVER persisted to historical_prices/intraday_candles.
+    # Daily seed dates are len-10 strings, so persisting them would launder
+    # synthetic bars into future "sqlite" reads and poison ML/backtest inputs.
     seed_df = _generate_crypto_seed_data(ticker, interval_clean, is_intraday)
     if seed_df is not None and not seed_df.empty:
-        if not is_intraday:
-            save_historical_prices(ticker, seed_df)
-        else:
-            save_intraday_candles(ticker, interval_clean, seed_df)
+        logger.warning(
+            "Serving crypto_seed baseline for %s (%s) — charts only, "
+            "blocked from ML/backtest by require_real_data.",
+            ticker, interval_clean,
+        )
         seed_df.attrs["data_source"] = "crypto_seed"
         _set_cached(cache_key, seed_df)
         return seed_df
@@ -1409,8 +1413,11 @@ def fetch_company_info(ticker: str) -> Optional[dict]:
         return None
 
     if fifty_two_week_high == 0.0:
-        fifty_two_week_high = round(current_price * 1.15, 2)
-        fifty_two_week_low = round(current_price * 0.85, 2)
+        # Zero-fake-data rule: unknown 52w range stays null (JSON) instead of
+        # a fabricated ±15% band. No frontend reads these fields directly;
+        # screener/heatmap use server-computed distance metrics with null guards.
+        fifty_two_week_high = None
+        fifty_two_week_low = None
 
     change = round(current_price - prev_close, 2) if prev_close > 0 else 0.0
     change_pct = round((change / prev_close) * 100, 2) if prev_close > 0 else 0.0

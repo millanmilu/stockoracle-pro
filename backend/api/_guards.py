@@ -22,6 +22,9 @@ from reaching compute-heavy consumers.
 Synthetic source keys (kept here as a single source of truth):
     "synthesized"                — set inside the old generator function
     "synthesized_market_baseline"— set at the fetch_stock_data call site
+    "crypto_seed"                — deterministic offline baseline from
+                                   _generate_crypto_seed_data (fetcher.py);
+                                   served for charts only, never for compute
 """
 
 import logging
@@ -34,7 +37,7 @@ logger = logging.getLogger("StockOracle.API.Guards")
 
 # All data_source values that indicate synthesized / random-walk data.
 _SYNTHETIC_SOURCES: frozenset = frozenset(
-    {"synthesized", "synthesized_market_baseline"}
+    {"synthesized", "synthesized_market_baseline", "crypto_seed"}
 )
 
 
