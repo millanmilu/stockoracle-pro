@@ -266,7 +266,10 @@ export function computeAIMomentum(candles, params = {}) {
 }
 
 // ── 3. AI Exhaustion (−100…+100): divergence + wicks + overextension ─────────
-// Positive = bullish reversal pressure, negative = bearish.
+// Positive = bullish reversal pressure (sellers exhausted, bounce expected),
+// negative = bearish reversal pressure (buyers exhausted, pullback expected).
+// Naming convention everywhere downstream is the EXHAUSTED party:
+// positive → 'BEAR-EXH' (bears exhausted), negative → 'BULL-EXH'.
 export function computeAIExhaustion(candles, params = {}) {
   const out = { main: [] };
   if (!Array.isArray(candles) || candles.length < 30) return out;
@@ -464,9 +467,15 @@ export function getAISupportResistance(candles, params = {}) {
     .map((c) => {
       const recency = 1 - (slice.length - 1 - c.lastIdx) / slice.length; // 0…1
       const strength = Math.round(clamp(c.touches * 22 + (c.volSum / maxVol) * 25 + recency * 20, 5, 100));
+      // Dynamic S/R role: price above zone = Support, price below zone = Resistance (breakout/flip)
+      let role = c.side === 'H' ? 'R' : 'S';
+      if (isFinite(lastClose)) {
+        if (c.price < lastClose - 1e-6) role = 'S';
+        else if (c.price > lastClose + 1e-6) role = 'R';
+      }
       return {
         price: c.price,
-        side: c.side === 'H' ? 'R' : 'S',
+        side: role,
         strength,
         touches: c.touches,
         near: isFinite(lastClose) ? Math.abs(lastClose - c.price) / lastClose < 0.03 : false,
@@ -511,6 +520,9 @@ export function computeAIForecast(candles, params = {}) {
   const rMean = tail.reduce((a, b) => a + b, 0) / Math.max(1, tail.length);
   const vol = Math.sqrt(tail.reduce((a, b) => a + (b - rMean) * (b - rMean), 0) / Math.max(1, tail.length));
   const volEff = isFinite(vol) && vol > 0 ? vol : 0.01;
+  // Drift sanity clamp: prevent runaway slopes (> 2.5 * realized vol per bar or > 5% price)
+  const maxDrift = Math.max(last * 0.05, volEff * last * 2.5);
+  drift = clamp(drift, -maxDrift, maxDrift);
   // Future time slots: numeric epoch grid, or business days for daily strings
   const lastCandle = candles[candles.length - 1];
   const lastTime = lastCandle.time;
@@ -537,13 +549,13 @@ export function computeAIForecast(candles, params = {}) {
   for (let k = 1; k <= horizon; k++) {
     const t = futureTime(k);
     if (t == null) continue;
-    const m = last + drift * k;
+    const m = Math.max(0.01, last + drift * k);
     const half = 1.0 * volEff * Math.sqrt(k) * last;
     median.push({ time: t, value: m });
-    upper.push({ time: t, value: m + half });
-    lower.push({ time: t, value: Math.max(m - half, 0.01) });
+    upper.push({ time: t, value: Math.max(0.01, m + half) });
+    lower.push({ time: t, value: Math.max(0.01, m - half) });
   }
-  return { median, upper, lower };
+  return { median, upper, lower, anchor: { time: lastTime, value: last } };
 }
 
 // ── 8. AI Pattern recognition: double tops/bottoms, triangles, flags ────────
@@ -636,6 +648,61 @@ export function detectAIPatterns(candles, params = {}) {
     const { secondIndex: _b, ...bClean } = doubleBottom;
     push(bClean);
   }
+
+  // Head & Shoulders (Bearish reversal): 3 peaks where head > left shoulder and head > right shoulder
+  for (let i = highs.length - 1; i >= 2; i--) {
+    const l = highs[i - 2], h = highs[i - 1], r = highs[i];
+    if (h.price > l.price * 1.008 && h.price > r.price * 1.008 && Math.abs(l.price - r.price) / l.price < 0.04) {
+      const between1 = slice.slice(l.index + 1, h.index);
+      const between2 = slice.slice(h.index + 1, r.index);
+      if (between1.length && between2.length) {
+        const t1 = Math.min(...between1.map((c) => num(c.low, Infinity)));
+        const t2 = Math.min(...between2.map((c) => num(c.low, Infinity)));
+        if (isFinite(t1) && isFinite(t2)) {
+          const neckline = (t1 + t2) / 2;
+          const completed = lastClose < neckline;
+          const invalidation = h.price + atrNow * 0.25;
+          if (lastClose <= invalidation) {
+            push({
+              name: 'Head & Shoulders', direction: 'bear',
+              completion: completed ? 100 : 70,
+              trigger: neckline, target: neckline - (h.price - neckline),
+              invalidation, time: r.time, forming: !completed,
+            });
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // Inverse Head & Shoulders (Bullish reversal): 3 troughs where head < left shoulder and head < right shoulder
+  for (let i = lows.length - 1; i >= 2; i--) {
+    const l = lows[i - 2], h = lows[i - 1], r = lows[i];
+    if (h.price < l.price * 0.992 && h.price < r.price * 0.992 && Math.abs(l.price - r.price) / l.price < 0.04) {
+      const between1 = slice.slice(l.index + 1, h.index);
+      const between2 = slice.slice(h.index + 1, r.index);
+      if (between1.length && between2.length) {
+        const p1 = Math.max(...between1.map((c) => num(c.high, -Infinity)));
+        const p2 = Math.max(...between2.map((c) => num(c.high, -Infinity)));
+        if (isFinite(p1) && isFinite(p2)) {
+          const neckline = (p1 + p2) / 2;
+          const completed = lastClose > neckline;
+          const invalidation = h.price - atrNow * 0.25;
+          if (lastClose >= invalidation) {
+            push({
+              name: 'Inv Head & Shoulders', direction: 'bull',
+              completion: completed ? 100 : 70,
+              trigger: neckline, target: neckline + (neckline - h.price),
+              invalidation, time: r.time, forming: !completed,
+            });
+            break;
+          }
+        }
+      }
+    }
+  }
+
   // Ascending triangle: flat top (slope ~0) + rising lows over ≥15 bars
   if (slice.length >= 25) {
     const win = slice.slice(-25);
@@ -703,7 +770,17 @@ export function detectAIPatterns(candles, params = {}) {
 }
 
 export function getAIPatternMarkers(candles, params = {}) {
-  return detectAIPatterns(candles, params).map((p) => ({
+  const patterns = detectAIPatterns(candles, params);
+  const byTime = new Map();
+  // Deduplicate markers on identical bar timestamps (completed beats forming, higher completion % wins)
+  patterns.forEach((p) => {
+    if (!p || p.time == null) return;
+    const existing = byTime.get(p.time);
+    if (!existing || (p.completion || 0) > (existing.completion || 0)) {
+      byTime.set(p.time, p);
+    }
+  });
+  return Array.from(byTime.values()).map((p) => ({
     time: p.time,
     position: p.direction === 'bull' ? 'belowBar' : 'aboveBar',
     color: p.direction === 'bull' ? '#10B981' : '#EF5350',
@@ -722,12 +799,14 @@ export function getAIReversalMarkers(candles, params = {}) {
   for (let i = 1; i < pts.length; i++) {
     if (i - lastIdx < 5) continue;
     const v = pts[i].value, pv = pts[i - 1].value;
-    // Fresh extreme cross: newly exhausted in either direction
+    // Fresh extreme cross: positive = sellers exhausted → bullish bounce
+    // expected (BUY marker below bar); negative = buyers exhausted → bearish
+    // pullback expected (SELL marker above bar).
     if (v >= thr && pv < thr) {
-      markers.push({ time: pts[i].time, position: 'aboveBar', color: '#EF5350', shape: 'arrowDown', text: 'EXH', size: 1 });
+      markers.push({ time: pts[i].time, position: 'belowBar', color: '#10B981', shape: 'arrowUp', text: 'EXH', size: 1 });
       lastIdx = i;
     } else if (v <= -thr && pv > -thr) {
-      markers.push({ time: pts[i].time, position: 'belowBar', color: '#10B981', shape: 'arrowUp', text: 'EXH', size: 1 });
+      markers.push({ time: pts[i].time, position: 'aboveBar', color: '#EF5350', shape: 'arrowDown', text: 'EXH', size: 1 });
       lastIdx = i;
     }
   }
@@ -753,8 +832,9 @@ export function computeAIDashboardScores(candles) {
     const u = bb.upper?.[i]?.value, l = bb.lower?.[i]?.value;
     return m && isFinite(m.value) && isFinite(u) && isFinite(l) && Math.abs(m.value) > 0
       ? (u - l) / Math.abs(m.value) : null;
-  }).filter((v) => v != null);
-  const regime = labelRegime(regV, pctRank(widths, 100), 50);
+  const atrArr = atrOf(candles, 14);
+  const atrRank = pctRank(atrArr.filter((v) => v != null && isFinite(v)), 100);
+  const regime = labelRegime(regV, pctRank(widths, 100), atrRank);
   const zones = getAISupportResistance(candles, {});
   const patterns = detectAIPatterns(candles, {});
   const fc = computeAIForecast(candles, { horizon: 7 });
@@ -775,6 +855,7 @@ export function computeAIDashboardScores(candles) {
     regime: regV == null ? none : { available: true, meter: regV, ...regime },
     exhaustion: exhV == null ? none : {
       available: true, score: exhV,
+      // Exhausted-party naming: +60 sellers exhausted (bullish bounce) → BEAR-EXH.
       label: exhV >= 60 ? 'BEAR-EXH' : exhV <= -60 ? 'BULL-EXH' : 'BALANCED',
     },
     breakout: brkV == null ? none : {

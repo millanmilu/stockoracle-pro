@@ -87,13 +87,33 @@ def compute_ai_consensus(ticker: str) -> Dict[str, Any]:
     try:
         from backend.analysis.trainer import predict_future
         pred = predict_future(ticker)
-        pred_conf = pred.get("ai_confidence_score", 55)
-        pred_return = pred.get("predicted_return_7d", 0.02)
-        ml_signal_raw = pred.get("signal", "hold").upper()
+        raw_conf = pred.get("ai_confidence_score", pred.get("confidence_score"))
+        raw_ret = pred.get("predicted_return_7d", pred.get("predicted_return", 0.0))
+        try:
+            pred_conf = float(raw_conf) if raw_conf is not None else None
+            if pred_conf is not None and not np.isfinite(pred_conf):
+                pred_conf = None
+        except (TypeError, ValueError):
+            pred_conf = None
+        try:
+            pred_return = float(raw_ret) if raw_ret is not None else 0.0
+            if not np.isfinite(pred_return):
+                pred_return = 0.0
+        except (TypeError, ValueError):
+            pred_return = 0.0
+        ml_signal_raw = str(pred.get("signal", "hold") or "hold").upper()
 
-        if ml_signal_raw == "BUY":
+        # Uncertified predictions (confidence None, e.g. heuristic fallbacks)
+        # must not fabricate a neutral ML vote — mark the engine unavailable
+        # so consensus honestly reweights to the 2 certified engines.
+        if pred_conf is None:
+            raise ValueError("ML prediction has no certified confidence score")
+        is_buy = "BUY" in ml_signal_raw
+        is_sell = "SELL" in ml_signal_raw
+
+        if is_buy and not is_sell:
             ml_score = min(96.0, 55.0 + (pred_conf * 0.4) + (pred_return * 200))
-        elif ml_signal_raw == "SELL":
+        elif is_sell and not is_buy:
             ml_score = max(15.0, 45.0 - (pred_conf * 0.3) - (abs(pred_return) * 150))
         else:
             ml_score = 50.0 + (pred_return * 100)

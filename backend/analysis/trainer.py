@@ -276,11 +276,53 @@ def predict_future(symbol: str, override_features: dict = None) -> dict:
     # Simple confidence bounds (e.g. +/- 1.5% of predicted price based on typical MAPE)
     confidence_margin = final_pred * 0.015
 
+    # ── Consensus-compatible derived fields ──
+    # Horizon honesty: this bundle predicts the NEXT trading day (target =
+    # close.shift(-1) in train_pipeline), not 7 days. `predicted_return_7d`
+    # is kept as a compat alias so AI-consensus callers work, but equals the
+    # 1-day return — callers must not treat magnitude as a 7-day move.
+    predicted_return = (
+        (final_pred - current_price) / current_price if current_price else 0.0
+    )
+    pct_return = predicted_return * 100.0
+    if pct_return >= 2.0:
+        ml_signal = "STRONG BUY"
+    elif pct_return >= 0.5:
+        ml_signal = "BUY"
+    elif pct_return <= -2.0:
+        ml_signal = "STRONG SELL"
+    elif pct_return <= -0.5:
+        ml_signal = "SELL"
+    else:
+        ml_signal = "HOLD"
+    # Certified confidence from out-of-sample validation MAPE:
+    # ~2% MAPE → ~90, ~5% → ~75, ~7% → ~66, ≥15% → floored at 20.
+    mape = bundle.get("validation_mape")
+    try:
+        mape_f = float(mape)
+        confidence_score = (
+            round(max(20.0, min(95.0, 100.0 - mape_f * 500.0)), 1)
+            if np.isfinite(mape_f) and mape_f >= 0
+            else None
+        )
+    except (TypeError, ValueError):
+        confidence_score = None
+
     out = {
         "current_price": current_price,
         "predicted_price": round(final_pred, 2),
         "high_bound": round(final_pred + confidence_margin, 2),
         "low_bound": round(final_pred - confidence_margin, 2),
+        "predicted_return": round(float(predicted_return), 4),
+        "predicted_return_7d": round(float(predicted_return), 4),
+        "predicted_return_pct": round(float(pct_return), 2),
+        "signal": ml_signal,
+        "confidence_score": confidence_score,
+        "ai_confidence_score": confidence_score,
+        "validation_mape": float(mape_f) if confidence_score is not None else None,
+        "mape": float(mape_f) if confidence_score is not None else None,
+        "model_trained": True,
+        "horizon_bars": 1,
     }
     if override_features:
         out["base_predicted_price"] = round(_infer(X_base), 2)
