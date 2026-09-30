@@ -30,6 +30,7 @@ Backend `enrich_stock_dataframe()` ~45 columns deta hai, par `market.py` ka `_CH
 - `src/hooks/` — `useStock.js` (REST + history fetch) aur `useWebSocket.js`.
 - `src/constants/` — `screenerConfig.js`.
 - `src/utils/` — engines + helpers: `indicatorEngine.js`, `chartIndicators.js`, `aiIndicatorEngine.js`, `aiSignalEngine.js`, `volumeProfile.js`, `marketStructure.js`, `drawingGeometry.js`, `safeChart.js`, `chartHelpers.js`, `chartDataCache.js`, `api.js`, `formatters.js`, `theme.js`, `watchlist.js`, `soundChime.js` + 8 `*.test.js` files (commands `08-commands.md` me).
+- `src/experiments/` — `pro-terminal-v2/` (mock-data design experiment; sidebar `EXPERIMENTAL` tab → `ProTerminalV2.jsx`; production logic yahan nahi jodna).
 - `src/App.jsx` + `src/main.jsx` — routing + entry.
 
 > Chart engine + AI indicator layer ka full map `11-chart-and-ai-engines.md` me hai (catalog → engine → render consumers). Kuch bhi add karne se pehle wo file padho.

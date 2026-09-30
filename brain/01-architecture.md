@@ -25,11 +25,12 @@ stockoracle-pro /
 │   ├── scripts/             # backup_db, refresh_index, refresh_index_constituents, clear_price_data
 │   └── alembic/             # DB migrations
 ├── frontend/
-│   ├── src/components/      # LiveChartView.jsx (sabse important) + 6 sub-folders
+│   ├── src/components/      # LiveChartView.jsx (sabse important) + sub-folders
 │   │   ├── chart/           # ChartCanvas, OscillatorPane, VolumePane, IndicatorModal, AIDashboard, indicatorDefinitions
 │   │   ├── chart-tools/     # drawing tools, smcEngine, AIPatternRecognition
 │   │   ├── terminal/        # Bloomberg-style views + terminal/mit (Market Intelligence)
 │   │   └── screener/, paper/, heatmap/
+│   ├── src/experiments/     # pro-terminal-v2 (mock-data experiment; sidebar "EXPERIMENTAL" tab se milta hai, production route nahi)
 │   ├── src/store/           # zustand (useStore.js) — SINGULAR, `src/stores/` nahi
 │   ├── src/hooks/           # useStock.js, useWebSocket.js
 │   ├── src/constants/       # screenerConfig.js
