@@ -160,7 +160,7 @@ function createPrimarySeries(chart, type, isCrypto) {
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
-      priceLineColor: '#818CF8',
+      priceLineColor: '#2962FF',
       priceLineStyle: 2,
     });
   }
@@ -172,33 +172,33 @@ function createPrimarySeries(chart, type, isCrypto) {
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
-      priceLineColor: '#818CF8',
+      priceLineColor: '#2962FF',
       priceLineStyle: 2,
     });
   }
   if (type === 'line') {
     return chart.addLineSeries({
-      color: '#38BDF8',
+      color: '#2962FF',
       lineWidth: 2,
       priceFormat,
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
-      priceLineColor: '#38BDF8',
+      priceLineColor: '#2962FF',
       priceLineStyle: 2,
     });
   }
   if (type === 'area') {
     return chart.addAreaSeries({
-      topColor: 'rgba(56, 189, 248, 0.35)',
-      bottomColor: 'rgba(56, 189, 248, 0.01)',
-      lineColor: '#38BDF8',
+      topColor: 'rgba(41, 98, 255, 0.28)',
+      bottomColor: 'rgba(41, 98, 255, 0.01)',
+      lineColor: '#2962FF',
       lineWidth: 2,
       priceFormat,
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineWidth: 1,
-      priceLineColor: '#38BDF8',
+      priceLineColor: '#2962FF',
       priceLineStyle: 2,
     });
   }
@@ -225,7 +225,7 @@ function createPrimarySeries(chart, type, isCrypto) {
     lastValueVisible: true,
     priceLineVisible: true,
     priceLineWidth: 1,
-    priceLineColor: '#818CF8',
+    priceLineColor: '#2962FF',
     priceLineStyle: 2,
   });
 }
@@ -534,7 +534,9 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           if (candlesRef.current) {
             const lastIdx = candlesRef.current.length - 1;
             if (lastIdx >= 0 && candlesRef.current[lastIdx].time === candle.time) {
-              candlesRef.current[lastIdx] = { ...candlesRef.current[lastIdx], ...candle, open: o, high: h, low: l, close: c };
+              // Replace in place (same bucket update) — create new array to avoid mutation
+              const updated = { ...candlesRef.current[lastIdx], ...candle, open: o, high: h, low: l, close: c };
+              candlesRef.current = [...candlesRef.current.slice(0, lastIdx), updated, ...candlesRef.current.slice(lastIdx + 1)];
             } else if (lastIdx >= 0 && candle.time > candlesRef.current[lastIdx].time) {
               // Only follow the live edge when the viewport is ALREADY at the
               // right edge. Panning into history + moving the mouse off-chart
@@ -634,16 +636,16 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       crosshair: {
         mode: CrosshairMode.Normal,
         vertLine: {
-          color: 'rgba(129, 140, 248, 0.45)',
+          color: theme === 'light' ? '#787B86' : '#787B86',
           width: 1,
           style: 2,
-          labelBackgroundColor: '#1e1060',
+          labelBackgroundColor: theme === 'light' ? '#787B86' : '#363C4E',
         },
         horzLine: {
-          color: 'rgba(129, 140, 248, 0.45)',
+          color: theme === 'light' ? '#787B86' : '#787B86',
           width: 1,
           style: 2,
-          labelBackgroundColor: '#1e1060',
+          labelBackgroundColor: theme === 'light' ? '#787B86' : '#363C4E',
         },
       },
       timeScale: {
@@ -1573,14 +1575,14 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           top: 0,
           bottom: 0,
           width: 1,
-          borderLeft: '1px dashed rgba(129, 140, 248, 0.45)',
+          borderLeft: '1px dashed #787B86',
           pointerEvents: 'none',
           display: 'none',
           zIndex: 14,
         }}
       />
 
-      {/* Active overlay indicator controls remain available over the chart. */}
+      {/* TradingView-style top-left OHLC legend (wired to the zero-latency DOM refs) */}
       <div
         style={{
           position: 'absolute',
@@ -1589,45 +1591,83 @@ const ChartCanvas = forwardRef(function ChartCanvas({
           zIndex: 15,
           display: 'flex',
           flexDirection: 'column',
-          gap: 5,
+          gap: 4,
+          pointerEvents: 'none',
+          maxWidth: 'calc(100% - 90px)',
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif",
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: tk.legendText, letterSpacing: '0.01em' }}>
+            {selectedSymbol}
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 500, color: tk.legendMuted }}>
+            {String(interval || '').toUpperCase()}
+          </span>
+          <span ref={timeRef} style={{ fontSize: 11, color: tk.legendMuted }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', fontSize: 12 }}>
+          <span style={{ color: tk.legendMuted }}>O</span>
+          <span ref={openRef} style={{ color: tk.legendText, fontWeight: 500 }}>—</span>
+          <span style={{ color: tk.legendMuted }}>H</span>
+          <span ref={highRef} style={{ color: tk.legendText, fontWeight: 500 }}>—</span>
+          <span style={{ color: tk.legendMuted }}>L</span>
+          <span ref={lowRef} style={{ color: tk.legendText, fontWeight: 500 }}>—</span>
+          <span style={{ color: tk.legendMuted }}>C</span>
+          <span ref={closeRef} style={{ color: tk.legendText, fontWeight: 500 }}>—</span>
+          <span ref={chgRef} style={{ fontWeight: 600 }}>—</span>
+          <span style={{ color: tk.legendMuted }}>Vol</span>
+          <span ref={volRef} style={{ color: tk.legendText }}>—</span>
+        </div>
+      </div>
+
+      {/* Active overlay indicator controls remain available over the chart. */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 62,
+          left: 10,
+          zIndex: 15,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 2,
           pointerEvents: 'auto',
           maxWidth: 'calc(100% - 90px)',
         }}
       >
         {overlayIndicators.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 2 }}>
             {overlayIndicators.map((ind) => {
               const isHidden = hiddenIndicators.includes(ind.id);
               return (
                 <div
                   key={ind.id}
+                  className="tv-ind-row"
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 5,
-                    padding: '2px 7px',
-                    borderRadius: 4,
-                    backgroundColor: tk.legendBg,
-                    backdropFilter: 'blur(6px)',
-                    border: `1px solid ${isHidden ? 'rgba(100, 116, 139, 0.25)' : 'rgba(99, 102, 241, 0.25)'}`,
-                    fontSize: '0.68rem',
-                    fontFamily: 'JetBrains Mono, monospace',
-                    color: isHidden ? '#64748B' : tk.legendText,
-                    opacity: isHidden ? 0.6 : 1,
-                    transition: 'all 0.15s ease',
+                    gap: 4,
+                    padding: '1px 2px',
+                    borderRadius: 0,
+                    backgroundColor: 'transparent',
+                    border: 0,
+                    fontSize: 12,
+                    fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
+                    color: isHidden ? '#787B86' : tk.legendText,
+                    opacity: isHidden ? 0.55 : 1,
                   }}
                 >
                   <div
                     style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: '50%',
+                      width: 9,
+                      height: 2,
+                      borderRadius: 1,
                       backgroundColor: ind.color,
                       opacity: isHidden ? 0.4 : 1,
                       flexShrink: 0,
                     }}
                   />
-                  <span style={{ fontWeight: 700, color: isHidden ? '#64748B' : tk.legendMuted }}>
+                  <span style={{ fontWeight: 500, color: isHidden ? '#787B86' : tk.legendMuted }}>
                     {ind.shortName}
                   </span>
                   <span
@@ -1635,9 +1675,9 @@ const ChartCanvas = forwardRef(function ChartCanvas({
                       if (el) indicatorValRefs.current[ind.id] = el;
                     }}
                     style={{
-                      fontWeight: 800,
-                      color: isHidden ? '#64748B' : ind.color,
-                      minWidth: 40,
+                      fontWeight: 500,
+                      color: isHidden ? '#787B86' : ind.color,
+                      minWidth: 30,
                     }}
                   >
                     —
@@ -1653,17 +1693,19 @@ const ChartCanvas = forwardRef(function ChartCanvas({
                     style={{
                       background: 'transparent',
                       border: 'none',
-                      color: isHidden ? '#64748B' : tk.legendMuted,
+                      color: '#787B86',
                       cursor: 'pointer',
-                      padding: 1,
+                      padding: 2,
                       display: 'flex',
                       alignItems: 'center',
                       borderRadius: 2,
+                      opacity: 0,
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.color = theme === 'light' ? '#0F172A' : '#F1F5F9')}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = isHidden ? '#64748B' : tk.legendMuted)}
+                    className="tv-legend-action"
+                    onMouseEnter={(e) => (e.currentTarget.style.color = tk.legendText)}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = '#787B86')}
                   >
-                    {isHidden ? <EyeOff size={11} /> : <Eye size={11} />}
+                    {isHidden ? <EyeOff size={12} /> : <Eye size={12} />}
                   </button>
 
                   {/* Remove (X) Button */}
@@ -1676,17 +1718,19 @@ const ChartCanvas = forwardRef(function ChartCanvas({
                     style={{
                       background: 'transparent',
                       border: 'none',
-                      color: '#64748B',
+                      color: '#787B86',
                       cursor: 'pointer',
-                      padding: 1,
+                      padding: 2,
                       display: 'flex',
                       alignItems: 'center',
                       borderRadius: 2,
+                      opacity: 0,
                     }}
+                    className="tv-legend-action"
                     onMouseEnter={(e) => (e.currentTarget.style.color = '#EF5350')}
-                    onMouseLeave={(e) => (e.currentTarget.style.color = '#64748B')}
+                    onMouseLeave={(e) => (e.currentTarget.style.color = '#787B86')}
                   >
-                    <X size={11} />
+                    <X size={12} />
                   </button>
                 </div>
               );
@@ -1696,6 +1740,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
       </div>
 
       {/* 3. Main Lightweight Charts Canvas */}
+      <style>{`.tv-ind-row:hover .tv-legend-action{opacity:1 !important;}`}</style>
       <div
         ref={containerRef}
         style={{
@@ -1728,6 +1773,16 @@ function chartCanvasPropsEqual(prev, next) {
     const lastA = a[a.length - 1]; const lastB = b[b.length - 1];
     if (firstA?.time !== firstB?.time || lastA?.time !== lastB?.time) return false;
     if (Number(lastA?.close) !== Number(lastB?.close)) return false;
+    // Also check a few bars near the live edge — live ticks update the last
+    // few candles, and a shallow first/last compare could miss those changes.
+    const checkCount = Math.min(5, a.length);
+    for (let i = 1; i <= checkCount; i++) {
+      const idxA = a.length - i;
+      const idxB = b.length - i;
+      if (idxA < 0 || idxB < 0) break;
+      if (a[idxA]?.time !== b[idxB]?.time) return false;
+      if (Number(a[idxA]?.close) !== Number(b[idxB]?.close)) return false;
+    }
   }
   const keys = ['interval', 'selectedSymbol', 'chartType', 'priceScaleMode', 'invertScale', 'showVolume', 'timezone', 'livePrice', 'liveChange', 'paperPosition'];
   for (const k of keys) {

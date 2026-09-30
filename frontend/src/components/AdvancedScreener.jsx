@@ -20,7 +20,7 @@ import ScreenerSaveModal from './screener/ScreenerSaveModal';
 import ScreenerColumnMenu from './screener/ScreenerColumnMenu';
 import ScreenerStatusBar from './screener/ScreenerStatusBar';
 import { INDEX_CONSTITUENTS } from '../constants/screenerConfig';
-import { COLUMN_GROUPS, PREBUILT_SCREENS, RANK_OPTIONS, OVERVIEW_CARDS, ALL_COLUMNS, groupColumnsWithTicker } from './screener/screenerColumns';
+import { COLUMN_GROUPS, PREBUILT_SCREENS, RANK_OPTIONS, OVERVIEW_CARDS, ALL_COLUMNS, groupColumnsWithTicker, NO_OP_QUERY, isNoOpQuery } from './screener/screenerColumns';
 import { getWsUrl } from '../utils/api';
 
 const ALL_UNIVERSE = 'ALL NSE';
@@ -118,7 +118,7 @@ export default function AdvancedScreener() {
 
   // Formula — open by default so first load shows the whole tracked
   // universe; user narrows down from there (matches initial runScreen + reset).
-  const [formulaQuery, setFormulaQuery] = useState('MarketCap > 0');
+  const [formulaQuery, setFormulaQuery] = useState(NO_OP_QUERY);
 
   // Results / presets / overview
   const [loading, setLoading] = useState(false);
@@ -126,7 +126,12 @@ export default function AdvancedScreener() {
   // Server-side match/universe counts ("N of M stocks") — distinct from the
   // client-side filtered processedResults length below.
   const [queryMeta, setQueryMeta] = useState({ total: 0, universeTotal: 0 });
-  const [overview, setOverview] = useState({ cards: {}, breadth: {}, sectors: [], market_status: 'UNKNOWN', feed_live: false, total: 0 });
+  const [overview, setOverview] = useState({
+    cards: {}, breadth: {}, sectors: [], market_status: 'UNKNOWN', feed_live: false, total: 0,
+    // Coverage + freshness from /screener/overview so the UI can distinguish
+    // "this filter matched nothing" from "this stock has no data yet".
+    coverage: null, sectors_excluded: null, stale: null, expected_refresh_date: null,
+  });
   const [prebuiltTemplates, setPrebuiltTemplates] = useState([]);
   const [savedScreens, setSavedScreens] = useState([]);
   const [activePresetId, setActivePresetId] = useState('all-nse');
@@ -246,7 +251,7 @@ export default function AdvancedScreener() {
       } catch (err) {
         console.error('Failed to load screener universes, using fallback', err);
       }
-      runScreen('MarketCap > 0', ALL_UNIVERSE);
+      runScreen(NO_OP_QUERY, ALL_UNIVERSE);
     };
     init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -274,7 +279,7 @@ export default function AdvancedScreener() {
     // Sector / market-cap are always explicit clicks, never defaults.
     if (sector !== 'ALL') parts.push(`Sector == '${sector}'`);
     if (marketCapCat !== 'ALL') parts.push(`MarketCapCat == '${marketCapCat}'`);
-    return parts.length ? parts.join(' AND ') : 'MarketCap > 0';
+    return parts.length ? parts.join(' AND ') : NO_OP_QUERY;
   }, [minRoce, minRoe, maxPe, maxPb, maxDebt, minSalesGrowth, minProfitGrowth, minRsi, maxRsi, minVolRatio, minAiScore, selectedSector, marketCapCat, touchedFilters]);
 
   const activeFormula = useMemo(() => {
@@ -288,9 +293,12 @@ export default function AdvancedScreener() {
     else if (queryMode === 'visual' && builderEnabled) setFormulaQuery(compileBuilderToDsl(builderGroups, builderTopLogic));
   }, [queryMode, builderEnabled, builderGroups, builderTopLogic, buildVisualFormula]);
 
-  // Active filter chips derived from current formula AST-ish split (best-effort display)
+  // Active filter chips derived from current formula AST-ish split (best-effort display).
+  // The no-op sentinel is not a filter, so it must not appear as one chip the
+  // user is invited to remove.
   const activeChips = useMemo(() => {
     const f = queryMode === 'formula' ? formulaQuery : activeFormula;
+    if (isNoOpQuery(f)) return [];
     return f.split(/\s+(AND|OR)\s+/i).filter((t) => !/^(AND|OR)$/i.test(t.trim())).map((t) => t.trim()).filter(Boolean).slice(0, 12);
   }, [formulaQuery, activeFormula, queryMode]);
 
@@ -299,11 +307,11 @@ export default function AdvancedScreener() {
   // "NIFTY MIDCAP") and the backend resolves official NSE constituents.
   const runScreen = async (query = null, universeId = null) => {
     setLoading(true);
-    const activeQuery = query || activeFormula || 'MarketCap > 0';
+    const activeQuery = query || activeFormula || NO_OP_QUERY;
     const activeUniverse = universeId !== null && universeId !== undefined ? universeId : universe;
     try {
       const { data } = await api.post('/api/screener/query', {
-        formula_query: activeQuery || 'MarketCap > 0',
+        formula_query: activeQuery || NO_OP_QUERY,
         universe: activeUniverse !== ALL_UNIVERSE ? activeUniverse : null,
         sort_by: sortColumn || 'market_cap_cr',
         sort_dir: sortDirection === 'asc' ? 'ASC' : 'DESC',
@@ -594,7 +602,7 @@ export default function AdvancedScreener() {
   const applyCard = (card) => {
     setActiveCard(card.id);
     if (!card.dsl) {
-      runScreen('MarketCap > 0');
+      runScreen(NO_OP_QUERY);
       return;
     }
     setFormulaQuery(card.dsl);
@@ -622,8 +630,8 @@ export default function AdvancedScreener() {
     // full universe instead of a default preset screen.
     setTouchedFilters(new Set());
     setUniverse(ALL_UNIVERSE); setBuilderEnabled(false); setBuilderGroups([newGroup()]);
-    setFormulaQuery('MarketCap > 0'); setActivePresetId('all-nse'); setActiveCard('total');
-    runScreen('MarketCap > 0', ALL_UNIVERSE);
+    setFormulaQuery(NO_OP_QUERY); setActivePresetId('all-nse'); setActiveCard('total');
+    runScreen(NO_OP_QUERY, ALL_UNIVERSE);
     toast.success('Filters reset to default.');
   };
 
@@ -651,7 +659,7 @@ export default function AdvancedScreener() {
       });
       next = out.join(' ').trim();
     }
-    next = next || 'MarketCap > 0';
+    next = next || NO_OP_QUERY;
     setFormulaQuery(next);
     setQueryMode('formula');
     runScreen(next);
@@ -826,7 +834,7 @@ export default function AdvancedScreener() {
   }, []);
 
   const quickPills = [
-    { id: 'all-nse', name: 'All NSE Equities', query: 'MarketCap > 0' },
+    { id: 'all-nse', name: 'All NSE Equities', query: NO_OP_QUERY },
     { id: 'high-roce', name: 'High ROCE (>20%)', query: 'ROCE > 20 AND DebtToEquity < 0.5' },
     { id: 'value-growth', name: 'Growth at Fair Value', query: 'ROCE > 18 AND PE < 28 AND DebtToEquity < 1.0' },
     { id: 'oversold', name: 'Oversold Momentum', query: 'RSI14 < 40 AND VolumeRatio20D > 1.1' },
@@ -888,6 +896,9 @@ export default function AdvancedScreener() {
         feedLive={overview.feed_live}
         wsState={wsState === 'live' ? 'live' : wsState}
         scannedCount={overview.total || results.length}
+        coverage={overview.coverage}
+        stale={overview.stale}
+        expectedRefreshDate={overview.expected_refresh_date}
         universe={universe}
         onUniverseChange={handleUniverseChange}
         universes={[ALL_UNIVERSE, ...universeIds.filter((u) => u !== ALL_UNIVERSE)]}
@@ -904,7 +915,7 @@ export default function AdvancedScreener() {
         loading={loading}
       />
 
-      <ScreenerKpiCards stats={kpiStats} activeCard={activeCard} onSelect={applyCard} />
+      <ScreenerKpiCards stats={kpiStats} activeCard={activeCard} onSelect={applyCard} coverage={overview.coverage} />
 
       <ScreenerBreadthBar breadth={overview.breadth?.total ? overview.breadth : null} />
 
@@ -1018,6 +1029,7 @@ export default function AdvancedScreener() {
       <ScreenerSectorChart
         rows={processedResults}
         sectors={overview.sectors || []}
+        sectorsExcluded={overview.sectors_excluded}
         selectedSector={selectedSector}
         collapsed={sectorsCollapsed}
         onToggleCollapse={() => setSectorsCollapsed((v) => !v)}

@@ -288,11 +288,11 @@ export default forwardRef(function OscillatorPane({
     const base = getChartBaseOptions(theme);
     const chart = safeCreateChart(containerRef.current, {
       height: 130,
-      layout: { background: { type: 'solid', color: 'transparent' }, textColor: base.layout.textColor, fontFamily: '"JetBrains Mono", monospace', fontSize: 10 },
+      layout: { background: { type: 'solid', color: 'transparent' }, textColor: base.layout.textColor, fontFamily: "'Trebuchet MS', Roboto, Ubuntu, sans-serif", fontSize: 10 },
       grid: base.grid,
       rightPriceScale: { borderColor: base.rightPriceScale.borderColor, textColor: base.rightPriceScale.textColor, scaleMargins: { top: 0.12, bottom: 0.12 }, autoScale: true, alignLabels: true, minimumWidth: PRICE_AXIS_WIDTH },
-      timeScale: { visible: false, borderColor: 'rgba(99,102,241,0.12)', lockVisibleTimeRangeOnResize: true, rightOffset: 12, barSpacing: 9, minBarSpacing: 0.5, shiftVisibleRangeOnNewBar: false },
-      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' }, horzLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' } },
+      timeScale: { visible: false, borderColor: base.timeScale.borderColor, lockVisibleTimeRangeOnResize: true, rightOffset: 12, barSpacing: 9, minBarSpacing: 0.5, shiftVisibleRangeOnNewBar: false },
+      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: '#787B86', width: 1, style: 2, labelBackgroundColor: theme === 'light' ? '#787B86' : '#363C4E' }, horzLine: { color: '#787B86', width: 1, style: 2, labelBackgroundColor: theme === 'light' ? '#787B86' : '#363C4E' } },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
       handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true, axisDoubleClickReset: true },
       kineticScroll: { touch: true, mouse: true },
@@ -499,16 +499,16 @@ export default forwardRef(function OscillatorPane({
       }}
     >
       {/* Synced hairline */}
-      <div ref={syncedHairRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, borderLeft: '1px dashed rgba(129,140,248,0.45)', pointerEvents: 'none', display: 'none', zIndex: 14 }} />
+      <div ref={syncedHairRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, borderLeft: '1px dashed #787B86', pointerEvents: 'none', display: 'none', zIndex: 14 }} />
 
-      {/* Legend HUD */}
-      <div style={{ position: 'absolute', top: 5, left: 10, zIndex: 15, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px', borderRadius: 4, backgroundColor: tk.legendBg, backdropFilter: 'blur(6px)', border: `1px solid ${tk.legendBorder}`, fontSize: '0.68rem', fontFamily: 'JetBrains Mono, monospace', color: isHidden ? '#64748B' : tk.legendText, opacity: isHidden ? 0.6 : 1 }}>
+      {/* Legend HUD — TradingView transparent style */}
+      <div style={{ position: 'absolute', top: 4, left: 10, zIndex: 15, display: 'inline-flex', alignItems: 'center', gap: 5, padding: 0, backgroundColor: 'transparent', border: 0, fontSize: 12, fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif", color: isHidden ? '#787B86' : tk.legendText, opacity: isHidden ? 0.6 : 1 }}>
         {renderLegend()}
-        <button onClick={(e) => { e.stopPropagation(); onToggleHide(oscType); }} title={isHidden ? 'Show' : 'Hide'} style={{ background: 'transparent', border: 'none', color: isHidden ? '#64748B' : tk.legendMuted, cursor: 'pointer', padding: 1, display: 'flex', alignItems: 'center', borderRadius: 2, marginLeft: 2 }} onMouseEnter={e => e.currentTarget.style.color=theme === 'light' ? '#0F172A' : '#F1F5F9'} onMouseLeave={e => e.currentTarget.style.color=isHidden ? '#64748B' : tk.legendMuted}>
-          {isHidden ? <EyeOff size={11} /> : <Eye size={11} />}
+        <button onClick={(e) => { e.stopPropagation(); onToggleHide(oscType); }} title={isHidden ? 'Show' : 'Hide'} style={{ background: 'transparent', border: 'none', color: '#787B86', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center', borderRadius: 2, marginLeft: 2 }} onMouseEnter={e => e.currentTarget.style.color=tk.legendText} onMouseLeave={e => e.currentTarget.style.color='#787B86'}>
+          {isHidden ? <EyeOff size={12} /> : <Eye size={12} />}
         </button>
-        <button onClick={(e) => { e.stopPropagation(); onClose(oscType); }} style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', padding: 1, display: 'flex', alignItems: 'center', borderRadius: 2 }} title={`Close ${oscType.toUpperCase()} pane`} onMouseEnter={e => e.currentTarget.style.color='#EF5350'} onMouseLeave={e => e.currentTarget.style.color='#64748B'}>
-          <X size={11} />
+        <button onClick={(e) => { e.stopPropagation(); onClose(oscType); }} style={{ background: 'transparent', border: 'none', color: '#787B86', cursor: 'pointer', padding: 2, display: 'flex', alignItems: 'center', borderRadius: 2 }} title={`Close ${oscType.toUpperCase()} pane`} onMouseEnter={e => e.currentTarget.style.color='#EF5350'} onMouseLeave={e => e.currentTarget.style.color='#787B86'}>
+          <X size={12} />
         </button>
       </div>
 

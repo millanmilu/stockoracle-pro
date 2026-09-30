@@ -13,6 +13,24 @@ const loadDrawerW = () => {
   return 440;
 };
 
+/**
+ * Coverage labels for a row's `data_status` (derived server-side from what the
+ * row actually contains). These describe *coverage*, never freshness — the two
+ * were conflated, so 582 of 633 rows were labelled "STALE DATA" without
+ * anything being old.
+ */
+const COVERAGE_CHIP = {
+  PARTIAL: {
+    label: 'TECHNICALS ONLY',
+    title: 'Price and technicals are computed, but fundamentals (PE / ROE / ROCE / D-E) are not — fundamental screens will not match this stock.',
+  },
+  NO_DATA: {
+    label: 'NO DATA',
+    title: 'No indicators computed for this stock yet. It is tracked, but metric-based screens exclude it.',
+  },
+  'N/A': { label: 'N/A', title: 'No coverage information available for this row.' },
+};
+
 const gridCell = { background: 'rgba(148,163,184,0.04)', border: `1px solid ${TN.border}`, borderRadius: TN.radius, padding: '7px 9px' };
 const gridLabel = { fontSize: 10, color: TN.faint, fontWeight: 700, letterSpacing: '0.06em' };
 const fmt = (v, d = 1) => (v === null || v === undefined ? 'N/A' : Number(v).toFixed(d));
@@ -158,11 +176,20 @@ export default function ScreenerFlyoutDrawer({ stock, onClose, onNavigateChart, 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 18, fontWeight: 700, color: TN.text }}>{d.ticker}</span>
               <span style={chip()}>{d.market_cap_cat || 'NSE'}</span>
+              {/* Coverage, not freshness. "Anything that isn't OK is stale" was
+                  wrong: PARTIAL means technicals-only and NO_DATA means the row
+                  has no metrics yet — neither says the numbers are old. */}
               {d.data_status && d.data_status !== 'OK' && (
-                <span style={chip('warn')}>{d.data_status === 'N/A' ? 'N/A' : 'STALE DATA'}</span>
+                <span
+                  style={chip('warn')}
+                  title={COVERAGE_CHIP[d.data_status]?.title || 'Coverage of this row is incomplete'}
+                >
+                  {COVERAGE_CHIP[d.data_status]?.label || d.data_status}
+                </span>
               )}
             </div>
-            <div style={{ fontSize: 12, color: TN.muted, marginTop: 2 }}>{d.name || d.ticker} · {d.sector || 'Diversified'}</div>
+            {/* An unknown sector stays unknown — "Diversified" is not a classification. */}
+            <div style={{ fontSize: 12, color: TN.muted, marginTop: 2 }}>{d.name || d.ticker}{d.sector ? ` · ${d.sector}` : ''}</div>
           </div>
           <button onClick={onClose} aria-label="Close details" style={{ background: 'transparent', border: `1px solid ${TN.border}`, borderRadius: TN.radius, color: TN.muted, cursor: 'pointer', padding: 5, display: 'flex' }}><X size={15} /></button>
         </div>

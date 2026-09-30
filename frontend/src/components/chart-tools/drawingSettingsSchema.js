@@ -16,8 +16,8 @@ import { getToolSpec } from './drawingToolCatalog';
 export const VISIBILITY_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d', '1W', '1M'];
 
 export const COLOR_PRESETS = [
-  '#38BDF8', '#10B981', '#F59E0B', '#EF5350',
-  '#A855F7', '#EC4899', '#FFFFFF', '#64748B',
+  '#2962FF', '#10B981', '#F59E0B', '#EF5350',
+  '#A855F7', '#EC4899', '#FFFFFF', '#787B86',
 ];
 
 export const LINE_WIDTHS = [1, 2, 3, 4, 5];
@@ -177,7 +177,7 @@ export function drawingDefaults(type) {
     showStatsPrice: true,
     showStatsPercent: true,
     // Volume Profile (FRVP)
-    rows: 24,
+    rows: type === 'fixed_range_volume_profile' ? 70 : 24,
     valueAreaPercent: 70,
     profileWidthPercent: 40,
     upColor: '#26A69A',

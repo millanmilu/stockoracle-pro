@@ -17,6 +17,9 @@ export default function ScreenerHeaderBar({
   feedLive = false,
   wsState = 'idle',
   scannedCount = 0,
+  coverage = null,
+  stale = null,
+  expectedRefreshDate = null,
   universe = 'ALL NSE',
   onUniverseChange,
   universes = ['ALL NSE'],
@@ -43,9 +46,35 @@ export default function ScreenerHeaderBar({
             <span style={{ fontSize: 11, fontWeight: 700, color: live ? TN.up : TN.down }}>{wsLabel}</span>
           </div>
           <div style={{ fontSize: 11, color: TN.faint }}>
-            {scannedCount.toLocaleString('en-IN')} stocks scanned · {dataAsOf ? <>{dataAsOf} · </> : null}NSE
+            {/* "N stocks scanned" used to stand in for "N tracked", which made
+                the empty half of the table look like a filtering bug. Coverage
+                is now stated outright. */}
+            {coverage && coverage.total > 0 ? (
+              <>
+                <span title="Rows whose core indicators are present">
+                  <span style={{ color: TN.text, fontWeight: 700 }}>{coverage.ok.toLocaleString('en-IN')}</span> fully covered
+                </span>
+                <span> · {coverage.total.toLocaleString('en-IN')} tracked</span>
+                {coverage.no_data > 0 ? (
+                  <span
+                    style={{ color: TN.warn }}
+                    title={`${coverage.no_data} tracked stocks have no computed indicators yet (not part of the "no data" filter)`}
+                  > · {coverage.no_data.toLocaleString('en-IN')} without data</span>
+                ) : null}
+              </>
+            ) : (
+              <>{scannedCount.toLocaleString('en-IN')} stocks scanned</>
+            )}
+            {dataAsOf ? <> · as of {dataAsOf}</> : null}
+            {' · NSE'}
             <span style={{ color: feedLive ? TN.up : TN.warn }}> · {feedLive ? 'LIVE' : 'CACHED'}</span>
             <span style={{ color: TN.faint }}> · Market: {marketStatus}</span>
+            {stale ? (
+              <span
+                style={{ color: TN.down, fontWeight: 700 }}
+                title={`Screener metrics predate the last scheduled refresh${expectedRefreshDate ? ` (${expectedRefreshDate})` : ''} — press Refresh to recompute`}
+              > · STALE</span>
+            ) : null}
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>

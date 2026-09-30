@@ -94,11 +94,11 @@ const VolumePane = forwardRef(function VolumePane({
     let disposed = false;
     const base = getChartBaseOptions(theme);
     const chart = safeCreateChart(containerRef.current, {
-      layout: { background: { type: 'solid', color: 'transparent' }, textColor: base.layout.textColor, fontFamily: '"JetBrains Mono", monospace', fontSize: 10 },
+      layout: { background: { type: 'solid', color: 'transparent' }, textColor: base.layout.textColor, fontFamily: "'Trebuchet MS', Roboto, Ubuntu, sans-serif", fontSize: 10 },
       grid: base.grid,
       rightPriceScale: { borderColor: base.rightPriceScale.borderColor, textColor: base.rightPriceScale.textColor, scaleMargins: { top: 0.08, bottom: 0.05 }, autoScale: true, minimumWidth: PRICE_AXIS_WIDTH },
       timeScale: { visible: false, borderColor: base.timeScale.borderColor, rightOffset: 12, barSpacing: 9, minBarSpacing: 0.5, lockVisibleTimeRangeOnResize: true },
-      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' }, horzLine: { color: 'rgba(129,140,248,0.45)', width: 1, style: 2, labelBackgroundColor: '#1e1060' } },
+      crosshair: { mode: CrosshairMode.Normal, vertLine: { color: '#787B86', width: 1, style: 2, labelBackgroundColor: theme === 'light' ? '#787B86' : '#363C4E' }, horzLine: { color: '#787B86', width: 1, style: 2, labelBackgroundColor: theme === 'light' ? '#787B86' : '#363C4E' } },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true },
       handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
     });
@@ -165,13 +165,14 @@ const VolumePane = forwardRef(function VolumePane({
   }, [onHeightChange]);
 
   return <div style={{ position: 'relative', height, flexShrink: 0, background: tk.paneBg, borderTop: `1px solid ${tk.paneBorder}`, display: isHidden ? 'none' : 'block' }}>
-    <div role="separator" aria-label="Resize volume panel" onPointerDown={event => { event.preventDefault(); isDraggingRef.current = true; setIsDragging(true); }} style={{ position: 'absolute', top: -5, left: 0, right: 0, height: 10, zIndex: 20, cursor: 'ns-resize', display: 'flex', justifyContent: 'center', alignItems: 'center', color: isDragging ? '#A5B4FC' : '#475569' }}><GripHorizontal size={18} /></div>
+    <div role="separator" aria-label="Resize volume panel" onPointerDown={event => { event.preventDefault(); isDraggingRef.current = true; setIsDragging(true); }} style={{ position: 'absolute', top: -5, left: 0, right: 0, height: 10, zIndex: 20, cursor: 'ns-resize', display: 'flex', justifyContent: 'center', alignItems: 'center', color: isDragging ? '#2962FF' : tk.toolbarMuted }}><GripHorizontal size={16} /></div>
     <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
-    <div ref={hairlineRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, borderLeft: '1px dashed rgba(129,140,248,0.45)', pointerEvents: 'none', display: 'none', zIndex: 14 }} />
-    <div ref={tooltipRef} role="tooltip" style={{ position: 'absolute', top: 30, left: 0, display: 'none', pointerEvents: 'none', zIndex: 16, padding: '3px 6px', borderRadius: 3, background: 'rgba(15,23,42,0.94)', border: '1px solid rgba(148,163,184,0.24)', color: '#E2E8F0', font: '600 0.66rem JetBrains Mono, monospace', whiteSpace: 'nowrap' }} />
-    <div style={{ position: 'absolute', top: 6, left: 10, zIndex: 15, display: 'flex', alignItems: 'center', gap: 7, padding: '2px 8px', borderRadius: 4, background: tk.legendBg, border: `1px solid ${tk.legendBorder}`, color: tk.toolbarMuted, font: '700 0.68rem JetBrains Mono, monospace' }}>
-      <span style={{ color: '#26A69A' }}>VOL</span><span>MA({volumeMA})</span><strong ref={valueRef} style={{ color: tk.legendText }}>-</strong>
-      <button type="button" onClick={onToggleHide} title="Hide volume" aria-label="Hide volume" style={{ display: 'flex', padding: 1, color: tk.legendMuted, background: 'transparent', border: 0, cursor: 'pointer' }}><EyeOff size={11} /></button>
+    <div ref={hairlineRef} style={{ position: 'absolute', top: 0, bottom: 0, width: 1, borderLeft: '1px dashed #787B86', pointerEvents: 'none', display: 'none', zIndex: 14 }} />
+    <div ref={tooltipRef} role="tooltip" style={{ position: 'absolute', top: 26, left: 0, display: 'none', pointerEvents: 'none', zIndex: 16, padding: '3px 8px', borderRadius: 4, background: tk.menuBg, border: `1px solid ${tk.toolbarBorder}`, color: tk.toolbarText, font: "500 11px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif", whiteSpace: 'nowrap', boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }} />
+    <div style={{ position: 'absolute', top: 4, left: 10, zIndex: 15, display: 'flex', alignItems: 'center', gap: 6, padding: 0, background: 'transparent', border: 0, color: tk.toolbarMuted, font: "500 12px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif", pointerEvents: 'auto' }}>
+      <span style={{ width: 9, height: 2, borderRadius: 1, backgroundColor: '#26A69A' }} />
+      <span>Volume</span><span style={{ color: tk.toolbarMuted }}>MA({volumeMA})</span><strong ref={valueRef} style={{ color: tk.legendText, fontWeight: 500 }}>-</strong>
+      <button type="button" onClick={onToggleHide} title="Hide volume" aria-label="Hide volume" style={{ display: 'flex', padding: 2, color: '#787B86', background: 'transparent', border: 0, cursor: 'pointer' }}><EyeOff size={12} /></button>
     </div>
   </div>;
 });

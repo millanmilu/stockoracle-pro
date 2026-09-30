@@ -35,7 +35,9 @@ export default function ScreenerHoverPreview({ row, x, y, onNavigateChart, onIns
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
         <span style={{ fontSize: 13, fontWeight: 700, color: TN.text }}>{row.ticker}</span>
         <span style={num(11, { color: pos ? TN.up : TN.down, fontWeight: 700 })}>
-          ₹{Number(row.close_price || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })} {pos ? '+' : ''}{chg != null ? Number(chg).toFixed(2) : '—'}%
+          {/* No price means no quote — never render "₹0" for a row that has none. */}
+          {row.close_price == null ? 'no price' : `₹${Number(row.close_price).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`}{' '}
+          {chg != null ? `${pos ? '+' : ''}${Number(chg).toFixed(2)}%` : '—'}
         </span>
       </div>
       <div style={{ height: 1, background: TN.border }} />

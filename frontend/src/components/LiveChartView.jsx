@@ -65,7 +65,7 @@ import ChartSettingsModal from './ChartSettingsModal';
 import { DEFAULT_ACTIVE_INDICATORS, INDICATOR_DEFINITIONS } from './chart/indicatorDefinitions';
 import { getEngineFallbackId } from './chart/indicatorSettingsSchema';
 import { getCachedCandles, setCachedCandles } from '../utils/chartDataCache';
-import { toChartTime, getSessionBucketStart, isCryptoSymbol, subscribeLiveTick, sanitizeCandles, isAppendableTime, compareChartTime, INTERVAL_SLOT_SEC, computeFillSlots, normalizeInterval, getBoundedTimeframe, getIstDateString, nextBackfillTimeframe } from '../utils/chartHelpers';
+import { toChartTime, getSessionBucketStart, isCryptoSymbol, subscribeLiveTick, sanitizeCandles, isAppendableTime, compareChartTime, INTERVAL_SLOT_SEC, computeFillSlots, normalizeInterval, getBoundedTimeframe, getIstDateString, getBackfillChunkLimit } from '../utils/chartHelpers';
 
 /**
  * Raw /history rows → chart-ready candles (OHLC-invariant enforced, sorted,
@@ -84,7 +84,8 @@ function formatHistoryCandles(rawCandles, isIntraday) {
     const close = Number(c.close);
     const volume = Number(c.volume || 0);
     // Enforce OHLC consistency invariant & preserve all indicator attributes
-    if (t && !isNaN(open) && open > 0 && !isNaN(close) && close > 0 && !isNaN(high) && !isNaN(low)) {
+    if (t && !isNaN(open) && open > 0 && !isNaN(close) && close > 0 && !isNaN(high) && !isNaN(low)
+        && high >= Math.max(open, close) && low <= Math.min(open, close)) {
       formatted.push({
         ...c,
         time: t,
@@ -155,6 +156,8 @@ export default function LiveChartView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [proxyWarning, setProxyWarning] = useState(null);
+  // Older-history (left-pan backfill) pill: null | { kind: 'loading' | 'end' | 'error' }.
+  const [backfillStatus, setBackfillStatus] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Throttled live snapshot for paper P&L price-lines only (2s cadence —
   // ChartCanvas recreates price-lines per change, so raw ticks flickered).
@@ -203,12 +206,12 @@ export default function LiveChartView() {
   // Shared drawing-tool selection — the top Draw menu and the left rail stay in sync
   const [activeDrawingTool, setActiveDrawingTool] = useState('crosshair');
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [showVolume, setShowVolume] = useState(true);
+  const [showVolume, setShowVolume] = useState(false);
   const [volumeHeight, setVolumeHeight] = useState(132);
   const [timezone, setTimezone] = useState('Asia/Kolkata');
 
   // ── Live On-Chart Paper Trading ──────────────────────────────────────────
-  const [showTradeBar, setShowTradeBar] = useState(true);
+  const [showTradeBar, setShowTradeBar] = useState(false);
   const [isTradeBarCollapsed, setIsTradeBarCollapsed] = useState(false);
   const [showTradeDocket, setShowTradeDocket] = useState(false);
   const [paperPositions, setPaperPositions] = useState([]);
@@ -324,6 +327,13 @@ export default function LiveChartView() {
   const lastVerifiedPriceRef = useRef(null);
   const recentPricesRef = useRef([]); // Rolling window of recent LTPs for adaptive spike detection
   const spikeCountRef = useRef(0);
+  // Fill-continuity guard: stall backfill (flat carry-forward bars) is only
+  // honest when the previous bucket was actually tick-touched in THIS session.
+  // Rollovers from seeded bars (cache/history restore, remount, hidden-tab
+  // return, full-frame replace) must leave an honest gap instead of painting
+  // a fake flat line at a stale price. Invalidated on long hidden gaps.
+  const lastTickBucketRef = useRef(null);
+  const hiddenAtRef = useRef(null);
   // Request-id guard: quick symbol/interval switches must not let a stale
   // history response overwrite the current symbol's candles (which would
   // also resolve that symbol's drawings against the wrong candle set).
@@ -350,6 +360,29 @@ export default function LiveChartView() {
   // Bounded lookback (1d→2Y, 1m/5m→5D, 15m/30m→1M, 1h/4h→6M) keeps default
   // loads to hundreds of bars instead of 7k+ rows / ~10 MB ('ALL' only for
   // explicit deep-history callers).
+  // Seeds live-tick refs from the newest candle so ticks can attach even
+  // before the enriched frame arrives (shared by slim paint + full replace).
+  // When a live bucket is already tracked, its fresher OHLC is preserved.
+  const seedLiveRefs = useCallback((candles) => {
+    if (!Array.isArray(candles) || candles.length === 0) return;
+    const last = candles[candles.length - 1];
+    const live = activeCandleRef.current;
+    if (live && live.time === last.time && Number(live.close) > 0) {
+      activeCandleRef.current = {
+        ...last,
+        open: live.open ?? last.open,
+        high: Math.max(Number(last.high), Number(live.high), Number(live.close)),
+        low: Math.min(Number(last.low), Number(live.low), Number(live.close)),
+        close: live.close,
+      };
+      lastVerifiedPriceRef.current = Number(live.close);
+    } else {
+      lastVerifiedPriceRef.current = last.close;
+      recentPricesRef.current = [last.close];
+      activeCandleRef.current = { ...last };
+    }
+  }, []);
+
   const loadHistory = useCallback(async (symbol, iv) => {
     const seq = ++historySeqRef.current;
     const alive = () => historySeqRef.current === seq;
@@ -372,6 +405,10 @@ export default function LiveChartView() {
     // Spike guard must reset on EVERY symbol/interval switch — cached restores
     // used to carry the previous symbol's count over.
     spikeCountRef.current = 0;
+    // Fill continuity is per session: a new load (switch/retry/remount) starts
+    // with seeded bars only — the first rollover must never backfill.
+    // (The full-stage merge re-arms it explicitly when it inherits live bars.)
+    lastTickBucketRef.current = null;
     if (!cached) {
       activeCandleRef.current = null;
       liveCandleTimeRef.current = null;
@@ -379,51 +416,81 @@ export default function LiveChartView() {
       recentPricesRef.current = [];
     }
 
+    const isIntraday = iv !== '1d';
+    const timeframe = getBoundedTimeframe(iv);
+
+    // Stage 1 (cold loads only): slim OHLCV paint — skips server enrich and
+    // ships ~10x fewer bytes, so candles appear in ~100-200ms while the full
+    // enriched frame loads beneath. Field-only overlays (SMA 20) pop in with
+    // stage 2; engine-backed consumers degrade gracefully meanwhile.
+    if (!cached) {
+      try {
+        const slimRes = await fetchHistory(symbol, iv, timeframe, { slim: true });
+        if (!alive()) return;
+        const slimCandles = formatHistoryCandles(slimRes?.candles || [], isIntraday);
+        if (slimCandles.length > 0) {
+          setCandles(slimCandles);
+          setCachedCandles(symbol, iv, slimCandles, slimRes?.dataSource || 'history-slim');
+          seedLiveRefs(slimCandles);
+          setLoading(false);
+        }
+      } catch {
+        // Silent fallthrough — the full request below is the real attempt.
+      }
+      if (!alive()) return;
+    }
+
     try {
-      const res = await fetchHistory(symbol, iv, getBoundedTimeframe(iv));
+      const res = await fetchHistory(symbol, iv, timeframe);
       if (!alive()) return;
       const rawCandles = res?.candles || [];
       if (res?.proxyWarning) setProxyWarning(res.proxyWarning);
       else setProxyWarning(null);
 
       if (!Array.isArray(rawCandles) || rawCandles.length === 0) {
-        setCandles([]);
+        // Slim already painted something — never blank it on an empty full.
+        if (!getCachedCandles(symbol, iv)) {
+          setCandles([]);
+          setError('No data available for this symbol/interval');
+        }
         setLoading(false);
         return;
       }
 
-      const isIntraday = iv !== '1d';
       // Shared formatter (initial load + backfills produce identical shapes).
       const deduplicated = formatHistoryCandles(rawCandles, isIntraday);
 
-      setCandles(deduplicated);
-      setCachedCandles(symbol, iv, deduplicated, res?.dataSource || 'history');
+      // Preserve the live tail: while the (slow, 10k-bar) full frame was in
+      // flight, ticks kept appending live buckets onto the slim-painted state.
+      // The full frame's tail is older — re-append any strictly-newer live
+      // bars so their wicks survive the replace instead of vanishing for a
+      // frame and re-appearing as flat fill bars on the next tick.
+      let merged = deduplicated;
+      if (deduplicated.length > 0) {
+        const tailTime = deduplicated[deduplicated.length - 1].time;
+        const liveTail = (Array.isArray(liveCandlesRef.current) ? liveCandlesRef.current : [])
+          .filter((c) => c && c.time != null
+            && typeof c.time === typeof tailTime
+            && compareChartTime(c.time, tailTime) > 0);
+        if (liveTail.length > 0) {
+          merged = sanitizeCandles([...deduplicated, ...liveTail]);
+          // The live edge stays tick-touched — continuity (fill gating) is
+          // inherited, not reset, by the refresh.
+          lastTickBucketRef.current = merged[merged.length - 1].time;
+        }
+      }
+
+      setCandles(merged);
+      setCachedCandles(symbol, iv, merged, res?.dataSource || 'history');
 
       // Merge (don't clobber) the live bucket: a refresh landing mid-bucket
       // used to reseed activeCandleRef from stale history and make the live
       // bar vanish for a frame. Keep live OHLC when the bucket is unchanged.
-      if (deduplicated.length > 0) {
-        const last = deduplicated[deduplicated.length - 1];
-        const live = activeCandleRef.current;
-        if (live && live.time === last.time && Number(live.close) > 0) {
-          activeCandleRef.current = {
-            ...last,
-            open: live.open ?? last.open,
-            high: Math.max(Number(last.high), Number(live.high), Number(live.close)),
-            low: Math.min(Number(last.low), Number(live.low), Number(live.close)),
-            close: live.close,
-          };
-          lastVerifiedPriceRef.current = Number(live.close);
-        } else {
-          lastVerifiedPriceRef.current = last.close;
-          recentPricesRef.current = [last.close];
-          activeCandleRef.current = { ...last };
-        }
-      }
+      seedLiveRefs(merged);
     } catch (err) {
       if (!alive()) return;
       // Never blank a visible chart on a failed refresh — keep the cached
-      // candles and surface the error badge only.
+      // (or slim-painted) candles and surface the error badge only.
       const hadCached = getCachedCandles(symbol, iv);
       if (!hadCached) setCandles([]);
       else setLoading(false);
@@ -431,10 +498,11 @@ export default function LiveChartView() {
     } finally {
       if (alive()) setLoading(false);
     }
-  }, [fetchHistory]);
+  }, [fetchHistory, seedLiveRefs]);
 
   // Load history on symbol or interval change
   useEffect(() => {
+    setBackfillStatus(null); // stale loading/end/error pill must not linger
     loadHistory(selectedSymbol, interval);
   }, [selectedSymbol, interval, loadHistory]);
 
@@ -442,61 +510,106 @@ export default function LiveChartView() {
   const liveCandlesRef = useRef([]);
   liveCandlesRef.current = candles;
 
-  // Per symbol+interval depth state: { level, exhausted, inflight }.
-  // Level 0 = bounded default (loadHistory); each left-edge trigger deepens once.
+  // Per symbol+interval cursor state: { exhausted, inflight, oldest, lastBefore, failed }.
+  // `oldest`/`lastBefore` form the loaded-range cache: a trigger at an already
+  // fetched edge never refires a request (no duplicate API calls); `exhausted`
+  // sticks once the backend reports no older candles.
   const backfillRef = useRef({});
   const lastBackfillAtRef = useRef(0);
+  const backfillEndTimerRef = useRef(null);
 
-  // Progressive history: user panned to the loaded left edge → fetch the next
-  // deeper timeframe and PREPEND older bars (live edge untouched, so the active
-  // candle never flickers). Silent on failure — no error badge, next pan retries.
-  const handleNeedOlderData = useCallback(async () => {
+  // Flash a transient "No more historical data" pill (non-intrusive, auto-clear).
+  const flashBackfillEnd = useCallback(() => {
+    setBackfillStatus({ kind: 'end' });
+    if (backfillEndTimerRef.current) {
+      try { clearTimeout(backfillEndTimerRef.current); } catch {}
+    }
+    backfillEndTimerRef.current = setTimeout(() => {
+      setBackfillStatus((s) => (s && s.kind === 'end' ? null : s));
+      backfillEndTimerRef.current = null;
+    }, 4000);
+  }, []);
+  useEffect(() => () => {
+    if (backfillEndTimerRef.current) {
+      try { clearTimeout(backfillEndTimerRef.current); } catch {}
+    }
+  }, []);
+
+  // Cursor-based older history: user panned to the loaded left edge → request
+  // the previous window (`?before=<oldest loaded>&limit=<chunk>`) and PREPEND
+  // it (live edge untouched, so the active candle never flickers). Zoom,
+  // crosshair and visible position are preserved by ChartCanvas (prepend
+  // shifts the logical range by the gained bar count). Timestamp-deduped via
+  // sanitizeCandles; single-flight per symbol+interval; errors surface a
+  // retryable pill instead of the chart error badge.
+  const handleNeedOlderData = useCallback(async (force = false) => {
     if (readyRef.current.loading || !readyRef.current.hasCandles) return;
     if (replayIndexRef.current != null) return; // replay cursor owns the surface
     const now = Date.now();
-    if (now - lastBackfillAtRef.current < 1500) return; // debounce pan storms
+    if (!force && now - lastBackfillAtRef.current < 1500) return; // debounce pan storms
     const symbol = symbolRef.current;
     const iv = intervalRef.current;
     if (!symbol || !iv) return;
     const key = `${String(symbol).toUpperCase()}__${iv}`;
     let st = backfillRef.current[key];
     if (!st) {
-      st = { level: 0, exhausted: false, inflight: false };
+      st = { exhausted: false, inflight: false, oldest: null, lastBefore: null, failed: false };
       backfillRef.current[key] = st;
     }
-    if (st.exhausted || st.inflight) return;
-    const nextTf = nextBackfillTimeframe(iv, st.level);
-    if (!nextTf) {
-      st.exhausted = true;
-      return;
-    }
+    if (st.inflight) return;
+    if (st.exhausted && !force) return;
+    const loaded = Array.isArray(liveCandlesRef.current) ? liveCandlesRef.current : [];
+    if (loaded.length === 0) return;
+    const oldest = loaded[0].time;
+    if (oldest == null) return;
+    // Range cache: this exact edge already resolved (exhausted or failed) —
+    // don't refire until the edge moves or the user hits Retry.
+    if (!force && st.lastBefore === oldest && (st.exhausted || st.failed)) return;
+    const limit = getBackfillChunkLimit(iv);
     lastBackfillAtRef.current = now;
     st.inflight = true;
+    st.failed = false;
+    setBackfillStatus({ kind: 'loading' });
     try {
-      const res = await fetchHistory(symbol, iv, nextTf);
+      const res = await fetchHistory(symbol, iv, null, { before: oldest, limit });
       const formatted = formatHistoryCandles(res?.candles || [], iv !== '1d');
-      if (formatted.length === 0) return;
+      // Strictly older than the current edge (server guarantees this; double-check client-side).
+      const olderOnly = formatted.filter((c) => compareChartTime(c.time, oldest) < 0);
       const before = Array.isArray(liveCandlesRef.current) ? liveCandlesRef.current : [];
       if (before.length === 0) return;
       // History first, live state last — dedupe keeps the LAST occurrence, so
       // the live-owned edge bar (fresher OHLC) always wins ties.
-      const merged = sanitizeCandles([...formatted, ...before]);
+      const merged = sanitizeCandles([...olderOnly, ...before]);
       const gainedOlder = merged.length > before.length
         && compareChartTime(merged[0].time, before[0].time) < 0;
+      st.lastBefore = oldest;
       if (!gainedOlder) {
-        // Deeper window added nothing older → nothing deeper will either.
+        // Deeper window added nothing older → history fully loaded.
         st.exhausted = true;
+        setBackfillStatus(null);
+        flashBackfillEnd();
         return;
       }
-      st.level += 1;
+      st.oldest = merged[0].time;
       setCandles(merged);
-      setCachedCandles(symbol, iv, merged, res?.dataSource || 'history-backfill');
+      setCachedCandles(symbol, iv, merged, res?.dataSource || 'history-cursor');
+      // Short window (or explicit has_more=false) = oldest available bar reached.
+      if (res?.hasMore === false || olderOnly.length < limit) {
+        st.exhausted = true;
+        setBackfillStatus(null);
+        flashBackfillEnd();
+      } else {
+        setBackfillStatus(null);
+      }
     } catch {
-      // Silent — a failed backfill must never pop the error badge.
+      // Graceful: retryable pill, never the chart error badge; next pan also retries.
+      st.failed = true;
+      st.lastBefore = oldest;
+      setBackfillStatus({ kind: 'error' });
     } finally {
       st.inflight = false;
     }
-  }, [fetchHistory]);
+  }, [fetchHistory, flashBackfillEnd]);
 
   // Tab-return guard: if the user comes back (browser tab or app view) to an
   // empty chart that is not already loading, reload once.
@@ -519,6 +632,25 @@ export default function LiveChartView() {
       window.removeEventListener('focus', onVisible);
     };
   }, [loadHistory]);
+
+  // Fill-continuity invalidation: while the tab is hidden, rAF never fires so
+  // ticks can't touch buckets. On return after a long gap, the next rollover
+  // must NOT backfill the absence with flat bars (fake price line) — the gap
+  // stays honestly visible. Short hides (<60s) keep micro-stall bridging.
+  useEffect(() => {
+    const onVisChange = () => {
+      if (document.visibilityState === 'hidden') {
+        hiddenAtRef.current = Date.now();
+      } else if (hiddenAtRef.current != null) {
+        if (Date.now() - hiddenAtRef.current > 60000) {
+          lastTickBucketRef.current = null;
+        }
+        hiddenAtRef.current = null;
+      }
+    };
+    document.addEventListener('visibilitychange', onVisChange);
+    return () => document.removeEventListener('visibilitychange', onVisChange);
+  }, []);
 
   // Keep imperative refs in sync for the render-free tick path
   useEffect(() => {
@@ -625,17 +757,22 @@ export default function LiveChartView() {
 
     const storeLiveTick = useStore.getState().livePrices?.[selectedSymbol] || {};
 
-    // Publishes a new bucket candle in ascending order, backfilling any slots
-    // skipped during feed stalls with flat carry-forward bars (volume 0) so
-    // the series stays slot-complete and no whitespace gap appears. Daily
-    // buckets and oversized skips are never filled (weekends/holidays and
-    // real outages must stay visible). Same-time calls only update in place
-    // (state updater returns prev → no re-render, render-free hot path kept).
+    // Publishes a new bucket candle in ascending order, backfilling slots
+    // skipped during genuine micro-stalls with flat carry-forward bars
+    // (volume 0). Fills are CONTINUITY-GATED: the previous bucket must have
+    // been tick-touched in this session (lastTickBucketRef) — rollovers from
+    // seeded bars (history/cache restore, remount, hidden-tab return, full
+    // replace) leave an honest gap instead of a fake flat line at a stale
+    // price. Daily buckets and oversized skips are never filled
+    // (weekends/holidays and real outages must stay visible). Same-time calls
+    // only update in place (state updater returns prev → no re-render,
+    // render-free hot path kept).
     const emitOrdered = (prevTime, prevClose, newCandle) => {
       const slot = INTERVAL_SLOT_SEC[interval];
       const flat = Number(prevClose);
       const flatOk = isFinite(flat) && flat > 0;
-      const fills = (slot && flatOk && prevTime !== newCandle.time)
+      const continuous = lastTickBucketRef.current != null && prevTime === lastTickBucketRef.current;
+      const fills = (slot && flatOk && continuous && prevTime !== newCandle.time)
         ? computeFillSlots(prevTime, newCandle.time, slot, { sameDayOnly: !isCrypto })
             .map((t) => ({ time: t, open: flat, high: flat, low: flat, close: flat, volume: 0 }))
         : [];
@@ -645,6 +782,7 @@ export default function LiveChartView() {
         if (replayIndexRef.current == null) chartCanvasRef.current?.updateActiveCandle(c);
       }
       activeCandleRef.current = newCandle;
+      lastTickBucketRef.current = newCandle.time;
       try {
         setCandles((prev) => {
           if (!Array.isArray(prev)) return prev;
@@ -719,6 +857,9 @@ export default function LiveChartView() {
         active.high = Math.max(Number(active.high), ltp);
         active.low = Math.min(Number(active.low), ltp);
         active.close = ltp;
+        // This bucket is provably live-touched — a later rollover from it
+        // may bridge micro-stall slots (continuity gate in emitOrdered).
+        lastTickBucketRef.current = active.time;
         // Frozen during Bar Replay — the replay cursor owns the chart surface.
         if (replayIndexRef.current == null) chartCanvasRef.current?.updateActiveCandle(active);
       }
@@ -737,6 +878,10 @@ export default function LiveChartView() {
       // Continuation window = the interval's own slot (1h→3600, 4h→14400) so
       // prevClose carries over on hourly buckets; the old hardcoded 300s broke
       // gap continuity on 1h/4h (open fell back to tick LTP).
+      // NOTE: For daily candles, currentBucketTime is a string (YYYY-MM-DD), so
+      // isContinuation falls through to `active.time === currentBucketTime` — which
+      // is always false here (we're in the else-if branch where they differ).
+      // This is correct: daily candles always open at the tick LTP, never prevClose.
       const slotSec = INTERVAL_SLOT_SEC[interval] || 300;
       const isContinuation = active?.time && (
         typeof active.time === 'number' && typeof currentBucketTime === 'number'
@@ -756,7 +901,11 @@ export default function LiveChartView() {
         high: highPrice,
         low: lowPrice,
         close: ltp,
-        volume: (!isIntraday && Number(storeLiveTick.volume) > 0) ? Number(storeLiveTick.volume) : 0,
+        volume: (!isIntraday && Number(storeLiveTick.volume) > 0)
+          ? Number(storeLiveTick.volume)
+          : (isIntraday && storeLiveTick.liveCandle?.volume != null)
+            ? Number(storeLiveTick.liveCandle.volume)
+            : 0,
       };
       // Ordered publish: backfills stall-skipped slots, updates the chart
       // imperatively, and stores the SAME object reference in state so ticks
@@ -1225,8 +1374,11 @@ export default function LiveChartView() {
         backgroundColor: tk.chartBg,
         overflow: 'hidden',
         boxSizing: 'border-box',
-        padding: isMobile ? 3 : 6,
-        gap: isMobile ? 3 : 6,
+        padding: 0,
+        gap: 0,
+        border: `1px solid ${tk.toolbarBorder}`,
+        borderRadius: 4,
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif",
       }}
     >
       {/* 1. Header Toolbar — live price subscription isolated in LivePriceBadge
@@ -1289,7 +1441,9 @@ export default function LiveChartView() {
           minHeight: 0,
           position: 'relative',
           overflow: 'hidden',
-          borderRadius: 6,
+          borderRadius: 0,
+          borderTop: `1px solid ${tk.toolbarBorder}`,
+          backgroundColor: tk.chartBg,
         }}
       >
         {/* Left Vertical Drawing Toolbar & Coordinate-Synced SVG Drawing Layer */}
@@ -1321,7 +1475,7 @@ export default function LiveChartView() {
             overflow: 'hidden',
           }}
         >
-          <div ref={mainChartWrapRef} style={{ flex: 1, position: 'relative', width: '100%', minHeight: 0, overflow: 'hidden' }}>
+          <div ref={mainChartWrapRef} style={{ flex: 1, position: 'relative', width: '100%', minHeight: 0, overflow: 'hidden', backgroundColor: tk.chartBg }}>
             {loading && candles.length === 0 && (
               <div style={{
                 position: 'absolute',
@@ -1330,46 +1484,47 @@ export default function LiveChartView() {
                 alignItems: 'center',
                 justifyContent: 'center',
                 zIndex: 20,
-                backgroundColor: theme === 'light' ? 'rgba(240,242,248,0.85)' : 'rgba(9, 12, 21, 0.7)',
-                color: '#818CF8',
-                fontFamily: 'JetBrains Mono, monospace',
+                backgroundColor: tk.chartBg,
+                color: tk.toolbarMuted,
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
                 fontSize: '0.85rem',
                 gap: 8,
               }}>
                 <div className="spinner" style={{ width: 16, height: 16 }} />
-                Loading {selectedSymbol} Candles...
+                Loading {selectedSymbol}…
               </div>
             )}
 
             {error && (
               <div style={{
                 position: 'absolute',
-                top: 12,
-                right: 12,
+                top: 36,
+                right: 68,
                 zIndex: 20,
-                backgroundColor: 'rgba(239, 83, 80, 0.15)',
-                border: '1px solid rgba(239, 83, 80, 0.3)',
+                backgroundColor: tk.menuBg,
+                border: `1px solid #EF5350`,
                 borderRadius: 4,
-                padding: '4px 10px',
+                padding: '6px 10px',
                 color: '#EF5350',
-                fontSize: '0.72rem',
-                fontFamily: 'JetBrains Mono, monospace',
+                fontSize: '0.75rem',
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
               }}>
                 <span>{error}</span>
                 <button
                   type="button"
                   onClick={() => loadHistory(selectedSymbol, interval)}
-                  style={{ background: 'transparent', border: '1px solid rgba(239,83,80,0.5)', borderRadius: 3, color: '#EF5350', cursor: 'pointer', fontSize: '0.68rem', padding: '1px 7px' }}
+                  style={{ background: '#2962FF', border: 0, borderRadius: 4, color: '#fff', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, padding: '3px 10px' }}
                 >
                   Retry
                 </button>
                 <button
                   type="button"
                   onClick={() => setError(null)}
-                  style={{ background: 'transparent', border: 0, color: '#EF5350', cursor: 'pointer', fontSize: '0.72rem', padding: '0 2px' }}
+                  style={{ background: 'transparent', border: 0, color: tk.toolbarMuted, cursor: 'pointer', fontSize: '0.75rem', padding: '0 2px' }}
                   aria-label="Dismiss error"
                 >
                   ✕
@@ -1379,19 +1534,71 @@ export default function LiveChartView() {
             {proxyWarning && !error && (
               <div style={{
                 position: 'absolute',
-                top: 12,
-                right: 12,
+                top: 36,
+                right: 68,
                 zIndex: 20,
-                backgroundColor: 'rgba(250, 204, 21, 0.12)',
-                border: '1px solid rgba(250, 204, 21, 0.35)',
+                backgroundColor: tk.menuBg,
+                border: `1px solid ${tk.toolbarBorder}`,
                 borderRadius: 4,
-                padding: '4px 10px',
-                color: '#A16207',
-                fontSize: '0.7rem',
-                fontFamily: 'JetBrains Mono, monospace',
+                padding: '6px 10px',
+                color: tk.toolbarText,
+                fontSize: '0.72rem',
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
                 maxWidth: '60%',
               }}>
                 ⚠ {proxyWarning}
+              </div>
+            )}
+            {backfillStatus && (
+              <div style={{
+                position: 'absolute',
+                bottom: 54,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 20,
+                backgroundColor: tk.menuBg,
+                border: `1px solid ${backfillStatus.kind === 'error' ? '#EF5350' : tk.toolbarBorder}`,
+                borderRadius: 16,
+                padding: '5px 12px',
+                color: backfillStatus.kind === 'error' ? '#EF5350' : tk.toolbarMuted,
+                fontSize: '0.72rem',
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+                pointerEvents: 'auto',
+                whiteSpace: 'nowrap',
+              }}>
+                {backfillStatus.kind === 'loading' && (
+                  <>
+                    <div className="spinner" style={{ width: 12, height: 12 }} />
+                    <span>Loading historical data…</span>
+                  </>
+                )}
+                {backfillStatus.kind === 'end' && (
+                  <span>No more historical data</span>
+                )}
+                {backfillStatus.kind === 'error' && (
+                  <>
+                    <span>History load failed</span>
+                    <button
+                      type="button"
+                      onClick={() => handleNeedOlderData(true)}
+                      style={{ background: '#2962FF', border: 0, borderRadius: 10, color: '#fff', cursor: 'pointer', fontSize: '0.7rem', fontWeight: 600, padding: '2px 10px' }}
+                    >
+                      Retry
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBackfillStatus(null)}
+                      style={{ background: 'transparent', border: 0, color: tk.toolbarMuted, cursor: 'pointer', fontSize: '0.72rem', padding: '0 2px' }}
+                      aria-label="Dismiss"
+                    >
+                      ✕
+                    </button>
+                  </>
+                )}
               </div>
             )}
 
@@ -1437,19 +1644,19 @@ export default function LiveChartView() {
             {isReplaying && (
               <div style={{
                 position: 'absolute',
-                top: 14,
-                right: 60,
+                top: 40,
+                right: 68,
                 zIndex: 15,
                 pointerEvents: 'none',
-                opacity: 0.18,
-                fontSize: '1rem',
-                fontWeight: 900,
-                fontFamily: 'JetBrains Mono, monospace',
-                letterSpacing: '0.14em',
-                color: '#EF5350',
+                opacity: 0.35,
+                fontSize: '0.72rem',
+                fontWeight: 700,
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
+                letterSpacing: '0.12em',
+                color: '#2962FF',
                 userSelect: 'none',
               }}>
-                BAR REPLAY SIMULATION
+                BAR REPLAY
               </div>
             )}
 
@@ -1457,23 +1664,22 @@ export default function LiveChartView() {
             {isJumpMode && (
               <div style={{
                 position: 'absolute',
-                top: 14,
+                top: 40,
                 left: '50%',
                 transform: 'translateX(-50%)',
                 zIndex: 60,
-                background: 'rgba(239, 83, 80, 0.95)',
+                background: '#2962FF',
                 color: '#FFFFFF',
-                padding: '5px 14px',
-                borderRadius: 20,
+                padding: '6px 14px',
+                borderRadius: 4,
                 fontSize: '0.76rem',
-                fontWeight: 700,
-                letterSpacing: '0.04em',
+                fontWeight: 500,
+                letterSpacing: '0.01em',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                boxShadow: '0 8px 24px rgba(239, 83, 80, 0.45)',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
                 pointerEvents: 'none',
-                animation: 'replay-blink 2s ease-in-out infinite',
               }}>
                 <Crosshair size={14} />
                 Click any candle on the chart to set cut point (Esc to cancel)

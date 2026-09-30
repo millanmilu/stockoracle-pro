@@ -1224,7 +1224,7 @@ function renderFixedRangeVolumeProfile({ points, handlers, drawing, candles, toX
     );
   }
 
-  const rowsCount = Math.max(4, Math.min(100, Math.round(Number(drawing.rows) || 24)));
+  const rowsCount = Math.max(4, Math.min(100, Math.round(Number(drawing.rows) || 70)));
   const vaPct = Math.max(10, Math.min(99, Number(drawing.valueAreaPercent) || 70));
   const profile = computeVolumeProfile(slice, { rows: rowsCount, valueAreaPercent: vaPct });
 

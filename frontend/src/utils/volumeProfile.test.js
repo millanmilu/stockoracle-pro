@@ -86,4 +86,18 @@ describe('computeVolumeProfile — basics', () => {
     const sum = p.rows.reduce((s, r) => s + r.volume, 0);
     assert.ok(Math.abs(sum - 200) < 1e-9);
   });
+
+  it('breaks ties towards row closer to POC, and above when equal distance (TradingView parity)', () => {
+    const candles = [
+      bar(10, 10, 10, 10, 50),
+      bar(11, 11, 11, 11, 100),
+      bar(12, 12, 12, 12, 200),
+      bar(13, 13, 13, 13, 100),
+      bar(14, 14, 14, 14, 50),
+    ];
+    const p = computeVolumeProfile(candles, { rows: 5, valueAreaPercent: 55 });
+    assert.strictEqual(p.poc.rowIndex, 2);
+    assert.strictEqual(p.vah, p.rows[3].high);
+    assert.strictEqual(p.val, p.rows[2].low);
+  });
 });

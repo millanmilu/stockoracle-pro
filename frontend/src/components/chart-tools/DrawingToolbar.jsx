@@ -67,6 +67,8 @@ import {
   TOOL_SHORTCUTS,
   getToolSpec,
 } from './drawingToolCatalog';
+import useStore from '../../store/useStore';
+import { getThemeTokens } from '../../utils/theme';
 
 /**
  * StockOracle Pro drawing toolbar.
@@ -191,30 +193,55 @@ const FLYOUT_GROUPS = DRAWING_TOOL_GROUPS;
 // ── Presentational helpers ──────────────────────────────────────────────────
 
 const COLOR = {
-  bg: '#0F131D',
-  panel: '#111827',
-  border: 'rgba(148,163,184,0.18)',
-  borderSoft: 'rgba(255,255,255,0.08)',
-  text: '#CBD5E1',
-  textDim: '#94A3B8',
-  textMuted: '#64748B',
-  accent: '#38BDF8',
-  accentBg: 'rgba(56,189,248,0.16)',
-  hoverBg: 'rgba(148,163,184,0.12)',
+  bg: '#131722',
+  panel: '#1E222D',
+  border: '#2A2E39',
+  borderSoft: '#2A2E39',
+  text: '#D1D4DC',
+  textDim: '#787B86',
+  textMuted: '#787B86',
+  accent: '#2962FF',
+  accentBg: 'rgba(41,98,255,0.18)',
+  hoverBg: '#2A2E39',
   danger: '#EF5350',
-  mono: 'JetBrains Mono, monospace',
+  mono: "'Trebuchet MS', Roboto, Ubuntu, sans-serif",
 };
+
+/** Theme-aware rail palette — TradingView parity (dark #131722 / light white). */
+function useRailPalette() {
+  let theme = 'dark';
+  try {
+    theme = useStore(s => s.theme) || 'dark';
+  } catch { theme = 'dark'; }
+  if (theme === 'light') {
+    return {
+      bg: '#FFFFFF',
+      panel: '#FFFFFF',
+      border: '#E0E3EB',
+      borderSoft: '#E0E3EB',
+      text: '#131722',
+      textDim: '#787B86',
+      textMuted: '#787B86',
+      accent: '#2962FF',
+      accentBg: 'rgba(41,98,255,0.10)',
+      hoverBg: '#F0F3FA',
+      danger: '#EF5350',
+      mono: "'Trebuchet MS', Roboto, Ubuntu, sans-serif",
+    };
+  }
+  return COLOR;
+}
 
 const panelStyle = {
   position: 'absolute',
   left: '100%',
   width: 236,
-  padding: 6,
-  borderRadius: '0 8px 8px 0',
+  padding: '4px 0',
+  borderRadius: '0 4px 4px 0',
   border: `1px solid ${COLOR.border}`,
   borderLeft: 0,
   background: COLOR.panel,
-  boxShadow: '0 18px 40px rgba(0,0,0,0.6)',
+  boxShadow: '0 4px 16px rgba(0,0,0,0.45)',
   zIndex: 60,
 };
 
@@ -244,6 +271,7 @@ function RailButton({
   badge = null,
 }) {
   const [hovered, setHovered] = useState(false);
+  const C = useRailPalette();
   return (
     <button
       type="button"
@@ -276,14 +304,14 @@ function RailButton({
         height: size,
         padding: 0,
         flexShrink: 0,
-        border: `1px solid ${active ? 'rgba(56,189,248,0.45)' : 'transparent'}`,
-        borderRadius: 6,
-        background: active ? COLOR.accentBg : hovered ? COLOR.hoverBg : 'transparent',
-        color: disabled ? '#475569' : active ? COLOR.accent : hovered ? '#E2E8F0' : COLOR.textDim,
+        border: 0,
+        borderRadius: 4,
+        background: active ? '#2962FF' : hovered ? C.hoverBg : 'transparent',
+        color: disabled ? C.textMuted : active ? '#FFFFFF' : hovered ? C.text : C.textDim,
         cursor: disabled ? 'not-allowed' : draggable ? 'grab' : 'pointer',
         opacity: dragging ? 0.45 : 1,
-        outline: dropTarget ? `1px dashed ${COLOR.accent}` : 'none',
-        transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
+        outline: dropTarget ? '1px dashed #2962FF' : 'none',
+        transition: 'background 120ms ease, color 120ms ease',
       }}
     >
       {icon}
@@ -294,6 +322,7 @@ function RailButton({
 
 /** Compact hover tooltip: name, hint and keyboard shortcut. */
 function ToolTooltip({ data, railWidth, top }) {
+  const C = useRailPalette();
   if (!data) return null;
   return (
     <div
@@ -305,22 +334,22 @@ function ToolTooltip({ data, railWidth, top }) {
         pointerEvents: 'none',
         maxWidth: 220,
         padding: '6px 9px',
-        borderRadius: 6,
-        border: `1px solid ${COLOR.border}`,
-        background: 'rgba(17,24,39,0.98)',
-        boxShadow: '0 10px 26px rgba(0,0,0,0.5)',
+        borderRadius: 4,
+        border: `1px solid ${C.border}`,
+        background: C.panel,
+        boxShadow: '0 4px 16px rgba(0,0,0,0.45)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 11.5, fontWeight: 700, color: '#E2E8F0', whiteSpace: 'nowrap' }}>{data.label}</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: C.text, whiteSpace: 'nowrap' }}>{data.label}</span>
         {data.shortcut ? (
-          <span style={{ marginLeft: 'auto', fontSize: 9.5, color: COLOR.textMuted, fontFamily: COLOR.mono, whiteSpace: 'nowrap' }}>
+          <span style={{ marginLeft: 'auto', fontSize: 10, color: C.textMuted, whiteSpace: 'nowrap' }}>
             {data.shortcut}
           </span>
         ) : null}
       </div>
       {data.hint ? (
-        <div style={{ marginTop: 2, fontSize: 10, lineHeight: 1.35, color: COLOR.textDim, whiteSpace: 'normal' }}>{data.hint}</div>
+        <div style={{ marginTop: 2, fontSize: 11, lineHeight: 1.35, color: C.textDim, whiteSpace: 'normal' }}>{data.hint}</div>
       ) : null}
     </div>
   );
@@ -329,6 +358,7 @@ function ToolTooltip({ data, railWidth, top }) {
 /** A flyout row for one tool: icon, name, shortcut, active marker, pin toggle. */
 function FlyoutRow({ tool, active, pinned, onPick, onTogglePin, showPin = true, highlighted = false, rowRef = null, digit = null }) {
   const [hovered, setHovered] = useState(false);
+  const C = useRailPalette();
   const shortcut = TOOL_SHORTCUTS[tool.id];
   const keys = [shortcut, digit ? `[${digit}]` : null].filter(Boolean).join(' · ');
   return (
@@ -338,9 +368,9 @@ function FlyoutRow({ tool, active, pinned, onPick, onTogglePin, showPin = true, 
         display: 'flex',
         alignItems: 'center',
         gap: 2,
-        borderRadius: 5,
-        background: active ? COLOR.accentBg : hovered || highlighted ? COLOR.hoverBg : 'transparent',
-        outline: highlighted && !active ? `1px solid ${COLOR.accent}` : 'none',
+        borderRadius: 0,
+        background: active ? C.accentBg : hovered || highlighted ? C.hoverBg : 'transparent',
+        outline: highlighted && !active ? '1px solid #2962FF' : 'none',
         outlineOffset: -1,
       }}
       onMouseEnter={() => setHovered(true)}
@@ -353,26 +383,26 @@ function FlyoutRow({ tool, active, pinned, onPick, onTogglePin, showPin = true, 
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 9,
+          gap: 10,
           flex: 1,
           minWidth: 0,
-          padding: '6px 8px',
+          padding: '7px 12px',
           border: 0,
-          borderRadius: 5,
+          borderRadius: 0,
           background: 'transparent',
-          color: active ? COLOR.accent : COLOR.text,
+          color: active ? '#2962FF' : C.text,
           cursor: 'pointer',
           textAlign: 'left',
         }}
       >
-        <ToolIcon toolId={tool.id} size={15} color={active ? COLOR.accent : COLOR.textDim} />
-        <span style={{ flex: 1, minWidth: 0, fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <ToolIcon toolId={tool.id} size={16} color={active ? '#2962FF' : C.textDim} />
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {tool.label}
         </span>
         {active ? (
-          <Check size={13} color={COLOR.accent} />
+          <Check size={14} color="#2962FF" />
         ) : keys ? (
-          <span style={{ fontSize: 9.5, color: COLOR.textMuted, fontFamily: COLOR.mono }}>{keys}</span>
+          <span style={{ fontSize: 11, color: C.textMuted }}>{keys}</span>
         ) : null}
       </button>
       {showPin ? (
@@ -396,7 +426,7 @@ function FlyoutRow({ tool, active, pinned, onPick, onTogglePin, showPin = true, 
             border: 0,
             borderRadius: 4,
             background: 'transparent',
-            color: pinned ? COLOR.accent : hovered ? COLOR.textDim : 'transparent',
+            color: pinned ? '#2962FF' : hovered ? C.textDim : 'transparent',
             cursor: 'pointer',
           }}
         >
@@ -617,7 +647,7 @@ export default function DrawingToolbar({
         onLeave={() => setTooltip(null)}
         icon={
           <span style={{ position: 'relative', display: 'flex' }}>
-            <ToolIcon toolId={currentTool} size={icon} color={highlighted ? '#FFFFFF' : '#94A3B8'} />
+            <ToolIcon toolId={currentTool} size={icon} color={highlighted ? '#FFFFFF' : C.textDim} />
             <span
               style={{
                 position: 'absolute',
@@ -626,7 +656,7 @@ export default function DrawingToolbar({
                 width: 0,
                 height: 0,
                 borderLeft: '4px solid transparent',
-                borderBottom: `4px solid ${highlighted ? '#FFFFFF' : '#64748B'}`,
+                borderBottom: `4px solid ${highlighted ? '#FFFFFF' : C.textMuted}`,
               }}
             />
           </span>
@@ -655,8 +685,11 @@ export default function DrawingToolbar({
     />
   );
 
+  const railTheme = useStore(s => s.theme);
+  const C = useRailPalette();
+  const tk = getThemeTokens(railTheme);
   const divider = (
-    <div style={{ width: 22, height: 1, background: 'var(--border)', margin: '4px 0' }} />
+    <div style={{ width: 22, height: 1, background: C.border, margin: '4px 0' }} />
   );
 
   return (
@@ -668,8 +701,8 @@ export default function DrawingToolbar({
         display: isOpen ? 'flex' : 'none',
         flexDirection: 'column',
         alignItems: 'center',
-        background: 'var(--bg-card)',
-        borderRight: '1px solid var(--border)',
+        background: tk.toolbarBg,
+        borderRight: `1px solid ${tk.toolbarBorder}`,
         position: 'relative',
         zIndex: 46,
         flexShrink: 0,
@@ -769,8 +802,8 @@ export default function DrawingToolbar({
               height: 14,
               padding: '0 3px',
               borderRadius: 7,
-              background: '#0EA5E9',
-              color: '#082F49',
+              background: '#2962FF',
+              color: '#FFFFFF',
               fontSize: 8.5,
               fontWeight: 800,
               display: 'flex',
@@ -793,10 +826,10 @@ export default function DrawingToolbar({
           width: btn,
           height: btn,
           margin: '4px 0 6px',
-          borderRadius: 5,
+          borderRadius: 4,
           border: 0,
           background: 'transparent',
-          color: 'var(--text-muted)',
+          color: C.textDim,
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
@@ -815,15 +848,15 @@ export default function DrawingToolbar({
           onKeyDown={onFlyoutKeyDown}
           role="menu"
           aria-label={`${activeGroup.label} tools`}
-          style={{ ...panelStyle, top: flyoutTop, width: isMobile ? 186 : 236, maxHeight: isMobile ? '58vh' : '72vh', overflowY: 'auto', outline: 'none' }}
+          style={{ ...panelStyle, background: C.panel, border: `1px solid ${C.border}`, borderLeft: 0, top: flyoutTop, width: isMobile ? 186 : 236, maxHeight: isMobile ? '58vh' : '72vh', overflowY: 'auto', outline: 'none' }}
         >
-          <div style={{ padding: '4px 9px 6px', color: COLOR.textMuted, fontSize: 10, fontWeight: 700, letterSpacing: 0.4 }}>
-            {activeGroup.label.toUpperCase()}
+          <div style={{ padding: '6px 12px 4px', color: C.textMuted, fontSize: 11, fontWeight: 400 }}>
+            {activeGroup.label}
           </div>
           {flyoutTools.fav.length > 0 && (
             <>
-              <div style={{ padding: '2px 9px 3px', color: COLOR.accent, fontSize: 9, fontWeight: 800, letterSpacing: 0.6 }}>
-                ★ FAVORITES
+              <div style={{ padding: '2px 12px 3px', color: '#2962FF', fontSize: 11, fontWeight: 600 }}>
+                ★ Favorites
               </div>
               {flyoutTools.fav.map((tool) => (
                 <FlyoutRow
@@ -837,7 +870,7 @@ export default function DrawingToolbar({
                   onTogglePin={togglePin}
                 />
               ))}
-              <div style={{ height: 1, background: COLOR.border, margin: '4px 6px' }} />
+              <div style={{ height: 1, background: C.border, margin: '4px 0' }} />
             </>
           )}
           {flyoutTools.rest.map((tool) => (
@@ -860,6 +893,6 @@ export default function DrawingToolbar({
   );
 }
 
-const getToolbarWidth = (isMobile) => (isMobile ? 36 : 46);
+const getToolbarWidth = (isMobile) => (isMobile ? 36 : 40);
 
 export { ICONS, ToolIcon, FlyoutRow, getToolbarWidth };

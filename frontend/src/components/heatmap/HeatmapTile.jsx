@@ -169,32 +169,32 @@ export default function HeatmapTile({
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: '#64748B' }}>RSI 14:</span>
-              <strong style={{ color: stock.rsi_14 > 70 ? '#C084FC' : (stock.rsi_14 < 30 ? '#38BDF8' : '#F8FAFC'), fontFamily: 'JetBrains Mono, monospace' }}>
-                {(stock.rsi_14 || 50).toFixed(1)}
+              <strong style={{ color: stock.rsi_14 == null ? '#64748B' : (stock.rsi_14 > 70 ? '#C084FC' : (stock.rsi_14 < 30 ? '#38BDF8' : '#F8FAFC')), fontFamily: 'JetBrains Mono, monospace' }}>
+                {stock.rsi_14 == null ? '—' : stock.rsi_14.toFixed(1)}
               </strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: '#64748B' }}>1W Return:</span>
-              <strong style={{ color: stock.change_1w_pct >= 0 ? '#34D399' : '#F87171', fontFamily: 'JetBrains Mono, monospace' }}>
-                {stock.change_1w_pct >= 0 ? '+' : ''}{(stock.change_1w_pct || 0).toFixed(2)}%
+              <strong style={{ color: stock.change_1w_pct == null ? '#64748B' : (stock.change_1w_pct >= 0 ? '#34D399' : '#F87171'), fontFamily: 'JetBrains Mono, monospace' }}>
+                {stock.change_1w_pct == null ? '—' : `${stock.change_1w_pct >= 0 ? '+' : ''}${stock.change_1w_pct.toFixed(2)}%`}
               </strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: '#64748B' }}>Vol Surge:</span>
-              <strong style={{ color: stock.volume_ratio_20d > 1.5 ? '#FB923C' : '#F8FAFC', fontFamily: 'JetBrains Mono, monospace' }}>
-                {(stock.volume_ratio_20d || 1).toFixed(2)}x
+              <strong style={{ color: stock.volume_ratio_20d == null ? '#64748B' : (stock.volume_ratio_20d > 1.5 ? '#FB923C' : '#F8FAFC'), fontFamily: 'JetBrains Mono, monospace' }}>
+                {stock.volume_ratio_20d == null ? '—' : `${stock.volume_ratio_20d.toFixed(2)}x`}
               </strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: '#64748B' }}>P/E Ratio:</span>
               <strong style={{ color: '#F8FAFC', fontFamily: 'JetBrains Mono, monospace' }}>
-                {(stock.pe_ratio || 0).toFixed(1)}
+                {stock.pe_ratio == null ? '—' : stock.pe_ratio.toFixed(1)}
               </strong>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span style={{ color: '#64748B' }}>AI Score:</span>
               <strong style={{ color: '#818CF8', fontFamily: 'JetBrains Mono, monospace' }}>
-                {(stock.ai_consensus_score || 50).toFixed(0)}/100
+                {stock.ai_consensus_score == null ? '—' : `${stock.ai_consensus_score.toFixed(0)}/100`}
               </strong>
             </div>
           </div>

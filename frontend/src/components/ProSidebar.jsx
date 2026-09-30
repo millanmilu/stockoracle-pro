@@ -61,6 +61,12 @@ export default function ProSidebar({ collapsed, onToggleCollapse }) {
         { label: 'Broker & AI Hub', icon: <KeyRound size={16} />, view: 'Broker Settings', badge: { text: 'API/AI', color: '#10B981' } },
         { label: 'Price Alerts', icon: <Bell size={16} />, view: 'Price Alerts' },
       ]
+    },
+    {
+      title: 'EXPERIMENTAL',
+      items: [
+        { label: 'Pro Terminal V2', icon: <Compass size={16} />, view: 'Pro Terminal V2', badge: { text: 'BETA', color: '#F59E0B' } },
+      ]
     }
   ];
 

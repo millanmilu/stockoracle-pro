@@ -227,10 +227,10 @@ export default function HeatmapStockDrawer({ stock, onClose }) {
               <div style={{
                 fontSize: '0.95rem',
                 fontWeight: 800,
-                color: stock.rsi_14 > 70 ? '#C084FC' : (stock.rsi_14 < 30 ? '#38BDF8' : '#F8FAFC'),
+                color: stock.rsi_14 == null ? '#64748B' : (stock.rsi_14 > 70 ? '#C084FC' : (stock.rsi_14 < 30 ? '#38BDF8' : '#F8FAFC')),
                 fontFamily: 'JetBrains Mono, monospace',
               }}>
-                {(stock.rsi_14 || 50).toFixed(1)}
+                {stock.rsi_14 == null ? '—' : stock.rsi_14.toFixed(1)}
               </div>
             </div>
 
@@ -244,10 +244,10 @@ export default function HeatmapStockDrawer({ stock, onClose }) {
               <div style={{
                 fontSize: '0.95rem',
                 fontWeight: 800,
-                color: stock.volume_ratio_20d > 1.5 ? '#FB923C' : '#F8FAFC',
+                color: stock.volume_ratio_20d == null ? '#64748B' : (stock.volume_ratio_20d > 1.5 ? '#FB923C' : '#F8FAFC'),
                 fontFamily: 'JetBrains Mono, monospace',
               }}>
-                {(stock.volume_ratio_20d || 1).toFixed(2)}x
+                {stock.volume_ratio_20d == null ? '—' : `${stock.volume_ratio_20d.toFixed(2)}x`}
               </div>
             </div>
 
@@ -259,7 +259,7 @@ export default function HeatmapStockDrawer({ stock, onClose }) {
             }}>
               <span style={{ fontSize: '0.68rem', color: '#64748B' }}>Dist to 52W High</span>
               <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#F87171', fontFamily: 'JetBrains Mono, monospace' }}>
-                {(stock.distance_52w_high_pct || 0).toFixed(1)}%
+                {stock.distance_52w_high_pct == null ? '—' : `${stock.distance_52w_high_pct.toFixed(1)}%`}
               </div>
             </div>
 
@@ -271,7 +271,7 @@ export default function HeatmapStockDrawer({ stock, onClose }) {
             }}>
               <span style={{ fontSize: '0.68rem', color: '#64748B' }}>Dist to 52W Low</span>
               <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#34D399', fontFamily: 'JetBrains Mono, monospace' }}>
-                +{(stock.distance_52w_low_pct || 0).toFixed(1)}%
+                {stock.distance_52w_low_pct == null ? '—' : `+${stock.distance_52w_low_pct.toFixed(1)}%`}
               </div>
             </div>
           </div>
@@ -341,7 +341,7 @@ export default function HeatmapStockDrawer({ stock, onClose }) {
             <div>
               <span style={{ fontSize: '0.72rem', color: '#A5B4FC', fontWeight: 700 }}>AI Quant Consensus</span>
               <div style={{ fontSize: '0.95rem', fontWeight: 800, color: '#FFFFFF' }}>
-                {stock.ai_signal || 'NEUTRAL'}
+                {stock.ai_signal || '—'}
               </div>
             </div>
           </div>
@@ -352,7 +352,7 @@ export default function HeatmapStockDrawer({ stock, onClose }) {
             color: '#818CF8',
             fontFamily: 'JetBrains Mono, monospace',
           }}>
-            {(stock.ai_consensus_score || 50).toFixed(0)}/100
+            {stock.ai_consensus_score == null ? '—' : `${stock.ai_consensus_score.toFixed(0)}/100`}
           </div>
         </div>
       </div>

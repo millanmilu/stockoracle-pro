@@ -60,16 +60,16 @@ export function formatMetricDisplay(metric, stock) {
     return `${val >= 0 ? '+' : ''}${val.toFixed(2)}%`;
   }
   if (metric === 'rsi_14') {
-    return `RSI ${(stock.rsi_14 ?? 50).toFixed(1)}`;
+    return stock.rsi_14 == null ? 'RSI —' : `RSI ${stock.rsi_14.toFixed(1)}`;
   }
   if (metric === 'volume_ratio_20d') {
-    return `${(stock.volume_ratio_20d ?? 1.0).toFixed(2)}x Vol`;
+    return stock.volume_ratio_20d == null ? 'Vol —' : `${stock.volume_ratio_20d.toFixed(2)}x Vol`;
   }
   if (metric === 'pe_ratio') {
-    return `P/E ${(stock.pe_ratio ?? 0).toFixed(1)}`;
+    return stock.pe_ratio == null ? 'P/E —' : `P/E ${stock.pe_ratio.toFixed(1)}`;
   }
   if (metric === 'ai_consensus_score') {
-    return `AI ${(stock.ai_consensus_score ?? 50).toFixed(0)}/100`;
+    return stock.ai_consensus_score == null ? 'AI —' : `AI ${stock.ai_consensus_score.toFixed(0)}/100`;
   }
   return `${stock.change_pct >= 0 ? '+' : ''}${(stock.change_pct ?? 0).toFixed(2)}%`;
 }

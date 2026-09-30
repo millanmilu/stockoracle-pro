@@ -17,12 +17,39 @@ const badge = (tone) => {
   return { background: t.bg, color: t.color, border: `1px solid ${t.border}`, padding: '1px 6px', borderRadius: 3, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' };
 };
 
+/**
+ * Coverage marker for a row. `data_status` is derived server-side from what the
+ * row actually contains (OK / PARTIAL / NO_DATA), so a row can no longer look
+ * fully populated while every metric is blank.
+ */
+const COVERAGE_MARK = {
+  NO_DATA: {
+    glyph: '∅', color: TN.warn,
+    title: 'No indicators computed yet — this stock is tracked but has no metrics, so every metric-based screen excludes it.',
+  },
+  PARTIAL: {
+    glyph: '~', color: TN.faint,
+    title: 'Technicals only — fundamentals (PE / ROE / ROCE / D-E) are missing, so fundamental screens will not match this row.',
+  },
+};
+
 function cellContent(col, row, liveTick, flash) {
   const key = col.key;
   if (key === 'ticker') {
+    const mark = COVERAGE_MARK[String(row.data_status || '').toUpperCase()];
     return (
-      <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: TN.info, fontWeight: 700 }} title={`${row.ticker} — ${row.name || row.ticker}`}>
-        {row.ticker}
+      <span style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+        <span
+          style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: TN.info, fontWeight: 700 }}
+          title={`${row.ticker} — ${row.name || row.ticker}${mark ? `\n${mark.title}` : ''}`}
+        >
+          {row.ticker}
+        </span>
+        {mark ? (
+          <span style={{ color: mark.color, fontSize: 10, cursor: 'help', flexShrink: 0, lineHeight: 1 }} title={mark.title} aria-label={mark.title}>
+            {mark.glyph}
+          </span>
+        ) : null}
       </span>
     );
   }
@@ -194,7 +221,11 @@ function ScreenerTableRowComponent({
       onKeyDown={(e) => { if (e.key === 'Enter') onInspect(row); }}
       style={{
         borderBottom: '1px solid rgba(148,163,184,0.07)',
-        textAlign: 'right', color: '#C3CEDD', height: 32,
+        textAlign: 'right',
+        // Rows with no computed metrics are dimmed so a placeholder never reads
+        // as a screened result.
+        color: String(row.data_status || '').toUpperCase() === 'NO_DATA' ? TN.faint : '#C3CEDD',
+        height: 32,
         background: isSelected ? 'rgba(124,140,248,0.12)' : index % 2 === 0 ? 'transparent' : 'rgba(148,163,184,0.02)',
         cursor: 'pointer',
       }}

@@ -65,11 +65,14 @@ function formatRemaining(milliseconds) {
 export default function CandleCountdown({ chartRef, activeCandleRef, selectedSymbol, interval, currentPrice }) {
   const badgeRef = useRef(null);
   const [label, setLabel] = useState('MARKET CLOSED');
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     const updateLabel = () => {
       const { end, closed } = getSessionState(interval, selectedSymbol, activeCandleRef?.current);
-      setLabel(closed || !end ? 'MARKET CLOSED' : formatRemaining(end - Date.now()));
+      const isClosed = closed || !end;
+      setLabel(isClosed ? 'MARKET CLOSED' : formatRemaining(end - Date.now()));
+      setVisible(!isClosed);
     };
     updateLabel();
     const timer = window.setInterval(updateLabel, 1000);
@@ -78,22 +81,34 @@ export default function CandleCountdown({ chartRef, activeCandleRef, selectedSym
 
   // TradingView parity: the countdown sits directly BELOW the live price
   // label, docked to the slim right price axis (same 56px strip).
+  // Flexible positioning: tracks price smoothly, clamps to viewport, and
+  // hides when the price is off-screen or market is closed.
   useEffect(() => {
     let frame;
     const position = () => {
       const badge = badgeRef.current;
+      if (!badge) {
+        frame = requestAnimationFrame(position);
+        return;
+      }
       const coordinate = chartRef?.current?.getPriceCoordinate?.(currentPrice);
-      if (badge && coordinate != null && Number.isFinite(coordinate)) {
+      if (coordinate != null && Number.isFinite(coordinate)) {
         const paneH = badge.parentElement?.clientHeight || 600;
-        const top = Math.min(Math.max(8, coordinate + 16), Math.max(8, paneH - 26));
+        const paneW = badge.parentElement?.clientWidth || 400;
+        // Clamp: keep badge fully inside the viewport
+        const top = Math.min(Math.max(8, coordinate + 14), Math.max(8, paneH - 28));
+        const right = Math.min(Math.max(2, paneW - 56), paneW - 2);
         badge.style.top = `${top}px`;
-        badge.style.display = label === 'MARKET CLOSED' ? 'none' : 'block';
+        badge.style.right = `${right}px`;
+        badge.style.display = visible ? 'block' : 'none';
+      } else {
+        badge.style.display = 'none';
       }
       frame = requestAnimationFrame(position);
     };
     frame = requestAnimationFrame(position);
     return () => cancelAnimationFrame(frame);
-  }, [chartRef, currentPrice, label]);
+  }, [chartRef, currentPrice, visible]);
 
-  return <div ref={badgeRef} role="status" aria-live="polite" style={{ position: 'absolute', right: 2, display: 'none', width: 52, textAlign: 'center', padding: '2px 0', border: '1px solid rgba(125,211,252,0.24)', borderRadius: 4, background: 'rgba(8,15,29,0.9)', color: '#BAE6FD', font: '600 9px JetBrains Mono, monospace', pointerEvents: 'none', zIndex: 18, whiteSpace: 'nowrap' }}>{label}</div>;
+  return <div ref={badgeRef} role="status" aria-live="polite" style={{ position: 'absolute', right: 2, display: 'none', width: 52, textAlign: 'center', padding: '2px 0', border: '1px solid #2A2E39', borderRadius: 4, background: '#1E222D', color: '#D1D4DC', font: "500 10px -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif", pointerEvents: 'none', zIndex: 18, whiteSpace: 'nowrap', transition: 'top 0.15s ease-out' }}>{label}</div>;
 }

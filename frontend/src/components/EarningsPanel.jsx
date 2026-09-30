@@ -338,7 +338,9 @@ export default function EarningsPanel({ ticker: propTicker }) {
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3, fontSize: "0.66rem", color: "#64748B" }}>
-              <span>Source: <strong style={{ color: "#94A3B8" }}>{deepData?.data_freshness?.data_source || fundData?.data_source || "Screener.in Consolidated + NSE Filings"}</strong></span>
+              {/* Do not claim Screener.in filings when nothing was fetched —
+                  that fallback fired precisely when the source was unknown. */}
+              <span>Source: <strong style={{ color: "#94A3B8" }}>{deepData?.data_freshness?.data_source || fundData?.data_source || "Unknown"}</strong></span>
               <span>•</span>
               <span>Audited Disclosures: <strong style={{ color: "#94A3B8" }}>{enrichedQuarters.length} Quarters Analyzed</strong></span>
             </div>

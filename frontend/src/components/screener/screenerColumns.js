@@ -139,9 +139,29 @@ export function formatCell(col, value) {
   }
 }
 
+/**
+ * The screener's real "no filter" query.
+ *
+ * It used to be faked with `MarketCap > 0`, which is not a no-op at all: every
+ * row whose market cap is unknown was silently dropped (382 of 633 in practice)
+ * while the UI advertised "All NSE Equities". `ALL` parses to `1=1` in
+ * backend/research/screener_dsl.py, so "show everything" genuinely means
+ * everything.
+ */
+export const NO_OP_QUERY = 'ALL';
+
+/** True when a formula carries no filter, so the UI shows no filter chips. */
+export const isNoOpQuery = (query) => {
+  const s = String(query ?? '').trim();
+  if (!s) return true;
+  if (['all', 'any', '*', 'true'].includes(s.toLowerCase())) return true;
+  const m = /^(\d+)\s*=\s*(\d+)$/.exec(s);
+  return Boolean(m && m[1] === m[2]);
+};
+
 // Clickable overview cards -> DSL filter applied on click.
 export const OVERVIEW_CARDS = [
-  { id: 'total', label: 'TOTAL', dsl: null, color: '#818CF8' },
+  { id: 'total', label: 'TOTAL', dsl: NO_OP_QUERY, color: '#818CF8' },
   { id: 'bullish', label: 'BULLISH', dsl: "AIConsensus > 65", color: '#10B981' },
   { id: 'bearish', label: 'BEARISH', dsl: "AIConsensus < 45", color: '#EF4444' },
   { id: 'neutral', label: 'NEUTRAL', dsl: "AIConsensus >= 45 AND AIConsensus <= 65", color: '#F59E0B' },

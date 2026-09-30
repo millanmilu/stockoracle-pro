@@ -44,6 +44,7 @@ const OptionsLabView = lazy(() => import('./components/terminal/OptionsLabView')
 const MarketIntelligenceView = lazy(() => import('./components/terminal/MarketIntelligenceView'));
 const SentimentTAView = lazy(() => import('./components/SentimentTAView'));
 const BrokerSettingsView = lazy(() => import('./components/BrokerSettingsView'));
+const ProTerminalV2 = lazy(() => import('./experiments/pro-terminal-v2/ProTerminalV2'));
 
 
 function LoadingFallback() {
@@ -143,6 +144,7 @@ export default function App() {
       case 'Fundamentals':
       case 'Earnings':          return <Suspense fallback={<LoadingFallback />}><FundamentalsPanel ticker={selectedSymbol} /></Suspense>;
       case 'Broker Settings':   return <Suspense fallback={<LoadingFallback />}><BrokerSettingsView initialTab="broker" /></Suspense>;
+      case 'Pro Terminal V2':   return <Suspense fallback={<LoadingFallback />}><ProTerminalV2 /></Suspense>;
       case 'AI Providers':      return <Suspense fallback={<LoadingFallback />}><BrokerSettingsView initialTab="ai" /></Suspense>;
       default:                  return <LiveChartView />;
     }

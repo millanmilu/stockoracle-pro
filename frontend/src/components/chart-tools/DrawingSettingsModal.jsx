@@ -15,37 +15,37 @@ const shell = {
   width: 380,
   maxWidth: '94vw',
   maxHeight: '88vh',
-  background: 'var(--bg-card, #0F172A)',
-  border: '1px solid var(--border, rgba(99,102,241,0.3))',
-  borderRadius: 12,
-  boxShadow: '0 24px 60px rgba(0,0,0,0.6)',
+  background: 'var(--bg-card, #1E222D)',
+  border: '1px solid var(--border, #2A2E39)',
+  borderRadius: 4,
+  boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
-  fontFamily: 'JetBrains Mono, monospace',
+  fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
 };
 
 const sectionTitle = {
-  fontSize: '0.62rem', fontWeight: 800, color: '#64748B',
-  letterSpacing: '0.06em', margin: '12px 0 6px',
+  fontSize: 11, fontWeight: 400, color: '#787B86',
+  margin: '12px 0 6px',
 };
-const rowLabel = { fontSize: '0.72rem', color: '#CBD5E1', minWidth: 110 };
+const rowLabel = { fontSize: 13, color: 'var(--text-primary, #D1D4DC)', minWidth: 110 };
 const row = { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 };
 const numberInput = {
-  width: 84, background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6,
-  padding: '5px 8px', color: '#F1F5F9', fontSize: '0.74rem',
-  fontFamily: 'JetBrains Mono, monospace', textAlign: 'right', outline: 'none',
+  width: 84, background: 'var(--bg-card, #131722)',
+  border: '1px solid var(--border, #2A2E39)', borderRadius: 4,
+  padding: '5px 8px', color: 'var(--text-primary, #D1D4DC)', fontSize: 13,
+  textAlign: 'right', outline: 'none',
 };
 const textInput = {
-  width: '100%', background: 'rgba(255,255,255,0.05)',
-  border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6,
-  padding: '6px 10px', color: '#F1F5F9', fontSize: '0.74rem',
+  width: '100%', background: 'var(--bg-card, #131722)',
+  border: '1px solid var(--border, #2A2E39)', borderRadius: 4,
+  padding: '6px 10px', color: 'var(--text-primary, #D1D4DC)', fontSize: 13,
   outline: 'none', boxSizing: 'border-box',
 };
 const checkLabel = {
   display: 'flex', alignItems: 'center', gap: 8,
-  fontSize: '0.72rem', color: '#CBD5E1', cursor: 'pointer', marginBottom: 6,
+  fontSize: 13, color: 'var(--text-primary, #D1D4DC)', cursor: 'pointer', marginBottom: 6,
 };
 
 function ColorRow({ value, onChange }) {
@@ -65,7 +65,7 @@ function ColorRow({ value, onChange }) {
       ))}
       <input
         type="color"
-        value={customOk ? value : '#38BDF8'}
+        value={customOk ? value : '#2962FF'}
         onChange={(e) => onChange(e.target.value)}
         title="Custom color"
         style={{ width: 26, height: 22, padding: 0, border: '1px solid rgba(255,255,255,0.2)', borderRadius: 4, background: 'transparent', cursor: 'pointer' }}
@@ -155,10 +155,10 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
     >
       <div style={shell} onMouseDown={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px 0' }}>
-          <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary, #F1F5F9)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary, #D1D4DC)' }}>
             {label} Settings
           </span>
-          <button onClick={onClose} title="Close settings" style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', display: 'flex', padding: 2 }}>
+          <button onClick={onClose} title="Close settings" style={{ background: 'transparent', border: 'none', color: '#787B86', cursor: 'pointer', display: 'flex', padding: 2 }}>
             <X size={16} />
           </button>
         </div>
@@ -169,9 +169,9 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
               key={t.id}
               onClick={() => setTab(t.id)}
               style={{
-                padding: '6px 12px', borderRadius: 6, border: 'none',
-                background: activeTab === t.id ? '#2962FF' : 'rgba(255,255,255,0.05)',
-                color: '#FFF', fontSize: '0.7rem', fontWeight: 700, cursor: 'pointer',
+                padding: '6px 12px', borderRadius: 4, border: 'none',
+                background: activeTab === t.id ? '#2962FF' : 'transparent',
+                color: activeTab === t.id ? '#FFF' : '#787B86', fontSize: 13, fontWeight: activeTab === t.id ? 600 : 400, cursor: 'pointer',
               }}
             >
               {t.label}
@@ -193,7 +193,7 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                     <span style={rowLabel}>Width</span>
                     <input type="range" min={1} max={5} step={1} value={d.strokeWidth || 2}
                       onChange={(e) => patch({ strokeWidth: Number(e.target.value) })}
-                      style={{ flex: 1, accentColor: '#6366F1' }} />
+                      style={{ flex: 1, accentColor: '#2962FF' }} />
                     <span style={{ fontSize: '0.7rem', color: '#E2E8F0', minWidth: 30, textAlign: 'right' }}>{d.strokeWidth || 2}px</span>
                   </div>
                   <div style={row}>
@@ -210,11 +210,11 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                   {caps.extend && (
                     <div style={{ marginTop: 4 }}>
                       <label style={checkLabel}>
-                        <input type="checkbox" checked={!!d.extendLeft} onChange={(e) => patch({ extendLeft: e.target.checked })} style={{ accentColor: '#6366F1' }} />
+                        <input type="checkbox" checked={!!d.extendLeft} onChange={(e) => patch({ extendLeft: e.target.checked })} style={{ accentColor: '#2962FF' }} />
                         Extend left
                       </label>
                       <label style={checkLabel}>
-                        <input type="checkbox" checked={!!d.extendRight} onChange={(e) => patch({ extendRight: e.target.checked })} style={{ accentColor: '#6366F1' }} />
+                        <input type="checkbox" checked={!!d.extendRight} onChange={(e) => patch({ extendRight: e.target.checked })} style={{ accentColor: '#2962FF' }} />
                         Extend right
                       </label>
                     </div>
@@ -226,7 +226,7 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                 <>
                   <div style={sectionTitle}>BACKGROUND</div>
                   <label style={checkLabel}>
-                    <input type="checkbox" checked={d.backgroundVisible !== false} onChange={(e) => patch({ backgroundVisible: e.target.checked })} style={{ accentColor: '#6366F1' }} />
+                    <input type="checkbox" checked={d.backgroundVisible !== false} onChange={(e) => patch({ backgroundVisible: e.target.checked })} style={{ accentColor: '#2962FF' }} />
                     Fill visible
                   </label>
                   <div style={row}>
@@ -237,7 +237,7 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                     <span style={rowLabel}>Opacity</span>
                     <input type="range" min={0} max={0.8} step={0.02} value={d.backgroundOpacity ?? 0.12}
                       onChange={(e) => patch({ backgroundOpacity: Number(e.target.value) })}
-                      style={{ flex: 1, accentColor: '#6366F1' }} />
+                      style={{ flex: 1, accentColor: '#2962FF' }} />
                     <span style={{ fontSize: '0.7rem', color: '#E2E8F0', minWidth: 36, textAlign: 'right' }}>{Math.round((d.backgroundOpacity ?? 0.12) * 100)}%</span>
                   </div>
                 </>
@@ -247,7 +247,7 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                 <>
                   <div style={sectionTitle}>BORDER</div>
                   <label style={checkLabel}>
-                    <input type="checkbox" checked={d.borderVisible !== false} onChange={(e) => patch({ borderVisible: e.target.checked })} style={{ accentColor: '#6366F1' }} />
+                    <input type="checkbox" checked={d.borderVisible !== false} onChange={(e) => patch({ borderVisible: e.target.checked })} style={{ accentColor: '#2962FF' }} />
                     Border visible
                   </label>
                 </>
@@ -274,7 +274,7 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                     </div>
                   )}
                   <label style={checkLabel}>
-                    <input type="checkbox" checked={d.showPrices !== false} onChange={(e) => patch({ showPrices: e.target.checked })} style={{ accentColor: '#6366F1' }} />
+                    <input type="checkbox" checked={d.showPrices !== false} onChange={(e) => patch({ showPrices: e.target.checked })} style={{ accentColor: '#2962FF' }} />
                     Show level prices
                   </label>
                 </>
@@ -284,7 +284,7 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                 <>
                   <div style={sectionTitle}>MIDDLE LINE (50%)</div>
                   <label style={checkLabel}>
-                    <input type="checkbox" checked={d.showMidLine !== false} onChange={(e) => patch({ showMidLine: e.target.checked })} style={{ accentColor: '#6366F1' }} />
+                    <input type="checkbox" checked={d.showMidLine !== false} onChange={(e) => patch({ showMidLine: e.target.checked })} style={{ accentColor: '#2962FF' }} />
                     Show 50% equilibrium line
                   </label>
                 </>
@@ -300,7 +300,7 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                     ['showStatsPercent', 'Percent change'],
                   ].map(([key, lbl]) => (
                     <label key={key} style={checkLabel}>
-                      <input type="checkbox" checked={d[key] !== false} onChange={(e) => patch({ [key]: e.target.checked })} style={{ accentColor: '#6366F1' }} />
+                      <input type="checkbox" checked={d[key] !== false} onChange={(e) => patch({ [key]: e.target.checked })} style={{ accentColor: '#2962FF' }} />
                       {lbl}
                     </label>
                   ))}
@@ -311,7 +311,7 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                 <>
                   <div style={sectionTitle}>LABELS</div>
                   <label style={checkLabel}>
-                    <input type="checkbox" checked={d.showPrices !== false} onChange={(e) => patch({ showPrices: e.target.checked })} style={{ accentColor: '#6366F1' }} />
+                    <input type="checkbox" checked={d.showPrices !== false} onChange={(e) => patch({ showPrices: e.target.checked })} style={{ accentColor: '#2962FF' }} />
                     Show price labels
                   </label>
                 </>
@@ -327,8 +327,8 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                       min={4}
                       max={100}
                       step={1}
-                      value={d.rows ?? 24}
-                      onChange={(e) => patch({ rows: Math.max(4, Math.min(100, Number(e.target.value) || 24)) })}
+                      value={d.rows ?? 70}
+                      onChange={(e) => patch({ rows: Math.max(4, Math.min(100, Number(e.target.value) || 70)) })}
                       style={numberInput}
                     />
                   </div>
@@ -371,7 +371,7 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                       type="checkbox"
                       checked={d.showPoc !== false}
                       onChange={(e) => patch({ showPoc: e.target.checked })}
-                      style={{ accentColor: '#6366F1' }}
+                      style={{ accentColor: '#2962FF' }}
                     />
                     Show Point of Control (POC)
                   </label>
@@ -387,14 +387,14 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                       type="checkbox"
                       checked={d.showVahVal !== false}
                       onChange={(e) => patch({ showVahVal: e.target.checked })}
-                      style={{ accentColor: '#6366F1' }}
+                      style={{ accentColor: '#2962FF' }}
                     />
                     Show Value Area (VAH / VAL)
                   </label>
                   {d.showVahVal !== false && (
                     <div style={row}>
                       <span style={rowLabel}>VA Color</span>
-                      <ColorRow value={d.vahValColor || '#38BDF8'} onChange={(c) => patch({ vahValColor: c })} />
+                      <ColorRow value={d.vahValColor || '#2962FF'} onChange={(c) => patch({ vahValColor: c })} />
                     </div>
                   )}
 
@@ -403,7 +403,7 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                       type="checkbox"
                       checked={d.showProfileSummary !== false}
                       onChange={(e) => patch({ showProfileSummary: e.target.checked })}
-                      style={{ accentColor: '#6366F1' }}
+                      style={{ accentColor: '#2962FF' }}
                     />
                     Show Volume & Bars Summary
                   </label>
@@ -428,12 +428,12 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                   <span style={rowLabel}>Font size</span>
                   <input type="range" min={9} max={24} step={1} value={d.fontSize || 12}
                     onChange={(e) => patch({ fontSize: Number(e.target.value) })}
-                    style={{ flex: 1, accentColor: '#6366F1' }} />
+                    style={{ flex: 1, accentColor: '#2962FF' }} />
                   <span style={{ fontSize: '0.7rem', color: '#E2E8F0', minWidth: 36, textAlign: 'right' }}>{d.fontSize || 12}px</span>
                 </div>
               )}
               <label style={{ ...checkLabel, marginTop: 8 }}>
-                <input type="checkbox" checked={d.fontBold !== false} onChange={(e) => patch({ fontBold: e.target.checked })} style={{ accentColor: '#6366F1' }} />
+                <input type="checkbox" checked={d.fontBold !== false} onChange={(e) => patch({ fontBold: e.target.checked })} style={{ accentColor: '#2962FF' }} />
                 Bold
               </label>
             </div>
@@ -446,8 +446,8 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
                 <div style={{ fontSize: '0.72rem', color: '#64748B' }}>Freehand drawing — no fixed anchors.</div>
               )}
               {coordRows.map((r) => (
-                <div key={r.key} style={{ marginBottom: 10, padding: 8, borderRadius: 6, background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div style={{ fontSize: '0.66rem', fontWeight: 800, color: '#93C5FD', marginBottom: 6 }}>{r.title}</div>
+                <div key={r.key} style={{ marginBottom: 10, padding: 8, borderRadius: 4, background: 'var(--bg-card, #131722)', border: '1px solid var(--border, #2A2E39)' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#2962FF', marginBottom: 6 }}>{r.title}</div>
                   <div style={row}>
                     <span style={rowLabel}>Price</span>
                     <input type="number" step="any" value={r.price ?? ''} placeholder="—"
@@ -470,7 +470,7 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
               <label style={checkLabel}>
                 <input type="checkbox" checked={allVisible}
                   onChange={() => patch({ visibleIntervals: null })}
-                  style={{ accentColor: '#6366F1' }} />
+                  style={{ accentColor: '#2962FF' }} />
                 Visible on all timeframes (TradingView default)
               </label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
@@ -503,13 +503,13 @@ export default function DrawingSettingsModal({ drawing, onPatch = () => {}, onCl
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderTop: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.02)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderTop: '1px solid var(--border, #2A2E39)' }}>
           <button onClick={() => onPatch(drawingDefaults(drawing.type), { reset: true })}
-            style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 6, padding: '6px 12px', color: '#94A3B8', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer' }}>
+            style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'transparent', border: '1px solid var(--border, #2A2E39)', borderRadius: 4, padding: '6px 12px', color: '#787B86', fontSize: 13, cursor: 'pointer' }}>
             <RotateCcw size={13} /><span>Reset</span>
           </button>
           <button onClick={onClose}
-            style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'linear-gradient(135deg, #4F46E5, #6366F1)', border: 'none', borderRadius: 6, padding: '6px 16px', color: '#FFF', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}>
+            style={{ display: 'flex', alignItems: 'center', gap: 5, background: '#2962FF', border: 'none', borderRadius: 4, padding: '6px 16px', color: '#FFF', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
             <Check size={14} /><span>Done</span>
           </button>
         </div>

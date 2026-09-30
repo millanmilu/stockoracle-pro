@@ -110,6 +110,9 @@ export function computeVolumeProfile(candles, opts = {}) {
   }
 
   // Value Area: expand from POC, always adding the larger neighbour.
+  // Tie-breaking (TradingView parity):
+  // 1. If candidate volumes equal, choose row closer to POC.
+  // 2. If distances equal, choose row above POC.
   const target = totalVolume * (vaPct / 100);
   let vaTop = pocIndex;
   let vaBottom = pocIndex;
@@ -118,7 +121,19 @@ export function computeVolumeProfile(candles, opts = {}) {
     const upNext = vaTop < rows - 1 ? vols[vaTop + 1] : -1;
     const downNext = vaBottom > 0 ? vols[vaBottom - 1] : -1;
     if (upNext < 0 && downNext < 0) break;
-    if (upNext >= downNext) {
+
+    let chooseUp;
+    if (upNext > downNext) {
+      chooseUp = true;
+    } else if (downNext > upNext) {
+      chooseUp = false;
+    } else {
+      const distUp = (vaTop + 1) - pocIndex;
+      const distDown = pocIndex - (vaBottom - 1);
+      chooseUp = distUp <= distDown;
+    }
+
+    if (chooseUp) {
       vaTop += 1;
       vaVol += vols[vaTop];
     } else {

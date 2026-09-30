@@ -2,9 +2,16 @@ import React from 'react';
 import { OVERVIEW_CARDS } from './screenerColumns';
 import { TN, num } from './terminalTheme';
 
-/* Compact institutional KPI strip: flat tiles, tabular numbers. */
-export function ScreenerKpiCards({ stats = {}, activeCard = 'total', onSelect }) {
+/* Compact institutional KPI strip: flat tiles, tabular numbers.
+ *
+ * Every count is computed from rows that have the relevant metric, so the
+ * denominator is *covered* rows, not the whole tracked universe. The coverage
+ * footnote below the strip states that outright — otherwise "AI HIGH CONF 2"
+ * reads as a broken screen rather than "only 51 stocks have fundamentals".
+ */
+export function ScreenerKpiCards({ stats = {}, activeCard = 'total', onSelect, coverage = null }) {
   return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, width: '100%', minWidth: 0 }}>
     <div
       className="tn-kpi-strip"
       role="list"
@@ -49,6 +56,16 @@ export function ScreenerKpiCards({ stats = {}, activeCard = 'total', onSelect })
           </button>
         );
       })}
+    </div>
+    {coverage && coverage.total > 0 ? (
+      <div style={{ fontSize: 10, color: TN.faint, padding: '0 4px' }}>
+        Counts are over covered rows:{' '}
+        <span style={{ color: TN.text }}>{coverage.priced.toLocaleString('en-IN')}</span> of{' '}
+        {coverage.total.toLocaleString('en-IN')} tracked have a price,
+        {' '}<span style={{ color: TN.text }}>{coverage.with_fundamentals.toLocaleString('en-IN')}</span> have fundamentals
+        {coverage.no_data > 0 ? <> · <span style={{ color: TN.warn }}>{coverage.no_data.toLocaleString('en-IN')} without data</span></> : null}
+      </div>
+    ) : null}
     </div>
   );
 }

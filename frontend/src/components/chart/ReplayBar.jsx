@@ -122,17 +122,15 @@ export default function ReplayBar({
         alignItems: 'center',
         gap: isMobile ? 3 : 6,
         padding: '5px 8px',
-        borderRadius: 10,
-        background: 'var(--bg-card, #131722)',
-        border: isJumpMode ? '1px solid #EF5350' : '1px solid rgba(239,83,80,0.5)',
-        boxShadow: isJumpMode
-          ? '0 0 16px rgba(239,83,80,0.4), 0 12px 32px rgba(0,0,0,0.6)'
-          : '0 12px 32px rgba(0,0,0,0.55)',
+        borderRadius: 4,
+        background: '#1E222D',
+        border: '1px solid #2A2E39',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
         userSelect: 'none',
         maxWidth: 'calc(100% - 16px)',
         overflow: 'hidden',
         flexWrap: 'nowrap',
-        backdropFilter: 'blur(8px)',
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
       }}
     >
       {/* Drag Grip handle */}
@@ -235,9 +233,9 @@ export default function ReplayBar({
           width: 32,
           height: 32,
           borderRadius: '50%',
-          background: '#EF5350',
+          background: '#2962FF',
           color: '#FFF',
-          boxShadow: '0 2px 8px rgba(239,83,80,0.4)',
+          boxShadow: '0 2px 8px rgba(41,98,255,0.4)',
         }}
       >
         {playing ? <Pause size={15} /> : <Play size={15} style={{ marginLeft: 2 }} />}
@@ -273,7 +271,7 @@ export default function ReplayBar({
           onChange={(e) => onSeek(Number(e.target.value))}
           title="Scrub through history"
           aria-label="Scrub through history"
-          style={{ width: 140, maxWidth: '24vw', minWidth: 60, flexShrink: 1, accentColor: '#EF5350', cursor: 'pointer' }}
+          style={{ width: 140, maxWidth: '24vw', minWidth: 60, flexShrink: 1, accentColor: '#2962FF', cursor: 'pointer' }}
         />
       )}
 
@@ -287,12 +285,11 @@ export default function ReplayBar({
           ...pillBtn,
           width: 'auto',
           padding: '0 7px',
-          fontFamily: 'JetBrains Mono, monospace',
           fontSize: 11,
-          fontWeight: 800,
-          border: '1px solid rgba(148,163,184,0.3)',
-          borderRadius: 6,
-          color: '#93C5FD',
+          fontWeight: 600,
+          border: '1px solid #2A2E39',
+          borderRadius: 4,
+          color: '#D1D4DC',
         }}
       >
         {speedLabel}
@@ -302,9 +299,8 @@ export default function ReplayBar({
       <span
         title={barLabel || undefined}
         style={{
-          fontFamily: 'JetBrains Mono, monospace',
-          fontSize: 10.5,
-          color: '#E2E8F0',
+          fontSize: 11,
+          color: '#787B86',
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',

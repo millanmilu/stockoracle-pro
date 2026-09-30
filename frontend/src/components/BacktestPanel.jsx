@@ -74,6 +74,7 @@ export default function BacktestPanel({ ticker: propTicker }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [strategyOptions, setStrategyOptions] = useState(STRATEGIES);
   const [activeTab, setActiveTab] = useState('summary');
   const [showSettings, setShowSettings] = useState(false);
   const [showGuideModal, setShowGuideModal] = useState(false);
@@ -156,6 +157,33 @@ export default function BacktestPanel({ ticker: propTicker }) {
   useEffect(() => {
     runBacktest();
   }, [activeTicker, strategy]);
+
+  // Custom strategies (backend registry) — builtin list par merge, bina tode
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await api.get('/api/backtest/strategies');
+        const list = res.data?.strategies;
+        if (!alive || !Array.isArray(list) || list.length === 0) return;
+        const byId = new Map(STRATEGIES.map((s) => [s.id, s]));
+        list.forEach((s) => {
+          if (!s?.id || byId.has(s.id)) return;
+          byId.set(s.id, {
+            id: s.id,
+            name: s.label || s.id.toUpperCase(),
+            desc: s.description || 'Custom user strategy (custom_strategies.py)',
+            icon: '🧪',
+            badge: 'CUSTOM',
+          });
+        });
+        setStrategyOptions(Array.from(byId.values()));
+      } catch (_) {
+        // Backend purana ho ya offline — builtin 6 par hi chalo
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
 
   const handleTickerSelect = (t) => {
     const clean = t.toUpperCase();
@@ -432,7 +460,7 @@ export default function BacktestPanel({ ticker: propTicker }) {
                   color: '#818CF8', borderRadius: 6, padding: '4px 8px', fontSize: '0.72rem',
                   fontWeight: 700, outline: 'none', cursor: 'pointer'
                 }}>
-                {STRATEGIES.map(s => (
+                {strategyOptions.map(s => (
                   <option key={s.id} value={s.id}>
                     {s.icon} {s.name}
                   </option>

@@ -1959,9 +1959,18 @@ export default function FundamentalsPanel({ ticker: propTicker }) {
               </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3, fontSize: '0.63rem', color: '#64748B' }}>
-              <span>Source: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.data_source || 'Screener.in Consolidated + NSE'}</strong></span>
+              {/* Never name a source we did not actually read. The old fallback
+                  asserted "Screener.in Consolidated + NSE" whenever the field was
+                  missing — i.e. exactly when nothing had been fetched. */}
+              <span>Source: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.data_source || 'Unknown'}</strong></span>
               <span>•</span>
-              <span>Updated: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.last_updated || 'Live'}</strong></span>
+              <span>Updated: <strong style={{ color: '#94A3B8' }}>{deepData?.data_freshness?.last_updated || 'Unknown'}</strong></span>
+              {deepData?.data_freshness?.status && deepData.data_freshness.status !== 'Verified' && (
+                <>
+                  <span>•</span>
+                  <span style={{ color: '#F59E0B' }}>{deepData.data_freshness.status}</span>
+                </>
+              )}
             </div>
           </div>
         </div>

@@ -230,10 +230,34 @@ export default function DrawingTools({
   const [showStickerMenu, setShowStickerMenu] = useState(false);
   const [stickerPos, setStickerPos] = useState(null);
 
-  // Active Line Styles
-  const [activeColor, setActiveColor] = useState('#38BDF8');
-  const [activeStrokeWidth, setActiveStrokeWidth] = useState(2);
-  const [activeLineStyle, setActiveLineStyle] = useState('solid'); // 'solid' | 'dashed' | 'dotted'
+  // Active Line Styles — TradingView remembers the last-used style per
+  // session and new drawings inherit it. Persisted so the default survives
+  // reloads; factory default is TradingView blue.
+  const [activeColor, setActiveColor] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('so_active_draw_style') || '{}');
+      return typeof saved.color === 'string' && saved.color ? saved.color : '#2962FF';
+    } catch { return '#2962FF'; }
+  });
+  const [activeStrokeWidth, setActiveStrokeWidth] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('so_active_draw_style') || '{}');
+      return Number.isFinite(Number(saved.strokeWidth)) ? Number(saved.strokeWidth) : 2;
+    } catch { return 2; }
+  });
+  const [activeLineStyle, setActiveLineStyle] = useState(() => { // 'solid' | 'dashed' | 'dotted'
+    try {
+      const saved = JSON.parse(localStorage.getItem('so_active_draw_style') || '{}');
+      return ['solid', 'dashed', 'dotted'].includes(saved.lineStyle) ? saved.lineStyle : 'solid';
+    } catch { return 'solid'; }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('so_active_draw_style', JSON.stringify({
+        color: activeColor, strokeWidth: activeStrokeWidth, lineStyle: activeLineStyle,
+      }));
+    } catch {}
+  }, [activeColor, activeStrokeWidth, activeLineStyle]);
 
   // Coordinate sync tick (throttled with RAF) — the VALUE is kept (not just
   // the setter) so render-path coordinate caches can key on it.
@@ -2542,29 +2566,48 @@ export default function DrawingTools({
         />
       )}
 
-      {/* ── Selected Drawing Floating Context Action Toolbar ── */}
-      {/* TradingView-style: appears on ANY selection (any active tool), hidden
-          only while a placement/drag gesture is in progress. */}
-      {selectedDrawing && !isDrawing && !currentDraw && (pendingPoints?.length ?? 0) === 0 && (
+      {/* ── Selected Drawing Floating Toolbar — TradingView parity ── */}
+      {/* Anchored next to the selection's first anchor (tracks pan/zoom via the
+          render-path coordinate cache), clamped inside the price pane. Falls
+          back to top-center only when the anchor can't be resolved. */}
+      {selectedDrawing && !isDrawing && !currentDraw && (pendingPoints?.length ?? 0) === 0 && (() => {
+        let anchor = null;
+        try {
+          const anchors = resolveAnchorsCached(selectedDrawing);
+          if (anchors && anchors[0] && Number.isFinite(anchors[0].x) && Number.isFinite(anchors[0].y)) {
+            anchor = anchors[0];
+          }
+        } catch {}
+        const paneW = (surfaceSize && surfaceSize.width) || 800;
+        const paneH = paneHeight || (surfaceSize && surfaceSize.height) || 400;
+        const rawLeft = (isOpen ? toolbarWidth : 0) + (anchor ? anchor.x + 14 : paneW / 2);
+        const maxLeft = (isOpen ? toolbarWidth : 0) + Math.max(140, paneW - 380);
+        const left = Math.max((isOpen ? toolbarWidth : 0) + 8, Math.min(rawLeft, maxLeft));
+        // Prefer above the anchor (TV style); drop below when near the top edge.
+        const rawTop = anchor ? anchor.y - 52 : 12;
+        const top = anchor && anchor.y < 64
+          ? Math.min(anchor.y + 18, Math.max(8, paneH - 52))
+          : Math.max(8, Math.min(rawTop, Math.max(8, paneH - 52)));
+        return (
         <div style={{
           position: 'absolute',
-          top: 12,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          backgroundColor: 'var(--bg-card, #131722)',
-          border: '1px solid var(--border, #2962FF)',
-          borderRadius: 8,
-          padding: '4px 12px',
+          top,
+          left,
+          backgroundColor: 'var(--bg-card, #1E222D)',
+          border: '1px solid var(--border, #2A2E39)',
+          borderRadius: 4,
+          padding: '4px 8px',
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: 8,
           zIndex: 60,
-          boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
           userSelect: 'none',
           maxWidth: 'calc(100% - 24px)',
           overflowX: 'auto',
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
         }}>
-          <span style={{ fontSize: '0.72rem', color: '#93C5FD', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 12, color: '#2962FF', fontWeight: 600, whiteSpace: 'nowrap' }}>
             {String(selectedDrawing.type || '').replace(/_/g, ' ')}
           </span>
 
@@ -2579,7 +2622,7 @@ export default function DrawingTools({
               });
             }}
             title={hiddenIds.has(selectedDrawingId) ? 'Show drawing' : 'Hide drawing'}
-            style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 2, display: 'flex' }}
+            style={{ background: 'transparent', border: 'none', color: '#787B86', cursor: 'pointer', padding: 3, display: 'flex', borderRadius: 4 }}
           >
             {hiddenIds.has(selectedDrawingId) ? <EyeOff size={15} /> : <Eye size={15} />}
           </button>
@@ -2590,7 +2633,7 @@ export default function DrawingTools({
             title={selectedDrawing.locked ? 'Unlock drawing' : 'Lock drawing (anchors cannot move)'}
             style={{
               background: selectedDrawing.locked ? 'rgba(245,158,11,0.15)' : 'transparent',
-              border: 'none', borderRadius: 4, color: selectedDrawing.locked ? '#F59E0B' : '#94A3B8',
+              border: 'none', borderRadius: 4, color: selectedDrawing.locked ? '#F59E0B' : '#787B86',
               cursor: 'pointer', padding: 3, display: 'flex',
             }}
           >
@@ -2601,12 +2644,12 @@ export default function DrawingTools({
           <button
             onClick={() => setDrawingSettingsId(selectedDrawingId)}
             title="Drawing settings"
-            style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 2, display: 'flex' }}
+            style={{ background: 'transparent', border: 'none', color: '#787B86', cursor: 'pointer', padding: 3, display: 'flex', borderRadius: 4 }}
           >
             <Settings size={15} />
           </button>
 
-          <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border, rgba(148,163,184,0.2))' }} />
+          <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border, #2A2E39)' }} />
 
           {/* Color Presets */}
           <div style={{ display: 'flex', gap: 5, alignItems: 'center' }}>
@@ -2635,8 +2678,8 @@ export default function DrawingTools({
                 title={`Width ${w}px`}
                 style={{
                   padding: '2px 6px', borderRadius: 4, border: 'none',
-                  backgroundColor: selectedDrawing.strokeWidth === w ? '#2962FF' : '#2A2E39',
-                  color: '#FFF', fontSize: '0.65rem', fontWeight: 700, cursor: 'pointer',
+                  backgroundColor: selectedDrawing.strokeWidth === w ? '#2962FF' : 'var(--border, #2A2E39)',
+                  color: '#FFF', fontSize: 11, fontWeight: 600, cursor: 'pointer',
                 }}
               >
                 {w}px
@@ -2653,8 +2696,8 @@ export default function DrawingTools({
                 title={`Style ${st}`}
                 style={{
                   padding: '2px 6px', borderRadius: 4, border: 'none',
-                  backgroundColor: (selectedDrawing.lineStyle || 'solid') === st ? '#2962FF' : '#2A2E39',
-                  color: '#FFF', fontSize: '0.65rem', fontWeight: 600, cursor: 'pointer',
+                  backgroundColor: (selectedDrawing.lineStyle || 'solid') === st ? '#2962FF' : 'var(--border, #2A2E39)',
+                  color: '#FFF', fontSize: 11, fontWeight: 500, cursor: 'pointer',
                   textTransform: 'capitalize'
                 }}
               >
@@ -2663,13 +2706,13 @@ export default function DrawingTools({
             ))}
           </div>
 
-          <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border, rgba(148,163,184,0.2))' }} />
+          <div style={{ width: 1, alignSelf: 'stretch', background: 'var(--border, #2A2E39)' }} />
 
           {/* Duplicate Button */}
           <button
             onClick={handleDuplicateSelected}
             title="Duplicate Drawing (Ctrl+D)"
-            style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 2, display: 'flex' }}
+            style={{ background: 'transparent', border: 'none', color: '#787B86', cursor: 'pointer', padding: 3, display: 'flex', borderRadius: 4 }}
           >
             <Copy size={15} />
           </button>
@@ -2678,7 +2721,7 @@ export default function DrawingTools({
           <button
             onClick={deleteSelectedDrawing}
             title="Delete Drawing (Del)"
-            style={{ background: 'transparent', border: 'none', color: '#EF5350', cursor: 'pointer', padding: 2, display: 'flex' }}
+            style={{ background: 'transparent', border: 'none', color: '#EF5350', cursor: 'pointer', padding: 3, display: 'flex', borderRadius: 4 }}
           >
             <Trash2 size={15} />
           </button>
@@ -2687,12 +2730,13 @@ export default function DrawingTools({
           <button
             onClick={() => setSelectedDrawingId(null)}
             title="Close selection"
-            style={{ background: 'transparent', border: 'none', color: '#64748B', cursor: 'pointer', padding: 2, display: 'flex' }}
+            style={{ background: 'transparent', border: 'none', color: '#787B86', cursor: 'pointer', padding: 3, display: 'flex', borderRadius: 4 }}
           >
             <X size={15} />
           </button>
         </div>
-      )}
+        );
+      })()}
 
       {/* ── Drawing Settings Modal — TradingView parity (Style/Text/Coordinates/Visibility, ALL tools) ── */}
       {drawingSettingsId && (() => {
@@ -2824,21 +2868,21 @@ export default function DrawingTools({
                   />
                   <line
                     x1={0} y1={pt1.y} x2="100%" y2={pt1.y}
-                    stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 2}
+                    stroke={d.color || '#2962FF'} strokeWidth={d.strokeWidth || 2}
                     strokeDasharray={strokeDash}
                   />
                   <circle
                     cx={10} cy={pt1.y} r={isSelected ? 5 : 3.5}
-                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#2962FF'}
                     stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'ns-resize' }}
                     onMouseDown={(e) => beginLegacyDrag(e, d.id, 'start')}
                   />
                   <rect
                     x={8} y={pt1.y - 18} width={75} height={16} rx={3}
-                    fill="#131722" stroke={d.color || '#38BDF8'} strokeWidth={1}
+                    fill="#131722" stroke={d.color || '#2962FF'} strokeWidth={1}
                   />
-                  <text x={12} y={pt1.y - 6} fill={d.color || '#38BDF8'} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace">
+                  <text x={12} y={pt1.y - 6} fill={d.color || '#2962FF'} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace">
                     {currSym}{d.startPrice?.toFixed(2)}
                   </text>
                 </g>
@@ -2861,15 +2905,15 @@ export default function DrawingTools({
                   />
                   <line
                     x1={pt1.x} y1={pt1.y} x2="100%" y2={pt1.y}
-                    stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 2}
+                    stroke={d.color || '#2962FF'} strokeWidth={d.strokeWidth || 2}
                     strokeDasharray={strokeDash}
                   />
-                  <circle cx={pt1.x} cy={pt1.y} r={isSelected ? 5 : 3.5} fill="#FFF" stroke={d.color || '#38BDF8'} strokeWidth={1.5} />
+                  <circle cx={pt1.x} cy={pt1.y} r={isSelected ? 5 : 3.5} fill="#FFF" stroke={d.color || '#2962FF'} strokeWidth={1.5} />
                   <rect
                     x={pt1.x + 8} y={pt1.y - 18} width={75} height={16} rx={3}
-                    fill="#131722" stroke={d.color || '#38BDF8'} strokeWidth={1}
+                    fill="#131722" stroke={d.color || '#2962FF'} strokeWidth={1}
                   />
-                  <text x={pt1.x + 12} y={pt1.y - 6} fill={d.color || '#38BDF8'} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace">
+                  <text x={pt1.x + 12} y={pt1.y - 6} fill={d.color || '#2962FF'} fontSize="10" fontWeight="700" fontFamily="JetBrains Mono, monospace">
                     {currSym}{d.startPrice?.toFixed(2)}
                   </text>
                 </g>
@@ -2892,21 +2936,21 @@ export default function DrawingTools({
                   />
                   <line
                     x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y}
-                    stroke={d.color || '#38BDF8'}
+                    stroke={d.color || '#2962FF'}
                     strokeWidth={d.strokeWidth || 2}
                     strokeDasharray={strokeDash}
                   />
                   {/* Start & End Handles */}
                   <circle
                     cx={pt1.x} cy={pt1.y} r={isSelected ? 6 : 4}
-                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#2962FF'}
                     stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
                     onMouseDown={(e) => beginLegacyDrag(e, d.id, 'start')}
                   />
                   <circle
                     cx={pt2.x} cy={pt2.y} r={isSelected ? 6 : 4}
-                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#2962FF'}
                     stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
                     onMouseDown={(e) => beginLegacyDrag(e, d.id, 'end')}
@@ -2947,20 +2991,20 @@ export default function DrawingTools({
                   />
                   <line
                     x1={pt1.x} y1={pt1.y} x2={extX} y2={extY}
-                    stroke={d.color || '#38BDF8'}
+                    stroke={d.color || '#2962FF'}
                     strokeWidth={d.strokeWidth || 2}
                     strokeDasharray={strokeDash}
                   />
                   <circle
                     cx={pt1.x} cy={pt1.y} r={isSelected ? 6 : 4}
-                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#2962FF'}
                     stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
                     onMouseDown={(e) => beginLegacyDrag(e, d.id, 'start')}
                   />
                   <circle
                     cx={pt2.x} cy={pt2.y} r={isSelected ? 6 : 4}
-                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#2962FF'}
                     stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
                     onMouseDown={(e) => beginLegacyDrag(e, d.id, 'end')}
@@ -3001,22 +3045,22 @@ export default function DrawingTools({
                     onMouseDown={(e) => startBodyDrag(e, d.id)}
                   />
                   {/* Upper & Lower Channel Lines */}
-                  <line x1={upperP1.x} y1={upperP1.y} x2={upperP2.x} y2={upperP2.y} stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 1.5} />
-                  <line x1={lowerP1.x} y1={lowerP1.y} x2={lowerP2.x} y2={lowerP2.y} stroke={d.color || '#38BDF8'} strokeWidth={d.strokeWidth || 1.5} />
+                  <line x1={upperP1.x} y1={upperP1.y} x2={upperP2.x} y2={upperP2.y} stroke={d.color || '#2962FF'} strokeWidth={d.strokeWidth || 1.5} />
+                  <line x1={lowerP1.x} y1={lowerP1.y} x2={lowerP2.x} y2={lowerP2.y} stroke={d.color || '#2962FF'} strokeWidth={d.strokeWidth || 1.5} />
                   {/* Median Line */}
-                  <line x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y} stroke={d.color || '#38BDF8'} strokeWidth={1} strokeDasharray="4,4" />
+                  <line x1={pt1.x} y1={pt1.y} x2={pt2.x} y2={pt2.y} stroke={d.color || '#2962FF'} strokeWidth={1} strokeDasharray="4,4" />
 
                   {/* Median endpoints — drag to reposition / resize the channel */}
                   <circle
                     cx={pt1.x} cy={pt1.y} r={isSelected ? 5 : 3.5}
-                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#2962FF'}
                     stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
                     onMouseDown={(e) => beginLegacyDrag(e, d.id, 'start')}
                   />
                   <circle
                     cx={pt2.x} cy={pt2.y} r={isSelected ? 5 : 3.5}
-                    fill={isSelected ? '#FFFFFF' : d.color || '#38BDF8'}
+                    fill={isSelected ? '#FFFFFF' : d.color || '#2962FF'}
                     stroke="#131722" strokeWidth={1.5}
                     style={{ pointerEvents: 'all', cursor: 'grab' }}
                     onMouseDown={(e) => beginLegacyDrag(e, d.id, 'end')}
@@ -3211,7 +3255,7 @@ export default function DrawingTools({
                   key={d.id}
                   d={pathData}
                   fill="none"
-                  stroke={d.color || '#38BDF8'}
+                  stroke={d.color || '#2962FF'}
                   strokeWidth={d.strokeWidth || 2}
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -3249,7 +3293,7 @@ export default function DrawingTools({
                     x={x} y={y} width={w} height={h}
                     fill={d.backgroundVisible === false ? 'transparent' : (d.backgroundColor || 'rgba(56, 189, 248, 0.12)')}
                     fillOpacity={d.backgroundVisible === false ? 0 : undefined}
-                    stroke={d.borderVisible === false ? 'transparent' : (d.borderColor || d.color || '#38BDF8')}
+                    stroke={d.borderVisible === false ? 'transparent' : (d.borderColor || d.color || '#2962FF')}
                     strokeWidth={d.borderWidth ?? d.strokeWidth ?? 1.5}
                     strokeDasharray={isSelected ? '4,4' : 'none'}
                     onMouseDown={(e) => startBodyDrag(e, d.id)}
@@ -3489,7 +3533,7 @@ export default function DrawingTools({
                   y={Math.min(currentDraw.startY, currentDraw.endY)}
                   width={Math.abs(currentDraw.endX - currentDraw.startX)}
                   height={Math.abs(currentDraw.endY - currentDraw.startY)}
-                  fill="rgba(56, 189, 248, 0.15)" stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4"
+                  fill="rgba(41, 98, 255, 0.15)" stroke={activeColor} strokeWidth={activeStrokeWidth} strokeDasharray="4,4"
                 />
               )}
               {currentDraw.type === 'ruler' && (
@@ -3539,13 +3583,13 @@ export default function DrawingTools({
           left: textInputPos.x + (isOpen ? toolbarWidth : 0),
           top: textInputPos.y,
           zIndex: 60,
-          background: '#131722',
-          border: '1px solid #2962FF',
-          borderRadius: 6,
+          background: 'var(--bg-card, #1E222D)',
+          border: '1px solid var(--border, #2A2E39)',
+          borderRadius: 4,
           padding: 4,
           display: 'flex',
           gap: 4,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
         }}>
           <input
             type="text"
@@ -3564,12 +3608,12 @@ export default function DrawingTools({
             }}
             autoFocus
             style={{
-              background: '#090C18',
-              border: '1px solid rgba(255,255,255,0.1)',
+              background: 'var(--bg-card, #131722)',
+              border: '1px solid var(--border, #2A2E39)',
               borderRadius: 4,
               padding: '4px 8px',
-              color: '#fff',
-              fontSize: '0.75rem',
+              color: 'var(--text-primary, #D1D4DC)',
+              fontSize: 12,
               outline: 'none',
             }}
           />
@@ -3580,9 +3624,9 @@ export default function DrawingTools({
               color: '#fff',
               border: 'none',
               borderRadius: 4,
-              padding: '4px 8px',
-              fontSize: '0.72rem',
-              fontWeight: 700,
+              padding: '4px 12px',
+              fontSize: 12,
+              fontWeight: 600,
               cursor: 'pointer',
             }}
           >
@@ -3598,13 +3642,13 @@ export default function DrawingTools({
           left: stickerPos.x + (isOpen ? toolbarWidth : 0),
           top: stickerPos.y,
           zIndex: 60,
-          background: '#131722',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
-          borderRadius: 8,
+          background: 'var(--bg-card, #1E222D)',
+          border: '1px solid var(--border, #2A2E39)',
+          borderRadius: 4,
           padding: 8,
           display: 'flex',
           gap: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
         }}>
           {['🚀', '📈', '📉', '🎯', '⭐', '🔥', '👍', '❌', '💰', '🛡️'].map((emoji) => (
             <span
@@ -3633,13 +3677,14 @@ export default function DrawingTools({
             left: contextMenu.clientX,
             top: contextMenu.clientY,
             zIndex: 62,
-            minWidth: 176,
-            padding: 5,
-            background: '#111827',
-            border: '1px solid rgba(148,163,184,0.25)',
-            borderRadius: 8,
-            boxShadow: '0 16px 40px rgba(0,0,0,0.7)',
+            minWidth: 200,
+            padding: '4px 0',
+            background: 'var(--bg-card, #1E222D)',
+            border: '1px solid var(--border, #2A2E39)',
+            borderRadius: 4,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
             userSelect: 'none',
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
           }}>
             {contextTarget ? (
               <>
@@ -3660,15 +3705,15 @@ export default function DrawingTools({
                 />
                 <MenuItem icon={<ArrowUpRight size={13} />} label="Bring to front" onClick={() => { bringToFront(contextTarget.id); setContextMenu(null); }} />
                 <MenuItem icon={<ArrowDownRight size={13} />} label="Send to back" onClick={() => { sendToBack(contextTarget.id); setContextMenu(null); }} />
-                <div style={{ height: 1, background: 'rgba(148,163,184,0.18)', margin: '4px 2px' }} />
+                <div style={{ height: 1, background: 'var(--border, #2A2E39)', margin: '4px 0' }} />
                 <MenuItem icon={<Trash2 size={13} />} label="Remove" danger onClick={() => { removeDrawing(contextTarget.id); setContextMenu(null); }} />
               </>
             ) : (
               <>
                 {menuFavouriteTools.length > 0 && (
                   <>
-                    <div style={{ padding: '2px 8px 3px', color: '#38BDF8', fontSize: 9, fontWeight: 800, letterSpacing: 0.6 }}>
-                      ★ FAVORITE TOOLS
+                    <div style={{ padding: '6px 12px 4px', color: '#787B86', fontSize: 11 }}>
+                      Favorites
                     </div>
                     {menuFavouriteTools.map(({ spec, digit }) => (
                       <MenuItem
@@ -3678,7 +3723,7 @@ export default function DrawingTools({
                         onClick={() => { handleSelectTool(spec.id); setContextMenu(null); }}
                       />
                     ))}
-                    <div style={{ height: 1, background: 'rgba(148,163,184,0.18)', margin: '4px 2px' }} />
+                    <div style={{ height: 1, background: 'var(--border, #2A2E39)', margin: '4px 0' }} />
                   </>
                 )}
                 <MenuItem icon={<Copy size={13} />} label="Paste" disabled={!clipboard} onClick={() => { pasteClipboard(); setContextMenu(null); }} />
@@ -3700,20 +3745,21 @@ export default function DrawingTools({
           width: 240,
           maxHeight: '60%',
           overflowY: 'auto',
-          padding: 8,
-          background: '#0F131D',
-          border: '1px solid rgba(148,163,184,0.25)',
-          borderRadius: 8,
-          boxShadow: '0 16px 40px rgba(0,0,0,0.7)',
+          padding: '4px 0',
+          background: 'var(--bg-card, #1E222D)',
+          border: '1px solid var(--border, #2A2E39)',
+          borderRadius: 4,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
+          fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-            <span style={{ color: '#7DD3FC', fontSize: 11, fontWeight: 800, letterSpacing: 0.4 }}>OBJECTS ({drawings.length})</span>
-            <button type="button" onClick={() => setShowObjectTree(false)} style={{ background: 'transparent', border: 0, color: '#64748B', cursor: 'pointer', padding: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px' }}>
+            <span style={{ color: '#787B86', fontSize: 11 }}>Objects ({drawings.length})</span>
+            <button type="button" onClick={() => setShowObjectTree(false)} style={{ background: 'transparent', border: 0, color: '#787B86', cursor: 'pointer', padding: 0, display: 'flex' }}>
               <X size={14} />
             </button>
           </div>
           {drawings.length === 0 ? (
-            <div style={{ color: '#475569', fontSize: 11, textAlign: 'center', padding: '14px 0' }}>No objects yet</div>
+            <div style={{ color: '#787B86', fontSize: 12, textAlign: 'center', padding: '14px 0' }}>No objects yet</div>
           ) : (
             drawings.map((d) => (
               <div
@@ -3722,16 +3768,16 @@ export default function DrawingTools({
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 6,
-                  padding: '5px 6px',
-                  borderRadius: 5,
+                  gap: 8,
+                  padding: '6px 12px',
+                  borderRadius: 0,
                   cursor: 'pointer',
-                  background: d.id === selectedDrawingId ? 'rgba(41,98,255,0.18)' : 'transparent',
+                  background: d.id === selectedDrawingId ? 'rgba(41,98,255,0.12)' : 'transparent',
                   opacity: hiddenIds.has(d.id) ? 0.45 : 1,
                 }}
               >
-                <span style={{ width: 9, height: 9, borderRadius: '50%', background: d.color || '#38BDF8', flexShrink: 0 }} />
-                <span style={{ flex: 1, fontSize: 11, color: '#CBD5E1', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <span style={{ width: 9, height: 2, borderRadius: 1, background: d.color || '#2962FF', flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 13, color: 'var(--text-primary, #D1D4DC)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {getToolSpec(d.type)?.label || (d.type === 'sticker' ? 'Stickers & Emoji' : d.type.replace('_', ' '))}
                 </span>
                 <button
@@ -3746,7 +3792,7 @@ export default function DrawingTools({
                       return next;
                     });
                   }}
-                  style={{ background: 'transparent', border: 0, color: hiddenIds.has(d.id) ? '#475569' : '#94A3B8', cursor: 'pointer', padding: 0 }}
+                  style={{ background: 'transparent', border: 0, color: '#787B86', cursor: 'pointer', padding: 2, display: 'flex' }}
                 >
                   {hiddenIds.has(d.id) ? <Eye size={13} /> : <EyeOff size={13} />}
                 </button>
@@ -3754,7 +3800,7 @@ export default function DrawingTools({
                   type="button"
                   title="Remove"
                   onClick={(e) => { e.stopPropagation(); removeDrawing(d.id); }}
-                  style={{ background: 'transparent', border: 0, color: '#EF5350', cursor: 'pointer', padding: 0 }}
+                  style={{ background: 'transparent', border: 0, color: '#787B86', cursor: 'pointer', padding: 2, display: 'flex' }}
                 >
                   <Trash2 size={13} />
                 </button>
@@ -3772,13 +3818,13 @@ export default function DrawingTools({
           left: '50%',
           transform: 'translateX(-50%)',
           zIndex: 60,
-          background: '#131722',
-          border: '1px solid #2962FF',
-          borderRadius: 6,
+          background: 'var(--bg-card, #1E222D)',
+          border: '1px solid var(--border, #2A2E39)',
+          borderRadius: 4,
           padding: 4,
           display: 'flex',
           gap: 4,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.8)',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
         }}>
           <input
             type="text"
@@ -3790,19 +3836,19 @@ export default function DrawingTools({
             }}
             autoFocus
             style={{
-              background: '#090C18',
-              border: '1px solid rgba(255,255,255,0.1)',
+              background: 'var(--bg-card, #131722)',
+              border: '1px solid var(--border, #2A2E39)',
               borderRadius: 4,
               padding: '4px 8px',
-              color: '#fff',
-              fontSize: '0.75rem',
+              color: 'var(--text-primary, #D1D4DC)',
+              fontSize: 12,
               outline: 'none',
               minWidth: 180,
             }}
           />
           <button
             onClick={commitTextEdit}
-            style={{ background: '#2962FF', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 8px', fontSize: '0.72rem', fontWeight: 700, cursor: 'pointer' }}
+            style={{ background: '#2962FF', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
           >
             OK
           </button>
@@ -3822,18 +3868,19 @@ function MenuItem({ icon, label, onClick, danger = false, disabled = false }) {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 8,
+        gap: 10,
         width: '100%',
-        padding: '6px 8px',
+        padding: '7px 12px',
         border: 0,
-        borderRadius: 5,
+        borderRadius: 0,
         background: 'transparent',
-        color: disabled ? '#475569' : danger ? '#F87171' : '#CBD5E1',
+        color: disabled ? '#787B86' : danger ? '#EF5350' : 'var(--text-primary, #D1D4DC)',
         cursor: disabled ? 'default' : 'pointer',
-        fontSize: 12,
+        fontSize: 13,
         textAlign: 'left',
+        fontFamily: "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif",
       }}
-      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'rgba(148,163,184,0.12)'; }}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'var(--hover-bg, #2A2E39)'; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
     >
       {icon}

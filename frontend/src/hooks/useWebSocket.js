@@ -247,6 +247,8 @@ export function useWebSocket(onMessage) {
 
               if (!isNaN(ltp) && ltp > 0) {
                 const existingCandle = useStore.getState().livePrices?.[selectedSymbol.toUpperCase()]?.liveCandle;
+                // Use kline volume when available (per-interval), fall back to 24h ticker volume
+                const tickVolume = existingCandle?.volume != null ? existingCandle.volume : latest24h.vol;
                 const tickPayload = {
                   ticker: selectedSymbol.toUpperCase(),
                   price: ltp,
@@ -255,7 +257,7 @@ export function useWebSocket(onMessage) {
                   low: latest24h.low,
                   close: latest24h.prevClose,
                   change_pct: latest24h.changePct,
-                  volume: latest24h.vol,
+                  volume: tickVolume,
                   is_live: true,
                   liveCandle: existingCandle,
                 };
