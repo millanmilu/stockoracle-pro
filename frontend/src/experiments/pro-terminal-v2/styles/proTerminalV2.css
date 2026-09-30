@@ -1,0 +1,70 @@
+/* Pro Terminal V2 — Styles */
+/* All styles are scoped to .v2-terminal to avoid conflicts with existing app. */
+
+.v2-terminal {
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #2A3142;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #3B4252;
+  }
+}
+
+/* Animations */
+@keyframes v2-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes v2-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Focus states */
+.v2-terminal button:focus-visible {
+  outline: 1px solid #3B82F6;
+  outline-offset: 1px;
+}
+
+/* Selection */
+.v2-terminal ::selection {
+  background: rgba(59, 130, 246, 0.3);
+}
+
+/* Transitions */
+.v2-terminal button {
+  transition: color 0.1s, background 0.1s;
+}
+
+.v2-terminal tr {
+  transition: background 0.1s;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+  .v2-terminal {
+    /* Collapse right panel on smaller screens */
+  }
+}
+
+@media (max-width: 768px) {
+  .v2-terminal {
+    /* Mobile layout adjustments */
+  }
+}
