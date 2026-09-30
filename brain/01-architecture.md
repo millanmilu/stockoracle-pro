@@ -27,7 +27,7 @@ stockoracle-pro /
 ├── frontend/
 │   ├── src/components/      # LiveChartView.jsx (sabse important) + sub-folders
 │   │   ├── chart/           # ChartCanvas, OscillatorPane, VolumePane, IndicatorModal, AIDashboard, indicatorDefinitions
-│   │   ├── chart-tools/     # drawing tools, smcEngine, AIPatternRecognition
+│   │   ├── chart-tools/     # drawing tools, smcEngine
 │   │   ├── terminal/        # Bloomberg-style views + terminal/mit (Market Intelligence)
 │   │   └── screener/, paper/, heatmap/
 │   ├── src/experiments/     # pro-terminal-v2 (mock-data experiment; sidebar "EXPERIMENTAL" tab se milta hai, production route nahi)

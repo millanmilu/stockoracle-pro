@@ -23,7 +23,7 @@ Backend `enrich_stock_dataframe()` ~45 columns deta hai, par `market.py` ka `_CH
 ## Folders (asli structure — `ls frontend/src` se verified)
 - `src/components/` — root me ~40 files (`LiveChartView.jsx` sabse important) + 6 sub-folders:
   - `chart/` — chart engine layer: `ChartCanvas.jsx` (render hub), `OscillatorPane.jsx`, `VolumePane.jsx`, `VolumeProfileOverlay.jsx`, `IndicatorModal.jsx`, `IndicatorParamsModal.jsx`, `IndicatorLegend.jsx`, `ReplayBar.jsx`, `AIDashboard.jsx` + catalog `indicatorDefinitions.js` aur `indicatorSettingsSchema.js`.
-  - `chart-tools/` — drawing toolbar/shape/renderers, `smcEngine.js`, `AIPatternRecognition.jsx`, `MultiTimeframeCorrelation.jsx`, `OrderFlow.jsx`.
+  - `chart-tools/` — drawing toolbar/shape/renderers, `smcEngine.js`.
   - `terminal/` — Bloomberg-style terminal views (Options Lab, Quant Risk Cockpit, RRG Rotation, Valuation, Macro, MultiTile, CommandPalette, ticker tape) + `terminal/mit/` = Market Intelligence tab (`useMitAi.js`, `useMitIntel.js`, `useMitData.js` + `MitAiHero`, `MitSignal`, `MitConsensus`, `MitDivergence`, `MitFearGreed`, `MitSummary`, ...).
   - `screener/`, `paper/`, `heatmap/`.
 - `src/store/` — zustand (SINGULAR folder; `useStore.js` + persist) — ticker, timeframe, theme, WS state.
