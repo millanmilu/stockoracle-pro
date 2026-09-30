@@ -69,6 +69,9 @@ jobs:
       - name: Run Frontend Unit Tests
         run: npm test
 
+      - name: Lint Frontend (ESLint — 0 errors gate)
+        run: npm run lint
+
       - name: Build Production Frontend Bundle (Vite)
         run: npm run build
 

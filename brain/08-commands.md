@@ -31,7 +31,7 @@ cd frontend && npm test        # = node --test src/utils/*.test.js
 - **8 `*.test.js` files**, sab `src/utils/` me — glob `package.json` me `src/utils/*.test.js` hai,
 isliye test wahi rakho, warna chala hi nahi.
 - Indicator/AI engine tests: `aiIndicatorEngine.test.js`, `indicatorEngine.test.js`, `aiSignalEngine.test.js` (+ `chartHelpers`, `volumeProfile`, `drawingGeometry`, `watchlist`, `timeframeQuickSwitch`).
-- CI ka `frontend-ci` job `npm test` + `npm run build` dono chalata hai — red test commit hi nahi hoga.
+- CI ka `frontend-ci` job `npm test` + `npm run lint` (0-errors gate) + `npm run build` chalata hai — red test ya lint error commit hi nahi hoga.
 
 ## Brain checker
 ```bash
