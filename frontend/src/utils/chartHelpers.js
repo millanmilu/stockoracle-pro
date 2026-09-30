@@ -31,7 +31,9 @@ export function toChartTime(dateStr, isIntraday) {
   if (typeof dateStr === 'number') {
     const ms = dateStr > 1000000000000 ? dateStr : dateStr * 1000;
     if (!isIntraday) {
-      return new Date(ms).toISOString().substring(0, 10);
+      // Daily buckets are IST (backend invariant §1) — never UTC.
+      // getIstDateString is the single source (hoisted, defined below).
+      return getIstDateString(ms);
     }
     return Math.floor(ms / 1000);
   }
@@ -129,6 +131,43 @@ function validFallback(fallback) {
   return SUPPORTED_INTERVALS.includes(fb) ? fb : '1m';
 }
 
+/**
+ * TradingView-style number-key timeframe quick switch.
+ * Digits accumulate ("1" → 1m, "15" → 15m); a trailing h/d picks the unit
+ * ("1h" → 1h, "4h" → 4h, "d" → 1d); "60"/"240" are minute aliases for 1h/4h.
+ * Returns the timeframe value or null when the buffer matches nothing.
+ * Only covers toolbar timeframes (1s/30s stay dropdown-only by design).
+ */
+const TF_QUICK_SWITCH = [
+  { value: '1m', num: '1', unit: 'm' },
+  { value: '5m', num: '5', unit: 'm' },
+  { value: '15m', num: '15', unit: 'm' },
+  { value: '30m', num: '30', unit: 'm' },
+  { value: '1h', num: '1', unit: 'h' },
+  { value: '4h', num: '4', unit: 'h' },
+  { value: '1d', num: '1', unit: 'd' },
+];
+
+export function resolveTimeframeBuffer(buf) {
+  const raw = String(buf || '').trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === 'h') return '1h';
+  if (raw === 'd') return '1d';
+  const m = raw.match(/^(\d{1,3})([hmd])?$/);
+  if (!m) return null;
+  const [, num, suf] = m;
+  if (!suf && num === '60') return '1h';
+  if (!suf && num === '240') return '4h';
+  const opts = TF_QUICK_SWITCH.filter((o) => o.num === num);
+  if (!opts.length) return null;
+  if (!suf || suf === 'm') return (opts.find((o) => o.unit === 'm') || opts[0]).value;
+  const hit = opts.find((o) => o.unit === suf);
+  if (hit) return hit.value;
+  if (suf === 'd') return '1d';
+  if (suf === 'h') return (TF_QUICK_SWITCH.find((o) => o.unit === 'h') || {}).value || null;
+  return null;
+}
+
 export const SIG = {
   buy:  { label: '▲ BUY',  color: '#10B981', bg: 'rgba(16,185,129,0.10)', border: 'rgba(16,185,129,0.28)' },
   sell: { label: '▼ SELL', color: '#EF5350', bg: 'rgba(239,83,80,0.10)',  border: 'rgba(239,83,80,0.28)' },
@@ -141,35 +180,35 @@ export const SIG = {
  * panes) and the DrawingTools SVG overlay reserve the exact same strip —
  * drawings then end at the plot edge instead of bleeding over the axis.
  */
-export const PRICE_AXIS_WIDTH = 56;
+export const PRICE_AXIS_WIDTH = 60;
 
 export const CHART_OPTIONS = {
   layout: {
     background: { type: 'solid', color: 'transparent' },
-    textColor: '#6B7280',
-    fontFamily: '"JetBrains Mono", "Courier New", monospace',
+    textColor: '#787B86',
+    fontFamily: "'Trebuchet MS', Roboto, Ubuntu, sans-serif",
     fontSize: 11,
   },
   grid: {
-    vertLines: { color: 'rgba(99,102,241,0.04)', style: 1 },
-    horzLines: { color: 'rgba(99,102,241,0.06)' },
+    vertLines: { color: '#1E222D' },
+    horzLines: { color: '#1E222D' },
   },
   crosshair: {
     mode: 0, // CrosshairMode.Normal
-    vertLine: { color: 'rgba(129,140,248,0.4)', width: 1, style: 2, labelBackgroundColor: '#1e1060' },
-    horzLine: { color: 'rgba(129,140,248,0.4)', width: 1, style: 2, labelBackgroundColor: '#1e1060' },
+    vertLine: { color: '#787B86', width: 1, style: 2, labelBackgroundColor: '#363C4E' },
+    horzLine: { color: '#787B86', width: 1, style: 2, labelBackgroundColor: '#363C4E' },
   },
   rightPriceScale: {
-    borderColor: 'rgba(99,102,241,0.12)',
-    textColor: '#6B7280',
+    borderColor: '#2A2E39',
+    textColor: '#787B86',
     scaleMargins: { top: 0.08, bottom: 0.16 },
     autoScale: true,
     alignLabels: true,
     minimumWidth: PRICE_AXIS_WIDTH, // Strict pixel alignment across main chart and stacked panes
   },
   timeScale: {
-    borderColor: 'rgba(99,102,241,0.12)',
-    textColor: '#6B7280',
+    borderColor: '#2A2E39',
+    textColor: '#787B86',
     timeVisible: false,
     secondsVisible: false,
     shiftVisibleRangeOnNewBar: true,
@@ -324,6 +363,30 @@ export function getBoundedTimeframe(interval) {
 export const BACKFILL_TRIGGER_BARS = 30;
 
 /**
+ * Timeframe-aware cursor chunk sizes: candles fetched per older-history
+ * request (`?before=<oldest>&limit=<n>`). Kabhi ek universal count nahi —
+ * microstructure chhota, intraday hazaaron me, daily saal-bhar. Backend
+ * `CURSOR_CHUNK_LIMITS` (fetcher.py) ka mirror — dono ek saath badlo.
+ */
+export const BACKFILL_CHUNK_LIMIT = {
+  '1s': 300, '30s': 500,
+  '1m': 3000, '5m': 3000, '15m': 2000, '30m': 2000,
+  '1h': 2000, '4h': 1500, '1d': 1000,
+};
+export const BACKFILL_MIN_LIMIT = 50;
+export const BACKFILL_MAX_LIMIT = 5000;
+
+/** Resolve per-request candle count for older-history loads (clamped). */
+export function getBackfillChunkLimit(interval, requested = null) {
+  const iv = String(interval || '').toLowerCase();
+  const def = BACKFILL_CHUNK_LIMIT[iv] ?? 2000;
+  if (requested == null) return def;
+  const n = Number(requested);
+  if (!Number.isFinite(n)) return def;
+  return Math.max(BACKFILL_MIN_LIMIT, Math.min(BACKFILL_MAX_LIMIT, Math.floor(n)));
+}
+
+/**
  * Progressive history depth per interval (left-pan infinite scroll).
  * Index 0 === getBoundedTimeframe() (default fast load); panning left deepens
  * one level at a time (2Y → 5Y → ALL). Levels stop where the backend stops
@@ -411,5 +474,7 @@ export function getSessionBucketStart(interval, nowMs, isCrypto = false) {
   const IST_OFFSET = 5.5 * 3600; // seconds (UTC + 05:30)
   // Epoch second of 09:15 IST on the current IST day
   const anchor = Math.floor((nowSec + IST_OFFSET) / DAY) * DAY - IST_OFFSET + (9 * 3600 + 15 * 60);
-  return anchor + Math.floor((nowSec - anchor) / bucketSize) * bucketSize;
+  const bucketStart = anchor + Math.floor((nowSec - anchor) / bucketSize) * bucketSize;
+
+  return bucketStart;
 }

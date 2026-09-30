@@ -4,7 +4,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { getSessionBucketStart, sanitizeSeriesData, sanitizeCandles, isAppendableTime, compareChartTime, computeFillSlots, INTERVAL_SLOT_SEC, normalizeInterval, isSupportedInterval, SUPPORTED_INTERVALS, getIstDateString, getBoundedTimeframe, BACKFILL_LEVELS, BACKFILL_TRIGGER_BARS, nextBackfillTimeframe, POPULAR_STOCKS } from './chartHelpers.js';
+import { getSessionBucketStart, sanitizeSeriesData, sanitizeCandles, isAppendableTime, compareChartTime, computeFillSlots, INTERVAL_SLOT_SEC, normalizeInterval, isSupportedInterval, SUPPORTED_INTERVALS, getIstDateString, getBoundedTimeframe, BACKFILL_LEVELS, BACKFILL_TRIGGER_BARS, nextBackfillTimeframe, BACKFILL_CHUNK_LIMIT, BACKFILL_MIN_LIMIT, BACKFILL_MAX_LIMIT, getBackfillChunkLimit, POPULAR_STOCKS } from './chartHelpers.js';
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 const HOUR = 3600;
@@ -225,6 +225,32 @@ describe('getSessionBucketStart', () => {
 
     it('trigger threshold is a small positive bar count', () => {
       assert.ok(Number.isInteger(BACKFILL_TRIGGER_BARS) && BACKFILL_TRIGGER_BARS > 0 && BACKFILL_TRIGGER_BARS < 80);
+    });
+  });
+
+  describe('getBackfillChunkLimit — timeframe-aware cursor chunks (no universal count)', () => {
+    it('microstructure stays small, intraday pulls thousands, daily pulls years', () => {
+      assert.equal(getBackfillChunkLimit('1s'), 300);
+      assert.equal(getBackfillChunkLimit('30s'), 500);
+      assert.equal(getBackfillChunkLimit('1m'), 3000);
+      assert.equal(getBackfillChunkLimit('5m'), 3000);
+      assert.equal(getBackfillChunkLimit('15m'), 2000);
+      assert.equal(getBackfillChunkLimit('30m'), 2000);
+      assert.equal(getBackfillChunkLimit('1h'), 2000);
+      assert.equal(getBackfillChunkLimit('4h'), 1500);
+      assert.equal(getBackfillChunkLimit('1d'), 1000);
+    });
+
+    it('clamps explicit requests into the safe band', () => {
+      assert.equal(getBackfillChunkLimit('1m', 10), BACKFILL_MIN_LIMIT);
+      assert.equal(getBackfillChunkLimit('1m', 99999), BACKFILL_MAX_LIMIT);
+      assert.equal(getBackfillChunkLimit('1h', 750), 750);
+      assert.equal(getBackfillChunkLimit('1d', 'bogus'), BACKFILL_CHUNK_LIMIT['1d']);
+    });
+
+    it('unknown intervals fall back to a bounded default', () => {
+      const got = getBackfillChunkLimit('bogus');
+      assert.ok(got >= BACKFILL_MIN_LIMIT && got <= BACKFILL_MAX_LIMIT);
     });
   });
 
