@@ -18,7 +18,7 @@ REST /api/stock/{t}/history?period=&interval= → purani candles + indicators �
 ```
 
 ## Chart payload trim
-Backend `enrich_stock_dataframe()` ~45 columns deta hai, par `market.py` ka `_CHART_COLUMNS` sirf chart-waale columns bhejta hai (~8MB → ~2MB). `?full=true` se sab le sakte ho. Price cols 2-decimal, indicator cols 4-decimal, NaN/Inf → null (JSON-safe).
+Backend `enrich_stock_dataframe()` ~45 columns deta hai, par `market.py` ka `_CHART_COLUMNS` sirf chart-waale columns bhejta hai (~8MB → ~2MB). `?full=true` se sab le sakte ho. `?slim=true` se enrich skip karke sirf OHLCV 6 cols aate hain (instant first paint; `loadHistory` phir full frame se replace karta hai). Price cols 2-decimal, indicator cols 4-decimal, NaN/Inf → null (JSON-safe).
 
 ## Folders (asli structure — `ls frontend/src` se verified)
 - `src/components/` — root me ~40 files (`LiveChartView.jsx` sabse important) + 6 sub-folders:
@@ -29,10 +29,33 @@ Backend `enrich_stock_dataframe()` ~45 columns deta hai, par `market.py` ka `_CH
 - `src/store/` — zustand (SINGULAR folder; `useStore.js` + persist) — ticker, timeframe, theme, WS state.
 - `src/hooks/` — `useStock.js` (REST + history fetch) aur `useWebSocket.js`.
 - `src/constants/` — `screenerConfig.js`.
-- `src/utils/` — engines + helpers: `indicatorEngine.js`, `chartIndicators.js`, `aiIndicatorEngine.js`, `aiSignalEngine.js`, `volumeProfile.js`, `marketStructure.js`, `drawingGeometry.js`, `safeChart.js`, `chartHelpers.js`, `chartDataCache.js`, `api.js`, `formatters.js`, `theme.js`, `watchlist.js`, `soundChime.js` + 7 `*.test.js` files (commands `08-commands.md` me).
+- `src/utils/` — engines + helpers: `indicatorEngine.js`, `chartIndicators.js`, `aiIndicatorEngine.js`, `aiSignalEngine.js`, `volumeProfile.js`, `marketStructure.js`, `drawingGeometry.js`, `safeChart.js`, `chartHelpers.js`, `chartDataCache.js`, `api.js`, `formatters.js`, `theme.js`, `watchlist.js`, `soundChime.js` + 8 `*.test.js` files (commands `08-commands.md` me).
 - `src/App.jsx` + `src/main.jsx` — routing + entry.
 
 > Chart engine + AI indicator layer ka full map `11-chart-and-ai-engines.md` me hai (catalog → engine → render consumers). Kuch bhi add karne se pehle wo file padho.
+
+## Live-chart theme (TradingView parity — Sep 2026)
+`src/utils/theme.js` single source hai: dark `#131722` bg / `#1E222D` menu / `#2A2E39` border /
+`#D1D4DC` text / `#787B86` muted / accent `#2962FF`, candles up `#26A69A` / down `#EF5350`.
+Font Trebuchet/Roboto (JetBrains Mono nahi). `ChartToolbar.jsx` TV top-bar (40px, text timeframe
+tabs me active = blue pill, live price + change% header me), `ChartCanvas.jsx` me TV OHLC legend
+(symbol + O/H/L/C + chg + Vol, zero-latency DOM refs se), left drawing rail 40px TV blue-active,
+sub-pane headers transparent TV legend. Data/tick logic untouched — sirf visuals.
+
+## Timeframe dropdown + number-key switch (TradingView parity — Sep 2026)
+`ChartToolbar.jsx`: single dropdown button (current interval + chevron) me pura timeframe —
+Minutes/Hours/Daily groups, full names, tip footer. Number keys se direct switch:
+`1→1m, 5→5m, 15→15m, 30→30m, 1H/4H/1D, 60→1H, 240→4H` — 800ms buffer, blue chip feedback, Enter =
+apply now, Esc = cancel. Resolver `resolveTimeframeBuffer()` `chartHelpers.js` me hai (pure,
+`timeframeQuickSwitch.test.js` me 5 tests). Inputs/modals focused ho ya Alt/Ctrl dabaa ho to keys
+ignore hote hain taaki drawing shortcuts na tootein.
+
+## Drawing tools UX (TradingView parity — Sep 2026)
+Selection toolbar drawing ke first anchor ke paas float karti hai (pan/zoom pe saath chalti hai,
+pane me clamped; anchor na mile to top-center fallback) — hide/lock/settings/colors/width/style/
+duplicate/delete same functions. Naye drawings ka default color TV blue `#2962FF`, aur last-used
+style (color/width/style) `so_active_draw_style` me persist hota hai. Context menu, object tree,
+sticker picker, text popup, settings modal sab TV tokens/radius-4/TV font me.
 
 ## Dhyan rakhne wali baatein
 - Date display hamesha IST me karo; backend daily `YYYY-MM-DD` bhejta hai.

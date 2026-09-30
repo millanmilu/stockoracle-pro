@@ -136,6 +136,12 @@ dikhta hai.
   par chart loads bounded hain.
 - **Payload truth:** `_CHART_COLUMNS` = 71 cols (comment me purana `~8MB→2MB / 22 cols`
   claim fix ho gaya). Payload win rows se aata hai, column-trim se nahi.
+- **Slim two-stage load (cold chart paint):** `GET /history?...&slim=true` enrich skip
+  karke sirf OHLCV 6 cols deta hai (1m/5D: 2.6 MB → 190 KB). `loadHistory` pehle slim
+  paint karta hai (live-tick refs seed ho jate hain), phir full enriched frame silently
+  replace karta hai — field-only overlays (SMA 20) stage 2 me pop-in hote hain, chart
+  kabhi blank nahi hota. Sirf cold loads pe (cache miss); cached remount seedha full
+  refresh karta hai. Cursor backfill (`?before=`) hamesha full rehta hai.
 - **Render isolation:** `LivePriceBadge` (toolbar) hi ekmatra per-tick subscriber hai;
   `LiveChartView` tree per-tick re-render nahi hota. `ChartCanvas` `React.memo` +
   custom prop-compare me hai. Paper P&L lines ko 2s-throttled snapshot milta hai
@@ -147,6 +153,14 @@ dikhta hai.
   Yehi `useStock` Binance fallback aur `useWebSocket` kline branch me bhi hai.
 - **Continuation:** `INTERVAL_SLOT_SEC[interval]` use hota hai (hardcoded 300s hata diya)
   taaki 1h/4h me `prevClose` carry-over na toote.
+- **Fill continuity gate (BTC flat-dash fix):** stall backfill (flat vol-0 bars) sirf tab
+  jab previous bucket isi session me tick-touched ho (`lastTickBucketRef`). Seeded bars
+  (cache/history restore, remount, hidden-tab return, full-frame replace) pe rollover
+  honest gap chhodta hai — stale price pe fake flat line + jump nahi (yehi BTC pe
+  "galat chhoti candles" lag rahe the; probe me live edge pe 5 vol-0 flats mile, fix ke
+  baad zero). 60s+ hidden gap `visibilitychange` se continuity invalidate karta hai;
+  har `loadHistory` start reset karta hai; full-stage merge strictly-newer live bars
+  preserve karke continuity re-arm karta hai (16s-load wick loss band).
 - **Viewport guard:** `scrollToRealtime()` sirf tab jab viewport already right edge pe ho
   (`range.to >= totalBars - 2`) — history pan karne pe snap-back nahi.
 - **Cache budget:** `chartDataCache` me `MAX_ENTRIES=5` + 30 MB byte-budget
@@ -154,6 +168,24 @@ dikhta hai.
 - **Error UX:** `useStock.fetchHistory` detail propagate karta hai (throw), generic
   "Failed" nahi. GOLD `PAXGUSDT` proxy ko `dataSource: 'binance_proxy_PAXG'` +
   `proxyWarning` banner milta hai. Error badge me Retry/Dismiss + 12s auto-clear.
+- **Cursor backfill (left-pan auto-load, primary):** `GET /history?before=<epoch|IST date>&limit=<n>`
+  → `fetch_history_window()` (`fetcher.py`) purani window **sirf** lautata hai (live edge
+  merge nahi) — crypto Binance `endTime` walk-back, equity Angel One window + DB merge,
+  daily DB slice (+refill). `LiveChartView.handleNeedOlderData` oldest loaded candle ko
+  cursor banata hai, `sanitizeCandles` se prepend karta hai (timestamp dedupe, live edge
+  wins ties), ChartCanvas prepend-shift se zoom/crosshair/viewport rakhta hai.
+  Trigger: `range.from < BACKFILL_TRIGGER_BARS (30)`; single-flight + 1.5s debounce +
+  per-key `{exhausted, oldest, lastBefore}` range-cache (same edge dobara fire nahi).
+  Pill: `Loading historical data…` → `No more historical data` (4s auto-clear) →
+  error pe Retry. `BACKFILL_LEVELS` ab fallback/compat ke liye hai.
+- **Chunk sizes (kabhi universal count nahi):** backend `CURSOR_CHUNK_LIMITS` =
+  frontend `BACKFILL_CHUNK_LIMIT` (`chartHelpers.getBackfillChunkLimit`, clamp 50…5000):
+  `1s→300, 30s→500, 1m/5m→3000, 15m/30m/1h→2000, 4h→1500, 1d→1000`. Dono files
+  ek saath badlo. Short window / `has_more:false` / khaali list = exhausted.
+  `useStock` Binance fallback bhi cursor-aware hai (`endTime` seed + `limit` cap) taaki
+  backend-down pe bhi backfill kaam kare.
+- **Crypto DB fast-path period-aware hai** (`from_ts` + coverage check) — warna 5D load ke
+  60s andar 1M backfill wahi shallow slice lautata tha aur turant `exhausted` lagta tha.
 - **`POPULAR_STOCKS` me `NIFTY50` nahi** (no universe token — kabhi tick nahi deta tha).
 - **Replay:** timer deps me `replayIndex` nahi (speed even), end-toast once (ref guard),
   keydown listener once (stable refs) — har candle pe re-attach nahi.
@@ -161,13 +193,14 @@ dikhta hai.
 ## Tests + commands
 
 ```bash
-cd frontend && npm test        # = node --test src/utils/*.test.js (7 files)
+cd frontend && npm test        # = node --test src/utils/*.test.js (8 files)
 ```
 
 - `aiIndicatorEngine.test.js` — har AI engine ka behaviour synthetic candles pe (trend ±100,
   exhaustion sign, band widening, markers, dashboard aggregate, short-series safety).
 - `indicatorEngine.test.js`, `chartHelpers.test.js`, `volumeProfile.test.js`,
-  `drawingGeometry.test.js`, `aiSignalEngine.test.js`, `watchlist.test.js`.
+  `drawingGeometry.test.js`, `aiSignalEngine.test.js`, `watchlist.test.js`,
+  `timeframeQuickSwitch.test.js` (number-key timeframe resolver).
 - **CI me `npm test` nahi chalta** (CI sirf `npm run build`) — isliye ye locally chalao.
 - `*.test.js` files `src/utils/` me hi rehti hain (`package.json` ka glob) — test ko
   `src/components/` me na rakho, warna chalega hi nahi.

@@ -92,3 +92,10 @@ jobs:
       - name: Run Invariants Test Suite (AGENTS.md rules)
         run: |
           pytest tests/test_database_invariants.py tests/test_data_invariants.py -v
+
+      # brain/ is the project memory every agent is told to read first, so its
+      # claims are gated here: a stale path, count or line number fails the build
+      # instead of misleading the next agent. Also probes the screener's honesty
+      # contract (no-op sentinel parses; NULL is never a neutral observation).
+      - name: Verify brain/ project memory (paths, counts, screener invariants)
+        run: python3 scripts/check_brain.py

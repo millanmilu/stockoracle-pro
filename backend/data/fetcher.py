@@ -26,7 +26,7 @@ else:
 from SmartApi import SmartConnect
 from backend.data.market_calendar import is_trading_day
 from backend.data.database import (
-    save_historical_prices, get_historical_prices,
+    save_historical_prices, get_historical_prices, get_history_coverage,
     save_company_info, get_company_info, get_stale_company_info,
     get_live_tick_ohlcv, save_stock_universe, search_stock_universe,
     get_stock_universe_token, purge_stale_partial_history,
@@ -496,25 +496,37 @@ ALIAS_TOKEN_MAP = {
 def get_token_info(ticker: str) -> Optional[dict]:
     """
     Returns the ScripMaster record for a ticker (e.g. 'RELIANCE' or 'RELIANCE-EQ').
-    Triggers a one-time ScripMaster download if needed.
+
+    Lookup order is cheap → expensive so a cold process never pays a ~40s
+    full ScripMaster download for a ticker the DB universe already knows
+    (every chart/history call hits this function first):
+      1. in-memory alias map / already-loaded ScripMaster map (µs)
+      2. stock_universe table in SQLite (ms, survives restarts)
+      3. one-time ScripMaster download (slow, then cached in memory + DB)
     """
     t = ticker.upper().strip()
     if t in ALIAS_TOKEN_MAP:
         return ALIAS_TOKEN_MAP[t]
 
-    _load_scrip_master()
     key = t if t.endswith("-EQ") else f"{t}-EQ"
     info = _scrip_map.get(key) or _scrip_map.get(t) or _scrip_map.get(t.removesuffix("-EQ"))
-    if not info:
-        # Check stock_universe table via ORM
-        try:
-            db_row = get_stock_universe_token(t)
-            if db_row:
-                info = db_row
-                _scrip_map[key] = info
-                _scrip_map[t] = info
-        except Exception as exc:
-            logger.debug("stock_universe token lookup failed for %s: %s", t, exc)
+    if info:
+        return info
+
+    # DB universe before any network download — this is what makes
+    # post-restart chart loads fast (ms instead of tens of seconds).
+    try:
+        db_row = get_stock_universe_token(t)
+        if db_row:
+            info = db_row
+            _scrip_map[key] = info
+            _scrip_map[t] = info
+            return info
+    except Exception as exc:
+        logger.debug("stock_universe token lookup failed for %s: %s", t, exc)
+
+    _load_scrip_master()
+    info = _scrip_map.get(key) or _scrip_map.get(t) or _scrip_map.get(t.removesuffix("-EQ"))
 
     if not info and _scrip_map_failed:
         _load_scrip_master(force=True)
@@ -609,6 +621,22 @@ def _generate_crypto_seed_data(ticker: str, interval: str, is_intraday: bool) ->
     return df
 
 
+def _crypto_period_days(period: Optional[str], is_intraday: bool) -> int:
+    """Maps a chart period label to days of 24x7 crypto history needed."""
+    p = (period or "").upper().strip()
+    if p in ("ALL", "MAX", ""):
+        return 45 if is_intraday else 9000
+    if p.endswith("D") and p[:-1].isdigit():
+        return int(p[:-1])
+    if p.endswith("W") and p[:-1].isdigit():
+        return int(p[:-1]) * 7
+    if p.endswith("M") and p[:-1].isdigit():
+        return int(p[:-1]) * 30
+    if p.endswith("Y") and p[:-1].isdigit():
+        return int(p[:-1]) * 365
+    return 7 if is_intraday else 9000
+
+
 def fetch_crypto_data(ticker: str, period: str = "ALL", interval: str = "1d") -> Optional[pd.DataFrame]:
     """
     Fetches cryptocurrency OHLCV data (e.g. BTC) via public Binance / Coinbase endpoints.
@@ -628,8 +656,14 @@ def fetch_crypto_data(ticker: str, period: str = "ALL", interval: str = "1d") ->
 
     interval_clean = interval.lower().strip()
     is_intraday = interval_clean in ["1s", "30s", "1m", "5m", "15m", "30m", "1h", "4h"]
+    binance_interval_map = {
+        "1s": "1s", "30s": "1m", "1m": "1m", "5m": "5m",
+        "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d"
+    }
+    b_interval = binance_interval_map.get(interval_clean, "1d")
+    symbol = _binance_crypto_symbol(ticker)
 
-    # 1. Check local DB first
+    # 1. Check local DB first + Incremental Tail Fetch (sub-100ms path)
     if not is_intraday:
         db_df = get_historical_prices(ticker)
         if db_df is not None and not db_df.empty and len(db_df) >= 30:
@@ -639,58 +673,180 @@ def fetch_crypto_data(ticker: str, period: str = "ALL", interval: str = "1d") ->
                 db_df.attrs["data_source"] = "sqlite"
                 _set_cached(cache_key, db_df)
                 return db_df
+            # Daily incremental fetch: only fetch missing days since latest_date
+            try:
+                latest_dt = datetime.strptime(latest_date, "%Y-%m-%d").replace(tzinfo=_IST)
+                start_ms = int(latest_dt.timestamp() * 1000)
+                inc_url = (f"https://api.binance.com/api/v3/klines?symbol={symbol}"
+                           f"&interval=1d&startTime={start_ms}&limit=1000")
+                req = urllib.request.Request(inc_url, headers={"User-Agent": "StockOracle/2.0"})
+                with urllib.request.urlopen(req, timeout=3) as resp:
+                    inc_data = json.loads(resp.read().decode())
+                if isinstance(inc_data, list) and inc_data:
+                    delta_rows = []
+                    for k in inc_data:
+                        open_time_ms = int(k[0])
+                        dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc).astimezone(_IST)
+                        d_str = dt.strftime("%Y-%m-%d")
+                        delta_rows.append({
+                            "date": d_str,
+                            "open": float(k[1]), "high": float(k[2]),
+                            "low": float(k[3]), "close": float(k[4]),
+                            "volume": float(k[5]),
+                        })
+                    if delta_rows:
+                        delta_df = pd.DataFrame(delta_rows)
+                        combined = pd.concat([db_df, delta_df], ignore_index=True)
+                        combined = combined.drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
+                        combined["high"] = np.maximum(combined["high"], np.maximum(combined["open"], combined["close"]))
+                        combined["low"] = np.minimum(combined["low"], np.minimum(combined["open"], combined["close"]))
+                        combined = combined[(combined["open"] > 0) & (combined["close"] > 0) & (combined["high"] > 0) & (combined["low"] > 0)]
+                        save_historical_prices(ticker, delta_df)
+                        combined.attrs["data_source"] = "binance_crypto"
+                        _set_cached(cache_key, combined)
+                        return combined
+            except Exception as inc_exc:
+                logger.debug("Daily crypto incremental fetch failed for %s: %s — serving stored DB", ticker, inc_exc)
+                db_df.attrs["data_source"] = "sqlite"
+                _set_cached(cache_key, db_df)
+                return db_df
     else:
-        intra_db = get_intraday_candles(ticker, interval_clean)
+        # Period-aware DB fast-path with Incremental Fetch:
+        req_days = _crypto_period_days(period, is_intraday)
+        req_from = datetime.now(_IST) - timedelta(days=req_days)
+        req_from_str = req_from.strftime("%Y-%m-%d %H:%M:%S")
+        intra_db = get_intraday_candles(ticker, interval_clean, from_ts=req_from_str)
         if intra_db is not None and not intra_db.empty and len(intra_db) >= 10:
+            oldest_ts = str(intra_db["date"].min())
             latest_ts = str(intra_db["date"].max())
             try:
-                latest_dt = datetime.fromisoformat(latest_ts.replace(" ", "T"))
-                if latest_dt.tzinfo is None:
-                    latest_dt = latest_dt.replace(tzinfo=_IST)
-                # Max tolerance strictly matches timeframe so historical data seamlessly connects to live stream:
-                tolerance_sec = {
-                    "1s": 3, "30s": 30, "1m": 60, "5m": 240, "15m": 600, "30m": 1200, "1h": 2400, "4h": 7200
-                }.get(interval_clean, 60)
-                if (datetime.now(_IST) - latest_dt).total_seconds() < tolerance_sec:
-                    # Heal any stored holes at serve time (rows saved before slot-fill existed)
-                    intra_db = fill_intraday_time_gaps(intra_db, interval_clean, is_crypto=True)
-                    intra_db.attrs["data_source"] = "sqlite"
-                    _set_cached(cache_key, intra_db, ttl_seconds=tolerance_sec // 2 or 2)
-                    return intra_db
+                oldest_dt = datetime.fromisoformat(oldest_ts.replace(" ", "T"))
+                if oldest_dt.tzinfo is None:
+                    oldest_dt = oldest_dt.replace(tzinfo=_IST)
+                covers_window = (oldest_dt - req_from).total_seconds() <= 3600
+                if not covers_window:
+                    logger.debug("Crypto DB slice too shallow for %s %s (oldest %s, need %s) — fetching Binance",
+                                 ticker, period, oldest_ts, req_from_str)
+                else:
+                    latest_dt = datetime.fromisoformat(latest_ts.replace(" ", "T"))
+                    if latest_dt.tzinfo is None:
+                        latest_dt = latest_dt.replace(tzinfo=_IST)
+                    # Max tolerance strictly matches timeframe so historical data seamlessly connects to live stream:
+                    tolerance_sec = {
+                        "1s": 3, "30s": 30, "1m": 60, "5m": 240, "15m": 600, "30m": 1200, "1h": 2400, "4h": 7200
+                    }.get(interval_clean, 60)
+                    now_ist = datetime.now(_IST)
+                    gap_sec = (now_ist - latest_dt).total_seconds()
+                    if gap_sec < tolerance_sec:
+                        # Heal any stored holes at serve time (rows saved before slot-fill existed)
+                        intra_db = fill_intraday_time_gaps(intra_db, interval_clean, is_crypto=True)
+                        intra_db.attrs["data_source"] = "sqlite"
+                        _set_cached(cache_key, intra_db, ttl_seconds=tolerance_sec // 2 or 2)
+                        return intra_db
+
+                    # Incremental fetch: DB has historical coverage; only fetch missing tail up to now!
+                    # A gap up to 2 days easily fits into 1 fast Binance call (limit=1000).
+                    if gap_sec < 86400 * 2:
+                        start_ms = int(latest_dt.timestamp() * 1000)
+                        delta_rows = []
+                        try:
+                            inc_url = (f"https://api.binance.com/api/v3/klines?symbol={symbol}"
+                                       f"&interval={b_interval}&startTime={start_ms}&limit=1000")
+                            req = urllib.request.Request(inc_url, headers={"User-Agent": "StockOracle/2.0"})
+                            with urllib.request.urlopen(req, timeout=3) as resp:
+                                inc_data = json.loads(resp.read().decode())
+                            if isinstance(inc_data, list) and inc_data:
+                                for k in inc_data:
+                                    open_time_ms = int(k[0])
+                                    dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc).astimezone(_IST)
+                                    date_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                                    delta_rows.append({
+                                        "date": date_str,
+                                        "open": float(k[1]), "high": float(k[2]),
+                                        "low": float(k[3]), "close": float(k[4]),
+                                        "volume": float(k[5]),
+                                    })
+                        except Exception as inc_exc:
+                            logger.debug("Incremental Binance fetch failed for %s: %s — serving stored DB", ticker, inc_exc)
+
+                        if delta_rows:
+                            delta_df = pd.DataFrame(delta_rows)
+                            combined = pd.concat([intra_db, delta_df], ignore_index=True)
+                            combined = combined.drop_duplicates(subset=["date"], keep="last").sort_values("date").reset_index(drop=True)
+                            combined["high"] = np.maximum(combined["high"], np.maximum(combined["open"], combined["close"]))
+                            combined["low"] = np.minimum(combined["low"], np.minimum(combined["open"], combined["close"]))
+                            combined = combined[(combined["open"] > 0) & (combined["close"] > 0) & (combined["high"] > 0) & (combined["low"] > 0)]
+                            combined = fill_intraday_time_gaps(combined, interval_clean, is_crypto=True)
+                            try:
+                                save_intraday_candles(ticker, interval_clean, delta_df)
+                            except Exception as save_exc:
+                                logger.debug("Failed saving crypto delta to DB: %s", save_exc)
+                            combined.attrs["data_source"] = "binance_crypto"
+                            crypto_ttl = 2 if interval_clean in ["1s", "30s"] else (8 if interval_clean == "1m" else 25)
+                            _set_cached(cache_key, combined, ttl_seconds=crypto_ttl)
+                            return combined
+                        else:
+                            # If incremental fetch returned empty or failed, serve stored DB rather than stalling
+                            intra_db = fill_intraday_time_gaps(intra_db, interval_clean, is_crypto=True)
+                            intra_db.attrs["data_source"] = "sqlite"
+                            _set_cached(cache_key, intra_db, ttl_seconds=5)
+                            return intra_db
             except Exception as exc:
                 logger.debug("Intraday cache freshness check failed for %s: %s", ticker, exc)
 
-    # 2. Fetch from Binance public klines API
-    binance_interval_map = {
-        "1s": "1s", "30s": "1m", "1m": "1m", "5m": "5m",
-        "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d"
-    }
-    b_interval = binance_interval_map.get(interval_clean, "1d")
+    # 2. Fetch from Binance public klines API — paginated so `period` is
+    # honored. One klines call caps at 1000 bars (≈3.5d of 5m), so without
+    # pages BTC 5m could never cover the chart's default 5D/7D window.
     symbol = _binance_crypto_symbol(ticker)
 
-    limit = 1000
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={b_interval}&limit={limit}"
+    slot_sec = {"1s": 1, "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
+                "1h": 3600, "4h": 14400, "1d": 86400}.get(b_interval, 86400)
+    needed = int(_crypto_period_days(period, is_intraday) * 86400 / slot_sec) + 2
+    # Walk backwards with endTime; cap pages so deep backfills stay bounded
+    # (1m needs ~10k bars for 7D — still only seconds of klines calls).
+    max_pages = max(1, min(12, -(-needed // 1000)))
 
     rows = []
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "StockOracle/2.0"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode())
-            if isinstance(data, list) and len(data) > 0:
-                for k in data:
-                    open_time_ms = int(k[0])
-                    dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc).astimezone(_IST)
-                    date_str = dt.strftime("%Y-%m-%d") if not is_intraday else dt.strftime("%Y-%m-%d %H:%M:%S")
-                    rows.append({
-                        "date": date_str,
-                        "open": float(k[1]),
-                        "high": float(k[2]),
-                        "low": float(k[3]),
-                        "close": float(k[4]),
-                        "volume": float(k[5]),
-                    })
-    except Exception as exc:
-        logger.debug("Binance crypto fetch failed for %s: %s", ticker, exc)
+    end_ms = None
+    for _ in range(max_pages):
+        url = (f"https://api.binance.com/api/v3/klines?symbol={symbol}"
+               f"&interval={b_interval}&limit=1000"
+               + (f"&endTime={end_ms}" if end_ms else ""))
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "StockOracle/2.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception as exc:
+            logger.debug("Binance crypto page failed for %s: %s", ticker, exc)
+            break  # keep pages already collected instead of dropping everything
+        if not isinstance(data, list) or not data:
+            break
+        for k in data:
+            open_time_ms = int(k[0])
+            dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc).astimezone(_IST)
+            date_str = dt.strftime("%Y-%m-%d") if not is_intraday else dt.strftime("%Y-%m-%d %H:%M:%S")
+            rows.append({
+                "date": date_str,
+                "open": float(k[1]),
+                "high": float(k[2]),
+                "low": float(k[3]),
+                "close": float(k[4]),
+                "volume": float(k[5]),
+            })
+        if len(data) < 1000 or len(rows) >= needed:
+            break
+        end_ms = int(data[0][0]) - 1  # page backwards before oldest kline
+    if not rows:
+        logger.debug("Binance crypto fetch failed for %s: no klines", ticker)
+    else:
+        # Pages arrive newest-first but each page is oldest→newest, so the
+        # concatenated list is NOT time-ordered: sort first, then keep the
+        # most recent `needed` bars matching the requested period.
+        # (ISO date strings sort lexicographically.)
+        rows.sort(key=lambda r: r["date"])
+        excess = len(rows) - needed
+        if excess > 0:
+            rows = rows[excess:]
 
     # 3. Fallback to Coinbase public candles
     if not rows and ("BTC" in ticker or "BITCOIN" in ticker):
@@ -986,6 +1142,297 @@ def _set_cached(key: str, data, ttl_seconds: Optional[int] = None):
 
 
 
+# ── Cursor-based historical windows (chart left-pan backfill) ──
+
+# Timeframe-aware chunk sizes: candles returned per older-history request.
+# Never one universal count — microstructure stays small, intraday pulls
+# thousands, daily pulls years. Frontend mirrors this map (chartHelpers.js).
+CURSOR_CHUNK_LIMITS = {
+    "1s": 300, "30s": 500,
+    "1m": 3000, "5m": 3000, "15m": 2000, "30m": 2000,
+    "1h": 2000, "4h": 1500, "1d": 1000,
+}
+CURSOR_MIN_LIMIT = 50
+CURSOR_MAX_LIMIT = 5000
+
+
+def cursor_chunk_limit(interval: str, requested: Optional[int] = None) -> int:
+    """Resolve the candle count for one older-history request."""
+    iv = str(interval or "").lower().strip()
+    default = CURSOR_CHUNK_LIMITS.get(iv, 2000)
+    if requested is None:
+        return default
+    try:
+        n = int(requested)
+    except (TypeError, ValueError):
+        return default
+    return max(CURSOR_MIN_LIMIT, min(CURSOR_MAX_LIMIT, n))
+
+
+def parse_cursor_before(before) -> Optional[datetime]:
+    """Parse a cursor `before` bound (epoch seconds or IST ISO date/datetime).
+
+    Returns an IST-aware datetime; the window holds candles strictly older
+    than this bound. Returns None when unparseable.
+    """
+    if before is None:
+        return None
+    s = str(before).strip()
+    if not s:
+        return None
+    try:
+        ts = float(s)
+        if ts > 1e9:
+            return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(_IST)
+    except (TypeError, ValueError):
+        pass
+    try:
+        iso = s.replace("Z", "")
+        if "T" in iso:
+            iso = iso.replace("T", " ")
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_IST)
+        return dt.astimezone(_IST)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fetch_crypto_window(ticker: str, interval_clean: str, before_dt: datetime, limit: int) -> Optional["pd.DataFrame"]:
+    """Up to `limit` crypto/gold candles strictly older than `before_dt` (newest last)."""
+    import json
+    import urllib.request
+
+    binance_interval_map = {
+        "1s": "1s", "30s": "1m", "1m": "1m", "5m": "5m",
+        "15m": "15m", "30m": "30m", "1h": "1h", "4h": "4h", "1d": "1d"
+    }
+    b_interval = binance_interval_map.get(interval_clean, "1d")
+    symbol = _binance_crypto_symbol(ticker)
+    is_intraday = interval_clean in ["1s", "30s", "1m", "5m", "15m", "30m", "1h", "4h"]
+
+    rows = []
+    end_ms = int(before_dt.timestamp() * 1000) - 1  # exclusive bound
+    max_pages = max(1, -(-limit // 1000))
+    for _ in range(max_pages):
+        url = (f"https://api.binance.com/api/v3/klines?symbol={symbol}"
+               f"&interval={b_interval}&limit={min(1000, limit)}&endTime={end_ms}")
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "StockOracle/2.0"})
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+        except Exception as exc:
+            logger.debug("Binance cursor window failed for %s: %s", ticker, exc)
+            break
+        if not isinstance(data, list) or not data:
+            break
+        for k in data:
+            open_time_ms = int(k[0])
+            dt = datetime.fromtimestamp(open_time_ms / 1000.0, tz=timezone.utc).astimezone(_IST)
+            if dt >= before_dt:
+                continue  # belt & braces: strictly older only
+            date_str = dt.strftime("%Y-%m-%d") if not is_intraday else dt.strftime("%Y-%m-%d %H:%M:%S")
+            rows.append({
+                "date": date_str,
+                "open": float(k[1]),
+                "high": float(k[2]),
+                "low": float(k[3]),
+                "close": float(k[4]),
+                "volume": float(k[5]),
+            })
+        if len(data) < min(1000, limit) or len(rows) >= limit:
+            break
+        end_ms = int(data[0][0]) - 1
+    if not rows:
+        return None
+    rows.sort(key=lambda r: r["date"])
+    rows = rows[-limit:]
+    df = pd.DataFrame(rows)
+    df["high"] = np.maximum(df["high"], np.maximum(df["open"], df["close"]))
+    df["low"] = np.minimum(df["low"], np.minimum(df["open"], df["close"]))
+    df = df[(df["open"] > 0) & (df["close"] > 0) & (df["high"] > 0) & (df["low"] > 0)]
+    df = df.drop_duplicates(subset=["date"]).sort_values("date").reset_index(drop=True)
+    if df.empty:
+        return None
+    if is_intraday:
+        df = fill_intraday_time_gaps(df, interval_clean, is_crypto=True)
+        try:
+            save_intraday_candles(ticker, interval_clean, df)
+        except Exception as exc:
+            logger.debug("Cursor window intraday save failed for %s: %s", ticker, exc)
+    else:
+        try:
+            save_historical_prices(ticker, df)
+        except Exception as exc:
+            logger.debug("Cursor window daily save failed for %s: %s", ticker, exc)
+    df.attrs["data_source"] = "binance_crypto"
+    return df
+
+
+def fetch_history_window(ticker: str, interval: str = "1d", before=None, limit: Optional[int] = None) -> Optional["pd.DataFrame"]:
+    """Cursor-based older-history window for chart left-pan backfill.
+
+    Returns up to `limit` OHLCV candles strictly older than `before`
+    (epoch seconds or IST ISO date/datetime), oldest-first, WITHOUT merging
+    the live edge — callers prepend this to their dataset. Returns None when
+    `before` is unparseable or no older candles exist.
+    """
+    ticker = str(ticker or "").upper().strip()
+    interval_clean = str(interval or "1d").lower().strip()
+    if interval_clean not in ("1s", "30s", "1m", "5m", "15m", "30m", "1h", "4h", "1d"):
+        return None
+    before_dt = parse_cursor_before(before)
+    if before_dt is None:
+        return None
+    limit = cursor_chunk_limit(interval_clean, limit)
+    is_intraday = interval_clean in ["1s", "30s", "1m", "5m", "15m", "30m", "1h", "4h"]
+
+    cache_key = f"cursor_{ticker}_{interval_clean}_{int(before_dt.timestamp())}_{limit}"
+    fresh = _get_cached(cache_key)
+    if fresh is not None:
+        return fresh
+
+    # ── Daily: DB slice ending the day before the cursor ──
+    if not is_intraday:
+        end_str = (before_dt - timedelta(days=1)).strftime("%Y-%m-%d")
+        db_df = get_historical_prices(ticker, end_date=end_str)
+        win = db_df.tail(limit) if db_df is not None and not db_df.empty else None
+        if (win is None or len(win) < limit) and is_crypto_ticker(ticker):
+            older = _fetch_crypto_window(ticker, "1d", before_dt, limit)
+            if older is not None and not older.empty:
+                db_df = get_historical_prices(ticker, end_date=end_str)
+                win = db_df.tail(limit) if db_df is not None and not db_df.empty else older.tail(limit)
+        elif (win is None or len(win) < limit) and _session_active:
+            try:
+                backfill_full_history(ticker)
+                db_df = get_historical_prices(ticker, end_date=end_str)
+                if db_df is not None and not db_df.empty:
+                    win = db_df.tail(limit)
+            except Exception as exc:
+                logger.debug("Cursor daily refill failed for %s: %s", ticker, exc)
+        if win is None or win.empty:
+            return None
+        win = win.copy(deep=True)
+        win.attrs["data_source"] = "sqlite"
+        _set_cached(cache_key, win, ttl_seconds=60)
+        return win
+
+    # ── Intraday crypto/gold (24/7 Binance pipeline) ──
+    if is_crypto_ticker(ticker):
+        df = _fetch_crypto_window(ticker, interval_clean, before_dt, limit)
+        if df is None or df.empty:
+            before_str = before_dt.strftime("%Y-%m-%d %H:%M:%S")
+            db_df = get_intraday_candles(ticker, interval_clean)
+            if db_df is not None and not db_df.empty:
+                win = db_df[db_df["date"] < before_str].sort_values("date").tail(limit)
+                if not win.empty:
+                    win = win.copy(deep=True)
+                    win.attrs["data_source"] = "sqlite"
+                    _set_cached(cache_key, win, ttl_seconds=60)
+                    return win
+            return None
+        _set_cached(cache_key, df, ttl_seconds=60)
+        return df
+
+    # ── Intraday equity (NSE via Angel One, DB-first) ──
+    broker_iv = interval_clean
+    broker_limit = limit
+    if interval_clean in ("1s", "30s"):
+        broker_iv, broker_limit = "1m", max(limit, 10)  # microstructure served from 1m base
+    elif interval_clean == "4h":
+        broker_iv, broker_limit = "1h", limit * 4 + 8  # grouped into session buckets below
+    slot_sec = {"1m": 60, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600}.get(broker_iv, 60)
+    trading_days = max(2, -(-(broker_limit * slot_sec) // (60 * 375)))  # ~375 NSE min/day
+    cal_days = int(trading_days * 7 / 5) + 3
+    broker_max = {"1h": 365, "15m": 90, "30m": 90, "5m": 60, "1m": 30}.get(broker_iv, 30)
+    cal_days = min(cal_days, broker_max)
+    window_to = before_dt
+    window_from = before_dt - timedelta(days=cal_days)
+    before_str = before_dt.strftime("%Y-%m-%d %H:%M:%S")
+    from_str = window_from.strftime("%Y-%m-%d")
+
+    base = get_intraday_candles(ticker, broker_iv, from_ts=from_str)
+    base_win = None
+    if base is not None and not base.empty:
+        base_win = base[base["date"] < before_str].sort_values("date").tail(broker_limit)
+        if base_win is not None and len(base_win) >= broker_limit:
+            win = _shape_equity_window(base_win, broker_iv, interval_clean, before_str, limit)
+            if win is not None and not win.empty:
+                win.attrs["data_source"] = "sqlite"
+                _set_cached(cache_key, win, ttl_seconds=60)
+                return win
+
+    ensure_session()
+    token_info = get_token_info(ticker)
+    if _session_active and token_info and token_info.get("token"):
+        api_map = {"1m": "ONE_MINUTE", "5m": "FIVE_MINUTE", "15m": "FIFTEEN_MINUTE",
+                   "30m": "THIRTY_MINUTE", "1h": "ONE_HOUR"}
+        historicParam = {
+            "exchange": token_info["exch_seg"],
+            "symboltoken": token_info["token"],
+            "interval": api_map.get(broker_iv, "ONE_MINUTE"),
+            "fromdate": window_from.strftime("%Y-%m-%d %H:%M"),
+            "todate": window_to.strftime("%Y-%m-%d %H:%M"),
+        }
+        try:
+            response = _call_api(smartApi.getCandleData, historicParam)
+        except Exception as exc:
+            logger.debug("Cursor Angel One window failed for %s: %s", ticker, exc)
+            response = None
+        if response and response.get("status") and response.get("data"):
+            df = pd.DataFrame(response["data"], columns=["date", "open", "high", "low", "close", "volume"])
+            df = df.astype({"open": float, "high": float, "low": float, "close": float, "volume": int})
+            dt_raw = pd.to_datetime(df["date"], format="mixed", errors="coerce")
+            df = df[dt_raw.dt.dayofweek < 5].copy()  # drop weekend mock/DR sessions
+            df["date"] = pd.to_datetime(df["date"], format="mixed", errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
+            df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date")
+            df = fill_intraday_time_gaps(df, broker_iv, is_crypto=False)
+            try:
+                save_intraday_candles(ticker, broker_iv, df)
+            except Exception as exc:
+                logger.debug("Cursor window save failed for %s: %s", ticker, exc)
+            if base_win is not None and not base_win.empty:
+                df = pd.concat([base_win, df], ignore_index=True).drop_duplicates(subset=["date"], keep="last")
+            win = _shape_equity_window(df, broker_iv, interval_clean, before_str, limit)
+            if win is not None and not win.empty:
+                win.attrs["data_source"] = "angel_one"
+                _set_cached(cache_key, win, ttl_seconds=60)
+                return win
+
+    # Last resort: whatever older DB rows exist (possibly short → caller marks exhausted).
+    if base_win is not None and not base_win.empty:
+        win = _shape_equity_window(base_win, broker_iv, interval_clean, before_str, limit)
+        if win is not None and not win.empty:
+            win.attrs["data_source"] = "sqlite_stale"
+            _set_cached(cache_key, win, ttl_seconds=60)
+            return win
+    return None
+
+
+def _shape_equity_window(df: "pd.DataFrame", broker_iv: str, interval_clean: str, before_str: str, limit: int) -> Optional["pd.DataFrame"]:
+    """Filter a broker/DB frame to candles strictly older than `before_str`,
+    group 1h→4h session buckets when asked, oldest-first, capped at `limit`."""
+    if df is None or df.empty:
+        return None
+    win = df[df["date"] < before_str].sort_values("date").tail(limit * (4 if interval_clean == "4h" else 1))
+    if win.empty:
+        return None
+    if interval_clean == "4h" and broker_iv == "1h":
+        dt = pd.to_datetime(win["date"], format="mixed", errors="coerce")
+        is_morning = dt.dt.hour < 13
+        tmp = win.copy()
+        tmp["bucket"] = dt.dt.strftime("%Y-%m-%d") + is_morning.map({True: " 09:15:00", False: " 13:15:00"})
+        win = tmp.groupby("bucket", as_index=False).agg({
+            "open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum",
+        }).rename(columns={"bucket": "date"}).sort_values("date")
+        win = win[win["date"] < before_str].tail(limit)
+        if win.empty:
+            return None
+    else:
+        win = win.tail(limit)
+    return win.reset_index(drop=True)
+
+
 # ── fetch_stock_data ──
 
 def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> Optional[pd.DataFrame]:
@@ -1099,10 +1546,23 @@ def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> 
             else:
                 latest_db_date_str = str(db_df["date"].max())[:10]
                 expected_date_str = _expected_latest_trading_day()
-                is_up_to_date = latest_db_date_str >= expected_date_str
+
+                # Coverage MUST be judged on the WHOLE table, not the requested
+                # slice: a bounded 2Y slice is only ~500 rows (always < 2500)
+                # even when the DB holds complete inception history. Judging on
+                # the slice forced a full 730-day Angel refetch on every cold
+                # cache miss (~40s) despite the DB already having everything.
+                is_bounded = period not in ["ALL", "MAX", None, "5Y"]
+                if is_bounded:
+                    full_count, full_latest = get_history_coverage(ticker)
+                    if full_count <= 0:
+                        full_count, full_latest = len(db_df), latest_db_date_str
+                else:
+                    full_count, full_latest = len(db_df), latest_db_date_str
+                is_up_to_date = (full_latest or "") >= expected_date_str
 
                 # Check if full inception backfill has been performed
-                has_full_history = (ticker in _full_backfill_done) or (len(db_df) >= 2500)
+                has_full_history = (ticker in _full_backfill_done) or (full_count >= 2500)
 
                 if has_full_history:
                     if is_up_to_date:
@@ -1128,7 +1588,12 @@ def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d") -> 
                                 recent_df = recent_df[dt_raw.dt.dayofweek < 5].copy()
                                 recent_df["date"] = pd.to_datetime(recent_df["date"], format='mixed', errors='coerce').dt.strftime("%Y-%m-%d")
                                 save_historical_prices(ticker, recent_df)
-                                updated_df = get_historical_prices(ticker)
+                                # Re-apply the requested window: a bounded request
+                                # must never return/cache the full table.
+                                if is_bounded:
+                                    updated_df = get_historical_prices(ticker, fromdate_str, todate_str)
+                                else:
+                                    updated_df = get_historical_prices(ticker)
                                 if updated_df is not None and not updated_df.empty:
                                     updated_df.attrs["data_source"] = "angel_one"
                                     _set_cached(cache_key, updated_df)

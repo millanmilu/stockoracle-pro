@@ -585,7 +585,10 @@ def delete_user_screen_endpoint(
 def get_screener_overview_endpoint():
     """Institutional overview: clickable cards, market breadth, sector rotation.
 
-    All counts are derived from real screener_daily_metrics rows.
+    All counts are derived from real screener_daily_metrics rows, plus an
+    explicit ``coverage`` breakdown and a ``stale`` flag so the UI can tell
+    "no data for this stock" apart from "your filter matched nothing" — and can
+    admit when the whole table predates the last scheduled refresh.
     """
     from backend.data.database import get_screener_overview_stats
     from backend.data.fetcher import get_session_status
@@ -600,6 +603,18 @@ def get_screener_overview_endpoint():
         stats["feed_live"] = bool(get_session_status())
     except Exception:
         stats["feed_live"] = False
+    try:
+        from backend.research.screener_pipeline import (
+            expected_last_screener_refresh,
+            screener_metrics_are_stale,
+        )
+        stats["expected_refresh_date"] = expected_last_screener_refresh()
+        # Judged on the median covered row, not the newest one — a single
+        # freshly rewritten row must not declare the whole table current.
+        stats["stale"] = screener_metrics_are_stale(stats.get("metrics_as_of"))
+    except Exception:
+        stats["expected_refresh_date"] = None
+        stats["stale"] = None
     return stats
 
 

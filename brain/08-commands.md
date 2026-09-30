@@ -16,7 +16,7 @@ python main.py --mode worker                       # celery worker
 python verify_terminal.py                          # EC2 integration check
 ```
 
-## Tests (19 files in tests/)
+## Tests (20 files in tests/)
 ```bash
 venv/bin/pytest tests/ -q
 venv/bin/pytest tests/test_data_invariants.py tests/test_database_invariants.py -v  # invariants
@@ -24,19 +24,19 @@ venv/bin/pytest tests/test_ws_broadcast_fallback.py tests/test_indicators.py -v
 ```
 
 ## Frontend tests (JS — CI me NAHI chalte)
-<!-- check: frontend_tests=7 -->
+<!-- check: frontend_tests=8 -->
 ```bash
 cd frontend && npm test        # = node --test src/utils/*.test.js
 ```
-- **7 `*.test.js` files**, sab `src/utils/` me — glob `package.json` me `src/utils/*.test.js` hai,
+- **8 `*.test.js` files**, sab `src/utils/` me — glob `package.json` me `src/utils/*.test.js` hai,
 isliye test wahi rakho, warna chala hi nahi.
-- Indicator/AI engine tests: `aiIndicatorEngine.test.js`, `indicatorEngine.test.js`, `aiSignalEngine.test.js` (+ `chartHelpers`, `volumeProfile`, `drawingGeometry`, `watchlist`).
+- Indicator/AI engine tests: `aiIndicatorEngine.test.js`, `indicatorEngine.test.js`, `aiSignalEngine.test.js` (+ `chartHelpers`, `volumeProfile`, `drawingGeometry`, `watchlist`, `timeframeQuickSwitch`).
 - CI ka `frontend-ci` job sirf `npm run build` chalata hai — **`npm test` nahi**. Isliye JS unit tests
   locally chalana zaroori hai, warna red test chup-chaap commit ho jayega.
 
 ## Brain checker
 ```bash
-python3 scripts/check_brain.py            # paths + counts verify (CI invariants job me bhi chalta hai)
+python3 scripts/check_brain.py            # paths + counts + screener honesty probes (CI invariants job me chalta hai)
 python3 scripts/check_brain.py --strict   # line-count drift pe bhi fail (default 10% tolerance)
 ```
 `brain/*.md` ke saare backtick paths + tree paths exist karte hain ya nahi, ye check hota hai.

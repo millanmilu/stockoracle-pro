@@ -532,7 +532,23 @@ def _fetch_yfinance_deep(ticker: str) -> Dict[str, Any]:
 
 
 def _fetch_universe_fallback(ticker: str) -> Dict[str, Any]:
-    """Provides resilient database/universe fallback when Screener.in and Yahoo Finance are unreachable."""
+    """Reference-row baseline used when Screener.in and Yahoo are unreachable.
+
+    Returns ONLY fields the curated reference row actually carries — identity,
+    sector, price, ratios, market cap — and **never synthesises financial
+    statements**.
+
+    It used to invent a 5-year P&L, four quarters, a balance sheet, a cash-flow
+    statement and a shareholding pattern (the last with the *same* promoter/FII/
+    DII/public split for every company), derived from a hardcoded 12%/14% growth
+    default and a ₹100,000 revenue fallback — while the profile still advertised
+    itself as "Verified". The invented series then fed the CAGR block below, so
+    `ratios_cagr` was computed from fabricated inputs and looked authoritative.
+
+    Invented statements are worse than absent ones: the UI renders an empty
+    statement as an honest gap, but a fabricated one reads as fact. Callers must
+    treat this as a reference baseline, never as audited statements.
+    """
     t = (ticker or "").upper().strip()
     try:
         from backend.data.seed_screener_metrics import MASTER_NSE_UNIVERSE
@@ -550,93 +566,75 @@ def _fetch_universe_fallback(ticker: str) -> Dict[str, Any]:
     pe = match.get("pe_ratio")
     pb = match.get("pb_ratio")
     mcap_cr = match.get("market_cap_cr")
+    # EPS/PBV are exact rearrangements of a real price and a real multiple, not
+    # invented observations.
     eps = round(cmp_val / pe, 2) if (cmp_val and pe and pe > 0) else None
     bvps = round(cmp_val / pb, 2) if (cmp_val and pb and pb > 0) else None
 
-    # Baseline multi-year financial statements for universe stocks
-    rev_base = round(mcap_cr / max(0.5, (pe or 15) * 0.15), 1) if mcap_cr else 100000.0
-    pat_base = round(mcap_cr / (pe or 20), 1) if mcap_cr else 5000.0
-    s_growth = (match.get("sales_growth_3y") or 12.0) / 100.0
-    p_growth = (match.get("profit_growth_3y") or 14.0) / 100.0
-
-    annual_pl = []
-    for i in range(5, 0, -1):
-        factor_s = max(0.4, 1.0 - s_growth * i)
-        factor_p = max(0.3, 1.0 - p_growth * i)
-        yr_sales = round(rev_base * factor_s, 1)
-        yr_pat = round(pat_base * factor_p, 1)
-        yr_ebit = round(yr_pat * 1.45, 1)
-        annual_pl.append({
-            "period": f"Mar {2026 - i}",
-            "Sales": yr_sales,
-            "Expenses": round(yr_sales - yr_ebit, 1),
-            "Operating Profit": yr_ebit,
-            "OPM %": round((yr_ebit / max(1.0, yr_sales)) * 100.0, 1),
-            "Net Profit": yr_pat,
-            "EPS in Rs": round((eps or 30.0) * factor_p, 2),
-            "Dividend Payout %": 18.0,
-        })
-
-    quarterly_results = []
-    for q_idx, q_label in enumerate(["Jun 2025", "Sep 2025", "Dec 2025", "Mar 2026"]):
-        q_s = round(rev_base * 0.25 * (1.0 + 0.02 * q_idx), 1)
-        q_p = round(pat_base * 0.25 * (1.0 + 0.03 * q_idx), 1)
-        quarterly_results.append({
-            "period": q_label,
-            "revenue": q_s,
-            "net_profit": q_p,
-            "eps": round((eps or 30.0) * 0.25 * (1.0 + 0.03 * q_idx), 2),
-            "OPM %": round((q_p * 1.45 / max(1.0, q_s)) * 100.0, 1),
-        })
-
-    shareholding = [
-        {"quarter": "Jun 2025", "promoter": 50.3, "fii": 21.6, "dii": 16.2, "public": 11.9},
-        {"quarter": "Sep 2025", "promoter": 50.3, "fii": 21.7, "dii": 16.4, "public": 11.6},
-        {"quarter": "Dec 2025", "promoter": 50.3, "fii": 21.9, "dii": 16.5, "public": 11.3},
-        {"quarter": "Mar 2026", "promoter": 50.3, "fii": 22.1, "dii": 16.5, "public": 11.1},
-    ]
-
-    peers = _sector_peers_from_universe(t)
+    try:
+        peers = _sector_peers_from_universe(t)
+    except Exception as exc:
+        logger.debug("Sector peers fallback failed for %s: %s", t, exc)
+        peers = []
 
     return {
         "name": name,
         "sector": sector,
-        "about": f"{name} ({t}) is a prominent constituent of the National Stock Exchange (NSE) indexed universe.",
-        "annual_pl": annual_pl,
-        "quarterly_results": quarterly_results,
-        "balance_sheet": [
-            {
-                "period": "Mar 2026",
-                "Equity Capital": round(mcap_cr * 0.02, 1) if mcap_cr else 3000.0,
-                "Reserves": round(mcap_cr * 0.45, 1) if mcap_cr else 70000.0,
-                "Borrowings": round((mcap_cr * 0.47) * (match.get("debt_to_equity") or 0.4), 1) if mcap_cr else 30000.0,
-                "Other Liabilities": round(mcap_cr * 0.15, 1) if mcap_cr else 20000.0,
-                "Total Liabilities": round(mcap_cr * 0.8, 1) if mcap_cr else 120000.0,
-                "Fixed Assets": round(mcap_cr * 0.5, 1) if mcap_cr else 75000.0,
-                "Total Assets": round(mcap_cr * 0.8, 1) if mcap_cr else 120000.0,
-            }
-        ],
-        "cash_flow": [
-            {
-                "period": "Mar 2026",
-                "Cash from Operating Activity": round(pat_base * 1.25, 1),
-                "Cash from Investing Activity": round(-pat_base * 0.75, 1),
-                "Cash from Financing Activity": round(-pat_base * 0.35, 1),
-                "Net Cash Flow": round(pat_base * 0.15, 1),
-            }
-        ],
-        "shareholding": shareholding,
+        "about": (
+            f"{name} ({t}) is a constituent of the National Stock Exchange (NSE) "
+            "tracked universe. Verified statements are unavailable right now."
+        ),
+        # Explicitly empty — the UI must show "no statements" rather than read
+        # fabricated numbers as fact.
+        "annual_pl": [],
+        "quarterly_results": [],
+        "balance_sheet": [],
+        "cash_flow": [],
+        "shareholding": [],
         "peers": peers,
         "cmp": cmp_val,
         "eps": eps,
         "book_value": bvps,
         "mcap_cr": mcap_cr,
+        "market_cap_cr": mcap_cr,
         "pe_ratio": pe,
         "pb_ratio": pb,
         "roce": match.get("roce_pct"),
         "roe": match.get("roe_pct"),
         "debt_to_equity": match.get("debt_to_equity"),
     }
+
+
+def _finalize_freshness_status(data: Dict[str, Any]) -> None:
+    """Sets ``data_freshness.status`` from what the payload ACTUALLY contains.
+
+    "Verified" must mean verified — Screener.in statements were parsed. A profile
+    with no statements (or one stitched together from the reference baseline)
+    previously kept the verified label and, at one merge site, still pointed
+    ``data_source`` at "Screener.in Consolidated + NSE Real-Time" while most of
+    the payload was invented.
+    """
+    fresh = data.setdefault("data_freshness", {})
+    source = str(fresh.get("data_source") or "")
+    has_pl = bool(data.get("annual_pl"))
+    has_bs = bool(data.get("balance_sheet"))
+    has_sh = bool(data.get("shareholding"))
+
+    if has_pl and has_bs and "Screener" in source:
+        fresh["status"] = "Verified"
+    elif has_pl or has_bs or has_sh:
+        fresh["status"] = "Partial"
+    else:
+        fresh["status"] = "No verified statements"
+
+    # Ratios without statements are still useful, but the reader must know that
+    # growth/CAGR figures are absent rather than zero.
+    cagr = data.get("ratios_cagr") or {}
+    growth = (cagr.get("sales_growth") or {}).get("3y")
+    if growth is None and not has_pl:
+        fresh["statements_available"] = False
+    else:
+        fresh["statements_available"] = has_pl
 
 
 def get_deep_financials(ticker: str) -> Dict[str, Any]:
@@ -658,10 +656,16 @@ def get_deep_financials(ticker: str) -> Dict[str, Any]:
         "name": ticker,
         "sector": "General",
         "about": f"{ticker} is a publicly traded entity listed on the National Stock Exchange of India (NSE).",
+        # Neutral defaults. This profile is the floor every code path starts
+        # from, so it must not claim verification before anything was parsed —
+        # it used to ship "status": "Verified" and a Screener.in source label
+        # even when the payload was empty or assembled from the reference
+        # baseline. `_finalize_freshness_status` sets the real values from what
+        # the payload actually contains.
         "data_freshness": {
             "last_updated": now_str,
-            "data_source": "Screener.in Consolidated + NSE Real-Time",
-            "status": "Verified",
+            "data_source": "Unavailable",
+            "status": "Unverified",
         },
         "quarterly_results": [],
         "annual_pl": [],
@@ -701,6 +705,10 @@ def get_deep_financials(ticker: str) -> Dict[str, Any]:
 
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
+            # The page loaded, so Screener.in is the source — but whether the
+            # statements below actually parsed is decided by
+            # `_finalize_freshness_status` at the end, not here.
+            data["data_freshness"]["data_source"] = "Screener.in Consolidated (live scrape)"
 
             h1 = soup.find("h1")
             if h1:
@@ -989,9 +997,13 @@ def get_deep_financials(ticker: str) -> Dict[str, Any]:
                 uni_fallback = _fetch_universe_fallback(ticker)
                 if uni_fallback:
                     for k, v in uni_fallback.items():
+                        # Only fill genuine gaps; empty statement lists stay empty
+                        # so nothing invented can reach the CAGR block below.
                         if not data.get(k) and v:
                             data[k] = v
-                    data["data_freshness"]["data_source"] = "StockOracle Precomputed Database (Resilient Fallback)"
+                    data["data_freshness"]["data_source"] = (
+                        "StockOracle reference baseline (no verified statements)"
+                    )
 
         # ── 2. Pure Dynamic CAGR Calculations (No Hardcoded Mock Numbers) ──
         annual_pl = data.get("annual_pl", [])
@@ -1149,6 +1161,7 @@ def get_deep_financials(ticker: str) -> Dict[str, Any]:
             cmp=cmp,
         )
 
+        _finalize_freshness_status(data)
         cache_set(cache_key, data, ttl_seconds=_CACHE_TTL)
         return data
 
@@ -1169,7 +1182,9 @@ def get_deep_financials(ticker: str) -> Dict[str, Any]:
                 for k, v in uni_fallback.items():
                     if not data.get(k) and v:
                         data[k] = v
-                data["data_freshness"]["data_source"] = "StockOracle Precomputed Database (Resilient Fallback)"
+                data["data_freshness"]["data_source"] = (
+                    "StockOracle reference baseline (no verified statements)"
+                )
 
         # Calculate CAGRs, Piotroski, Altman, and DCF if statements are present
         annual_pl = data.get("annual_pl", [])
@@ -1212,6 +1227,7 @@ def get_deep_financials(ticker: str) -> Dict[str, Any]:
             cmp=cmp_val,
         )
 
+        _finalize_freshness_status(data)
         cache_set(cache_key, data, ttl_seconds=_CACHE_TTL if data.get("annual_pl") else 600)
         return data
 

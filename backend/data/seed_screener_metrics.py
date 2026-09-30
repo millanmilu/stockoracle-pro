@@ -619,10 +619,16 @@ SYMBOL_MIGRATIONS = {
 
 def seed_screener_metrics_table():
     """Seeds the screener_daily_metrics table with top liquid + small-cap NSE stocks.
-    Preserves existing rows that already have verified technical indicators so static
-    seed numbers never overwrite real calculations.
+
+    Preserves any existing row that already carries real computed data so static
+    seed numbers never overwrite real calculations. "Real data" is detected by
+    **either** an EMA (the institutional indicator set) **or** a price — the
+    price term matters because a row computed before the EMA extension carried
+    technicals but no EMA, so it used to be re-seeded (and re-stamped as freshly
+    updated) on every run. Only genuinely empty placeholder rows are refreshed,
+    which is also the only case where re-writing the curated market cap helps.
     """
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
     from backend.shared.database import get_db_session
     from backend.shared.models import ScreenerDailyMetric
 
@@ -630,7 +636,12 @@ def seed_screener_metrics_table():
     try:
         with get_db_session() as session:
             rows = session.execute(
-                select(ScreenerDailyMetric.ticker).where(ScreenerDailyMetric.ema_50.isnot(None))
+                select(ScreenerDailyMetric.ticker).where(
+                    or_(
+                        ScreenerDailyMetric.ema_50.isnot(None),
+                        ScreenerDailyMetric.close_price.isnot(None),
+                    )
+                )
             ).all()
             existing_enriched = {str(r[0]).upper().strip() for r in rows}
     except Exception as exc:
@@ -643,7 +654,7 @@ def seed_screener_metrics_table():
             continue
         upsert_screener_daily_metric(s)
         seeded += 1
-    logger.info("Seeded %d stocks into screener_daily_metrics (%d preserved with live indicators).",
+    logger.info("Seeded %d stocks into screener_daily_metrics (%d preserved with real data).",
                 seeded, len(existing_enriched))
 
 

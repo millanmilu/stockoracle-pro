@@ -42,7 +42,8 @@
 - `GET /api/stock/{s}/explain`, `/shap-drivers`
 - `POST /api/train/{t}?epochs` → task_id (Celery ya background)
 - `GET /api/task/{task_id}`, `/api/models/registry?ticker`
-- `GET /api/stock/{t}/backtest?strategy&...` (6 strategies + risk params)
+- `GET /api/stock/{t}/backtest?strategy&...` (6 builtin + custom registry strategies + risk params)
+- `GET /api/backtest/strategies` → builtin + custom list (BacktestPanel dropdown merge)
 - `GET /api/stock/{t}/ai-consensus`, `/ml/benchmark/{t}`, `/stock/{t}/forecast-bands`
 
 ## AI Chat (`ai_chat.py` /api, auth)

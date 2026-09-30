@@ -102,15 +102,10 @@ def compute_metrics_from_ohlcv(ticker: str, df: pd.DataFrame, meta: Optional[Dic
     debt_eq = meta.get("debt_to_equity")
     market_cap_cr = meta.get("market_cap_cr")
 
-    # Market cap categorization (NULL when market cap unknown)
-    if market_cap_cr is None:
-        market_cap_cat = None
-    elif market_cap_cr >= 50000.0:
-        market_cap_cat = "LARGE"
-    elif market_cap_cr >= 10000.0:
-        market_cap_cat = "MID"
-    else:
-        market_cap_cat = "SMALL"
+    # Market cap categorization (NULL when market cap unknown). Thresholds live
+    # in one shared helper so the backfill cannot label a row differently.
+    from backend.research.screener_engines import market_cap_category
+    market_cap_cat = market_cap_category(market_cap_cr)
 
     # ── Institutional layered engines (all deterministic, real-data only) ──
     # Base row keeps legacy behaviour; engines enrich with traceable metrics.
@@ -201,8 +196,12 @@ def compute_metrics_from_ohlcv(ticker: str, df: pd.DataFrame, meta: Optional[Dic
     base = {
         "ticker": ticker,
         "name": company_info.get("name") or company_info.get("companyName") or meta.get("name", ticker),
-        "sector": meta.get("sector", "Diversified"),
-        "industry": meta.get("industry", "General"),
+        # No fabricated taxonomy. "Diversified"/"General" used to be written for
+        # every ticker without curated meta, and "Diversified" then became the
+        # largest "sector" in the rotation chart (382 of 633 rows) while mixing
+        # Auto, Pharma, IT and Consumer together. Unknown stays unknown.
+        "sector": meta.get("sector"),
+        "industry": meta.get("industry"),
         "market_cap_cr": market_cap_cr,
         "market_cap_cat": market_cap_cat,
         "close_price": curr_close,
@@ -231,7 +230,9 @@ def compute_metrics_from_ohlcv(ticker: str, df: pd.DataFrame, meta: Optional[Dic
         "ai_consensus_score": round(float(ai_score), 1),
         "ai_signal": ai_sig,
         "ai_confidence_score": round(float(ai_conf), 1),
-        "data_status": "OK",
+        # data_status is NOT set here. It is derived from the row's real coverage
+        # at write time (derive_screener_data_status) so a row can never claim
+        # "OK" while missing its price or core indicators.
     }
     # Extended institutional metrics (None-safe; DB upsert ignores Nones)
     try:
@@ -430,7 +431,14 @@ def refresh_screener_metrics_from_market() -> Dict[str, Any]:
                 if c_info and (c_info.get("price") or c_info.get("current_price")):
                     item_copy = dict(item)
                     item_copy["close_price"] = float(c_info.get("price") or c_info.get("current_price"))
-                    item_copy["change_1d_pct"] = float(c_info.get("change_pct") or c_info.get("changePercent") or item.get("change_1d_pct") or 0.0)
+                    # Only copy a change through when the provider actually
+                    # reports one. Defaulting to 0.0 fabricated a flat day and
+                    # made the row count as "unchanged" in market breadth.
+                    _chg = c_info.get("change_pct") or c_info.get("changePercent")
+                    if _chg is None:
+                        _chg = item.get("change_1d_pct")
+                    if _chg is not None:
+                        item_copy["change_1d_pct"] = float(_chg)
                     upsert_screener_daily_metric(item_copy)
                     updated_count += 1
                 else:
@@ -478,6 +486,42 @@ def next_screener_refresh_delay_seconds(now: Optional[datetime] = None) -> float
     while candidate.weekday() >= 5:  # Saturday/Sunday — market closed
         candidate += timedelta(days=1)
     return max(60.0, (candidate - now).total_seconds())
+
+
+def expected_last_screener_refresh(now: Optional[datetime] = None) -> str:
+    """Date (YYYY-MM-DD, IST) of the most recent scheduled screener refresh.
+
+    The daemon fires at 16:15 IST on weekdays. "Most recent" = today if that
+    moment has already passed, otherwise the previous weekday. Used to judge
+    whether the stored metrics are older than they should be.
+    """
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo("Asia/Kolkata")
+    if now is None:
+        now = datetime.now(tz)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=tz)
+    else:
+        now = now.astimezone(tz)
+    candidate = now.replace(hour=SCREENER_REFRESH_HOUR_IST, minute=SCREENER_REFRESH_MINUTE_IST,
+                            second=0, microsecond=0)
+    if candidate > now:
+        candidate -= timedelta(days=1)
+    while candidate.weekday() >= 5:  # Saturday/Sunday — market closed
+        candidate -= timedelta(days=1)
+    return candidate.date().isoformat()
+
+
+def screener_metrics_are_stale(latest_updated_at: Optional[str], now: Optional[datetime] = None) -> bool:
+    """True when the newest stored metric predates the last scheduled refresh.
+
+    Without this the screener happily presents multi-day-old prices as current;
+    the header showed a request-time timestamp while the data itself was five
+    days old.
+    """
+    if not latest_updated_at:
+        return True
+    return str(latest_updated_at)[:10] < expected_last_screener_refresh(now)
 
 
 async def run_screener_refresh_loop():

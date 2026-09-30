@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, Response
 from backend.data.fetcher import (
     fetch_stock_data, fetch_company_info, get_session_status,
     search_nse_stocks, get_token_info, get_combined_stock_data,
-    preload_all_stock_timeframes
+    preload_all_stock_timeframes, fetch_history_window, cursor_chunk_limit
 )
 from backend.analysis.indicators import enrich_stock_dataframe, evaluate_custom_formula
 from pydantic import BaseModel, Field
@@ -140,11 +140,17 @@ def _trim_and_round(df, full: bool):
     # Replace ±Inf with NaN first, then sanitize every value to JSON-safe types
     try:
         df = df.replace([np.inf, -np.inf], np.nan)
+        df = df.astype(object).where(pd.notnull(df), None)
     except Exception:
         pass
     records = df.to_dict(orient="records")
     for row in records:
-        for k, v in list(row.items()):
+        for k, v in row.items():
+            if v is None:
+                continue
+            tv = type(v)
+            if tv in (float, int, str, bool):
+                continue
             row[k] = _sanitize_json_value(v)
     return records
 
@@ -169,6 +175,9 @@ def get_stock_history(
     timeframe: Optional[str] = None,
     interval: str = "1d",
     full: bool = False,
+    before: Optional[str] = None,
+    limit: Optional[int] = None,
+    slim: bool = False,
 ):
     """
     Fetches historical OHLCV data with technical indicators.
@@ -179,6 +188,13 @@ def get_stock_history(
     (~7.5k rows / ~10 MB inflated JSON with the default 71 chart columns — prefer a bounded
     timeframe such as 2Y/6M/1M/5D for chart loads).
     Pass ?full=true to receive all enriched columns instead of the default 71 chart columns.
+
+    Cursor pagination for chart left-pan backfill: pass ?before=<epoch seconds |
+    IST 'YYYY-MM-DD[ HH:MM:SS]'> (exclusive upper bound = oldest loaded candle)
+    with optional ?limit=<candles> (timeframe-aware default when omitted:
+    1s→300, 30s→500, 1m/5m→3000, 15m/30m/1h→2000, 4h→1500, 1d→1000).
+    Returns ONLY the older window (oldest-first, never merged with the live
+    edge) plus has_more; an empty data list means no older candles exist.
     """
     t = ticker.upper().strip()
 
@@ -195,6 +211,26 @@ def get_stock_history(
         "3M": "120D", "6M": "200D", "1Y": "370D", "2Y": "2Y", "5Y": "5Y",
         "ALL": "ALL", "MAX": "ALL",
     }
+    # Cursor path: strictly-older window for left-pan backfill (never the live edge).
+    if before is not None:
+        want = cursor_chunk_limit(iv, limit)
+        window_df = fetch_history_window(t, interval=iv, before=before, limit=want)
+        if window_df is None or window_df.empty:
+            return JSONResponse(
+                content={"data": [], "data_source": "none", "has_more": False},
+                headers={"X-Data-Source": "none", "Cache-Control": "max-age=60, stale-while-revalidate=30"},
+            )
+        data_source = window_df.attrs.get("data_source", "unknown")
+        enriched_df = enrich_stock_dataframe(window_df, use_cache=True, cache_key=f"{t}:{iv}:cursor:{before}:{want}")
+        records = _trim_and_round(enriched_df, full=full)
+        has_more = len(records) >= want
+        return JSONResponse(
+            content={"data": records, "data_source": data_source, "has_more": has_more},
+            headers={
+                "X-Data-Source": data_source,
+                "Cache-Control": "max-age=60, stale-while-revalidate=30",
+            },
+        )
     if timeframe and timeframe.upper() not in ["ALL", "MAX"]:
         period = days_map.get(timeframe.upper())
         if not period:
@@ -229,6 +265,32 @@ def get_stock_history(
         background_tasks.add_task(preload_all_stock_timeframes, t)
 
     data_source = df.attrs.get("data_source", "unknown")
+
+    # --- Slim fast path (?slim=true): OHLCV-only instant paint ---
+    # Skips enrich_stock_dataframe entirely (saves ~0.4s CPU on large frames)
+    # and ships 6 columns instead of 71 (~10x smaller JSON). The chart paints
+    # candles immediately; the client then re-requests the full frame in the
+    # background for indicator columns. Never touches the enrich LRU cache
+    # (keyed per full frame) and never serves indicator consumers — callers
+    # must treat slim rows as candle geometry only.
+    if slim:
+        slim_cols = ["date", "open", "high", "low", "close", "volume"]
+        slim_df = df[[c for c in slim_cols if c in df.columns]].copy()
+        last_date = str(slim_df["date"].max()) if not slim_df.empty else "none"
+        etag_val = hashlib.md5(f"{t}:{iv}:{period}:{last_date}:slim".encode()).hexdigest()[:16]
+        client_etag = request.headers.get("if-none-match", "")
+        if client_etag == f'"{etag_val}"':
+            return Response(status_code=304, headers={"ETag": f'"{etag_val}"'})
+        records = _trim_and_round(slim_df, full=False)
+        return JSONResponse(
+            content={"data": records, "data_source": data_source, "slim": True},
+            headers={
+                "X-Data-Source": data_source,
+                "ETag": f'"{etag_val}"',
+                "Cache-Control": "max-age=60, stale-while-revalidate=30",
+            },
+        )
+
     enriched_df = enrich_stock_dataframe(df, use_cache=True, cache_key=f"{t}:{iv}:{period}")
 
     # --- HTTP Caching: ETag + Cache-Control ---

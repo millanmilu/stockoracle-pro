@@ -73,7 +73,17 @@ def compute_market_heatmap_data(
     if universe_clean == "ALL NSE":
         universe_clean = "ALL"
 
-    valid_tickers = INDEX_CONSTITUENTS.get(universe_clean)
+    # Official NSE membership (backend/data/index_constituents.py) — the local
+    # INDEX_CONSTITUENTS below only covers 10 legacy index ids and is fallback.
+    # Without this, NIFTY MIDCAP/SMALLCAP/500/200/100 silently returned ALL.
+    valid_tickers = None
+    try:
+        from backend.data.index_constituents import resolve_universe as _resolve_universe
+        valid_tickers = _resolve_universe(universe_clean)
+    except Exception as exc:
+        logger.debug("Official universe resolve failed for %s: %s", universe, exc)
+    if valid_tickers is None and universe_clean not in ("ALL", ""):
+        valid_tickers = INDEX_CONSTITUENTS.get(universe_clean)
 
     with get_db_session() as session:
         stmt = select(ScreenerDailyMetric)
@@ -87,18 +97,27 @@ def compute_market_heatmap_data(
             "sector": m.sector,
             "close_price": m.close_price,
             "change_1d_pct": m.change_1d_pct,
+            "change_1w_pct": m.change_1w_pct,
+            "change_1m_pct": m.change_1m_pct,
+            "change_1y_pct": m.change_1y_pct,
             "market_cap_cr": m.market_cap_cr,
             "pe_ratio": m.pe_ratio,
             "pb_ratio": m.pb_ratio,
+            "roce_pct": m.roce_pct,
+            "roe_pct": m.roe_pct,
+            "debt_to_equity": m.debt_to_equity,
             "dividend_yield": None,
             "rsi_14": m.rsi_14,
             "sma_20": m.sma_20,
             "sma_50": m.sma_50,
             "sma_200": m.sma_200,
             "volume_vs_avg_pct": m.volume_ratio_20d,
+            "volume_ratio_20d": m.volume_ratio_20d,
             "macd_signal_cross": m.macd_signal,
             "distance_52w_high_pct": m.distance_52w_high_pct,
             "distance_52w_low_pct": m.distance_52w_low_pct,
+            "ai_consensus_score": m.ai_consensus_score,
+            "ai_signal": m.ai_signal,
         } for m in metric_objs]
 
     # If database is empty, return structured fallback
@@ -147,8 +166,11 @@ def compute_market_heatmap_data(
         else:
             mcap_tier = 1  # Standard Cap
 
-        # Determine metric value
-        metric_val = float(s.get(metric) if s.get(metric) is not None else s.get("change_1d_pct", 0.0))
+        # Determine metric value — None-safe (200/633 rows lack technicals).
+        # Missing metric falls back to the 1D change for tile coloring;
+        # drawer/tooltip fields below stay None so UI shows '—', never fake.
+        raw_metric = s.get(metric)
+        metric_val = float(raw_metric) if raw_metric is not None else chg
 
         if chg > 0.05:
             sector_map[sec]["advancers"] += 1
@@ -165,22 +187,24 @@ def compute_market_heatmap_data(
             "price": float(s.get("close_price") or 0.0),
             "change_pct": chg,
             "change_1d_pct": chg,
-            "change_1w_pct": float(s.get("change_1w_pct") or 0.0),
-            "change_1m_pct": float(s.get("change_1m_pct") or 0.0),
-            "change_1y_pct": float(s.get("change_1y_pct") or 0.0),
-            "rsi_14": float(s.get("rsi_14") or 50.0),
-            "volume_ratio_20d": float(s.get("volume_ratio_20d") or 1.0),
-            "pe_ratio": float(s.get("pe_ratio") or 20.0),
-            "pb_ratio": float(s.get("pb_ratio") or 2.5),
-            "roce_pct": float(s.get("roce_pct") or 15.0),
-            "roe_pct": float(s.get("roe_pct") or 14.0),
-            "debt_to_equity": float(s.get("debt_to_equity") or 0.5),
-            "distance_52w_high_pct": float(s.get("distance_52w_high_pct") or -5.0),
-            "distance_52w_low_pct": float(s.get("distance_52w_low_pct") or 25.0),
+            # Raw passthrough — None stays None so tiles/drawer render '—'
+            # instead of fabricated 0.0/50.0/20.0/15.0 defaults.
+            "change_1w_pct": s.get("change_1w_pct"),
+            "change_1m_pct": s.get("change_1m_pct"),
+            "change_1y_pct": s.get("change_1y_pct"),
+            "rsi_14": s.get("rsi_14"),
+            "volume_ratio_20d": s.get("volume_ratio_20d"),
+            "pe_ratio": s.get("pe_ratio"),
+            "pb_ratio": s.get("pb_ratio"),
+            "roce_pct": s.get("roce_pct"),
+            "roe_pct": s.get("roe_pct"),
+            "debt_to_equity": s.get("debt_to_equity"),
+            "distance_52w_high_pct": s.get("distance_52w_high_pct"),
+            "distance_52w_low_pct": s.get("distance_52w_low_pct"),
             "market_cap_cr": mcap,
             "mcap_tier": mcap_tier,
-            "ai_consensus_score": float(s.get("ai_consensus_score") or 50.0),
-            "ai_signal": s.get("ai_signal") or "NEUTRAL",
+            "ai_consensus_score": s.get("ai_consensus_score"),
+            "ai_signal": s.get("ai_signal"),
             "metric_value": metric_val
         }
         sector_map[sec]["stocks"].append(stock_obj)

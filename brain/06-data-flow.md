@@ -14,20 +14,31 @@ Angel SmartAPI WS / Binance (BTC/XAU)
 ## 2. History (daily) ka safar
 ```
 fetch_stock_data(ticker, period)
-  1. memory cache hit? → return
+  1. memory cache hit? → return (TTL 120s)
   2. SQLite historical_prices (YYYY-MM-DD) → return
+     - full-history/up-to-date ka faisla POORI table pe hota hai
+       (get_history_coverage: COUNT + MAX(date)) — requested slice pe nahi.
+       Bounded 2Y slice (~500 rows) hamesha < 2500 hota, slice pe judge karne
+       se har cold miss pe 730-day Angel refetch ho jata tha (~40s).
   3. Angel One API → save_historical_prices (validate: >0, OHLC, date len 10) → return
   4. stale SQLite fallback → return
-  (synthetic path HATA DIYA — ab 404/503 aayega, fake candle kabhi nahi)
+(synthetic path HATA DIYA — ab 404/503 aayega, fake candle kabhi nahi)
   → get_combined_stock_data(): aaj ka live tick merge (sirf weekday + >=9AM IST)
+  → ?slim=true: enrich SKIP, sirf OHLCV 6 cols (instant paint, ~10x chhota)
   → enrich_stock_dataframe() → 45 indicators
-  → market.py trim → JSON → chart seed
+  → market.py trim (71 _CHART_COLUMNS) → JSON → chart seed
 ```
+Token lookup order (cold start ~38s → ms): `get_token_info` pehle memory map,
+phir stock_universe table (DB), aur sirf aakhir me ScripMaster download karta
+hai. Pehle download first hota tha — har restart ke baad pehla chart load atak jata tha.
 
 ## 3. Intraday ka safar
 ```
 fetch_stock_data(ticker, period, interval=1m/5m/15m/1h)
-  → memory cache `hist_{t}_{p}_{i}` → direct return (SQLite me SAVE NAHI)
+  → memory cache `hist_{t}_{p}_{i}` → direct return (equity intraday SQLite me SAVE NAHI)
+  → Crypto/Gold (24/7): `intraday_candles` table check. Window covered hone par agar
+    stale ho to Binance `startTime` se sirf missing tail candles ka Incremental Fetch (~50ms)
+    hota hai aur fast batch upsert chalta hai (poora 10k bars refetch nahi hota).
   → fill_intraday_time_gaps(): chhote gap flat-fill (prev close, vol 0), bada gap khaali
   → frontend bucketing: activeCandle ya rollover pe nayi candle
 ```

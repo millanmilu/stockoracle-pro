@@ -207,6 +207,11 @@ def get_fundamentals(ticker: str) -> dict:
 
     empty = {
         "ticker": ticker,
+        # Real company name from the Screener.in page. Previously only
+        # `get_deep_financials` extracted it, so rows filled from here kept the
+        # ticker as their display name (the screener table showed "360ONE"
+        # instead of the company).
+        "company_name": None,
         "market_cap": None,
         "market_cap_cr": None,
         "current_price": None,
@@ -251,6 +256,13 @@ def get_fundamentals(ticker: str) -> dict:
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
             data["data_source"] = "Screener.in (Verified Consolidated)"
+
+            h1 = soup.find("h1")
+            if h1:
+                scraped_name = h1.get_text(strip=True)
+                # Guard against a page that echoes the symbol back.
+                if scraped_name and scraped_name.upper() != ticker:
+                    data["company_name"] = scraped_name
 
             # 1. Top ratios
             ratios_list = soup.find("ul", id="top-ratios")

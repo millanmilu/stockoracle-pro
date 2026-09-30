@@ -13,6 +13,8 @@ from backend.data.fundamentals_deep import (
     _calculate_altman_z_score,
     _calculate_intrinsic_dcf,
     _calculate_piotroski_f_score,
+    _fetch_universe_fallback,
+    _finalize_freshness_status,
 )
 
 
@@ -175,3 +177,109 @@ def test_dcf_without_cmp_returns_null_margin_not_fake_verdict():
     no_eps = _calculate_intrinsic_dcf("TEST", annual, [], eps=None, bvps=None, cmp=1500.0)
     assert no_eps["dcf_fair_value"] is None
     assert no_eps["valuation_verdict"] == "INSUFFICIENT DATA"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fundamentals deep — reference baseline must never invent financial statements
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _a_universe_ticker():
+    """First curated reference row, or None when the universe seed is empty."""
+    from backend.data.seed_screener_metrics import MASTER_NSE_UNIVERSE
+    for row in (MASTER_NSE_UNIVERSE or []):
+        ticker = str(row.get("ticker", "")).upper().strip()
+        if ticker:
+            return ticker
+    return None
+
+
+def test_universe_fallback_never_fabricates_statements():
+    """The resilience baseline used to invent a 5-year P&L, four quarters, a
+    balance sheet, a cash-flow statement and a shareholding pattern — all from
+    hardcoded growth defaults — and the profile still said "Verified".
+
+    Absent statements must stay absent: the UI renders a gap honestly, but a
+    fabricated series reads as fact and even fed the CAGR block.
+    """
+    ticker = _a_universe_ticker()
+    if not ticker:
+        pytest.skip("curated universe seed is empty")
+
+    profile = _fetch_universe_fallback(ticker)
+    assert profile, "a ticker from the curated universe must resolve"
+
+    for field in ("annual_pl", "quarterly_results", "balance_sheet",
+                  "cash_flow", "shareholding"):
+        assert profile[field] == [], (
+            f"reference baseline fabricated {field!r}; absent statements must stay absent"
+        )
+
+
+def test_universe_fallback_keeps_only_reference_fields():
+    """Identity/ratios/price are real reference-row values and must survive."""
+    ticker = _a_universe_ticker()
+    if not ticker:
+        pytest.skip("curated universe seed is empty")
+
+    profile = _fetch_universe_fallback(ticker)
+    assert profile.get("name")
+    # The blurb must admit the gap instead of presenting the row as a full profile.
+    assert "unavailable" in profile["about"].lower()
+
+    for field in ("annual_pl", "quarterly_results", "balance_sheet",
+                  "cash_flow", "shareholding"):
+        assert profile[field] == []
+
+    # EPS is an exact rearrangement of a real price and a real multiple, not an
+    # invented observation — so when both exist the identity must hold.
+    cmp_val, pe = profile.get("cmp"), profile.get("pe_ratio")
+    if cmp_val and pe and pe > 0:
+        assert profile["eps"] == pytest.approx(round(cmp_val / pe, 2))
+
+
+def test_unknown_ticker_yields_no_reference_profile():
+    assert _fetch_universe_fallback("ZZZZZZ") == {}
+
+
+@pytest.mark.parametrize("payload,expected_verified", [
+    ({"data_freshness": {"data_source": "Screener.in Consolidated (live scrape)"},
+      "annual_pl": [{"Sales": 1.0}], "balance_sheet": [{"Assets": 1.0}],
+      "shareholding": [{"quarter": "Mar 2026"}]}, True),
+    # A 200 response whose tables did not parse is NOT verified.
+    ({"data_freshness": {"data_source": "Screener.in Consolidated (live scrape)"},
+      "annual_pl": [], "balance_sheet": [], "shareholding": []}, False),
+    ({"data_freshness": {"data_source": "StockOracle reference baseline (no verified statements)"},
+      "annual_pl": [], "balance_sheet": [], "shareholding": []}, False),
+    ({"data_freshness": {"data_source": "Unavailable"},
+      "annual_pl": [], "balance_sheet": [], "shareholding": []}, False),
+])
+def test_freshness_status_is_derived_not_claimed(payload, expected_verified):
+    """"Verified" must mean statements were actually parsed — the floor profile
+    shipped status="Verified" before anything had been fetched, and the fallback
+    merge sites left that label in place while most of the payload was invented."""
+    _finalize_freshness_status(payload)
+    fresh = payload["data_freshness"]
+    assert (fresh["status"] == "Verified") is expected_verified
+    assert fresh["statements_available"] is expected_verified
+
+
+def test_baseline_fallback_reports_no_verified_statements():
+    """End-to-end shape of the fallback: reference identity + honest freshness."""
+    ticker = _a_universe_ticker()
+    if not ticker:
+        pytest.skip("curated universe seed is empty")
+
+    payload = {
+        "data_freshness": {
+            "data_source": "StockOracle reference baseline (no verified statements)"
+        },
+        "annual_pl": [],
+        "balance_sheet": [],
+        "shareholding": [],
+    }
+    payload.update(_fetch_universe_fallback(ticker))
+    _finalize_freshness_status(payload)
+
+    assert payload["data_freshness"]["status"] == "No verified statements"
+    assert "Verified" not in payload["data_freshness"]["data_source"]
+    assert payload["annual_pl"] == []

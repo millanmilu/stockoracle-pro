@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Security
 from backend.shared.security import verify_api_key
 
 from backend.data.fetcher import fetch_stock_data, get_session_status
-from backend.analysis.backtester import run_backtest
+from backend.analysis.backtester import run_backtest, list_strategies
 from backend.services.ai_consensus import compute_ai_consensus
 from backend.api._guards import require_real_data
 
@@ -138,8 +138,9 @@ def get_stock_backtest(
     commission_bps: float = 5.0,
 ):
     """
-    Runs an institutional out-of-sample walk-forward backtest across 6 quantitative strategies.
-    Supports AI ML Ensemble, EMA Golden Cross, RSI+BB Mean Reversion, 20D Breakout, MACD, and Supertrend.
+    Runs an institutional out-of-sample walk-forward backtest across 6 builtin
+    quantitative strategies + any custom strategies registered via
+    `backend/analysis/custom_strategies.py` (@register_strategy / @register_exit).
     All risk & execution parameters are configurable with zero look-ahead bias.
     """
     t = ticker.upper().strip()
@@ -175,6 +176,13 @@ def get_stock_backtest(
     if "error" in res:
         raise HTTPException(status_code=400, detail=res["error"])
     return res
+
+
+
+@router.get("/backtest/strategies")
+def list_backtest_strategies():
+    """Builtin + custom backtest strategies ki list (BacktestPanel dropdown ke liye)."""
+    return {"strategies": list_strategies()}
 
 
 

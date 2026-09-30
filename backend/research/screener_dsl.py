@@ -112,6 +112,26 @@ FIELD_MAP = {
     "sentiment": "sentiment_score", "sentiment_score": "sentiment_score",
 }
 
+# ── True no-op sentinel ────────────────────────────────────────────────────
+# "No filter" MUST be a real, parseable concept. It used to be faked with
+# `MarketCap > 0`, which is not a no-op at all — it silently dropped every row
+# whose market cap is unknown (382 of 633 in practice) while the UI advertised
+# "All NSE Equities". These literals all compile to the same `1=1` / ALL node.
+NO_OP_WORDS = {"all", "any", "*", "true"}
+_TRUE_QUERY_RE = re.compile(r"^\s*(\d+)\s*=\s*(\d+)\s*$")
+
+
+def is_no_op_query(query_str: str) -> bool:
+    """True when the query carries no filter (empty, ALL/ANY/*, or a numeric tautology)."""
+    s = (query_str or "").strip()
+    if not s:
+        return True
+    if s.lower() in NO_OP_WORDS:
+        return True
+    m = _TRUE_QUERY_RE.match(s)
+    return bool(m and m.group(1) == m.group(2))
+
+
 TOKEN_SPEC = [
     ("NUMBER",   r"-?\d+(\.\d+)?"),
     ("STRING",   r"'[^']*'|\"[^\"]*\""),
@@ -210,6 +230,12 @@ class ScreenerQueryParser:
         if not tok:
             raise ValueError("Unexpected end of expression.")
 
+        # `ALL` / `ANY` / `*` as a bare factor — the composable form of the
+        # no-op sentinel, so `ALL AND ROCE > 20` still parses.
+        if tok[0] == "IDENT" and str(tok[1]).lower() in NO_OP_WORDS:
+            self.consume("IDENT")
+            return "1=1", {"type": "ALL"}
+
         if tok == ("LOGIC", "NOT"):
             self.consume("LOGIC")
             sql, ast = self.parse_factor()
@@ -290,7 +316,7 @@ def parse_screener_query(query_str: str) -> Dict[str, Any]:
     """
     Main entry point: Parses a formula query string and returns SQL, params, and AST.
     """
-    if not query_str or not query_str.strip():
+    if is_no_op_query(query_str):
         return {
             "success": True,
             "where_clause": "1=1",

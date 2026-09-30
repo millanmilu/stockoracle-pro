@@ -14,7 +14,8 @@ from backend.data.database import (
     save_user_screen_query,
     get_user_screens_list,
     get_user_screen_by_share_token,
-    delete_user_screen_query
+    delete_user_screen_query,
+    upsert_screener_daily_metric,
 )
 from backend.analysis.market_heatmap import compute_market_heatmap_data
 
@@ -345,3 +346,433 @@ def test_compute_metrics_never_fabricates_fundamentals(monkeypatch):
     assert metrics["market_cap_cat"] is None
     assert metrics["close_price"] > 0
     assert metrics["rsi_14"] is not None
+    # A meta-less row must not invent a sector taxonomy either: "Diversified"
+    # used to be stamped on 382 of 633 rows and became the rotation chart's
+    # largest "sector" while mixing unrelated industries.
+    assert metrics["sector"] is None
+
+
+# ── No-op sentinel & card/click consistency ─────────────────────────────────
+
+def test_screener_no_op_sentinel_means_everything():
+    """`ALL` / `1=1` / empty must compile to a true no-op and return the whole table.
+
+    "Show everything" used to be faked with `MarketCap > 0`, which silently
+    dropped every row whose market cap is unknown (382 of 633 in practice) while
+    the UI advertised "All NSE Equities".
+    """
+    from backend.research.screener_dsl import is_no_op_query
+
+    for literal in ("", "   ", "1=1", "ALL", "all", "ANY", "*"):
+        parsed = parse_screener_query(literal)
+        assert parsed["success"] is True, literal
+        assert parsed["where_clause"] == "1=1", literal
+        assert parsed["ast"] == {"type": "ALL"}, literal
+        assert is_no_op_query(literal) is True, literal
+
+    # A no-op composes, and a real filter is never mistaken for one.
+    assert parse_screener_query("ALL AND ROCE > 20")["success"] is True
+    assert is_no_op_query("MarketCap > 0") is False
+
+    whole = execute_screener_sql_query("1=1", {}, limit=5000)
+    assert whole["total"] == whole["universe_total"]
+    assert whole["total"] >= 200
+
+    # The old fake no-op really was a filter — this is the regression guard.
+    capped = parse_screener_query("MarketCap > 0")
+    capped_res = execute_screener_sql_query(capped["where_clause"], capped["params"], limit=5000)
+    assert capped_res["total"] <= whole["total"]
+
+
+def test_total_card_count_matches_its_own_click():
+    """The TOTAL card must not display a different number than clicking it returns.
+
+    It showed 633 while clicking ran `MarketCap > 0` and returned 251.
+    compute_overview_cards documents this invariant for every card; this pins the
+    one card whose DSL was null.
+    """
+    from backend.data.database import get_screener_overview_stats
+
+    stats = get_screener_overview_stats()
+    total_card = stats["cards"]["total"]
+
+    parsed = parse_screener_query("ALL")
+    res = execute_screener_sql_query(parsed["where_clause"], parsed["params"], limit=5000)
+
+    assert total_card == res["total"] == res["universe_total"]
+    assert stats["coverage"]["total"] == total_card
+
+
+# ── Never fabricate a price / coverage flag ────────────────────────────────
+
+def test_upsert_never_writes_a_placeholder_price():
+    """A row with no known price stores NULL, and its data_status says so.
+
+    The upsert used to do `close_price or 100.0` against a NOT NULL column, so
+    200 seeded rows rendered a fabricated ₹100.00 quote in the Price column.
+    """
+    from sqlalchemy import text as _text
+
+    from backend.data.database import upsert_screener_daily_metric
+    from backend.shared.database import get_db_session
+
+    ticker = "__ZTEST_NO_PRICE__"
+
+    def _read():
+        with get_db_session() as session:
+            return session.execute(
+                _text("SELECT close_price, data_status FROM screener_daily_metrics WHERE ticker = :t"),
+                {"t": ticker},
+            ).mappings().first()
+
+    try:
+        upsert_screener_daily_metric({"ticker": ticker, "name": "Placeholder Test", "sector": "Testing"})
+        row = _read()
+        assert row is not None
+        assert row["close_price"] is None, "missing price must stay NULL, never a placeholder"
+        assert row["data_status"] == "NO_DATA"
+
+        # A non-positive price is not a quote either.
+        upsert_screener_daily_metric({"ticker": ticker, "name": "Placeholder Test", "close_price": 0})
+        assert _read()["close_price"] is None
+    finally:
+        with get_db_session() as session:
+            session.execute(_text("DELETE FROM screener_daily_metrics WHERE ticker = :t"), {"t": ticker})
+
+    # And no legacy placeholder price survives anywhere in the table.
+    with get_db_session() as session:
+        legacy = session.execute(
+            _text(
+                "SELECT COUNT(*) FROM screener_daily_metrics "
+                "WHERE close_price = 100.0 AND rsi_14 IS NULL"
+            )
+        ).scalar()
+    assert int(legacy or 0) == 0
+
+
+def test_derive_screener_data_status_distinguishes_all_three_states():
+    """OK / PARTIAL / NO_DATA follow real coverage, not a hardcoded "OK".
+
+    data_status used to read "OK" on all 633 rows, including 200 with a
+    fabricated price and no indicators at all.
+    """
+    from backend.research.screener_engines import derive_screener_data_status as derive
+
+    full = {
+        "close_price": 100.0, "rsi_14": 50.0, "sma_20": 99.0, "sma_50": 98.0,
+        "sma_200": 90.0, "volume_ratio_20d": 1.2,
+        "pe_ratio": 20.0, "roe_pct": 15.0, "roce_pct": 18.0, "debt_to_equity": 0.4,
+    }
+    assert derive(full) == "OK"
+    assert derive({**full, "pe_ratio": None}) == "PARTIAL"
+    assert derive({**full, "close_price": None}) == "NO_DATA"
+    assert derive({**full, "rsi_14": None}) == "NO_DATA"
+    assert derive({}) == "NO_DATA"
+
+
+# ── Aggregators must not read NULL as a neutral observation ─────────────────
+
+def test_sector_rotation_refuses_to_plot_unmeasured_sectors():
+    """Empty sectors produce no bar and no identical composite fingerprint.
+
+    Substituting 0.0 / 50.0 / 1.0 for missing inputs made 24 of 40 sectors report
+    the exact same `-11.8` composite.
+    """
+    from backend.research.screener_engines import compute_sector_rotation, compute_sector_exclusions
+
+    blank = {
+        "close_price": None, "rsi_14": None, "change_1d_pct": None,
+        "ai_consensus_score": None, "ai_signal": None,
+        "volume_ratio_20d": None, "sma_50": None,
+    }
+    rows = (
+        [{"ticker": f"C{i}", "sector": "Chemicals", **blank} for i in range(4)]
+        + [{"ticker": f"T{i}", "sector": "Textiles", **blank} for i in range(4)]
+        + [{"ticker": f"D{i}", "sector": "Diversified", **blank} for i in range(4)]
+    )
+
+    assert compute_sector_rotation(rows) == []
+    excluded = compute_sector_exclusions(rows)
+    # Chemicals and Textiles are real sectors of measurable size that simply
+    # have nothing computed — excluded, and counted so the UI can say so.
+    assert excluded["no_data_sectors"] == 2
+    assert excluded["no_data_stocks"] == 8
+    # "Diversified" is a placeholder label, not a sector: those rows are
+    # unclassified rather than forming a 4-stock "sector".
+    assert excluded["unclassified"] == 4
+    assert excluded["unclassified_placeholder_label"] == 4
+
+    # Opting in surfaces the unmeasured sectors with an explicit no-data status
+    # instead of a neutral composite.
+    verbose = compute_sector_rotation(rows, include_unmeasured=True)
+    assert len(verbose) == 2
+    assert all(s["composite"] is None and s["quadrant"] == "No Data" for s in verbose)
+    assert all(s["data_status"] == "NO_DATA" for s in verbose)
+
+    # With measured data the sector appears, and two disjoint sectors never
+    # share the identical neutral composite.
+    measured = {
+        "close_price": 110.0, "sma_50": 100.0, "change_1d_pct": 1.5,
+        "ai_consensus_score": 62.0, "ai_signal": "BUY", "volume_ratio_20d": 1.4,
+    }
+    rows2 = [{"ticker": f"A{i}", "sector": "Auto", **measured} for i in range(3)] + [
+        {"ticker": f"P{i}", "sector": "Pharma", **measured} for i in range(3)
+    ]
+    out = compute_sector_rotation(rows2)
+    assert {s["sector"] for s in out} == {"Auto", "Pharma"}
+    assert len({s["composite"] for s in out}) == 1  # identical inputs -> identical output
+    assert all(s["composite"] is not None for s in out)
+
+    # A sector too small to read is excluded and counted.
+    tiny = [{"ticker": "Z1", "sector": "Paper", **measured}]
+    assert compute_sector_rotation(tiny) == []
+    assert compute_sector_exclusions(tiny)["below_min_sectors"] == 1
+
+
+def test_market_breadth_reports_missing_change_as_no_data():
+    """Rows without a computed change are `no_data`, not `unchanged`."""
+    from backend.research.screener_engines import compute_market_breadth
+
+    rows = [
+        {"change_1d_pct": 1.0, "rsi_14": 55.0, "close_price": 100.0, "sma_20": 90.0,
+         "sma_50": 90.0, "sma_200": 90.0, "ai_signal": "BUY", "ai_consensus_score": 60.0},
+        {"change_1d_pct": -1.0, "rsi_14": 45.0, "close_price": 100.0, "sma_20": 110.0,
+         "sma_50": 110.0, "sma_200": 110.0, "ai_signal": "AVOID", "ai_consensus_score": 40.0},
+        {"change_1d_pct": None, "rsi_14": None, "close_price": None,
+         "ai_signal": None, "ai_consensus_score": None},
+    ]
+    b = compute_market_breadth(rows)
+
+    assert b["advancing"] == 1
+    assert b["declining"] == 1
+    assert b["unchanged"] == 0, "a NULL change must not be counted as unchanged"
+    assert b["no_data"] == 1
+    assert b["advancing"] + b["declining"] + b["unchanged"] + b["no_data"] == b["total"]
+    # Percentages are over rows that have a signal, not over the tracked universe.
+    assert b["bullish_pct"] == 50.0
+    assert b["signals_available"] == 2
+    assert b["above_ema20_pct"] == 50.0   # 1 of 2 rows with both price and SMA
+
+
+def test_screener_stale_flag_uses_median_covered_row():
+    """Freshness is judged on the median covered row, not the newest one.
+
+    A single row rewritten by the seeder used to make a nine-day-old table look
+    current.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from backend.research.screener_pipeline import (
+        expected_last_screener_refresh, screener_metrics_are_stale,
+    )
+
+    tz = ZoneInfo("Asia/Kolkata")
+    monday_evening = datetime(2026, 9, 28, 20, 0, tzinfo=tz)   # Monday, past 16:15
+    monday_morning = datetime(2026, 9, 28, 10, 0, tzinfo=tz)   # Monday, before 16:15
+    sunday = datetime(2026, 9, 27, 12, 0, tzinfo=tz)
+
+    assert expected_last_screener_refresh(monday_evening) == "2026-09-28"
+    assert expected_last_screener_refresh(monday_morning) == "2026-09-25"  # Friday
+    assert expected_last_screener_refresh(sunday) == "2026-09-25"          # Friday
+
+    assert screener_metrics_are_stale("2026-09-19", monday_evening) is True
+    assert screener_metrics_are_stale("2026-09-28", monday_evening) is False
+    assert screener_metrics_are_stale(None, monday_evening) is True
+
+
+def test_sector_needs_enough_MEASURED_stocks_not_just_rows():
+    """A sector's bar must not be ranked from a handful of its rows.
+
+    `"Finance"` had 15 tracked rows but only 2 with data, and those 2 were enough
+    to rank the whole sector — a bar labelled 15 stocks whose composite came from
+    2 of them. The threshold has to count measured rows.
+    """
+    from backend.research.screener_engines import (
+        compute_sector_rotation, compute_sector_exclusions,
+    )
+
+    def row(i, measured):
+        base = {"ticker": f"F{i}", "sector": "Finance"}
+        if measured:
+            base.update({"close_price": 100.0 + i, "sma_50": 95.0,
+                         "change_1d_pct": 1.0, "ai_consensus_score": 70.0,
+                         "volume_ratio_20d": 1.2, "ai_signal": "BUY"})
+        return base
+
+    # 15 tracked rows, only 2 of them measured.
+    thin = [row(i, measured=i < 2) for i in range(15)]
+    assert compute_sector_rotation(thin) == [], \
+        "a 2-of-15 sector is noise, not rotation"
+
+    # It must also be ACCOUNTED for, never silently dropped from the chart.
+    exclusions = compute_sector_exclusions(thin)
+    assert exclusions["below_measured_sectors"] == 1
+    assert exclusions["below_measured_stocks"] == 15
+
+    # Four measured rows do clear the bar, and the count is exposed.
+    enough = [row(i, measured=i < 4) for i in range(15)]
+    plotted = compute_sector_rotation(enough)
+    assert len(plotted) == 1
+    assert plotted[0]["stocks"] == 15
+    assert plotted[0]["stocks_measured"] == 4
+
+
+def test_overview_reports_coverage_and_exclusions():
+    """The overview payload states coverage and what the sector chart refuses to plot."""
+    from backend.data.database import get_screener_overview_stats
+
+    stats = get_screener_overview_stats()
+    cov = stats["coverage"]
+
+    assert cov["total"] == cov["ok"] + cov["partial"] + cov["no_data"]
+    assert cov["priced"] <= cov["total"]
+    assert cov["with_fundamentals"] <= cov["priced"]
+    assert stats["metrics_as_of"] is not None
+
+    excluded = stats["sectors_excluded"]
+    assert excluded is not None
+    assert excluded["min_stocks"] >= 2
+    # Sectors drawn + rows explicitly excluded can never exceed the table.
+    assert sum(s["stocks"] for s in stats["sectors"]) + excluded["unclassified"] <= cov["total"]
+    # Every plotted sector is measured; none carries the old neutral default.
+    for sec in stats["sectors"]:
+        assert sec["composite"] is not None
+        assert sec["quadrant"] != "No Data"
+
+
+# ── Screener upsert must not be destructive ──────────────────────────────────
+#
+# The upsert used to blind-overwrite every base column with whatever the caller
+# passed, and every base column is always present in the payload (None when the
+# caller had no value). Any partial write therefore erased good stored data.
+
+_MERGE_TEST_TICKER = "ZZMERGETEST"
+
+
+@pytest.fixture
+def merge_row():
+    """A throwaway row so the real universe is never touched."""
+    from backend.shared.database import get_db_session
+    from backend.shared.models import ScreenerDailyMetric
+    from sqlalchemy import delete
+
+    def _drop():
+        with get_db_session() as session:
+            session.execute(delete(ScreenerDailyMetric).where(
+                ScreenerDailyMetric.ticker == _MERGE_TEST_TICKER))
+
+    _drop()
+    yield _MERGE_TEST_TICKER
+    _drop()
+
+
+def _read_screener_row(ticker):
+    from backend.shared.database import get_db_session
+    from backend.shared.models import ScreenerDailyMetric
+    from sqlalchemy import select
+
+    with get_db_session() as session:
+        row = session.execute(select(ScreenerDailyMetric).where(
+            ScreenerDailyMetric.ticker == ticker)).scalar_one_or_none()
+        if row is None:
+            return None
+        return {c.name: getattr(row, c.name) for c in ScreenerDailyMetric.__table__.columns}
+
+
+def test_partial_write_never_erases_stored_fundamentals(merge_row):
+    """A payload that only carries price must not NULL the pe/roe/roce already stored.
+
+    This is what made every backfill destructive: refreshing a row whose
+    fundamentals could not be fetched wiped the fundamentals it already had.
+    """
+    upsert_screener_daily_metric({
+        "ticker": merge_row, "name": "Merge Test Ltd", "sector": "Chemicals",
+        "close_price": 500.0, "pe_ratio": 25.0, "pb_ratio": 4.0,
+        "roe_pct": 18.0, "roce_pct": 22.0, "debt_to_equity": 0.3,
+        "market_cap_cr": 12000.0,
+    })
+    before = _read_screener_row(merge_row)
+    assert before["pe_ratio"] == 25.0 and before["roce_pct"] == 22.0
+
+    # OHLCV-only refresh: no fundamentals in the payload at all.
+    upsert_screener_daily_metric({
+        "ticker": merge_row, "name": merge_row, "close_price": 510.0,
+        "rsi_14": 55.0,
+    })
+    after = _read_screener_row(merge_row)
+
+    assert after["close_price"] == 510.0, "a real new value must land"
+    assert after["rsi_14"] == 55.0, "a real new value must land"
+    assert after["pe_ratio"] == 25.0, "missing pe must not erase the stored one"
+    assert after["roce_pct"] == 22.0
+    assert after["roe_pct"] == 18.0
+    assert after["debt_to_equity"] == 0.3
+    assert after["market_cap_cr"] == 12000.0
+    assert after["sector"] == "Chemicals", "sector must survive a payload without one"
+    assert after["name"] == "Merge Test Ltd", "ticker-as-name must not overwrite a real name"
+
+
+def test_placeholder_sector_never_overwrites_a_real_one(merge_row):
+    """'Diversified' is what the pipeline writes when it has no classification."""
+    upsert_screener_daily_metric({
+        "ticker": merge_row, "name": "Merge Test Ltd", "sector": "Pharmaceuticals",
+        "close_price": 100.0,
+    })
+    upsert_screener_daily_metric({
+        "ticker": merge_row, "name": "Merge Test Ltd", "sector": "Diversified",
+        "close_price": 101.0,
+    })
+    row = _read_screener_row(merge_row)
+    assert row["sector"] == "Pharmaceuticals"
+    assert row["close_price"] == 101.0
+
+
+def test_clear_fields_is_the_only_way_to_remove_a_value(merge_row):
+    """Absent and known-wrong are different: a gap-fill must not remove, and a
+    repair pass must be able to.
+
+    Without this, a label an earlier pass wrote on a wrong basis stayed on the
+    row forever, so the sector chart kept drawing a bar from a stale guess.
+    """
+    upsert_screener_daily_metric({
+        "ticker": merge_row, "name": "Merge Test Ltd", "sector": "Chemicals",
+        "close_price": 100.0,
+    })
+
+    # A payload without a sector may not remove it...
+    upsert_screener_daily_metric({"ticker": merge_row, "close_price": 101.0})
+    assert _read_screener_row(merge_row)["sector"] == "Chemicals"
+
+    # ...but naming it explicitly may.
+    upsert_screener_daily_metric({"ticker": merge_row},
+                                 clear_fields=["sector"])
+    row = _read_screener_row(merge_row)
+    assert row["sector"] is None
+    assert row["close_price"] == 101.0, "clearing one field must not touch another"
+    assert row["name"] == "Merge Test Ltd"
+
+
+def test_data_status_reflects_the_merged_row(merge_row):
+    """Status is derived after merging, so a gap-fill write can only improve it."""
+    full_fundamentals = {
+        "close_price": 500.0, "rsi_14": 50.0, "sma_20": 495.0, "sma_50": 490.0,
+        "sma_200": 470.0, "volume_ratio_20d": 1.1,
+        "pe_ratio": 20.0, "roe_pct": 15.0, "roce_pct": 18.0, "debt_to_equity": 0.4,
+    }
+    upsert_screener_daily_metric({
+        "ticker": merge_row, "name": "Merge Test Ltd", "sector": "Chemicals",
+        **full_fundamentals,
+    })
+    assert _read_screener_row(merge_row)["data_status"] == "OK"
+
+    # Fundamentals-only refresh after losing the price: the stored price must be
+    # reused, so the row stays OK instead of dropping to NO_DATA.
+    upsert_screener_daily_metric({
+        "ticker": merge_row, "name": "Merge Test Ltd", "sector": "Chemicals",
+        "close_price": None, "pe_ratio": 21.0,
+    })
+    row = _read_screener_row(merge_row)
+    assert row["pe_ratio"] == 21.0
+    assert row["close_price"] == 500.0
+    assert row["data_status"] == "OK"

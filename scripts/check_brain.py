@@ -10,6 +10,11 @@ Kya check hota hai:
   2. Count claims — "N domain routers" (backend/main.py se),
                     "N files in tests/", "`x.py` (~N lines)" (wc -l se).
   3. Marker claims— `<!-- check: name=N -->` (jaise frontend_tests=7).
+  4. Behavioural probes — screener ka honesty contract: no-op sentinel
+                    (`ALL`/`1=1`) parse hota hai, `data_status` teen states deta
+                    hai, aur aggregators NULL ko neutral observation nahi maante
+                    (path/count checks ye nahi pakad sakte — dekho
+                    screener_invariant_probes() ka docstring).
 
 Usage:
     python scripts/check_brain.py             # line counts pe 10% tolerance
@@ -155,6 +160,166 @@ def count_lines(path: Path) -> int:
     return len(path.read_text(encoding="utf-8", errors="ignore").splitlines())
 
 
+def screener_invariant_probes(rep: Report) -> None:
+    """Behavioural probes of the screener honesty contract.
+
+    Path/count checks cannot catch these: the aggregators once read NULL as a
+    *neutral observation* (24 of 40 sectors reported an identical composite) and
+    the "no filter" sentinel did not parse at all, so "All NSE Equities" silently
+    dropped 60% of the table. These probes pin the contract that brain/ describes.
+
+    The DSL probe is a HARD check: ``screener_dsl`` is stdlib-only, so failing to
+    import it is a real breakage, not a missing dependency. The aggregator probes
+    need numpy/pandas and are skipped-with-a-note on a bare interpreter (CI
+    installs them, so they run for real there).
+    """
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+
+    def probe(name: str, ok: bool, detail: str = "") -> None:
+        (rep.claim_ok if ok else rep.claim_fail)(f"{name} {detail}".rstrip())
+
+    # 1. A true no-op sentinel exists (so "show everything" means everything).
+    #    stdlib-only module -> import failure is a genuine problem.
+    try:
+        from backend.research.screener_dsl import is_no_op_query, parse_screener_query
+    except Exception as exc:
+        rep.claim_fail(f"screener_dsl import failed ({type(exc).__name__}: {exc})")
+        return
+    for literal in ("ALL", "1=1"):
+        parsed = parse_screener_query(literal)
+        probe(f"screener no-op sentinel `{literal}` -> 1=1",
+              bool(parsed.get("success")) and parsed.get("where_clause") == "1=1")
+    probe("screener `MarketCap > 0` is NOT treated as a no-op",
+          is_no_op_query("MarketCap > 0") is False)
+
+    try:
+        from backend.research.screener_engines import (
+            compute_market_breadth,
+            compute_sector_rotation,
+            derive_screener_data_status,
+        )
+    except Exception as exc:  # pragma: no cover - dependency dependent
+        rep.claim_ok(f"aggregator probes SKIPPED (cannot load engines: {type(exc).__name__})")
+        return
+
+    # 2. Coverage flag follows real contents, not a hardcoded "OK".
+    full = {
+        "close_price": 100.0, "rsi_14": 50.0, "sma_20": 99.0, "sma_50": 98.0,
+        "sma_200": 90.0, "volume_ratio_20d": 1.2,
+        "pe_ratio": 20.0, "roe_pct": 15.0, "roce_pct": 18.0, "debt_to_equity": 0.4,
+    }
+    probe(
+        "derive_screener_data_status distinguishes OK/PARTIAL/NO_DATA",
+        derive_screener_data_status(full) == "OK"
+        and derive_screener_data_status({**full, "pe_ratio": None}) == "PARTIAL"
+        and derive_screener_data_status({**full, "close_price": None}) == "NO_DATA",
+    )
+
+    # 3. NULL is never a neutral observation in the aggregators.
+    blank = {
+        "close_price": None, "rsi_14": None, "change_1d_pct": None,
+        "ai_consensus_score": None, "ai_signal": None,
+        "volume_ratio_20d": None, "sma_50": None,
+    }
+    unmeasured = [{"ticker": f"X{i}", "sector": "Chemicals", **blank} for i in range(3)]
+    probe("unmeasured sector is not plotted as a neutral bar",
+          compute_sector_rotation(unmeasured) == [])
+    placeholder = [{"ticker": f"D{i}", "sector": "Diversified", **blank} for i in range(3)]
+    probe("placeholder sector label is not a sector",
+          compute_sector_rotation(placeholder) == [])
+    breadth = compute_market_breadth([{"change_1d_pct": None}])
+    probe("missing change is no_data, never unchanged",
+          breadth["unchanged"] == 0 and breadth["no_data"] == 1)
+
+    def _thin_sector(measured):
+        rows = []
+        for i in range(15):
+            row = {"ticker": f"F{i}", "sector": "Finance"}
+            if i < measured:
+                row.update({"close_price": 100.0 + i, "sma_50": 95.0,
+                            "change_1d_pct": 1.0, "ai_consensus_score": 70.0,
+                            "volume_ratio_20d": 1.2})
+            rows.append(row)
+        return rows
+
+    from backend.research.screener_engines import (
+        compute_sector_exclusions, market_cap_category,
+    )
+    probe("market-cap category is one shared definition (unknown stays None)",
+          market_cap_category(60000.0) == "LARGE"
+          and market_cap_category(20000.0) == "MID"
+          and market_cap_category(5000.0) == "SMALL"
+          and market_cap_category(None) is None)
+
+    thin_rows = _thin_sector(2)
+    probe("a sector is not ranked from 2 measured rows out of 15",
+          compute_sector_rotation(thin_rows) == [])
+    probe("the dropped sector is accounted for, never silently omitted",
+          compute_sector_exclusions(thin_rows)["below_measured_sectors"] == 1)
+    plotted = compute_sector_rotation(_thin_sector(4))
+    probe("plotting exposes measured vs tracked stock counts",
+          len(plotted) == 1 and plotted[0]["stocks"] == 15
+          and plotted[0]["stocks_measured"] == 4)
+
+    # 3b. A partial upsert may only make a screener row better, never erase it.
+    try:
+        from backend.data.database import merge_screener_metric
+    except Exception as exc:  # pragma: no cover - dependency dependent
+        rep.claim_ok(f"screener merge probe SKIPPED (cannot load: {type(exc).__name__})")
+        return
+
+    stored = {"pe_ratio": 25.0, "roce_pct": 22.0, "sector": "Chemicals",
+              "name": "Real Name Ltd", "market_cap_cr": 12000.0,
+              "close_price": 500.0}
+    merged = merge_screener_metric(stored, {
+        "ticker": "X", "name": "X", "sector": "Diversified",
+        "close_price": 510.0, "pe_ratio": None, "market_cap_cr": None,
+    }, ticker="X")
+    probe("partial upsert keeps stored metrics instead of NULLing them",
+          merged["pe_ratio"] == 25.0
+          and merged["market_cap_cr"] == 12000.0
+          # A column the payload never mentions is not in the UPDATE at all.
+          and "roce_pct" not in merged)
+    probe("placeholder sector/name never overwrite a real value",
+          merged["sector"] == "Chemicals" and merged["name"] == "Real Name Ltd")
+    probe("a real new value still lands", merged["close_price"] == 510.0)
+    insert_case = merge_screener_metric(None, {"ticker": "Y", "name": None}, ticker="Y")
+    probe("insert still gets a usable NOT NULL name", insert_case["name"] == "Y")
+
+    # 4. Deep fundamentals: the resilience baseline must not invent statements,
+    # and "Verified" must be derived from what was actually parsed.
+    try:
+        from backend.data.fundamentals_deep import (
+            _fetch_universe_fallback,
+            _finalize_freshness_status,
+        )
+        from backend.data.seed_screener_metrics import MASTER_NSE_UNIVERSE
+    except Exception as exc:  # pragma: no cover - dependency dependent
+        rep.claim_ok(f"deep-financials probes SKIPPED (cannot load module: {type(exc).__name__})")
+        return
+
+    first = next((str(r.get("ticker", "")).upper().strip() for r in (MASTER_NSE_UNIVERSE or [])
+                  if str(r.get("ticker", "")).strip()), None)
+    if first:
+        ref = _fetch_universe_fallback(first)
+        fabricated = [f for f in ("annual_pl", "quarterly_results", "balance_sheet",
+                                  "cash_flow", "shareholding") if ref.get(f)]
+        probe("reference baseline fabricates no statements",
+              ref and not fabricated)
+
+    honest = {"data_freshness": {"data_source": "Unavailable"},
+              "annual_pl": [], "balance_sheet": [], "shareholding": []}
+    _finalize_freshness_status(honest)
+    verified = {"data_freshness": {"data_source": "Screener.in Consolidated (live scrape)"},
+                "annual_pl": [{"Sales": 1.0}], "balance_sheet": [{"Assets": 1.0}],
+                "shareholding": [{"quarter": "Mar 2026"}]}
+    _finalize_freshness_status(verified)
+    probe("Verified requires parsed statements, not an empty profile",
+          honest["data_freshness"]["status"] != "Verified"
+          and verified["data_freshness"]["status"] == "Verified")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Verify brain/ docs against the repo.")
     ap.add_argument("--strict", action="store_true",
@@ -250,6 +415,9 @@ def main() -> int:
                 else:
                     rep.claim_fail(f"lines {target}: brain me ~{claimed}, asli {actual} "
                                    f"({drift * 100:.0f}% drift — brain update karo)")
+
+    # ── Behavioural probes (screener honesty contract) ─────────────────────
+    screener_invariant_probes(rep)
 
     if not args.quiet:
         print(f"brain drift check — {len(md_files)} files, "

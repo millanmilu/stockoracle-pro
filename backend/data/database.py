@@ -6,7 +6,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from typing import Optional, Any, Dict, List, Tuple
+from typing import Optional, Any, Dict, Iterable, List, Tuple
 from backend.core.logging import get_logger
 
 logger = get_logger("stockoracle.db")
@@ -99,6 +99,207 @@ def _ensure_screener_extended_columns() -> None:
                 pass
 
 
+SCREENER_TABLE = "screener_daily_metrics"
+
+# The price the legacy upsert wrote when it had none (`or 100.0`). Any row still
+# carrying it *with no computed indicators* is a placeholder, not a quote.
+LEGACY_PLACEHOLDER_CLOSE_PRICE = 100.0
+
+
+def _ensure_screener_close_price_nullable() -> None:
+    """Drops the legacy NOT NULL constraint on ``screener_daily_metrics.close_price``.
+
+    ``Base.metadata.create_all()`` never ALTERs an existing table, so a database
+    created before the column became nullable keeps ``close_price NOT NULL`` and
+    every honest write of an unknown price would fail. SQLite cannot drop a
+    NOT NULL constraint in place, so the table is rebuilt from the current model
+    metadata inside a single transaction, with the row count verified before the
+    swap. Idempotent: once the column is nullable this is a no-op.
+    """
+    from sqlalchemy import MetaData
+    from sqlalchemy import inspect as sa_inspect
+    from sqlalchemy.schema import CreateIndex, CreateTable
+
+    try:
+        inspector = sa_inspect(engine)
+        if SCREENER_TABLE not in inspector.get_table_names():
+            return
+        cols = {c["name"]: c for c in inspector.get_columns(SCREENER_TABLE)}
+        col = cols.get("close_price")
+        if col is None or col.get("nullable", True):
+            return  # already nullable (or table absent) — nothing to do
+    except Exception as exc:
+        logger.debug("close_price nullability probe skipped: %s", exc)
+        return
+
+    if engine.dialect.name == "postgresql":
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    f"ALTER TABLE {SCREENER_TABLE} ALTER COLUMN close_price DROP NOT NULL"
+                ))
+            logger.info("✅ screener_daily_metrics.close_price is now nullable (postgres).")
+        except Exception as exc:
+            logger.warning("close_price DROP NOT NULL failed: %s", exc)
+        return
+
+    # SQLite: rebuild the table from current metadata (no in-place ALTER support).
+    table = ScreenerDailyMetric.__table__
+    tmp = f"{SCREENER_TABLE}__nullable_rebuild"
+    staging = table.to_metadata(MetaData(), name=tmp)
+    shared = [c.name for c in table.columns if c.name in cols]
+    col_list = ", ".join(f'"{c}"' for c in shared)
+    try:
+        with engine.begin() as conn:
+            # Replay the indexes that actually exist rather than regenerating them
+            # from the model: this table carries hand-created idx_sdm_* indexes
+            # that no longer appear in metadata, and losing them would silently
+            # slow every screener scan.
+            idx_sql = [
+                r[0]
+                for r in conn.execute(
+                    text(
+                        "SELECT sql FROM sqlite_master "
+                        "WHERE type='index' AND tbl_name=:t AND sql IS NOT NULL"
+                    ),
+                    {"t": SCREENER_TABLE},
+                ).fetchall()
+                if r[0]
+            ]
+            conn.execute(text(f'DROP TABLE IF EXISTS "{tmp}"'))
+            conn.execute(CreateTable(staging))
+            conn.execute(text(
+                f'INSERT INTO "{tmp}" ({col_list}) SELECT {col_list} FROM "{SCREENER_TABLE}"'
+            ))
+            src = int(conn.execute(text(f'SELECT COUNT(*) FROM "{SCREENER_TABLE}"')).scalar() or 0)
+            moved = int(conn.execute(text(f'SELECT COUNT(*) FROM "{tmp}"')).scalar() or 0)
+            if moved != src:
+                raise RuntimeError(f"row count mismatch during rebuild ({moved} != {src})")
+            conn.execute(text(f'DROP TABLE "{SCREENER_TABLE}"'))
+            conn.execute(text(f'ALTER TABLE "{tmp}" RENAME TO "{SCREENER_TABLE}"'))
+            for stmt in idx_sql:
+                conn.execute(text(stmt))
+            # Top up any model-declared index the legacy table was missing.
+            for idx in table.indexes:
+                try:
+                    conn.execute(CreateIndex(idx, if_not_exists=True))
+                except TypeError:  # older SQLAlchemy without if_not_exists
+                    conn.execute(CreateIndex(idx))
+        logger.info(
+            "✅ screener_daily_metrics rebuilt — close_price is now nullable (%d rows, %d indexes replayed).",
+            src, len(idx_sql),
+        )
+    except Exception as exc:
+        logger.warning("screener_daily_metrics nullable migration failed (data untouched): %s", exc)
+
+
+def repair_screener_placeholder_rows() -> int:
+    """Clears prices fabricated by the legacy ``close_price or 100.0`` defaults.
+
+    Only rows that are *unambiguously* placeholders are touched: the exact legacy
+    sentinel price AND no computed indicators. A real ₹100.00 stock has
+    technicals once refreshed, so it is never affected. Idempotent — a second
+    run matches nothing. Returns the number of rows repaired.
+    """
+    try:
+        with get_db_session() as session:
+            res = session.execute(
+                text(
+                    f"UPDATE {SCREENER_TABLE} "
+                    "SET close_price = NULL "
+                    "WHERE close_price = :ph AND rsi_14 IS NULL AND change_1d_pct IS NULL"
+                ),
+                {"ph": LEGACY_PLACEHOLDER_CLOSE_PRICE},
+            )
+            repaired = int(res.rowcount or 0)
+        if repaired:
+            logger.info(
+                "🧹 Cleared %d fabricated screener prices (legacy ₹%.0f placeholder).",
+                repaired, LEGACY_PLACEHOLDER_CLOSE_PRICE,
+            )
+        return repaired
+    except Exception as exc:
+        logger.debug("screener placeholder repair skipped: %s", exc)
+        return 0
+
+
+def reconcile_screener_market_cap_category() -> int:
+    """Derives ``market_cap_cat`` for rows that hold a cap but no category.
+
+    A market cap without its LARGE/MID/SMALL label is a half-filled field: the
+    cap screens work while the category filter silently misses the row. Thresholds
+    live in `screener_engines.market_cap_category`, so this repair and every
+    writer share one definition. Idempotent. Returns the number of rows fixed.
+    """
+    try:
+        from backend.research.screener_engines import market_cap_category
+    except Exception as exc:
+        logger.debug("market-cap category reconciliation skipped: %s", exc)
+        return 0
+    try:
+        fixed = 0
+        with get_db_session() as session:
+            rows = session.execute(
+                text(f"SELECT ticker, market_cap_cr FROM {SCREENER_TABLE} "
+                     "WHERE market_cap_cr IS NOT NULL AND market_cap_cat IS NULL")
+            ).all()
+            updates = [
+                {"t": t, "c": market_cap_category(cap)}
+                for t, cap in rows
+                if market_cap_category(cap) is not None
+            ]
+            if updates:
+                session.execute(
+                    text(f"UPDATE {SCREENER_TABLE} SET market_cap_cat = :c WHERE ticker = :t"),
+                    updates,
+                )
+                fixed = len(updates)
+        if fixed:
+            logger.info("✅ screener market-cap categories reconciled for %d rows.", fixed)
+        return fixed
+    except Exception as e:
+        logger.debug("market-cap category reconciliation notice: %s", e)
+        return 0
+
+
+def reconcile_screener_data_status() -> int:
+    """Re-derives ``data_status`` for stored rows instead of trusting the old value.
+
+    ``upsert_screener_daily_metric`` derives the flag on every write, which
+    covers new data but not rows written before the rule existed — those still
+    claimed ``OK`` while missing a price or fundamentals. Runs on init because it
+    is cheap (one pass over the metric table) and self-heals after any bulk
+    import. Idempotent. Returns the number of rows corrected.
+    """
+    try:
+        from backend.research.screener_engines import derive_screener_data_status
+    except Exception as exc:
+        logger.debug("data_status reconciliation skipped (engines unavailable): %s", exc)
+        return 0
+    try:
+        fixed = 0
+        with get_db_session() as session:
+            rows = session.execute(text(f"SELECT * FROM {SCREENER_TABLE}")).mappings().all()
+            updates = []
+            for r in rows:
+                row = dict(r)
+                want = derive_screener_data_status(row)
+                if str(row.get("data_status") or "") != want:
+                    updates.append({"t": row.get("ticker"), "s": want})
+            if updates:
+                session.execute(
+                    text(f"UPDATE {SCREENER_TABLE} SET data_status = :s WHERE ticker = :t"),
+                    updates,
+                )
+                fixed = len(updates)
+        if fixed:
+            logger.info("🏷  Re-derived data_status for %d screener rows.", fixed)
+        return fixed
+    except Exception as exc:
+        logger.debug("screener data_status reconciliation skipped: %s", exc)
+        return 0
+
+
 def init_db():
     """Initializes the database schema and creates all tables via SQLAlchemy ORM."""
     logger.info("Initializing database with unified SQLAlchemy engine: %s", DB_PATH)
@@ -129,6 +330,16 @@ def init_db():
         _ensure_screener_extended_columns()
     except Exception as e:
         logger.debug("Screener extended-columns ensure notice: %s", e)
+
+    # Screener honesty migrations (order matters: the column must be nullable
+    # before a placeholder price can be cleared to NULL).
+    try:
+        _ensure_screener_close_price_nullable()
+        repair_screener_placeholder_rows()
+        reconcile_screener_data_status()
+        reconcile_screener_market_cap_category()
+    except Exception as e:
+        logger.debug("Screener honesty migration notice: %s", e)
 
 
     # Auto-seed broker_accounts from existing .env credentials if table is currently empty
@@ -498,6 +709,38 @@ def get_historical_prices(ticker: str, start_date: Optional[str] = None, end_dat
         )
 
 
+def get_history_coverage(ticker: str) -> Tuple[int, str]:
+    """
+    Cheap whole-table coverage probe for a ticker's daily history.
+
+    Returns (row_count, max_date_str) over ALL verified daily rows
+    (length(date) == 10). Single aggregate query — no row materialization,
+    safe on 7k+ row tables.
+
+    Used by the fetcher's DB fast-path: bounded requests (e.g. 2Y ≈ 500 rows)
+    must judge full-history/up-to-date state on the WHOLE table, never on the
+    requested slice length (a 2Y slice is always < 2500 rows even when the DB
+    holds complete inception history).
+    """
+    ticker = ticker.upper().strip()
+    try:
+        with get_db_session() as session:
+            stmt = select(
+                func.count(HistoricalPrice.date),
+                func.max(HistoricalPrice.date),
+            ).where(
+                HistoricalPrice.ticker == ticker,
+                func.length(HistoricalPrice.date) == 10,
+            )
+            row = session.execute(stmt).one()
+            count = int(row[0] or 0)
+            max_date = str(row[1] or "")[:10]
+            return (count, max_date)
+    except Exception as exc:
+        logger.debug("get_history_coverage failed for %s: %s", ticker, exc)
+        return (0, "")
+
+
 def get_intraday_candles(ticker: str, interval: str, from_ts: Optional[str] = None) -> Optional[pd.DataFrame]:
     """
     Fetches stored intraday candles from the intraday_candles table.
@@ -561,15 +804,19 @@ def save_intraday_candles(ticker: str, interval: str, df: pd.DataFrame) -> None:
 
     now_iso = datetime.now(timezone.utc).isoformat()
     rows = []
-    for _, row in df.iterrows():
-        ts = str(row.get("date", "")).strip()
+    # Fast dict iteration (~10x faster than df.iterrows())
+    for r in df.to_dict("records"):
+        ts = str(r.get("date", "")).strip()
         if not ts:
             continue
-        o = float(row.get("open", 0) or 0)
-        h = float(row.get("high", 0) or 0)
-        l = float(row.get("low", 0) or 0)
-        c = float(row.get("close", 0) or 0)
-        v = int(row.get("volume", 0) or 0)
+        try:
+            o = float(r.get("open", 0) or 0)
+            h = float(r.get("high", 0) or 0)
+            l = float(r.get("low", 0) or 0)
+            c = float(r.get("close", 0) or 0)
+            v = int(r.get("volume", 0) or 0)
+        except (ValueError, TypeError):
+            continue
         # OHLC sanity: skip corrupt candles
         if o <= 0 or h <= 0 or l <= 0 or c <= 0:
             continue
@@ -593,8 +840,8 @@ def save_intraday_candles(ticker: str, interval: str, df: pd.DataFrame) -> None:
         dialect = session.bind.dialect.name if session.bind else "sqlite"
         if dialect in ("sqlite", "postgresql"):
             insert = sqlite_insert if dialect == "sqlite" else pg_insert
-            for i in range(0, len(rows), 500):
-                stmt = insert(IntradayCandle).values(rows[i:i + 500])
+            for i in range(0, len(rows), 1000):
+                stmt = insert(IntradayCandle).values(rows[i:i + 1000])
                 stmt = stmt.on_conflict_do_update(
                     index_elements=["ticker", "interval", "timestamp"],
                     set_={
@@ -1806,12 +2053,90 @@ def get_registered_models(ticker: str = None) -> list:
 
 # ── Screener Platform Database Operations ────────────────────────────────────
 
-def upsert_screener_daily_metric(row_data: dict) -> None:
-    """Inserts or updates precomputed daily metrics for a ticker via SQLAlchemy ORM."""
+def merge_screener_metric(existing: Optional[dict], incoming: dict,
+                          ticker: Optional[str] = None,
+                          clear_fields: Optional[Iterable[str]] = None) -> dict:
+    """Gap-fill merge: an incoming payload may only make a row *better*.
+
+    The upsert used to be a blind overwrite. Every base column is always present
+    in the incoming dict, carrying ``None`` when the caller had no value for it,
+    so any partial write erased good stored data. Concretely, a refresh of a row
+    whose fundamentals could not be fetched NULLed the pe/roe/roce already on it,
+    and the refresh loop — which gets ``sector``/``name`` only from curated meta —
+    blanked the sector of the 382 rows that do have real technicals.
+
+    Rules, in order:
+
+    * a value the payload does not carry (``None``) never clears a stored one;
+    * a placeholder sector label never replaces a real classification (it means
+      "not classified", not "the sector is Diversified");
+    * a name that is just the ticker never replaces a real company name.
+
+    ``existing`` is a mapping of the stored row (or ``None`` for an insert).
+
+    ``clear_fields`` is the escape hatch: a value can only be removed by naming
+    it, because "absent" and "known to be wrong" are different things. A repair
+    pass that determines a previously written sector was not a real
+    classification must say so explicitly — the gap-fill rules would otherwise
+    keep the wrong value forever.
+    """
+    incoming = dict(incoming)
+    if existing:
+        from backend.research.screener_engines import UNCLASSIFIED_SECTOR_LABELS
+        for key in list(incoming.keys()):
+            if key in ("ticker", "data_status"):
+                continue
+            value = incoming[key]
+            stored = existing.get(key)
+            if value is None and stored is not None:
+                incoming[key] = stored
+            elif key == "sector" and stored is not None:
+                if str(value or "").strip().lower() in UNCLASSIFIED_SECTOR_LABELS:
+                    incoming[key] = stored
+            elif key == "name" and value == ticker and stored not in (None, ticker):
+                incoming[key] = stored
+
+    for key in (clear_fields or ()):
+        if key in incoming and key not in ("ticker", "name"):
+            incoming[key] = None
+
+    # `name` is NOT NULL — a row with no real name still needs a usable label.
+    if not incoming.get("name"):
+        incoming["name"] = incoming.get("ticker") or ticker
+    return incoming
+
+
+def upsert_screener_daily_metric(row_data: dict,
+                                 clear_fields: Optional[Iterable[str]] = None) -> None:
+    """Inserts or updates precomputed daily metrics for a ticker via SQLAlchemy ORM.
+
+    Three honesty rules are enforced here, on the one write path every producer
+    (seed, backfill, daily refresh) goes through:
+
+    * **a missing price is stored as NULL, never as a placeholder.** This used to
+      default to      ``100.0``, which made 200 seeded rows render a fabricated
+      ``₹100.00`` quote in the screener's Price column;
+    * **a payload may only make the row better** — a field the caller does not
+      carry never clears a stored value. See `merge_screener_metric`; the
+      ``clear_fields`` argument is the explicit way to remove one;
+    * **``data_status`` is derived from the row's real coverage**, not taken from
+      the caller, so no row can claim ``OK`` while its price or core indicators
+      are missing.
+    """
     now_str = datetime.now().isoformat()
     ticker = str(row_data.get("ticker", "")).upper().strip()
     if not ticker:
         return
+
+    _close_raw = row_data.get("close_price")
+    _close_val: Optional[float] = None
+    if _close_raw not in (None, ""):
+        try:
+            _parsed = float(_close_raw)
+            # A non-positive price is not a quote.
+            _close_val = _parsed if _parsed > 0 else None
+        except (TypeError, ValueError):
+            _close_val = None
 
     metric_dict = {
         "ticker": ticker,
@@ -1820,7 +2145,7 @@ def upsert_screener_daily_metric(row_data: dict) -> None:
         "industry": row_data.get("industry"),
         "market_cap_cr": float(row_data["market_cap_cr"]) if row_data.get("market_cap_cr") is not None else None,
         "market_cap_cat": str(row_data["market_cap_cat"]) if row_data.get("market_cap_cat") else None,
-        "close_price": float(row_data.get("close_price", 100.0) or 100.0),
+        "close_price": _close_val,
         "change_1d_pct": float(row_data["change_1d_pct"]) if row_data.get("change_1d_pct") is not None else None,
         "change_1w_pct": float(row_data["change_1w_pct"]) if row_data.get("change_1w_pct") is not None else None,
         "change_1m_pct": float(row_data["change_1m_pct"]) if row_data.get("change_1m_pct") is not None else None,
@@ -1868,10 +2193,12 @@ def upsert_screener_daily_metric(row_data: dict) -> None:
                 metric_dict[_k] = float(row_data[_k])
             except Exception:
                 pass
+    # NOTE: data_status is deliberately absent — it is derived below, never
+    # copied from the caller.
     _extended_str_keys = [
         "macd_crossover", "structure_label", "trend_hint", "retest_status",
         "liquidity_sweep", "momentum_state", "ema_alignment",
-        "market_regime", "sentiment_label", "data_status",
+        "market_regime", "sentiment_label",
     ]
     for _k in _extended_str_keys:
         if row_data.get(_k) is not None:
@@ -1892,6 +2219,30 @@ def upsert_screener_daily_metric(row_data: dict) -> None:
 
     with get_db_session() as session:
         dialect = session.bind.dialect.name if session.bind else "sqlite"
+        table = ScreenerDailyMetric.__table__
+
+        # ── Gap-fill merge (third honesty rule) ──────────────────────────────
+        # The upsert was a blind overwrite: every base column is always present
+        # in `metric_dict`, carrying None when the caller had no value for it,
+        # so ANY partial payload erased good stored data. That made every
+        # backfill destructive — refreshing a row whose fundamentals could not
+        # be fetched NULLed the pe/roe/roce already on it, and the refresh loop
+        # (which gets sector/name only from curated meta) blanked the sector of
+        # the 382 rows that have real technicals. Merge first, so a producer can
+        # supply a subset and still make the row strictly better.
+        existing = session.execute(
+            select(*[table.c[k] for k in metric_dict if k != "ticker"])
+            .where(table.c.ticker == ticker)
+        ).mappings().first()
+
+        metric_dict = merge_screener_metric(existing, metric_dict, ticker=ticker,
+                                            clear_fields=clear_fields)
+
+        # Derived last, from the MERGED row, so the flag describes what the row
+        # will actually contain after this write rather than this payload alone.
+        from backend.research.screener_engines import derive_screener_data_status
+        metric_dict["data_status"] = derive_screener_data_status(metric_dict)
+
         if dialect == "sqlite":
             stmt = sqlite_insert(ScreenerDailyMetric).values(metric_dict)
             update_cols = {k: v for k, v in metric_dict.items() if k != "ticker"}
@@ -2007,30 +2358,86 @@ def execute_screener_sql_query(
 def get_screener_overview_stats() -> dict:
     """Aggregated institutional overview directly from real screener rows.
 
-    Returns overview cards, market breadth and sector rotation computed from
-    the screener_daily_metrics table (no fake values; empty table -> zeros).
+    Returns overview cards, market breadth, sector rotation and an explicit
+    coverage breakdown computed from the screener_daily_metrics table (no fake
+    values; empty table -> zeros).
+
+    ``coverage`` exists so the UI can say "N of M with data" instead of
+    presenting a tracked-universe count as if every row carried metrics — the
+    difference is the reason a screen can legitimately match only a handful of
+    stocks. ``sectors_excluded`` reports the rows the rotation chart refuses to
+    plot rather than silently absorbing them into one bar.
     """
+    empty = {
+        "cards": {}, "breadth": {"total": 0, "data_status": "N/A"},
+        "sectors": [], "total": 0, "data_status": "N/A",
+        "coverage": {"total": 0, "ok": 0, "partial": 0, "no_data": 0,
+                     "with_fundamentals": 0, "priced": 0},
+        "sectors_excluded": None,
+        "latest_updated_at": None,
+        "metrics_as_of": None,
+    }
     try:
         from backend.research.screener_engines import (
             compute_overview_cards, compute_market_breadth, compute_sector_rotation,
+            compute_sector_exclusions, derive_screener_data_status,
+            FUNDAMENTAL_CORE_FIELDS,
         )
         with get_db_session() as session:
             rows = session.execute(text("SELECT * FROM screener_daily_metrics LIMIT 2000")).mappings().all()
             all_rows = [dict(r) for r in rows]
         if not all_rows:
-            return {"cards": {}, "breadth": {"total": 0, "data_status": "N/A"},
-                    "sectors": [], "total": 0, "data_status": "N/A"}
+            return dict(empty)
+
+        coverage = {
+            "total": len(all_rows), "ok": 0, "partial": 0, "no_data": 0,
+            "with_fundamentals": 0, "priced": 0,
+        }
+        latest = None
+        covered_dates: List[str] = []
+        for r in all_rows:
+            status = str(r.get("data_status") or "").upper()
+            if status not in ("OK", "PARTIAL", "NO_DATA"):
+                status = derive_screener_data_status(r)
+            coverage[{"OK": "ok", "PARTIAL": "partial", "NO_DATA": "no_data"}[status]] += 1
+            if r.get("close_price") is not None:
+                coverage["priced"] += 1
+            if all(r.get(f) is not None for f in FUNDAMENTAL_CORE_FIELDS):
+                coverage["with_fundamentals"] += 1
+            # Staleness is judged over rows that actually carry metrics. Rows
+            # with NO_DATA hold no computed values, so re-writing them says
+            # nothing about freshness; including them made an old table look
+            # current after any rescrape. ``latest_updated_at`` is reported for
+            # display, but ``metrics_as_of`` (the median covered date) is what
+            # the stale flag uses: a handful of freshly rewritten rows must not
+            # be able to declare the whole table current.
+            if status == "NO_DATA":
+                continue
+            ts = str(r.get("updated_at") or "")
+            if ts:
+                covered_dates.append(ts[:10])
+                if latest is None or ts > latest:
+                    latest = ts
+
+        metrics_as_of = None
+        if covered_dates:
+            covered_dates.sort()
+            metrics_as_of = covered_dates[len(covered_dates) // 2]
+
         return {
             "cards": compute_overview_cards(all_rows),
             "breadth": compute_market_breadth(all_rows),
             "sectors": compute_sector_rotation(all_rows),
             "total": len(all_rows),
-            "data_status": "OK",
+            "coverage": coverage,
+            "sectors_excluded": compute_sector_exclusions(all_rows),
+            "latest_updated_at": latest,
+            "metrics_as_of": metrics_as_of,
+            "data_status": "OK" if coverage["no_data"] < len(all_rows) else "N/A",
         }
     except Exception as exc:
         logger.warning("get_screener_overview_stats failed: %s", exc)
-        return {"cards": {}, "breadth": {"total": 0, "data_status": "N/A"},
-                "sectors": [], "total": 0, "data_status": "STALE"}
+        return {**empty, "data_status": "STALE"}
 
 
 def get_screener_detail(ticker: str) -> Optional[dict]:

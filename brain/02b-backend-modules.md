@@ -1,19 +1,19 @@
 # 02b — Backend Modules (part 2: data, analysis, ml, ai, services)
 
 ## `backend/data/` — data layer
-- `fetcher.py` (~1627 lines, project ka dil): memory cache → SQLite → Angel One → stale fallback. Synthetic path REMOVED.
+- `fetcher.py` (~1985 lines, project ka dil): memory cache → SQLite → Angel One → stale fallback. Synthetic path REMOVED. Crypto klines paginated (endTime walk-back, max 12 pages) taaki `period` honor ho — BTC 5m ab poora 7D deta hai (~2018 bars, pehle single 1000-cap ~3.5d). Cursor windows (`fetch_history_window` + `CURSOR_CHUNK_LIMITS`): `?before=&limit=` pe strictly-older slice, live-edge merge nahi.
 - Intraday gap-fill: `FILLABLE = {1m,5m,15m,30m,1h}`, MAX 30 slots, flat carry-forward (vol 0). Equity sirf 09:15–15:30 weekdays; crypto 24/7.
 - `get_combined_stock_data()`: live tick sirf weekday + >=9AM IST pe merge, weekend pe kabhi nahi.
 - Intraday cache key `hist_{ticker}_{period}_{interval}` (memory only).
 - Crypto/Gold: Binance live → historical close fallback. BTC/XAU pseudo-entries in search.
 - SmartAPI: TOTP login + keepalive + reset/ensure_session.
-- `database.py` (~2468 lines): history, intraday, ticks, universe, caches, portfolio, paper ledger, alerts, tasks, registry, broker, AI providers. Startup pe `purge_stale_partial_history(5)`.
+- `database.py` (~2759 lines): history, intraday, ticks, universe, caches, portfolio, paper ledger, alerts, tasks, registry, broker, AI providers. Startup pe `purge_stale_partial_history(5)`.
 - `market_calendar.py`: NSE holidays 2025–26, is_trading_day, is_market_open (09:15–15:30 IST), session phase, freshness.
 - `options.py` (chain+Greeks+MaxPain+PCR), `fundamentals*.py` (Screener.in), `news_multi_source.py` (RSS+TTL), `streamer.py`, `redis_cache.py`, `index_constituents.py`, seed scripts.
 
 ## `backend/analysis/` — indicators + quant
 - `indicators.py` (~1161 lines): SMA/EMA/RSI(neutral-50 fix)/MACD/BB/ATR/ADX/Stoch/CCI/Williams/ROC/MFI/Keltner/Donchian/Ichimoku/VWAP/OBV/Supertrend/PSAR/CMF/Elder/Fib/Divergence/Regime — sab `min_periods=1`, zero drop, LRU cache. `evaluate_custom_formula()` AST-safe hai.
-- `backtester.py` v3: 6 strategies, causal features, 70/30 split, slippage+commission, Sharpe/Sortino/Calmar/Alpha/Beta/CAGR/DD/WinRate/ProfitFactor, monthly matrix, 500-perm Monte Carlo.
+- `backtester.py` v3: 6 builtin strategies + custom plugin registry (`custom_strategies.py` me `@register_strategy`/`@register_exit`, `GET /api/backtest/strategies`), causal features, 70/30 split, slippage+commission, Sharpe/Sortino/Calmar/Alpha/Beta/CAGR/DD/WinRate/ProfitFactor, monthly matrix, 500-perm Monte Carlo.
 - Baaki: patterns, levels (S/R+Fib+pivot), quant_risk (VaR/CVaR), monte_carlo, volatility_forecast (GARCH), volume_profile (VPVR), market_heatmap, rrg_rotation, options_lab, sentiment, sentiment_market (Fear&Greed), macro + macro_terminal (ticker-tape), valuation (DCF+Graham), anomaly, explainer (SHAP), feature_engineer, trainer, tuning, supply_chain, constants.
 
 ## `backend/ml/` — forecasting

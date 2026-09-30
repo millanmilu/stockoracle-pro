@@ -27,6 +27,7 @@ Quantitative Features:
 """
 import os
 import json
+import logging
 import tempfile
 import numpy as np
 import pandas as pd
@@ -35,7 +36,130 @@ import xgboost as xgb
 from sklearn.linear_model import ElasticNet
 
 
+logger = logging.getLogger("StockOracle.Analysis.Backtester")
+
+
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models")
+
+
+# ── Strategy Plugin Registry ─────────────────────────────────────────────────
+# Apni strategy `backend/analysis/custom_strategies.py` me likho:
+#
+#   from backend.analysis.backtester import register_strategy, register_exit
+#
+#   @register_strategy("my_breakout", label="My Breakout", description="...")
+#   def my_entry(ctx, i, p):
+#       # ctx: look-ahead-free arrays + current-bar scalars, p: params dict
+#       return ctx["close"][i] > ctx["donchian_high"][i]
+#
+#   @register_exit("my_breakout")  # optional — na do to SL/TP/trailing/time-stop par exit
+#   def my_exit(ctx, i, p):
+#       return ctx["close"][i] < ctx["donchian_low"][i]
+#
+# `ctx` keys: close/high/low/open/volume/volume_ratio/rsi_14/bb_lower/bb_upper/
+#   macd/macd_signal/ema_fast/ema_slow/donchian_high/donchian_low/st_vals/st_dir/
+#   preds (ai preds ya None) + curr_close/curr_rsi/curr_volume_ratio/curr_bb_low/curr_bb_high
+# `p` keys: fast_period, slow_period, rsi_oversold, rsi_overbought, entry_threshold,
+#   bearish_exit_threshold, atr_multiplier, stop_loss, take_profit, trailing_stop_pct,
+#   max_holding_days, position_size_pct, slippage_bps, commission_bps
+# Rule: sirf i ya i-1 access karo — i+1 = look-ahead bias, mana hai.
+STRATEGY_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
+BUILTIN_STRATEGIES: Dict[str, Dict[str, str]] = {
+    "ai_ensemble": {
+        "label": "AI Walk-Forward ML Ensemble",
+        "description": "XGBoost + ElasticNet walk-forward prediction edge.",
+    },
+    "ema_crossover": {
+        "label": "EMA Trend Following / Golden Cross",
+        "description": "Fast vs Slow EMA crossover trend following.",
+    },
+    "rsi_mean_reversion": {
+        "label": "RSI + Bollinger Mean Reversion",
+        "description": "Oversold lower-band dip buyer with mean target.",
+    },
+    "momentum_breakout": {
+        "label": "20-Day Momentum / Donchian Breakout",
+        "description": "Donchian channel breakout with volume expansion.",
+    },
+    "macd_crossover": {
+        "label": "MACD Signal Momentum Cross",
+        "description": "MACD line cross above signal with positive momentum.",
+    },
+    "supertrend": {
+        "label": "Supertrend Volatility Trail",
+        "description": "Dynamic ATR-based trailing trend-following stop.",
+    },
+}
+
+
+def register_strategy(strategy_id: str, label: Optional[str] = None,
+                      description: str = ""):
+    """Decorator: custom entry rule register karo.
+
+    Usage:
+        @register_strategy("vwap_bounce", label="VWAP Bounce")
+        def my_entry(ctx, i, p):
+            return ctx["close"][i] > ctx["close"][i - 1]  # apna rule
+    Exit rule alag se `register_exit` se judta hai (na do to sirf
+    SL/TP/trailing/time-stop par exit hoga).
+    """
+    sid = str(strategy_id).lower().strip()
+
+    def _deco(fn):
+        spec = STRATEGY_REGISTRY.setdefault(sid, {})
+        spec["id"] = sid
+        spec["label"] = label or sid.upper()
+        spec["description"] = description or ""
+        spec["entry"] = fn
+        return fn
+
+    return _deco
+
+
+def register_exit(strategy_id: str):
+    """Decorator: custom signal-exit rule register karo."""
+    sid = str(strategy_id).lower().strip()
+
+    def _deco(fn):
+        spec = STRATEGY_REGISTRY.setdefault(sid, {})
+        spec["id"] = sid
+        spec["exit"] = fn
+        return fn
+
+    return _deco
+
+
+def list_strategies() -> List[Dict[str, str]]:
+    """Builtin + registered custom strategies ki metadata list."""
+    out: List[Dict[str, str]] = []
+    for sid, meta in BUILTIN_STRATEGIES.items():
+        out.append({"id": sid, "label": meta["label"],
+                    "description": meta["description"], "builtin": True,
+                    "has_custom_exit": bool(STRATEGY_REGISTRY.get(sid, {}).get("exit"))})
+    for sid, spec in STRATEGY_REGISTRY.items():
+        if sid in BUILTIN_STRATEGIES:
+            continue
+        out.append({"id": sid, "label": str(spec.get("label") or sid.upper()),
+                    "description": str(spec.get("description") or ""),
+                    "builtin": False,
+                    "has_custom_exit": bool(spec.get("exit"))})
+    return out
+
+
+def _try_load_custom_strategies() -> None:
+    """`backend/analysis/custom_strategies.py` ho to auto-import (decorators chal jayein)."""
+    try:
+        import importlib
+        importlib.import_module("backend.analysis.custom_strategies")
+    except ModuleNotFoundError:
+        pass
+    except Exception:
+        # Custom file me error ho to builtin strategies tooti nahi chahiye.
+        logger.exception("custom_strategies load failed — builtins continue")
+
+
+_try_load_custom_strategies()
 
 
 def _build_features_row_by_row(df: pd.DataFrame) -> pd.DataFrame:
@@ -379,6 +503,57 @@ def _run_monte_carlo(daily_rets: pd.Series, n_sims: int = 500, initial_capital: 
     }
 
 
+def _strategy_params(fast_period, slow_period, rsi_oversold, rsi_overbought,
+                     entry_threshold, bearish_exit_threshold, atr_multiplier,
+                     stop_loss, take_profit, trailing_stop_pct, max_holding_days,
+                     position_size_pct, slippage_bps, commission_bps) -> Dict[str, Any]:
+    """run_backtest ke risk/signal params ka snapshot — custom rules ko milta hai."""
+    return {
+        "fast_period": fast_period, "slow_period": slow_period,
+        "rsi_oversold": rsi_oversold, "rsi_overbought": rsi_overbought,
+        "entry_threshold": entry_threshold,
+        "bearish_exit_threshold": bearish_exit_threshold,
+        "atr_multiplier": atr_multiplier, "stop_loss": stop_loss,
+        "take_profit": take_profit, "trailing_stop_pct": trailing_stop_pct,
+        "max_holding_days": max_holding_days,
+        "position_size_pct": position_size_pct,
+        "slippage_bps": slippage_bps, "commission_bps": commission_bps,
+    }
+
+
+def _strategy_ctx(test_df: pd.DataFrame, preds: Optional[np.ndarray],
+                  ema_fast: np.ndarray, ema_slow: np.ndarray,
+                  donchian_high: np.ndarray, donchian_low: np.ndarray,
+                  st_vals: np.ndarray, st_dir: np.ndarray,
+                  curr_close: float, i: int) -> Dict[str, Any]:
+    """Custom rule ko look-ahead-free context: arrays + current scalars."""
+    row = test_df.iloc[i]
+    return {
+        # arrays (index i ya i-1 se access karo — i+1 kabhi mat chhoona)
+        "close": test_df["close"].values.astype(float),
+        "high": test_df["high"].values.astype(float),
+        "low": test_df["low"].values.astype(float),
+        "open": test_df["open"].values.astype(float),
+        "volume": test_df["volume"].values.astype(float),
+        "volume_ratio": test_df["volume_ratio"].values.astype(float),
+        "rsi_14": test_df["rsi_14"].values.astype(float),
+        "bb_lower": test_df["bb_lower"].values.astype(float),
+        "bb_upper": test_df["bb_upper"].values.astype(float),
+        "macd": test_df["macd"].values.astype(float),
+        "macd_signal": test_df["macd_signal"].values.astype(float),
+        "ema_fast": ema_fast, "ema_slow": ema_slow,
+        "donchian_high": donchian_high, "donchian_low": donchian_low,
+        "st_vals": st_vals, "st_dir": st_dir,
+        "preds": preds,
+        # current-bar scalars (shortcut)
+        "curr_close": curr_close,
+        "curr_rsi": float(row.get("rsi_14", 50.0)),
+        "curr_volume_ratio": float(row.get("volume_ratio", 1.0)),
+        "curr_bb_low": float(row.get("bb_lower", curr_close * 0.95)),
+        "curr_bb_high": float(row.get("bb_upper", curr_close * 1.05)),
+    }
+
+
 def run_backtest(
     df: pd.DataFrame,
     ticker: str,
@@ -420,7 +595,25 @@ def run_backtest(
     if len(test_df) < 15:
         return {"error": "Out-of-sample testing period is too short. Select a longer historical range."}
 
-    strat_norm = strategy.lower().strip()
+    strat_raw = str(strategy or "ai_ensemble")
+    strat_norm = strat_raw.lower().strip()
+    # Backward-compat alias
+    if strat_norm == "ai_predictive":
+        strat_norm = "ai_ensemble"
+
+    # Custom strategies file ho to load karo (server restart bina nayi strategy pick ho)
+    _try_load_custom_strategies()
+    custom_spec = STRATEGY_REGISTRY.get(strat_norm)
+    if strat_norm not in BUILTIN_STRATEGIES and custom_spec is None:
+        known = sorted(list(BUILTIN_STRATEGIES.keys()) + list(STRATEGY_REGISTRY.keys()))
+        return {"error": f"Unknown strategy '{strat_raw}'. Available: {', '.join(known)}"}
+    is_custom = custom_spec is not None and strat_norm not in BUILTIN_STRATEGIES
+
+    # Custom strategy ka entry/exit fn (builtin ids par custom override nahi — builtin jeet-ta hai)
+    custom_entry = custom_spec.get("entry") if is_custom else None
+    custom_exit_fn = custom_spec.get("exit") if is_custom else None
+    if is_custom and not callable(custom_entry):
+        return {"error": f"Custom strategy '{strat_norm}' me @register_strategy entry rule missing hai."}
 
     # 3. Compute Strategy Signals
     preds: Optional[np.ndarray] = None
@@ -495,7 +688,21 @@ def run_backtest(
 
             # Strategy Signal Exit
             signal_exit_hit = False
-            if strat_norm == "ai_ensemble" and preds is not None:
+            if is_custom and callable(custom_exit_fn):
+                try:
+                    signal_exit_hit = bool(custom_exit_fn(
+                        _strategy_ctx(test_df, preds, ema_fast, ema_slow,
+                                      donchian_high, donchian_low, st_vals, st_dir,
+                                      curr_close, i),
+                        i, _strategy_params(
+                            fast_period, slow_period, rsi_oversold, rsi_overbought,
+                            entry_threshold, bearish_exit_threshold, atr_multiplier,
+                            stop_loss, take_profit, trailing_stop_pct, max_holding_days,
+                            position_size_pct, slippage_bps, commission_bps)))
+                except Exception:
+                    logger.exception("custom exit '%s' failed — treated as no-exit", strat_norm)
+                    signal_exit_hit = False
+            elif strat_norm == "ai_ensemble" and preds is not None:
                 pred_ret = (preds[i] - curr_close) / (curr_close + 1e-9)
                 signal_exit_hit = pred_ret < bearish_exit_threshold
             elif strat_norm == "ema_crossover":
@@ -555,7 +762,21 @@ def run_backtest(
             # ── Not in Position: Evaluate Entry Signals ──
             entry_signal = False
 
-            if strat_norm == "ai_ensemble" and preds is not None:
+            if is_custom:
+                try:
+                    entry_signal = bool(custom_entry(
+                        _strategy_ctx(test_df, preds, ema_fast, ema_slow,
+                                      donchian_high, donchian_low, st_vals, st_dir,
+                                      curr_close, i),
+                        i, _strategy_params(
+                            fast_period, slow_period, rsi_oversold, rsi_overbought,
+                            entry_threshold, bearish_exit_threshold, atr_multiplier,
+                            stop_loss, take_profit, trailing_stop_pct, max_holding_days,
+                            position_size_pct, slippage_bps, commission_bps)))
+                except Exception:
+                    logger.exception("custom entry '%s' failed — treated as no-entry", strat_norm)
+                    entry_signal = False
+            elif strat_norm == "ai_ensemble" and preds is not None:
                 pred_ret = (preds[i] - curr_close) / (curr_close + 1e-9)
                 entry_signal = pred_ret > entry_threshold
             elif strat_norm == "ema_crossover":
@@ -749,11 +970,17 @@ def run_backtest(
         "macd_crossover": "MACD Signal Momentum Cross",
         "supertrend": "Supertrend Volatility Trail",
     }
+    # Custom labels registry se (builtin override nahi hota)
+    for _sid, _spec in STRATEGY_REGISTRY.items():
+        if _sid not in strategy_names and _spec.get("label"):
+            strategy_names[_sid] = str(_spec["label"])
 
     return {
         "ticker": ticker.upper(),
         "strategy": strat_norm,
         "strategy_label": strategy_names.get(strat_norm, strat_norm.upper()),
+        "is_custom": bool(is_custom),
+        "custom_description": str((custom_spec or {}).get("description") or ""),
         "initial_capital": initial_capital,
         "final_value": round(float(pv[-1]), 2),
         "out_of_sample_start": train_end_date,

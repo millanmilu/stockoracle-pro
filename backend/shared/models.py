@@ -336,7 +336,11 @@ class ScreenerDailyMetric(Base):
     market_cap_cat = Column(String(20), nullable=True, index=True)
     
     # Prices & Returns
-    close_price = Column(Float, nullable=False, index=True)
+    # Nullable on purpose: a row whose price is unknown (e.g. an index
+    # constituent that has been listed but not yet backfilled) must be able to
+    # say so. A NOT NULL column forced callers to write a placeholder (100.0),
+    # which the screener then rendered as a real ₹100.00 quote.
+    close_price = Column(Float, nullable=True, index=True)
     change_1d_pct = Column(Float, nullable=True, index=True)
     change_1w_pct = Column(Float, nullable=True)
     change_1m_pct = Column(Float, nullable=True)
@@ -408,7 +412,11 @@ class ScreenerDailyMetric(Base):
     # Traceability
     why_json = Column(Text, nullable=True)
     confluence_json = Column(Text, nullable=True)
-    data_status = Column(String(20), nullable=True, default="OK")
+    # Derived from real coverage by upsert_screener_daily_metric (see
+    # screener_engines.derive_screener_data_status). The column default is the
+    # SAFE state, not "OK": a row written without going through the deriver has
+    # no proven metrics and must not claim them.
+    data_status = Column(String(20), nullable=True, default="NO_DATA")
 
     # Fundamentals
     pe_ratio = Column(Float, nullable=True, index=True)
