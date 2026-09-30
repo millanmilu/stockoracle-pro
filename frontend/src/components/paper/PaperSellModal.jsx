@@ -4,16 +4,16 @@ import api from '../../utils/api';
 import toast from 'react-hot-toast';
 
 export default function PaperSellModal({ position, onClose, onSellExecuted }) {
-  if (!position) return null;
-
-  const totalShares = Number(position.shares) || 1;
-  const buyPrice = Number(position.avg_buy_price) || 0;
-  const livePrice = Number(position.current_price) || buyPrice;
+  const totalShares = Number(position?.shares) || 1;
+  const buyPrice = Number(position?.avg_buy_price) || 0;
+  const livePrice = Number(position?.current_price) || buyPrice;
 
   const [sellShares, setSellShares] = useState(totalShares);
   const [exitPrice, setExitPrice] = useState(livePrice);
   const [sellNote, setSellNote] = useState('PROFIT_BOOKING');
   const [submitting, setSubmitting] = useState(false);
+
+  if (!position) return null;
 
   const handleQuickPct = (pct) => {
     const calculated = Math.max(1, Math.floor(totalShares * (pct / 100)));

@@ -209,10 +209,7 @@ const COLOR = {
 
 /** Theme-aware rail palette — TradingView parity (dark #131722 / light white). */
 function useRailPalette() {
-  let theme = 'dark';
-  try {
-    theme = useStore(s => s.theme) || 'dark';
-  } catch { theme = 'dark'; }
+  const theme = useStore(s => s.theme) ?? 'dark';
   if (theme === 'light') {
     return {
       bg: '#FFFFFF',

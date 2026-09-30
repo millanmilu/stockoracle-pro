@@ -232,7 +232,7 @@ export function fibRetracementBands(a, b, levels = FIB_LEVEL_STYLE) {
     // Accept enriched metadata objects ({ level, color, fill, label }) or
     // plain numeric levels (e.g. FIB_RETRACEMENT_LEVELS), matching how the
     // legacy fib renderer and extended fib_extension/fib_channel shapes call it.
-    const level = l && typeof l === 'object' ? Number(l.level) ?? 0 : Number(l) ?? 0;
+    const level = l && typeof l === 'object' ? Number(l.level || 0) : Number(l || 0);
     const xLow = Math.min(a.x, b.x);
     const xHigh = Math.max(a.x, b.x);
     const y = above.y + totalY * level;
@@ -242,7 +242,7 @@ export function fibRetracementBands(a, b, levels = FIB_LEVEL_STYLE) {
     const label = l && typeof l === 'object' ? (l.label ?? `${level}`) : `${level}`;
     // bands span from *this* level to the *next* (or to the edge for the last).
     const next = levels[idx + 1];
-    const nextLevel = next && typeof next === 'object' ? Number(next.level) ?? 0 : Number(next) ?? 0;
+    const nextLevel = next && typeof next === 'object' ? Number(next.level || 0) : Number(next || 0);
     const nextY = next ? above.y + totalY * nextLevel : below.y;
     const nextPrice = next ? above.price + totalPrice * nextLevel : below.price;
     // For the fill rectangle we want the smaller Y on top.

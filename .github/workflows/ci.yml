@@ -66,6 +66,9 @@ jobs:
       - name: Install Frontend Dependencies
         run: npm install
 
+      - name: Run Frontend Unit Tests
+        run: npm test
+
       - name: Build Production Frontend Bundle (Vite)
         run: npm run build
 

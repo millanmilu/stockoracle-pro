@@ -575,7 +575,7 @@ export default function VolatilityPanel({ ticker }) {
           borderRadius: 12, padding: '16px', display: 'flex', flexDirection: 'column', gap: 12,
         }}>
           <div style={{ fontSize: '0.78rem', color: '#94A3B8', fontWeight: 700 }}>
-            Conditional Variance Maximum Likelihood Estimation ($\sigma_t^2 = \omega + \alpha \epsilon_{t-1}^2 + \beta \sigma_{t-1}^2$)
+            {'Conditional Variance Maximum Likelihood Estimation ($\\sigma_t^2 = \\omega + \\alpha \\epsilon_{t-1}^2 + \\beta \\sigma_{t-1}^2$)'}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
