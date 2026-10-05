@@ -36,7 +36,7 @@ stockoracle-pro /
 │   ├── src/constants/       # screenerConfig.js
 │   └── src/utils/           # engines (indicatorEngine, chartIndicators, aiIndicatorEngine, aiSignalEngine) + *.test.js
 ├── terminal_ui/             # institutional_terminal, chart_widget (ASCII)
-├── tests/                   # 20 test_*.py + conftest.py (invariants + features)
+├── tests/                   # 21 test_*.py + conftest.py (invariants + features)
 └── logs/, aws/, .github/workflows/ci.yml
 ```
 

@@ -96,6 +96,43 @@ export const mockAIAnalysis = {
   },
 };
 
+/**
+ * Derives a plausible AI analysis for symbols without a hand-written mock.
+ * Levels come from real recent candle data so S/R/target always sit around
+ * the CURRENT price instead of RELIANCE's hardcoded 2820/2920.
+ */
+export function synthesizeAIAnalysis(candles, changePct = 0) {
+  const recent = candles.slice(-50);
+  const support = recent.length ? Math.min(...recent.map((c) => c.low)) : 0;
+  const resistance = recent.length ? Math.max(...recent.map((c) => c.high)) : 0;
+  const price = candles[candles.length - 1]?.close || 0;
+  const bullish = changePct >= 0;
+  const target = bullish ? resistance + (resistance - support) * 0.25 : support - (resistance - support) * 0.25;
+  const stopLoss = bullish ? support : resistance;
+  const risk = Math.abs(price - stopLoss) || 1;
+  const reward = Math.abs(target - price);
+  return {
+    direction: bullish ? 'Bullish' : 'Bearish',
+    confidence: Math.min(85, Math.max(45, Math.round(55 + Math.abs(changePct) * 8))),
+    trend: Math.min(90, Math.max(30, Math.round(50 + changePct * 10))),
+    momentum: Math.min(90, Math.max(30, Math.round(50 + changePct * 12))),
+    breakout: 60,
+    volatility: 50,
+    volume: 58,
+    structure: 62,
+    regime: Math.abs(changePct) > 1 ? 'TREND' : 'RANGE',
+    regimeConfidence: 60,
+    pattern: 'None',
+    patternCompletion: 0,
+    support: Number(support.toFixed(2)),
+    resistance: Number(resistance.toFixed(2)),
+    target: Number(target.toFixed(2)),
+    stopLoss: Number(stopLoss.toFixed(2)),
+    riskReward: Number((reward / risk).toFixed(1)),
+    signals: [],
+  };
+}
+
 export const mockAIForecast = {
   RELIANCE: {
     median: [2874, 2885, 2898, 2910, 2925, 2940, 2955],

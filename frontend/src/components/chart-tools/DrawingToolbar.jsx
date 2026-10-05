@@ -64,6 +64,7 @@ import {
   ACTION_SHORTCUTS,
   DRAWING_TOOL_GROUPS,
   MAGNET_LABELS,
+  PINS_STORAGE_KEY,
   TOOL_SHORTCUTS,
   getToolSpec,
 } from './drawingToolCatalog';
@@ -89,7 +90,11 @@ import { getThemeTokens } from '../../utils/theme';
  * tools that have both an icon and a renderer.
  */
 
-export const PINS_STORAGE_KEY = 'stockoracle_drawing_toolbar_pins_v1';
+/**
+ * Kept for backwards compatibility — the constant lives in the pure
+ * catalog now so util modules (and Node tests) never pull in React.
+ */
+export { PINS_STORAGE_KEY };
 
 /** No default pins — the rail starts directly with tool categories.
  *  Users pin their own favourites via the star in any flyout. (Trendline,

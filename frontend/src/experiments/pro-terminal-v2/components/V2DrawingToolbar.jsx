@@ -3,7 +3,7 @@
 import React from 'react';
 import {
   MousePointer2, TrendingUp, Minus, Square, Type, ArrowUpRight,
-  Lock, Unlock, Eye, EyeOff, Trash2, Magnet, Ruler, Crosshair,
+  Lock, Eye, Trash2, Magnet, Ruler,
 } from 'lucide-react';
 import { V2_COLORS, V2_DRAWING_TOOLS } from '../utils/constants';
 
@@ -46,18 +46,56 @@ const TOOL_ICONS = {
   remove: Trash2,
 };
 
-export default function V2DrawingToolbar({ activeTool, onToolChange, showMenu, onToggleMenu }) {
+// Tools that are actions/toggles rather than drawing instruments.
+const ACTION_TOOLS = new Set(['magnet', 'lock', 'hide', 'remove']);
+
+export default function V2DrawingToolbar({
+  activeTool,
+  onToolChange,
+  showMenu,
+  onToggleMenu,
+  magnetEnabled = false,
+  drawingsLocked = false,
+  allDrawingsHidden = false,
+  onToggleMagnet,
+  onToggleLock,
+  onToggleHide,
+  onClearDrawings,
+}) {
   const handleToolClick = (tool) => {
     if (tool.category === 'group') {
       onToggleMenu(showMenu === tool.id ? null : tool.id);
-    } else {
-      onToolChange(tool.id);
-      onToggleMenu(null);
+      return;
+    }
+    switch (tool.id) {
+      case 'magnet': onToggleMagnet?.(); return;
+      case 'lock': onToggleLock?.(); return;
+      case 'hide': onToggleHide?.(); return;
+      case 'remove': onClearDrawings?.(); return;
+      default: onToolChange(tool.id); onToggleMenu(null);
     }
   };
 
+  const isToolActive = (tool) => {
+    switch (tool.id) {
+      case 'magnet': return magnetEnabled;
+      case 'lock': return drawingsLocked;
+      case 'hide': return allDrawingsHidden;
+      case 'remove': return false;
+      default: return activeTool === tool.id;
+    }
+  };
+
+  const toolTitle = (tool) => {
+    if (tool.id === 'magnet') return magnetEnabled ? 'Magnet: on' : 'Magnet: off';
+    if (tool.id === 'lock') return drawingsLocked ? 'Lock drawings: on' : 'Lock drawings: off';
+    if (tool.id === 'hide') return allDrawingsHidden ? 'Show drawings' : 'Hide all drawings';
+    if (tool.id === 'remove') return 'Remove all drawings';
+    return tool.label;
+  };
+
   return (
-    <div style={{
+    <div className="v2-drawing-rail" style={{
       display: 'flex',
       flexDirection: 'column',
       width: 36,
@@ -68,24 +106,31 @@ export default function V2DrawingToolbar({ activeTool, onToolChange, showMenu, o
       flexShrink: 0,
       position: 'relative',
     }}>
+
       {V2_DRAWING_TOOLS.map((tool) => {
         const Icon = TOOL_ICONS[tool.icon] || MousePointer2;
-        const isActive = activeTool === tool.id;
+        const isActive = isToolActive(tool);
+        const isGroup = tool.category === 'group';
         const isGroupOpen = showMenu === tool.id;
+        // A group lights up when the active drawing tool is one of its children.
+        const hasActiveChild = isGroup && (tool.children || []).some((c) => c.id === activeTool);
+        const lit = isActive || hasActiveChild;
 
         return (
           <div key={tool.id} style={{ position: 'relative' }}>
             <button
               onClick={() => handleToolClick(tool)}
-              title={tool.label}
+              title={toolTitle(tool)}
+              aria-label={toolTitle(tool)}
+              aria-pressed={ACTION_TOOLS.has(tool.id) ? isActive : undefined}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 width: '100%',
                 height: 28,
-                color: isActive ? V2_COLORS.accent.primary : V2_COLORS.text.secondary,
-                background: isActive ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
+                color: lit ? V2_COLORS.accent.primary : V2_COLORS.text.secondary,
+                background: lit ? 'rgba(59, 130, 246, 0.15)' : 'transparent',
                 border: 'none',
                 borderRadius: 4,
                 cursor: 'pointer',
@@ -93,7 +138,7 @@ export default function V2DrawingToolbar({ activeTool, onToolChange, showMenu, o
               }}
             >
               <Icon size={14} />
-              {tool.category === 'group' && (
+              {isGroup && (
                 <div style={{
                   position: 'absolute',
                   right: 2,
@@ -107,7 +152,7 @@ export default function V2DrawingToolbar({ activeTool, onToolChange, showMenu, o
 
             {/* Floating submenu */}
             {isGroupOpen && tool.children && (
-              <div style={{
+              <div role="menu" style={{
                 position: 'absolute',
                 left: '100%',
                 top: 0,
@@ -132,10 +177,13 @@ export default function V2DrawingToolbar({ activeTool, onToolChange, showMenu, o
                 </div>
                 {tool.children.map((child) => {
                   const ChildIcon = TOOL_ICONS[child.icon] || MousePointer2;
+                  const childActive = activeTool === child.id;
                   return (
                     <button
                       key={child.id}
+                      role="menuitem"
                       onClick={() => { onToolChange(child.id); onToggleMenu(null); }}
+                      aria-label={child.label}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -143,8 +191,8 @@ export default function V2DrawingToolbar({ activeTool, onToolChange, showMenu, o
                         width: '100%',
                         padding: '5px 10px',
                         fontSize: 11,
-                        color: V2_COLORS.text.secondary,
-                        background: 'transparent',
+                        color: childActive ? V2_COLORS.accent.primary : V2_COLORS.text.secondary,
+                        background: childActive ? 'rgba(59, 130, 246, 0.12)' : 'transparent',
                         border: 'none',
                         cursor: 'pointer',
                         textAlign: 'left',

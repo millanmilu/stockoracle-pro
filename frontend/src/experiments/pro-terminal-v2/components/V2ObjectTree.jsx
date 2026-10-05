@@ -1,62 +1,81 @@
 // Pro Terminal V2 — Object Tree Panel
+// Sections are derived from live state: indicator/AI visibility toggles the
+// chart, drawing rows mirror the drawings array, Data Window shows real values.
 
 import React, { useState } from 'react';
-import { Eye, EyeOff, Lock, Unlock, Trash2, Settings, ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
-import { V2_COLORS } from '../utils/constants';
+import { Eye, EyeOff, Lock, Unlock, Trash2, ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
+import { V2_COLORS, V2_INDICATORS, V2_AI_INDICATORS } from '../utils/constants';
+import { formatPrice, formatPercent, formatVolume } from '../utils/formatters';
 
-const OBJECT_SECTIONS = [
-  {
-    id: 'indicators',
-    label: 'INDICATORS',
-    objects: [
-      { id: 'ema_20', name: 'EMA 20', color: '#06B6D4', visible: true, locked: false },
-      { id: 'ema_50', name: 'EMA 50', color: '#F97316', visible: true, locked: false },
-      { id: 'ema_200', name: 'EMA 200', color: '#A855F7', visible: true, locked: false },
-      { id: 'volume', name: 'Volume', color: '#6366F1', visible: true, locked: false },
-      { id: 'rsi', name: 'RSI', color: '#F59E0B', visible: true, locked: false },
-      { id: 'macd', name: 'MACD', color: '#3B82F6', visible: true, locked: false },
-    ],
-  },
-  {
-    id: 'drawings',
-    label: 'DRAWINGS',
-    objects: [], // Populated from props
-  },
-  {
-    id: 'ai',
-    label: 'AI',
-    objects: [
-      { id: 'ai_trend', name: 'AI Trend', color: '#10B981', visible: true, locked: false },
-      { id: 'ai_sr', name: 'AI Support/Resistance', color: '#10B981', visible: true, locked: false },
-      { id: 'ai_breakout', name: 'AI Breakout', color: '#10B981', visible: false, locked: false },
-    ],
-  },
+const SECTIONS = [
+  { id: 'indicators', label: 'INDICATORS' },
+  { id: 'drawings', label: 'DRAWINGS' },
+  { id: 'ai', label: 'AI' },
 ];
 
-export default function V2ObjectTree({ activeTab, onTabChange, drawings = [], onToggleDrawingVisibility, onRemoveDrawing }) {
+export default function V2ObjectTree({
+  activeTab,
+  onTabChange,
+  drawings = [],
+  activeIndicators = [],
+  onToggleIndicator,
+  activeAiIndicators = [],
+  onToggleAiIndicator,
+  onToggleDrawingVisibility,
+  onToggleDrawingLock,
+  onRemoveDrawing,
+  dataWindow,
+}) {
   const [expanded, setExpanded] = useState({ indicators: true, drawings: true, ai: true });
-  const [objects, setObjects] = useState(() => {
-    const init = {};
-    OBJECT_SECTIONS.forEach((s) => s.objects.forEach((o) => { init[o.id] = o; }));
-    return init;
-  });
-
   const toggleSection = (id) => setExpanded((p) => ({ ...p, [id]: !p[id] }));
-  const toggleVisibility = (id) => setObjects((p) => ({ ...p, [id]: { ...p[id], visible: !p[id].visible } }));
-  const toggleLock = (id) => setObjects((p) => ({ ...p, [id]: { ...p[id], locked: !p[id].locked } }));
-  const removeObject = (id) => setObjects((p) => { const n = { ...p }; delete n[id]; return n; });
 
-  // Merge drawings into objects
-  const drawingObjects = drawings.map((d) => ({
-    id: d.id,
-    name: d.name || `Drawing ${d.id}`,
-    color: '#3B82F6',
-    visible: d.visible !== false,
-    locked: false,
-  }));
+  const sections = {
+    indicators: V2_INDICATORS
+      .filter((i) => i.id !== 'ai_trend') // shown under the AI section instead
+      .map((i) => ({
+        id: i.id,
+        name: i.name,
+        color: i.color,
+        visible: activeIndicators.includes(i.id),
+        locked: false,
+      })),
+    drawings: drawings.map((d) => ({
+      id: d.id,
+      name: d.name || d.type,
+      color: '#3B82F6',
+      visible: d.visible !== false,
+      locked: Boolean(d.locked),
+      isDrawing: true,
+    })),
+    ai: V2_AI_INDICATORS.map((i) => ({
+      id: i.id,
+      name: i.name,
+      color: '#10B981',
+      visible: activeAiIndicators.includes(i.id),
+      locked: false,
+      isAi: true,
+    })),
+  };
+
+  const handleToggleVisible = (sectionId, obj) => {
+    if (sectionId === 'drawings') onToggleDrawingVisibility?.(obj.id);
+    else if (sectionId === 'indicators') onToggleIndicator?.(obj.id);
+    else onToggleAiIndicator?.(obj.id);
+  };
+
+  const handleDelete = (sectionId, obj) => {
+    if (sectionId === 'drawings') {
+      if (obj.locked) return;
+      onRemoveDrawing?.(obj.id);
+    } else if (sectionId === 'indicators') {
+      onToggleIndicator?.(obj.id); // delete = turn the indicator off
+    } else {
+      onToggleAiIndicator?.(obj.id);
+    }
+  };
 
   return (
-    <div style={{
+    <div className="v2-objecttree" style={{
       width: 200,
       background: V2_COLORS.bg.secondary,
       borderLeft: `1px solid ${V2_COLORS.bg.border}`,
@@ -65,10 +84,12 @@ export default function V2ObjectTree({ activeTab, onTabChange, drawings = [], on
       flexShrink: 0,
     }}>
       {/* Tabs */}
-      <div style={{ display: 'flex', borderBottom: `1px solid ${V2_COLORS.bg.border}` }}>
+      <div role="tablist" style={{ display: 'flex', borderBottom: `1px solid ${V2_COLORS.bg.border}` }}>
         {['objects', 'data'].map((tab) => (
           <button
             key={tab}
+            role="tab"
+            aria-selected={activeTab === tab}
             onClick={() => onTabChange(tab)}
             style={{
               flex: 1,
@@ -91,12 +112,13 @@ export default function V2ObjectTree({ activeTab, onTabChange, drawings = [], on
 
       {activeTab === 'objects' ? (
         <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
-          {OBJECT_SECTIONS.map((section) => {
-            const sectionObjects = section.id === 'drawings' ? drawingObjects : section.objects;
+          {SECTIONS.map((section) => {
+            const sectionObjects = sections[section.id];
             return (
               <div key={section.id}>
                 <button
                   onClick={() => toggleSection(section.id)}
+                  aria-expanded={expanded[section.id]}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -119,36 +141,41 @@ export default function V2ObjectTree({ activeTab, onTabChange, drawings = [], on
                     {sectionObjects.length}
                   </span>
                 </button>
-                {expanded[section.id] && sectionObjects.map((obj) => {
-                  const state = objects[obj.id] || obj;
-                  return (
-                    <div
-                      key={obj.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        padding: '3px 8px 3px 20px',
-                        fontSize: 11,
-                        color: state.visible ? V2_COLORS.text.secondary : V2_COLORS.text.muted,
-                      }}
-                    >
-                      <GripVertical size={9} style={{ color: V2_COLORS.text.muted, cursor: 'grab' }} />
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: obj.color || '#3B82F6', flexShrink: 0 }} />
-                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{obj.name}</span>
-                      <ObjectIcon icon={state.visible ? <Eye size={10} /> : <EyeOff size={10} />} onClick={() => {
-                        if (section.id === 'drawings') onToggleDrawingVisibility?.(obj.id);
-                        else toggleVisibility(obj.id);
-                      }} title="Toggle visibility" />
-                      <ObjectIcon icon={state.locked ? <Lock size={10} /> : <Unlock size={10} />} onClick={() => toggleLock(obj.id)} title="Toggle lock" />
-                      <ObjectIcon icon={<Settings size={10} />} onClick={() => {}} title="Settings" />
-                      <ObjectIcon icon={<Trash2 size={10} />} onClick={() => {
-                        if (section.id === 'drawings') onRemoveDrawing?.(obj.id);
-                        else removeObject(obj.id);
-                      }} title="Delete" />
-                    </div>
-                  );
-                })}
+                {expanded[section.id] && sectionObjects.map((obj) => (
+                  <div
+                    key={obj.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '3px 8px 3px 20px',
+                      fontSize: 11,
+                      color: obj.visible ? V2_COLORS.text.secondary : V2_COLORS.text.muted,
+                    }}
+                  >
+                    <GripVertical size={9} aria-hidden="true" style={{ color: V2_COLORS.text.muted, cursor: 'grab' }} />
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: obj.color, flexShrink: 0 }} />
+                    <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>{obj.name}</span>
+                    <ObjectIcon
+                      icon={obj.visible ? <Eye size={10} /> : <EyeOff size={10} />}
+                      onClick={() => handleToggleVisible(section.id, obj)}
+                      title={obj.visible ? `Hide ${obj.name}` : `Show ${obj.name}`}
+                    />
+                    {obj.isDrawing && (
+                      <ObjectIcon
+                        icon={obj.locked ? <Lock size={10} /> : <Unlock size={10} />}
+                        onClick={() => onToggleDrawingLock?.(obj.id)}
+                        title={obj.locked ? 'Unlock drawing' : 'Lock drawing (blocks delete)'}
+                      />
+                    )}
+                    <ObjectIcon
+                      icon={<Trash2 size={10} />}
+                      onClick={() => handleDelete(section.id, obj)}
+                      title={obj.locked ? 'Unlock to delete' : `Remove ${obj.name}`}
+                      disabled={Boolean(obj.locked)}
+                    />
+                  </div>
+                ))}
               </div>
             );
           })}
@@ -157,14 +184,14 @@ export default function V2ObjectTree({ activeTab, onTabChange, drawings = [], on
         <div style={{ padding: 12, fontSize: 11, color: V2_COLORS.text.muted }}>
           <div style={{ marginBottom: 8, fontWeight: 600, color: V2_COLORS.text.secondary }}>Data Window</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <DataRow label="Symbol" value="RELIANCE" />
-            <DataRow label="Price" value="₹2,874.35" />
-            <DataRow label="Change" value="+0.55%" />
-            <DataRow label="Volume" value="1.24M" />
-            <DataRow label="RSI" value="58.2" />
-            <DataRow label="MACD" value="+12.4" />
-            <DataRow label="EMA 20" value="2,865.30" />
-            <DataRow label="EMA 50" value="2,842.10" />
+            <DataRow label="Symbol" value={dataWindow?.symbol || '—'} />
+            <DataRow label="Price" value={dataWindow?.price != null ? formatPrice(dataWindow.price) : '—'} />
+            <DataRow label="Change" value={dataWindow?.changePct != null ? formatPercent(dataWindow.changePct) : '—'} />
+            <DataRow label="Volume" value={dataWindow?.volume != null ? formatVolume(dataWindow.volume) : '—'} />
+            <DataRow label="RSI" value={dataWindow?.rsi != null ? dataWindow.rsi.toFixed(1) : '—'} />
+            <DataRow label="MACD" value={dataWindow?.macd != null ? dataWindow.macd.toFixed(2) : '—'} />
+            <DataRow label="EMA 20" value={dataWindow?.ema20 != null ? formatPrice(dataWindow.ema20) : '—'} />
+            <DataRow label="EMA 50" value={dataWindow?.ema50 != null ? formatPrice(dataWindow.ema50) : '—'} />
           </div>
         </div>
       )}
@@ -172,19 +199,22 @@ export default function V2ObjectTree({ activeTab, onTabChange, drawings = [], on
   );
 }
 
-function ObjectIcon({ icon, onClick, title }) {
+function ObjectIcon({ icon, onClick, title, disabled = false }) {
   return (
     <button
       onClick={onClick}
       title={title}
+      aria-label={title}
+      disabled={disabled}
       style={{
         padding: 2,
         color: V2_COLORS.text.muted,
         background: 'transparent',
         border: 'none',
         borderRadius: 3,
-        cursor: 'pointer',
+        cursor: disabled ? 'default' : 'pointer',
         display: 'flex',
+        opacity: disabled ? 0.4 : 1,
       }}
     >
       {icon}
@@ -194,7 +224,7 @@ function ObjectIcon({ icon, onClick, title }) {
 
 function DataRow({ label, value }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
       <span style={{ color: V2_COLORS.text.muted }}>{label}</span>
       <span style={{ color: V2_COLORS.text.secondary, fontWeight: 500 }}>{value}</span>
     </div>

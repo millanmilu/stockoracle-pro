@@ -737,6 +737,18 @@ def get_stock_volume_profile(
     return calculate_volume_profile(ticker=ticker, period=period, n_bins=bins)
 
 
+@router.get("/stock/{ticker}/exchange-report")
+def get_stock_exchange_report(
+    ticker: str,
+    period: Optional[str] = "1D",
+    bins: Optional[int] = 25,
+    _auth: None = Security(verify_api_key),
+):
+    """Returns a Binance trade-level exchange report using aggTrades price/quantity rows."""
+    from backend.analysis.volume_profile import calculate_exchange_report
+    return calculate_exchange_report(ticker=ticker, period=period or "1D", n_bins=bins or 25)
+
+
 @router.get("/macro/sovereign-yields")
 def get_sovereign_macro(
     _auth: None = Security(verify_api_key),

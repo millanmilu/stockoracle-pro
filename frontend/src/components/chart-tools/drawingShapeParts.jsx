@@ -12,7 +12,7 @@ import * as G from '../../utils/drawingGeometry';
 
 const HANDLE_SIZE = 8;
 const LABEL_FONT = '10px JetBrains Mono, monospace';
-const LABEL_BG = 'rgba(15, 19, 29, 0.92)';
+const LABEL_BG = 'var(--drawing-label-bg, rgba(15, 19, 29, 0.92))';
 
 function dashArray(drawing) {
   return G.strokeDasharray(drawing.lineStyle, drawing.strokeWidth || 2);
@@ -20,10 +20,10 @@ function dashArray(drawing) {
 
 function strokeProps(drawing, { width, opacity } = {}) {
   return {
-    stroke: drawing.color || '#38BDF8',
+    stroke: drawing.borderVisible === false ? 'transparent' : (drawing.borderColor || drawing.color || '#38BDF8'),
     strokeWidth: width ?? drawing.strokeWidth ?? 2,
     strokeDasharray: dashArray(drawing),
-    strokeOpacity: opacity,
+    strokeOpacity: opacity ?? drawing.borderOpacity ?? drawing.opacity ?? 1,
     fill: 'none',
     vectorEffect: 'non-scaling-stroke',
   };
@@ -43,7 +43,15 @@ function tint(color, alpha) {
   return c;
 }
 
-function Label({ x, y, text, color = '#E2E8F0', align = 'start', anchor = 'middle', bold = false }) {
+function fillProps(drawing, fallbackAlpha = 0.12) {
+  return {
+    fill: drawing.backgroundVisible === false
+      ? 'transparent'
+      : tint(drawing.backgroundColor || drawing.color || '#38BDF8', drawing.backgroundOpacity ?? fallbackAlpha),
+  };
+}
+
+function Label({ x, y, text, color = 'var(--drawing-label-text, #E2E8F0)', align = 'start', anchor = 'middle', bold = false }) {
   if (!text) return null;
   const width = String(text).length * 6.2 + 10;
   const left = align === 'end' ? x - width : align === 'center' ? x - width / 2 : x;
@@ -95,19 +103,19 @@ function HitPath({ d, onDown, onDoubleClick, cursor }) {
 }
 
 /** Selection handles at every anchor (TradingView shows these when selected). */
-function Handles({ points, onHandleDown, onDoubleClick, color = '#2962FF' }) {
+function Handles({ points, onHandleDown, onDoubleClick, color = '#2962FF', size = HANDLE_SIZE, pointColor = '#FFFFFF' }) {
   if (!onHandleDown) return null;
   return (
     <g>
       {points.map((point, index) => (
         <rect
           key={`h-${index}`}
-          x={point.x - HANDLE_SIZE / 2}
-          y={point.y - HANDLE_SIZE / 2}
-          width={HANDLE_SIZE}
-          height={HANDLE_SIZE}
+          x={point.x - size / 2}
+          y={point.y - size / 2}
+          width={size}
+          height={size}
           rx={1.5}
-          fill="#FFFFFF"
+          fill={pointColor}
           stroke={color}
           strokeWidth={1.5}
           style={{ cursor: 'crosshair', pointerEvents: 'all' }}
@@ -150,6 +158,7 @@ export {
   LABEL_BG,
   dashArray,
   strokeProps,
+  fillProps,
   tint,
   Label,
   HitLine,

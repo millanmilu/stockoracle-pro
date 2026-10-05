@@ -1,7 +1,7 @@
 // Pro Terminal V2 — Main Entry Point
 // Completely isolated experimental module. No imports from existing project code.
 
-import React, { useState, useCallback } from 'react';
+import React, { useRef } from 'react';
 import { useProTerminalV2 } from './hooks/useProTerminalV2';
 import V2TopNavigation from './components/V2TopNavigation';
 import V2ChartToolbar from './components/V2ChartToolbar';
@@ -9,64 +9,98 @@ import V2DrawingToolbar from './components/V2DrawingToolbar';
 import V2ObjectTree from './components/V2ObjectTree';
 import V2StockPanel from './components/V2StockPanel';
 import V2BottomTabs from './components/V2BottomTabs';
+import V2OrderModal from './components/V2OrderModal';
 import V2Chart from './chart/V2Chart';
 import V2Volume from './chart/V2Volume';
 import V2RSI from './chart/V2RSI';
 import V2MACD from './chart/V2MACD';
 import V2AITrend from './chart/V2AITrend';
-import { V2_COLORS } from './utils/constants';
+import { V2_COLORS, V2_INDICATORS, V2_AI_INDICATORS } from './utils/constants';
 import { formatPrice, formatChange, formatPercent, formatVolume } from './utils/formatters';
+import { createPaneSync } from './utils/paneSync';
 import './styles/proTerminalV2.css';
+
+// Top-nav items that map onto a bottom workspace tab
+const NAV_TO_TAB = {
+  Markets: 'overview',
+  Screener: 'screener',
+  Watchlist: 'overview',
+  Portfolio: 'financials',
+  News: 'news',
+  'AI Analytics': 'ai_analysis',
+};
 
 export default function ProTerminalV2() {
   const v2 = useProTerminalV2();
-  const [showIndicatorModal, setShowIndicatorModal] = useState(false);
-  const [showAIModal, setShowAIModal] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [bottomTab, setBottomTab] = useState('screener');
-  const [rightPanelTab, setRightPanelTab] = useState('overview');
-  const [objectTreeTab, setObjectTreeTab] = useState('objects');
-  const [showDrawingMenu, setShowDrawingMenu] = useState(null);
+  const paneSyncRef = useRef(null);
+  if (!paneSyncRef.current) paneSyncRef.current = createPaneSync();
+  const chartApiRef = useRef(null);
 
   const isPositive = v2.priceChange >= 0;
 
-  const handleToggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen?.().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen?.().catch(() => {});
-      setIsFullscreen(false);
-    }
-  }, []);
+  const dataWindow = {
+    symbol: v2.symbol,
+    price: v2.currentPrice,
+    changePct: v2.priceChangePct,
+    volume: v2.lastCandle.volume,
+    rsi: v2.technical?.rsi,
+    macd: v2.technical?.macd,
+    ema20: v2.technical?.ema20,
+    ema50: v2.technical?.ema50,
+  };
 
   return (
     <div className="v2-terminal" style={{
       display: 'flex',
       flexDirection: 'column',
       width: '100%',
-      height: '100vh',
+      height: '100%',
       background: V2_COLORS.bg.primary,
       color: V2_COLORS.text.primary,
       fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       overflow: 'hidden',
     }}>
       {/* Top Navigation */}
-      <V2TopNavigation activeView="Chart" onNavigate={() => {}} />
+      <V2TopNavigation
+        activeView="Chart"
+        onNavigate={(item) => {
+          const tab = NAV_TO_TAB[item];
+          if (tab) v2.setBottomTab(tab);
+        }}
+        symbols={v2.symbols}
+        onSelectSymbol={v2.handleSymbolChange}
+        searchOpen={v2.searchOpen}
+        onSearchOpenChange={v2.setSearchOpen}
+        searchQuery={v2.searchQuery}
+        onSearchQueryChange={v2.setSearchQuery}
+        onToggleSettings={() => v2.setShowSettings(!v2.showSettings)}
+      />
 
       {/* Chart Toolbar */}
       <V2ChartToolbar
         symbol={v2.symbol}
+        symbols={v2.symbols}
         interval={v2.interval}
         chartType={v2.chartType}
+        exchange={v2.exchange}
+        isFullscreen={v2.isFullscreen}
+        canUndo={v2.canUndo}
+        canRedo={v2.canRedo}
         onSymbolChange={v2.handleSymbolChange}
         onIntervalChange={v2.handleIntervalChange}
         onChartTypeChange={v2.handleChartTypeChange}
-        onToggleIndicators={() => setShowIndicatorModal(!showIndicatorModal)}
-        onToggleAI={() => setShowAIModal(!showAIModal)}
-        onToggleSettings={() => setShowSettings(!showSettings)}
-        onToggleFullscreen={handleToggleFullscreen}
+        onExchangeChange={v2.setExchange}
+        onToggleIndicators={() => v2.setShowIndicatorModal(!v2.showIndicatorModal)}
+        onToggleAI={() => v2.setShowAIModal(!v2.showAIModal)}
+        onToggleSettings={() => v2.setShowSettings(!v2.showSettings)}
+        onToggleFullscreen={v2.handleToggleFullscreen}
+        onUndo={v2.undoDrawings}
+        onRedo={v2.redoDrawings}
+        onSave={v2.persistDrawings}
+        onScreenshot={() => chartApiRef.current?.screenshot?.()}
+        onResetView={() => chartApiRef.current?.resetView?.()}
+        onTemplateChange={v2.applyTemplate}
+        onTrade={(side) => v2.setOrderModalSide(side)}
       />
 
       {/* Main Content Area */}
@@ -75,8 +109,15 @@ export default function ProTerminalV2() {
         <V2DrawingToolbar
           activeTool={v2.activeDrawingTool}
           onToolChange={v2.handleDrawingToolChange}
-          showMenu={showDrawingMenu}
-          onToggleMenu={setShowDrawingMenu}
+          showMenu={v2.showDrawingMenu}
+          onToggleMenu={v2.setShowDrawingMenu}
+          magnetEnabled={v2.magnetEnabled}
+          drawingsLocked={v2.drawingsLocked}
+          allDrawingsHidden={v2.allDrawingsHidden}
+          onToggleMagnet={v2.toggleMagnet}
+          onToggleLock={v2.toggleDrawingsLocked}
+          onToggleHide={v2.toggleAllDrawingsHidden}
+          onClearDrawings={v2.clearDrawings}
         />
 
         {/* Center: Chart + Sub-panes */}
@@ -90,13 +131,14 @@ export default function ProTerminalV2() {
             background: V2_COLORS.bg.secondary,
             borderBottom: `1px solid ${V2_COLORS.bg.border}`,
             flexShrink: 0,
+            flexWrap: 'wrap',
           }}>
             <div>
               <div style={{ fontSize: 13, fontWeight: 700, color: V2_COLORS.text.primary }}>
                 {v2.fundamentals.name}
               </div>
               <div style={{ fontSize: 10, color: V2_COLORS.text.muted }}>
-                {v2.interval} · NSE
+                {v2.symbol} · {v2.exchange} · {v2.interval}
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
@@ -132,6 +174,16 @@ export default function ProTerminalV2() {
               currentPrice={v2.currentPrice}
               symbol={v2.symbol}
               interval={v2.interval}
+              activeDrawingTool={v2.activeDrawingTool}
+              drawings={v2.drawings}
+              onAddDrawing={v2.addDrawing}
+              drawingsLocked={v2.drawingsLocked}
+              magnetEnabled={v2.magnetEnabled}
+              allDrawingsHidden={v2.allDrawingsHidden}
+              aiAnalysis={v2.aiAnalysis}
+              activeAiIndicators={v2.activeAiIndicators}
+              paneSync={paneSyncRef.current}
+              apiRef={chartApiRef}
             />
           </div>
 
@@ -140,32 +192,42 @@ export default function ProTerminalV2() {
             volumeData={v2.volumeData}
             height={v2.volumeHeight}
             visible={v2.activeIndicators.includes('volume')}
+            paneSync={paneSyncRef.current}
           />
           <V2RSI
             rsiData={v2.rsiData}
             height={v2.rsiHeight}
             visible={v2.activeIndicators.includes('rsi')}
+            paneSync={paneSyncRef.current}
           />
           <V2MACD
             macdData={v2.macdData}
             height={v2.macdHeight}
             visible={v2.activeIndicators.includes('macd')}
+            paneSync={paneSyncRef.current}
           />
           <V2AITrend
             aiTrendData={v2.aiTrendData}
             height={v2.aiTrendHeight}
             visible={v2.activeIndicators.includes('ai_trend')}
+            paneSync={paneSyncRef.current}
           />
         </div>
 
         {/* Right: Object Tree + Stock Panel */}
-        <div style={{ display: 'flex', flexShrink: 0 }}>
+        <div className="v2-sidepanels" style={{ display: 'flex', flexShrink: 0 }}>
           <V2ObjectTree
-            activeTab={objectTreeTab}
-            onTabChange={setObjectTreeTab}
+            activeTab={v2.objectTreeTab}
+            onTabChange={v2.setObjectTreeTab}
             drawings={v2.drawings}
+            activeIndicators={v2.activeIndicators}
+            onToggleIndicator={v2.toggleIndicator}
+            activeAiIndicators={v2.activeAiIndicators}
+            onToggleAiIndicator={v2.toggleAiIndicator}
             onToggleDrawingVisibility={v2.toggleDrawingVisibility}
+            onToggleDrawingLock={v2.toggleDrawingLock}
             onRemoveDrawing={v2.removeDrawing}
+            dataWindow={dataWindow}
           />
           <V2StockPanel
             symbol={v2.symbol}
@@ -173,49 +235,76 @@ export default function ProTerminalV2() {
             priceChange={v2.priceChange}
             priceChangePct={v2.priceChangePct}
             fundamentals={v2.fundamentals}
-            activeTab={rightPanelTab}
-            onTabChange={setRightPanelTab}
+            technical={v2.technical}
+            news={v2.news}
+            orders={v2.orders}
+            activeTab={v2.rightPanelTab}
+            onTabChange={v2.setRightPanelTab}
+            onOrder={(side) => v2.setOrderModalSide(side)}
           />
         </div>
       </div>
 
       {/* Bottom Analytics Workspace */}
       <V2BottomTabs
-        activeTab={bottomTab}
-        onTabChange={setBottomTab}
+        activeTab={v2.bottomTab}
+        onTabChange={v2.setBottomTab}
         screenerFilters={v2.screenerFilters}
         onAddFilter={v2.addScreenerFilter}
         onRemoveFilter={v2.removeScreenerFilter}
         screenerResults={v2.screenerResults}
+        scanning={v2.scanning}
+        onScan={v2.runScreenerScan}
+        onSaveFilters={v2.saveScreenerFilters}
+        screenerSymbol={v2.symbol}
         fundamentals={v2.fundamentals}
         aiAnalysis={v2.aiAnalysis}
         news={v2.news}
         marketIndices={v2.marketIndices}
         sectors={v2.sectors}
+        candles={v2.candles}
+        technical={v2.technical}
+        currentPrice={v2.currentPrice}
+        watchlist={v2.watchlist}
+        onToggleWatchlist={v2.toggleWatchlist}
+        onOpenSymbol={v2.handleSymbolChange}
       />
 
       {/* Indicator Modal */}
-      {showIndicatorModal && (
+      {v2.showIndicatorModal && (
         <V2IndicatorModal
           activeIndicators={v2.activeIndicators}
           onToggle={v2.toggleIndicator}
-          onClose={() => setShowIndicatorModal(false)}
+          onClose={() => v2.setShowIndicatorModal(false)}
         />
       )}
 
       {/* AI Modal */}
-      {showAIModal && (
+      {v2.showAIModal && (
         <V2AIModal
-          onClose={() => setShowAIModal(false)}
+          activeAiIndicators={v2.activeAiIndicators}
+          onToggle={v2.toggleAiIndicator}
+          onClose={() => v2.setShowAIModal(false)}
         />
       )}
 
       {/* Settings Modal */}
-      {showSettings && (
+      {v2.showSettings && (
         <V2SettingsModal
-          onClose={() => setShowSettings(false)}
+          onClose={() => v2.setShowSettings(false)}
           chartType={v2.chartType}
           onChartTypeChange={v2.handleChartTypeChange}
+        />
+      )}
+
+      {/* Paper order ticket */}
+      {v2.orderModalSide && (
+        <V2OrderModal
+          side={v2.orderModalSide}
+          symbol={v2.symbol}
+          currentPrice={v2.currentPrice}
+          onClose={() => v2.setOrderModalSide(null)}
+          onSubmit={v2.placeOrder}
         />
       )}
     </div>
@@ -233,39 +322,49 @@ function OHLCItem({ label, value, isVolume }) {
   );
 }
 
-function V2IndicatorModal({ activeIndicators, onToggle, onClose }) {
-  const indicators = [
-    { id: 'ema_20', name: 'EMA 20', color: '#06B6D4' },
-    { id: 'ema_50', name: 'EMA 50', color: '#F97316' },
-    { id: 'ema_200', name: 'EMA 200', color: '#A855F7' },
-    { id: 'volume', name: 'Volume', color: '#6366F1' },
-    { id: 'rsi', name: 'RSI', color: '#F59E0B' },
-    { id: 'macd', name: 'MACD', color: '#3B82F6' },
-    { id: 'ai_trend', name: 'AI Trend', color: '#10B981' },
-  ];
-
+function V2ModalShell({ title, onClose, minWidth = 240, children }) {
   return (
-    <div style={{
-      position: 'fixed',
-      top: 80,
-      left: '50%',
-      transform: 'translateX(-50%)',
-      background: V2_COLORS.bg.elevated,
-      border: `1px solid ${V2_COLORS.bg.border}`,
-      borderRadius: 8,
-      padding: 12,
-      minWidth: 240,
-      zIndex: 1000,
-      boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: V2_COLORS.text.primary }}>Indicators</span>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: V2_COLORS.text.muted, cursor: 'pointer', fontSize: 14 }}>×</button>
+    <div className="v2-modal-scrim" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: V2_COLORS.bg.elevated,
+          border: `1px solid ${V2_COLORS.bg.borderLight}`,
+          borderRadius: 8,
+          padding: 12,
+          minWidth,
+          maxHeight: '80vh',
+          overflowY: 'auto',
+          boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
+          animation: 'v2-fade-in 0.15s ease-out',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: V2_COLORS.text.primary }}>{title}</span>
+          <button
+            onClick={onClose}
+            aria-label={`Close ${title}`}
+            autoFocus
+            style={{ background: 'none', border: 'none', color: V2_COLORS.text.muted, cursor: 'pointer', fontSize: 14, lineHeight: 1 }}
+          >×</button>
+        </div>
+        {children}
       </div>
-      {indicators.map((ind) => (
+    </div>
+  );
+}
+
+function V2IndicatorModal({ activeIndicators, onToggle, onClose }) {
+  return (
+    <V2ModalShell title="Indicators" onClose={onClose}>
+      {V2_INDICATORS.map((ind) => (
         <button
           key={ind.id}
           onClick={() => onToggle(ind.id)}
+          aria-pressed={activeIndicators.includes(ind.id)}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -287,82 +386,49 @@ function V2IndicatorModal({ activeIndicators, onToggle, onClose }) {
           </span>
         </button>
       ))}
-    </div>
+    </V2ModalShell>
   );
 }
 
-function V2AIModal({ onClose }) {
-  const aiIndicators = [
-    { id: 'ai_trend', name: 'AI Trend' },
-    { id: 'ai_momentum', name: 'AI Momentum' },
-    { id: 'ai_sr', name: 'AI Support/Resistance' },
-    { id: 'ai_breakout', name: 'AI Breakout' },
-    { id: 'ai_pattern', name: 'AI Pattern Detection' },
-    { id: 'ai_forecast', name: 'AI Forecast' },
-  ];
-
+function V2AIModal({ activeAiIndicators, onToggle, onClose }) {
   return (
-    <div style={{
-      position: 'fixed',
-      top: 80,
-      left: '50%',
-      transform: 'translateX(-50%)',
-      background: V2_COLORS.bg.elevated,
-      border: `1px solid ${V2_COLORS.bg.border}`,
-      borderRadius: 8,
-      padding: 12,
-      minWidth: 240,
-      zIndex: 1000,
-      boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: V2_COLORS.text.primary }}>AI Indicators</span>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: V2_COLORS.text.muted, cursor: 'pointer', fontSize: 14 }}>×</button>
-      </div>
-      {aiIndicators.map((ind) => (
-        <button
-          key={ind.id}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            width: '100%',
-            padding: '6px 8px',
-            fontSize: 11,
-            color: V2_COLORS.text.secondary,
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            textAlign: 'left',
-          }}
-        >
-          <div style={{ width: 12, height: 2, background: V2_COLORS.positive, borderRadius: 1 }} />
-          <span>{ind.name}</span>
-        </button>
-      ))}
-    </div>
+    <V2ModalShell title="AI Indicators" onClose={onClose}>
+      {V2_AI_INDICATORS.map((ind) => {
+        const on = activeAiIndicators.includes(ind.id);
+        return (
+          <button
+            key={ind.id}
+            onClick={() => onToggle(ind.id)}
+            aria-pressed={on}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              width: '100%',
+              padding: '6px 8px',
+              fontSize: 11,
+              color: V2_COLORS.text.secondary,
+              background: 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ width: 12, height: 2, background: V2_COLORS.positive, borderRadius: 1 }} />
+            <span style={{ flex: 1 }}>{ind.name}</span>
+            <span style={{ color: on ? V2_COLORS.positive : V2_COLORS.text.muted }}>
+              {on ? 'ON' : 'OFF'}
+            </span>
+          </button>
+        );
+      })}
+    </V2ModalShell>
   );
 }
 
 function V2SettingsModal({ onClose, chartType, onChartTypeChange }) {
   return (
-    <div style={{
-      position: 'fixed',
-      top: '50%',
-      left: '50%',
-      transform: 'translate(-50%, -50%)',
-      background: V2_COLORS.bg.elevated,
-      border: `1px solid ${V2_COLORS.bg.border}`,
-      borderRadius: 8,
-      padding: 16,
-      minWidth: 320,
-      zIndex: 1000,
-      boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: V2_COLORS.text.primary }}>Chart Settings</span>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', color: V2_COLORS.text.muted, cursor: 'pointer', fontSize: 14 }}>×</button>
-      </div>
+    <V2ModalShell title="Chart Settings" onClose={onClose} minWidth={320}>
       <div style={{ marginBottom: 12 }}>
         <div style={{ fontSize: 11, color: V2_COLORS.text.muted, marginBottom: 4 }}>Chart Type</div>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -370,6 +436,7 @@ function V2SettingsModal({ onClose, chartType, onChartTypeChange }) {
             <button
               key={type}
               onClick={() => onChartTypeChange(type)}
+              aria-pressed={chartType === type}
               style={{
                 padding: '4px 10px',
                 fontSize: 11,
@@ -397,6 +464,6 @@ function V2SettingsModal({ onClose, chartType, onChartTypeChange }) {
           cursor: 'pointer',
         }}>Done</button>
       </div>
-    </div>
+    </V2ModalShell>
   );
 }

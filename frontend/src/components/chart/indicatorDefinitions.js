@@ -76,6 +76,7 @@ export const INDICATOR_SEARCH_ALIASES = {
   swing_hl: ['swing', 'fractal', 'pivot high low'],
   hh_hl: ['market structure', 'hh', 'hl', 'lh', 'll', 'bos precursor'],
   bos_choch: ['break of structure', 'change of character', 'smc'],
+  smc_pro: ['smart money', 'smc', 'pro', 'market structure', 'liquidity', 'order block', 'fvg'],
   supply_demand: ['supply', 'demand', 'zones', 'support', 'resistance'],
   order_blocks: ['ob', 'order block', 'institutional'],
   fvg: ['fair value gap', 'imbalance', 'gap'],
@@ -352,6 +353,11 @@ export const INDICATOR_DEFINITIONS = [
 
   // ── Market Structure / SMC ──────────────────────────────────────────────────
   {
+    id: 'smc_pro', name: 'SMC Pro', shortName: 'SMC Pro',
+    category: 'market_structure', type: 'smc', smcType: 'smc_pro', color: '#7C3AED',
+    description: 'Professional single-indicator SMC overlay combining structure, BOS/CHoCH, liquidity, FVG, OB, and S/R in one clean layer.', badge: 'SMC',
+  },
+  {
     id: 'swing_hl', name: 'Swing Highs & Lows (5)', shortName: 'Swing H/L',
     category: 'market_structure', type: 'smc', smcType: 'swing_hl', color: '#A78BFA',
     description: 'Fractal swing highs/lows with clean labels.', badge: 'SMC',
@@ -428,11 +434,11 @@ export const INDICATOR_DEFINITIONS = [
     badge: 'AI',
     keywords: ['signal', 'confluence', 'buy', 'sell', 'hold', 'entry', 'stop loss', 'take profit', 'score'],
     inputs: ['OHLCV candles', 'Trend (EMA/Supertrend)', 'Momentum (RSI/MACD)', 'Volatility (ATR/BB)', 'Structure (swings/S-R)'],
-    method: 'Weighted confluence of trend + momentum + volatility + structure sub-scores into a 0–100 composite. Deterministic rules — no black box.',
+    method: 'Deterministic weighted indicator consensus; BUY/SELL requires directional balance across at least two study groups. The confidence score is heuristic and capped because it is not calibrated.',
     outputs: ['BUY / SELL / HOLD signal', 'Entry zone', 'Stop-loss', 'Take-profit', 'Confidence 0–100', 'Risk : Reward'],
     signals: ['BUY', 'SELL', 'HOLD'],
-    confidence: 'Composite agreement across sub-models; >65 = high, 45–65 = moderate, <45 = no-trade.',
-    backtest: 'Validate win-rate and avg R:R per symbol/timeframe before sizing; confluence scores degrade in low-ATR chop.',
+    confidence: 'Uncalibrated 0–100 consensus score, not a probability of profit or a proven win rate; neutral has no directional confidence.',
+    backtest: 'Backtest score buckets, win rate, drawdown, and average R:R per symbol/timeframe before treating any score as predictive or sizing a trade.',
   },
   {
     id: 'ai_trend', name: 'AI Trend Detector', shortName: 'AI Trend',
@@ -524,8 +530,8 @@ export const INDICATOR_DEFINITIONS = [
     badge: 'AI',
     keywords: ['multi-timeframe', 'mtf', 'alignment', 'dashboard', 'probabilities', 'higher timeframe'],
     inputs: ['Signal-engine score per timeframe (1m → 1W)', 'Higher-timeframe trend filter', 'Volatility normalization per TF'],
-    method: 'Runs the confluence scorer independently per timeframe, then reports stack alignment (e.g. 4/6 TFs bullish) with HTF veto logic.',
-    outputs: ['Per-TF bias + probability', 'Alignment gauge (aligned/mixed/conflicted)', 'HTF veto flag'],
+    method: 'Runs the same confluence scorer independently per fetched timeframe and reports directional agreement; neutral timeframes remain in the agreement denominator.',
+     outputs: ['Per-TF bias + heuristic confidence', 'Directional agreement ratio (aligned/mixed/conflicted)'],
     signals: ['ALIGNED-BULL', 'ALIGNED-BEAR', 'MIXED'],
     confidence: 'More aligned timeframes + HTF agreement = higher confidence; mixed stacks are explicitly low-confidence.',
     backtest: 'Aligned stacks historically raise hit-rate but reduce frequency — size on alignment, skip mixed tapes.',

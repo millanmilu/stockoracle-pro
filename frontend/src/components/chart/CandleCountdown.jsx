@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { isCryptoSymbol, getSessionBucketStart } from '../../utils/chartHelpers';
+import { isCryptoSymbol, getSessionBucketStart, countdownDockRight } from '../../utils/chartHelpers';
 
 const INTERVAL_SECONDS = {
   '1s': 1,
@@ -97,7 +97,8 @@ export default function CandleCountdown({ chartRef, activeCandleRef, selectedSym
         const paneW = badge.parentElement?.clientWidth || 400;
         // Clamp: keep badge fully inside the viewport
         const top = Math.min(Math.max(8, coordinate + 14), Math.max(8, paneH - 28));
-        const right = Math.min(Math.max(2, paneW - 56), paneW - 2);
+        // Dock into the slim RIGHT price-axis strip (TradingView parity).
+        const right = countdownDockRight(paneW);
         badge.style.top = `${top}px`;
         badge.style.right = `${right}px`;
         badge.style.display = visible ? 'block' : 'none';

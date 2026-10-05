@@ -19,6 +19,23 @@
   }
 }
 
+/* Bottom analytics workspace height (class so media queries can override) */
+.v2-terminal .v2-bottomtabs {
+  height: 280px;
+}
+
+/* Modal scrim — click outside to close, Escape also closes (hook) */
+.v2-modal-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 1000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+}
+
 /* Animations */
 @keyframes v2-slide-in {
   from {
@@ -37,7 +54,9 @@
 }
 
 /* Focus states */
-.v2-terminal button:focus-visible {
+.v2-terminal button:focus-visible,
+.v2-terminal th:focus-visible,
+.v2-terminal [role='button']:focus-visible {
   outline: 1px solid #3B82F6;
   outline-offset: 1px;
 }
@@ -56,15 +75,33 @@
   transition: background 0.1s;
 }
 
-/* Responsive */
-@media (max-width: 1200px) {
-  .v2-terminal {
-    /* Collapse right panel on smaller screens */
+/* ── Responsive ─────────────────────────────────────────────────────── */
+@media (max-width: 1360px) {
+  .v2-terminal .v2-objecttree {
+    display: none;
+  }
+}
+
+@media (max-width: 1120px) {
+  .v2-terminal .v2-stockpanel {
+    display: none;
+  }
+}
+
+@media (max-width: 960px) {
+  .v2-terminal .v2-hide-sm {
+    display: none;
+  }
+  .v2-terminal .v2-bottomtabs {
+    height: 220px;
   }
 }
 
 @media (max-width: 768px) {
-  .v2-terminal {
-    /* Mobile layout adjustments */
+  .v2-terminal .v2-brand-text {
+    display: none;
+  }
+  .v2-terminal .v2-bottomtabs {
+    height: 180px;
   }
 }

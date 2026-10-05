@@ -324,6 +324,42 @@ export const INTERVAL_SLOT_SEC = {
 /** Max skipped slots to backfill in one go (beyond this = real outage, leave the gap). */
 export const MAX_LIVE_FILL_SLOTS = 15;
 
+/**
+ * History-frame freshness contract (stale-tail auto-recovery).
+ *
+ * The backend tags every /history frame (`data_source`): live-vendor frames
+ * ('binance_crypto', 'angel_one') prove freshness; fallback frames ('sqlite',
+ * 'sqlite_stale', 'memory_cache', 'crypto_seed', anything unknown) may carry
+ * a truncated tail — e.g. a chart load racing backend warmup while live ticks
+ * keep building the current bucket (the visible "candle gap" that survives
+ * until a manual refresh). Pure helper so the guard is unit-testable.
+ */
+export const FRESH_TAIL_SOURCES = new Set(['binance_crypto', 'angel_one']);
+
+export const STALE_TAIL_MAX_ATTEMPTS = 3;
+export const STALE_TAIL_RETRY_MS = 60000;
+
+export function shouldRefetchStaleTail({ tailTime, source, slotSec, nowMs, attempts = 0, lastTryMs = 0 }) {
+  if (tailTime == null || source == null) return false;
+  if (FRESH_TAIL_SOURCES.has(String(source))) return false; // vendor proved freshness
+  if (Number(attempts) >= STALE_TAIL_MAX_ATTEMPTS) return false;
+  const now = Number(nowMs);
+  if (!Number.isFinite(now)) return false;
+  if (Number(lastTryMs) > 0 && now - Number(lastTryMs) < STALE_TAIL_RETRY_MS) return false;
+  let tailMs;
+  if (typeof tailTime === 'number' && Number.isFinite(tailTime)) {
+    tailMs = tailTime * 1000; // intraday chart times are epoch seconds
+  } else {
+    // Daily tails are IST calendar dates — the bar covers its whole day.
+    const parsed = Date.parse(`${String(tailTime).slice(0, 10)}T00:00:00+05:30`);
+    if (!Number.isFinite(parsed)) return false;
+    tailMs = parsed + 86400000;
+  }
+  const slot = Number(slotSec) > 0 ? Number(slotSec) : 300;
+  const thresholdMs = Math.min(Math.max(slot * 3, 120), 86400) * 1000;
+  return now - tailMs > thresholdMs;
+}
+
 const IST_OFFSET_SEC = 5.5 * 3600;
 
 /**
@@ -477,4 +513,49 @@ export function getSessionBucketStart(interval, nowMs, isCrypto = false) {
   const bucketStart = anchor + Math.floor((nowSec - anchor) / bucketSize) * bucketSize;
 
   return bucketStart;
+}
+
+/**
+ * May a live equity/crypto tick mutate or spawn a chart candle?
+ *
+ * The clock window alone (09:15–15:30 IST) can't see NSE holidays — Gandhi
+ * Jayanti etc. fall INSIDE those hours on a normal weekday — and the backend
+ * broadcaster keeps sending verified EOD fallbacks flagged `is_live:false`
+ * during holidays/broker outages. An explicit `is_live:false` therefore
+ * VETOES the clock gate so no fake candles are painted (AGENTS.md §4: no
+ * fake rates; weekend/holiday ticks must never mint candles).
+ *
+ * @param {Object}  p
+ * @param {boolean} p.isCrypto     24/7 market → always allowed
+ * @param {boolean} p.isMarketHours client clock says 09:15–15:30 IST (weekday)
+ * @param {boolean|undefined} p.isLive backend's is_market_open() verdict
+ * @returns {boolean}
+ */
+export function canUpdateLiveCandle({ isCrypto = false, isMarketHours = false, isLive = undefined } = {}) {
+  if (isCrypto) return true;
+  if (isLive === true) return true;
+  if (isLive === false) return false; // holiday/outage fallback — clock is irrelevant
+  return !!isMarketHours; // payload without the flag → legacy clock behavior
+}
+
+/**
+ * CSS `right` offset (px) that docks the candle-countdown badge into the slim
+ * RIGHT price-axis strip, centred inside PRICE_AXIS_WIDTH.
+ *
+ * Pitfall this guards: a CSS `right` value is measured from the container's
+ * RIGHT edge, so it must be a small number (≈4). Computing `paneWidth - 56`
+ * instead — a LEFT-style offset — flung the badge to the far LEFT of the
+ * chart (its right edge landed 56px from the left edge).
+ *
+ * @param {number} paneWidth  chart container width in px (incl. price axis)
+ * @param {number} badgeWidth countdown badge width in px (default 52)
+ * @returns {number} right offset in px, clamped so the badge stays inside
+ */
+export function countdownDockRight(paneWidth, badgeWidth = 52) {
+  const pane = Number(paneWidth);
+  if (!Number.isFinite(pane) || pane <= 0) return 4;
+  // Centre the badge within the 60px axis strip → (60 - 52) / 2 = 4, and
+  // never let it overflow the container's left edge on tiny panes.
+  const centred = Math.max(0, (PRICE_AXIS_WIDTH - badgeWidth) / 2);
+  return Math.max(0, Math.min(centred, pane - badgeWidth));
 }

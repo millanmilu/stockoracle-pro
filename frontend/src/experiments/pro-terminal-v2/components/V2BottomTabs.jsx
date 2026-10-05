@@ -7,6 +7,14 @@ import V2Fundamentals from './V2Fundamentals';
 import V2AIAnalysis from './V2AIAnalysis';
 import V2NewsPanel from './V2NewsPanel';
 import V2MarketOverview from './V2MarketOverview';
+import {
+  HistoricalTable,
+  TechnicalReport,
+  PeerComparison,
+  OptionsChain,
+  ShareholdingTable,
+  CorporateActionsTable,
+} from './V2BottomTabViews';
 
 export default function V2BottomTabs({
   activeTab,
@@ -15,15 +23,24 @@ export default function V2BottomTabs({
   onAddFilter,
   onRemoveFilter,
   screenerResults,
+  scanning,
+  onScan,
+  onSaveFilters,
+  screenerSymbol,
   fundamentals,
   aiAnalysis,
   news,
   marketIndices,
   sectors,
+  candles,
+  technical,
+  currentPrice,
+  watchlist,
+  onToggleWatchlist,
+  onOpenSymbol,
 }) {
   return (
-    <div style={{
-      height: 280,
+    <div className="v2-bottomtabs" style={{
       background: V2_COLORS.bg.secondary,
       borderTop: `1px solid ${V2_COLORS.bg.border}`,
       display: 'flex',
@@ -42,6 +59,8 @@ export default function V2BottomTabs({
         {V2_BOTTOM_TABS.map((tab) => (
           <button
             key={tab.id}
+            role="tab"
+            aria-selected={activeTab === tab.id}
             onClick={() => onTabChange(tab.id)}
             style={{
               padding: '6px 12px',
@@ -62,38 +81,44 @@ export default function V2BottomTabs({
 
       {/* Content */}
       <div style={{ flex: 1, overflow: 'auto' }}>
+        {activeTab === 'overview' && (
+          <V2MarketOverview
+            indices={marketIndices}
+            sectors={sectors}
+            watchlist={watchlist}
+            onOpenSymbol={onOpenSymbol}
+          />
+        )}
         {activeTab === 'screener' && (
           <V2Screener
             filters={screenerFilters}
             onAddFilter={onAddFilter}
             onRemoveFilter={onRemoveFilter}
             results={screenerResults}
+            scanning={scanning}
+            onScan={onScan}
+            onSaveFilters={onSaveFilters}
+            onOpenSymbol={onOpenSymbol}
+            watchlist={watchlist}
+            onToggleWatchlist={onToggleWatchlist}
           />
         )}
         {activeTab === 'financials' && <V2Fundamentals fundamentals={fundamentals} />}
         {activeTab === 'technicals' && (
-          <div style={{ padding: 12, fontSize: 11, color: V2_COLORS.text.muted }}>
-            Technical analysis view — coming soon
-          </div>
+          <TechnicalReport technical={technical} symbol={screenerSymbol} />
         )}
         {activeTab === 'ai_analysis' && <V2AIAnalysis aiAnalysis={aiAnalysis} />}
         {activeTab === 'peers' && (
-          <div style={{ padding: 12, fontSize: 11, color: V2_COLORS.text.muted }}>
-            Peer comparison — coming soon
-          </div>
+          <PeerComparison symbol={screenerSymbol} onOpenSymbol={onOpenSymbol} />
         )}
-        {activeTab === 'shareholding' && <V2Fundamentals fundamentals={fundamentals} />}
-        {activeTab === 'corporate_actions' && <V2Fundamentals fundamentals={fundamentals} />}
+        {activeTab === 'shareholding' && <ShareholdingTable />}
+        {activeTab === 'corporate_actions' && <CorporateActionsTable />}
         {activeTab === 'historical' && (
-          <div style={{ padding: 12, fontSize: 11, color: V2_COLORS.text.muted }}>
-            Historical data — coming soon
-          </div>
+          <HistoricalTable candles={candles} symbol={screenerSymbol} />
         )}
         {activeTab === 'news' && <V2NewsPanel news={news} />}
         {activeTab === 'options' && (
-          <div style={{ padding: 12, fontSize: 11, color: V2_COLORS.text.muted }}>
-            Options chain — coming soon
-          </div>
+          <OptionsChain price={currentPrice} symbol={screenerSymbol} />
         )}
       </div>
     </div>

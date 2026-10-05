@@ -74,67 +74,59 @@ export function detectStructureSequence(swings) {
 // 3. BOS (Break of Structure) / CHoCH (Change of Character)
 // ─────────────────────────────────────────────────────────────────────────────
 export function detectBosChoch(candles, windowSize = 5) {
+  if (!Array.isArray(candles) || candles.length < windowSize * 2 + 2) return [];
+
   const swings = detectSwingPoints(candles, windowSize);
-  const breaks = [];
-  const lastClose = num(candles[candles.length - 1]?.close) ?? 0;
+  const candidates = new Map();
+  const collectCrossing = (swing, direction) => {
+    const start = swing.index + windowSize + 1;
+    for (let i = start; i < candles.length; i++) {
+      const previous = num(candles[i - 1]?.close);
+      const current = num(candles[i]?.close);
+      const crossed = direction === 'bull'
+        ? previous != null && current != null && previous <= swing.price && current > swing.price
+        : previous != null && current != null && previous >= swing.price && current < swing.price;
+      if (!crossed) continue;
 
-  const recentHighs = swings.highs.slice(-8);
-  const recentLows = swings.lows.slice(-8);
-
-  // A BOS happens when an earlier swing is decisively broken in the trend direction.
-  recentHighs.forEach((sh) => {
-    if (lastClose > sh.price) {
-      breaks.push({
-        type: 'BOS',
-        direction: 'bull',
-        label: `BOS ↑ ${sh.price.toFixed(1)}`,
-        price: sh.price,
-        time: sh.time,
-        color: '#10B981',
-        position: 'belowBar',
-        shape: 'arrowUp',
-      });
-    } else {
-      breaks.push({
-        type: 'CHoCH',
-        direction: 'bear',
-        label: `CHoCH ${sh.price.toFixed(1)}`,
-        price: sh.price,
-        time: sh.time,
-        color: '#EF5350',
-        position: 'aboveBar',
-        shape: 'arrowDown',
-      });
+      const key = `${i}:${direction}`;
+      const existing = candidates.get(key);
+      const isMoreRelevant = !existing || (direction === 'bull'
+        ? swing.price > existing.price
+        : swing.price < existing.price);
+      if (isMoreRelevant) {
+        candidates.set(key, {
+          direction,
+          price: swing.price,
+          levelTime: swing.time,
+          levelIndex: swing.index,
+          index: i,
+          time: candles[i].time,
+        });
+      }
+      break;
     }
-  });
+  };
 
-  recentLows.forEach((sl) => {
-    if (lastClose < sl.price) {
-      breaks.push({
-        type: 'BOS',
-        direction: 'bear',
-        label: `BOS ↓ ${sl.price.toFixed(1)}`,
-        price: sl.price,
-        time: sl.time,
-        color: '#EF5350',
-        position: 'aboveBar',
-        shape: 'arrowDown',
-      });
-    } else {
-      breaks.push({
-        type: 'CHoCH',
-        direction: 'bull',
-        label: `CHoCH ${sl.price.toFixed(1)}`,
-        price: sl.price,
-        time: sl.time,
-        color: '#10B981',
-        position: 'belowBar',
-        shape: 'arrowUp',
-      });
-    }
-  });
+  swings.highs.slice(-8).forEach((swing) => collectCrossing(swing, 'bull'));
+  swings.lows.slice(-8).forEach((swing) => collectCrossing(swing, 'bear'));
 
-  return breaks.slice(-10);
+  let structureDirection = null;
+  return [...candidates.values()]
+    .sort((a, b) => a.index - b.index)
+    .map((event) => {
+      const type = structureDirection && structureDirection !== event.direction ? 'CHoCH' : 'BOS';
+      structureDirection = event.direction;
+      const bullish = event.direction === 'bull';
+      return {
+        ...event,
+        type,
+        label: `${type} ${bullish ? '↑' : '↓'} ${event.price.toFixed(1)}`,
+        color: bullish ? '#10B981' : '#EF5350',
+        position: bullish ? 'belowBar' : 'aboveBar',
+        shape: bullish ? 'arrowUp' : 'arrowDown',
+      };
+    })
+    .slice(-10);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -389,6 +381,58 @@ export function detectSMC(smcType, candles, params = {}) {
       return detectLiquidity(candles, params.bins || 8);
     case 'sr_lines':
       return detectSR(candles, params.lookback || 150);
+    case 'smc_pro': {
+      const maxItems = params.maxItems || 12;
+      const swing = detectSwingPoints(candles, params.windowSize || 5);
+      const structure = detectBosChoch(candles, params.windowSize || 5);
+      const zones = detectSupplyDemand(candles, params.lookback || 120);
+      const blocks = detectOrderBlocks(candles, params.lookback || 100);
+      const gaps = detectFVGs(candles, params.maxGaps || 8);
+      const liquidity = detectLiquidity(candles, params.bins || 8);
+      const sr = detectSR(candles, params.lookback || 150);
+      const tail = candles[candles.length - 1];
+      const lastClose = num(tail?.close) ?? 0;
+      const recentHigh = swing.highs.at(-1)?.price ?? null;
+      const recentLow = swing.lows.at(-1)?.price ?? null;
+
+      const curated = [];
+
+      structure.forEach((item) => {
+        curated.push({
+          ...item,
+          label: item.type === 'BOS' ? `${item.direction === 'bull' ? 'BOS' : 'BOS'}` : 'CHoCH',
+          position: item.direction === 'bull' ? 'belowBar' : 'aboveBar',
+          shape: item.direction === 'bull' ? 'arrowUp' : 'arrowDown',
+          color: item.direction === 'bull' ? '#10B981' : '#EF5350',
+          price: item.price,
+        });
+      });
+
+      if (recentHigh && lastClose > recentHigh) {
+        curated.push({ type: 'MSS', direction: 'bull', price: recentHigh, label: 'MSS', color: '#34D399', position: 'belowBar', shape: 'arrowUp' });
+      }
+      if (recentLow && lastClose < recentLow) {
+        curated.push({ type: 'MSS', direction: 'bear', price: recentLow, label: 'MSS', color: '#F87171', position: 'aboveBar', shape: 'arrowDown' });
+      }
+
+      zones.forEach((zone) => curated.push({ ...zone, type: zone.type === 'demand' ? 'Demand' : 'Supply', label: zone.type === 'demand' ? 'Demand' : 'Supply', color: zone.type === 'demand' ? '#18b77d' : '#ef5350' }));
+      blocks.forEach((block) => curated.push({ ...block, type: block.type === 'bullish_ob' ? 'Bull OB' : 'Bear OB', label: block.type === 'bullish_ob' ? 'Bull OB' : 'Bear OB', color: block.type === 'bullish_ob' ? '#34D399' : '#F87171' }));
+      gaps.forEach((gap) => curated.push({ ...gap, type: gap.type === 'bullish_fvg' ? 'Bull FVG' : 'Bear FVG', label: gap.type === 'bullish_fvg' ? 'Bull FVG' : 'Bear FVG', color: gap.type === 'bullish_fvg' ? '#60A5FA' : '#60A5FA', position: 'inBar' }));
+      liquidity.forEach((lvl) => curated.push({ ...lvl, type: 'Liquidity', label: 'Liquidity', color: '#FB923C' }));
+      sr.forEach((lvl) => curated.push({ ...lvl, product: 'SR' }));
+
+      const deduped = [];
+      const seen = new Set();
+      curated.forEach((item) => {
+        const key = `${item.type || 'item'}:${Number(item.price ?? item.top ?? 0).toFixed(2)}:${item.label || ''}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          deduped.push(item);
+        }
+      });
+
+      return deduped.slice(-maxItems);
+    }
     default:
       return [];
   }

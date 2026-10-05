@@ -7,12 +7,18 @@
  * `points` describes how many anchors the tool collects before it finishes:
  *   - 0        → cursor / mode tool (no drawing is created)
  *   - 1        → single click placement
- *   - 2..6     → click-to-place anchors (the last click finalises the drawing)
+ *   - 2        → click twice or drag to place the two anchors
+ *   - 3..6     → click-to-place anchors (the last click finalises the drawing)
  *   - 'free'   → freehand stroke, released on mouse-up
  *
  * `legacy: true` means DrawingTools.jsx already renders and drags that type;
  * every other id is rendered by the registry-driven `DrawingShape` component.
  */
+
+/** localStorage key for the pinned/favourite tools (shared by the rail
+ *  and the floating favorites bar). Kept here — a pure module — so util
+ *  code and Node tests never need to import the React toolbar. */
+export const PINS_STORAGE_KEY = 'stockoracle_drawing_toolbar_pins_v1';
 
 export const DRAWING_TOOL_GROUPS = [
   {
@@ -28,7 +34,7 @@ export const DRAWING_TOOL_GROUPS = [
     id: 'lines',
     label: 'Trend Line Tools',
     tools: [
-      { id: 'trendline', label: 'Trend Line', points: 2, legacy: true, hint: 'Click-drag a straight trend line' },
+      { id: 'trendline', label: 'Trend Line', points: 2, legacy: true, hint: 'Click twice or drag to set both anchors' },
       { id: 'ray', label: 'Ray', points: 2, legacy: true, hint: 'Extends to the right edge of the chart' },
       { id: 'extended_line', label: 'Extended Line', points: 2, hint: 'Infinite line in both directions' },
       { id: 'info_line', label: 'Info Line', points: 2, hint: 'Line with price change, % and bar count' },
@@ -140,7 +146,7 @@ export const DRAWING_TOOL_GROUPS = [
       { id: 'date_range', label: 'Date Range', points: 2, hint: 'Measures bars and elapsed time' },
       { id: 'price_range', label: 'Price Range', points: 2, hint: 'Measures price change and percentage' },
       { id: 'date_price_range', label: 'Date and Price Range', points: 2, hint: 'Measures both time and price' },
-      { id: 'fixed_range_volume_profile', label: 'Fixed Range Volume Profile', points: 2, hint: 'Volume distribution between two points (VPVR)' },
+      { id: 'fixed_range_volume_profile', label: 'Fixed Range Volume Profile', points: 2, hint: 'Click twice or drag to set the profile range' },
       { id: 'ruler', label: 'Measure', points: 2, legacy: true, hint: 'Ruler: price, %, bars and duration' },
     ],
   },
@@ -223,12 +229,12 @@ export function nextMagnetMode(mode) {
  * Keyboard shortcuts surfaced in tool tooltips and handled by the drawing
  * layer. Alt-based chords are used deliberately: they never clash with the
  * Ctrl+Z / Ctrl+D editing keys, and the reserved char actions below
- * (Alt+L lock, Alt+H hide, Alt+R remove-all, Alt+M magnet) are kept free.
+ * (Alt+L lock, Alt+H hide, Alt+Shift+R remove-all, Alt+M magnet) are kept free.
  */
 export const TOOL_SHORTCUTS = {
   // Pointer
   crosshair: 'Alt+X',
-  cross: 'Alt+V',
+  cross: 'Alt+Shift+F',
   dot: 'Alt+Shift+X',
   // Lines
   trendline: 'Alt+T',
@@ -264,7 +270,7 @@ export const TOOL_SHORTCUTS = {
   brush: 'Alt+9',
   highlighter: 'Alt+0',
   rectangle: 'Alt+P',
-  rotated_rectangle: 'Alt+Shift+R',
+  rotated_rectangle: 'Alt+Shift+W',
   ellipse: 'Alt+O',
   circle: 'Alt+Shift+O',
   triangle: 'Alt+D',
@@ -295,7 +301,7 @@ export const ACTION_SHORTCUTS = {
   duplicate: 'Ctrl+D',
   lockAll: 'Alt+L',
   hideAll: 'Alt+H',
-  removeAll: 'Alt+R',
+  removeAll: 'Alt+Shift+R',
   magnet: 'Alt+M',
   keepDrawing: 'Alt+Shift+K',
 };

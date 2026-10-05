@@ -4,7 +4,7 @@ import React, { useEffect, useRef } from 'react';
 import { createChart, ColorType, LineStyle } from 'lightweight-charts';
 import { V2_COLORS } from '../utils/constants';
 
-export default function V2AITrend({ aiTrendData, height = 80, visible = true }) {
+export default function V2AITrend({ aiTrendData, height = 80, visible = true, paneSync }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
@@ -27,6 +27,10 @@ export default function V2AITrend({ aiTrendData, height = 80, visible = true }) 
         scaleMargins: { top: 0.1, bottom: 0.1 },
       },
       timeScale: { visible: false, borderColor: V2_COLORS.bg.border },
+      // Display-only strip: scroll/scale disabled so the main chart stays
+      // the single source of truth for the visible range.
+      handleScroll: false,
+      handleScale: { mouseWheel: false, pinch: false, axisPressedMouseMove: false },
       width: containerRef.current.clientWidth,
       height: containerRef.current.clientHeight,
     });
@@ -68,6 +72,7 @@ export default function V2AITrend({ aiTrendData, height = 80, visible = true }) 
 
     chartRef.current = chart;
     seriesRef.current = series;
+    paneSync?.addPane(chart);
 
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -79,15 +84,18 @@ export default function V2AITrend({ aiTrendData, height = 80, visible = true }) 
 
     return () => {
       ro.disconnect();
+      paneSync?.removePane(chart);
       chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
     };
-  }, []);
+    // Recreate when visibility flips: while hidden the container is unmounted,
+    // so the chart must be built fresh when the pane comes back.
+  }, [visible, paneSync]);
 
   useEffect(() => {
-    if (seriesRef.current && aiTrendData.length) {
-      seriesRef.current.setData(aiTrendData);
-      seriesRef.current.applyOptions({ visible });
-    }
+    if (!visible || !seriesRef.current) return;
+    if (aiTrendData.length) seriesRef.current.setData(aiTrendData);
   }, [aiTrendData, visible]);
 
   if (!visible) return null;

@@ -4,6 +4,7 @@ import { safeCreateChart } from '../../utils/safeChart';
 import { EyeOff, GripHorizontal } from 'lucide-react';
 import useStore from '../../store/useStore';
 import { getChartBaseOptions, getThemeTokens } from '../../utils/theme';
+import { loadChartSettings, subscribeChartSettings, applyPaneChartOptions } from '../../utils/chartSettings';
 import { PRICE_AXIS_WIDTH, sanitizeSeriesData } from '../../utils/chartHelpers';
 
 const MIN_HEIGHT = 92;
@@ -55,6 +56,10 @@ const VolumePane = forwardRef(function VolumePane({
     } catch {}
   }, [theme]);
 
+  // Chart Settings (scale placement / grid / crosshair / axis text) must
+  // apply to stacked panes too, otherwise the axis moves without them.
+  useEffect(() => subscribeChartSettings((s) => applyPaneChartOptions(chartRef.current, s, theme, [volumeRef.current, maRef.current])), [theme]);
+
   const updateLegend = useCallback((candle) => {
     if (valueRef.current) valueRef.current.textContent = formatVolume(Number(candle?.volume));
   }, []);
@@ -105,6 +110,7 @@ const VolumePane = forwardRef(function VolumePane({
     const volume = chart.addHistogramSeries({ priceFormat: { type: 'volume' } });
     const ma = chart.addLineSeries({ color: '#F59E0B', lineWidth: 1, priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false });
     chartRef.current = chart;
+    applyPaneChartOptions(chart, loadChartSettings(), theme, [volume, ma]);
     volumeRef.current = volume;
     maRef.current = ma;
     chart.timeScale().subscribeVisibleLogicalRangeChange(range => range && onVisibleRangeChange(range, 'volume'));

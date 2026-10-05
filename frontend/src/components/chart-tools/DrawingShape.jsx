@@ -1,6 +1,7 @@
 import React from 'react';
 import { SHAPE_RENDERERS } from './drawingShapeRenderers';
 import { Handles } from './drawingShapeParts';
+import { loadDrawingSettings, withDrawingDefaults } from './drawingSettingsSchema';
 
 /**
  * Dispatches a drawing to its extended-tool renderer and overlays selection
@@ -26,21 +27,26 @@ export default function DrawingShape({
   onDoubleClick,
 }) {
   if (!drawing || !Array.isArray(points) || points.length === 0) return null;
-  const render = SHAPE_RENDERERS[drawing.type];
+  const normalizedDrawing = withDrawingDefaults(drawing);
+  const render = SHAPE_RENDERERS[normalizedDrawing.type];
   if (!render) return null;
 
-  const content = render({ drawing, points, surface, handlers, currency, timeframeMs, toX, toY, candles });
+  const content = render({ drawing: normalizedDrawing, points, surface, handlers, currency, timeframeMs, toX, toY, candles });
   if (!content) return null;
+  const drawingTheme = loadDrawingSettings().theme;
+  const effectiveOpacity = normalizedDrawing.locked ? drawingTheme.lockedOpacity : normalizedDrawing.opacity;
 
   return (
-    <g data-drawing-id={drawing.id}>
+    <g data-drawing-id={drawing.id} opacity={selected ? drawingTheme.selectedOpacity : effectiveOpacity}>
       {content}
       {selected ? (
         <Handles
           points={points}
           onHandleDown={onHandleDown}
           onDoubleClick={onDoubleClick}
-          color={drawing.color || '#2962FF'}
+          color={drawingTheme.selectionColor || drawing.color || '#2962FF'}
+          size={drawingTheme.controlPointSize}
+          pointColor={drawingTheme.controlPointColor}
         />
       ) : null}
     </g>

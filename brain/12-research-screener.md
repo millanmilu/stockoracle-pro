@@ -10,7 +10,7 @@
 |------|------|
 | `screener_dsl.py` (~321 lines) | Screener.in-style **formula DSL**: lexer → AST → parameterized SQL. `FIELD_MAP` whitelist + `parse_screener_query()`. **Zero `eval`/`exec`, zero string interpolation** — security isi file ki zimmedari hai. |
 | `ai_screener.py` (~221 lines) | Natural-language trader query → DSL formula. `ask_ai()` + `extract_json_from_ai_response()` se JSON nikalta hai, phir `screener_dsl` se strictly validate karta hai. LLM ka output bina validate kiye DB tak nahi jaata. |
-| `screener_engines.py` (~1388 lines) | Layered analytics engines: Market Data → Fundamental → Technical → Market Structure → Volume/Liquidity → News/Sentiment → AI/ML → Scoring → Screener → UI. Sab **deterministic**, sirf real calculated data pe. |
+| `screener_engines.py` (~66 lines facade) + `screener_shared.py` (73), `screener_ta_engines.py` (325), `screener_flow_engines.py` (279), `screener_scoring.py` (408), `screener_aggregates.py` (304), `screener_status.py` (98) | Layered analytics engines: Market Data → Fundamental → Technical → Market Structure → Volume/Liquidity → News/Sentiment → AI/ML → Scoring → Screener → UI. Sab **deterministic**, sirf real calculated data pe. |
 | `screener_pipeline.py` (~517 lines) | Daily metrics refresh pipeline: NSE universe ka fresh data → live indicators (RSI-14, Volume Ratio 20D, 52W high/low distance, SMA crossovers, returns 1D/1W/1M/1Y) + AI consensus → DB update. |
 | `screener_backtest.py` (~181 lines) | Point-in-time screen-basket backtest: real closings, rebalance intervals, STT friction, NIFTY 50 benchmark. Zero random/synthetic returns. |
 

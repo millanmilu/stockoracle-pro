@@ -2,10 +2,13 @@
 
 import React, { useState } from 'react';
 import { V2_COLORS } from '../utils/constants';
-import { formatChange, formatPercent } from '../utils/formatters';
+import { formatChange, formatPercent, formatPrice } from '../utils/formatters';
+import { mockScreenerResults } from '../data/mockScreener';
 
-export default function V2MarketOverview({ indices, sectors }) {
+export default function V2MarketOverview({ indices, sectors, watchlist, onOpenSymbol }) {
   const [activeTab, setActiveTab] = useState('indices');
+
+  const watchlistRows = mockScreenerResults.filter((r) => watchlist?.has?.(r.symbol));
 
   return (
     <div style={{ padding: '12px' }}>
@@ -92,9 +95,47 @@ export default function V2MarketOverview({ indices, sectors }) {
       )}
 
       {activeTab === 'watchlist' && (
-        <div style={{ fontSize: 11, color: V2_COLORS.text.muted, textAlign: 'center', padding: 20 }}>
-          No watchlist items yet
-        </div>
+        watchlistRows.length === 0 ? (
+          <div style={{ fontSize: 11, color: V2_COLORS.text.muted, textAlign: 'center', padding: 20 }}>
+            No watchlist items yet — star a row in the Stock Screener to add it.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {watchlistRows.map((row) => (
+              <div
+                key={row.symbol}
+                onClick={() => onOpenSymbol?.(row.symbol)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => { if (e.key === 'Enter') onOpenSymbol?.(row.symbol); }}
+                title={`Open ${row.symbol} chart`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '6px 8px',
+                  background: V2_COLORS.bg.tertiary,
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: V2_COLORS.text.primary }}>{row.symbol}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: V2_COLORS.text.primary }}>
+                    {formatPrice(row.ltp)}
+                  </div>
+                </div>
+                <div style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: row.change >= 0 ? V2_COLORS.positive : V2_COLORS.negative,
+                }}>
+                  {formatPercent(row.change)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
       )}
     </div>
   );

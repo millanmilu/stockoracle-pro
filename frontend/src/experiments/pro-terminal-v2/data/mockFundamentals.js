@@ -89,9 +89,36 @@ export const mockFundamentals = {
     revenue: '28.4 LCr',
     netProfit: '5.2 LCr',
     operatingMargin: 38.5,
-    netProfitMargin: 18.3,
+    netMargin: 18.3,
   },
 };
+
+/**
+ * Fallback for symbols without a hand-written mock entry (every screener
+ * symbol, plus anything opened from search). Keeps the header/panel showing
+ * the REAL selected company instead of silently falling back to RELIANCE.
+ */
+export function deriveFallbackFundamentals(symbol, screenerRow) {
+  const row = screenerRow || null;
+  return {
+    name: symbol,
+    industry: '—',
+    marketCap: row ? `${(row.marketCap / 100).toFixed(2)} LCr` : '—',
+    pe: row?.pe ?? '—',
+    pb: '—',
+    roe: row?.roe ?? '—',
+    roce: row?.roce ?? '—',
+    debtEquity: row?.debtEquity ?? '—',
+    eps: '—',
+    dividendYield: '—',
+    bookValue: '—',
+    faceValue: '—',
+    revenue: '—',
+    netProfit: '—',
+    operatingMargin: '—',
+    netMargin: '—',
+  };
+}
 
 export const mockFinancialStatements = {
   incomeStatement: [

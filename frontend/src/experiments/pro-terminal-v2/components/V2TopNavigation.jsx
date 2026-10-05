@@ -6,23 +6,31 @@ import { V2_COLORS } from '../utils/constants';
 
 const NAV_ITEMS = ['Markets', 'Screener', 'Chart', 'Watchlist', 'Portfolio', 'Alerts', 'News', 'AI Analytics'];
 
-export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
+export default function V2TopNavigation({
+  activeView = 'Chart',
+  onNavigate,
+  symbols = [],
+  onSelectSymbol,
+  searchOpen = false,
+  onSearchOpenChange,
+  searchQuery = '',
+  onSearchQueryChange,
+  onToggleSettings,
+}) {
   const [active, setActive] = useState(activeView);
   const [showMore, setShowMore] = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
   const searchRef = useRef(null);
   const notifRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
-      if (searchRef.current && !searchRef.current.contains(e.target)) setShowSearch(false);
+      if (searchRef.current && !searchRef.current.contains(e.target)) onSearchOpenChange?.(false);
       if (notifRef.current && !notifRef.current.contains(e.target)) setShowNotifications(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [onSearchOpenChange]);
 
   const notifications = [
     { id: 1, text: 'RELIANCE crossed ₹2,870', time: '2m ago', type: 'price' },
@@ -30,8 +38,18 @@ export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
     { id: 3, text: 'AI signal: Bullish on INFY', time: '1h ago', type: 'ai' },
   ];
 
+  const searchResults = searchQuery
+    ? symbols.filter((s) => s.toLowerCase().includes(searchQuery.toLowerCase()))
+    : [];
+
+  const handleSelectSymbol = (s) => {
+    onSelectSymbol?.(s);
+    onSearchQueryChange?.('');
+    onSearchOpenChange?.(false);
+  };
+
   return (
-    <div style={{
+    <div className="v2-topnav" style={{
       display: 'flex',
       alignItems: 'center',
       height: 44,
@@ -66,14 +84,15 @@ export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
           fontWeight: 800,
           color: '#fff',
         }}>S</div>
-        StockOracle Pro
+        <span className="v2-brand-text">StockOracle Pro</span>
       </div>
 
       {/* Nav Items */}
-      {NAV_ITEMS.map((item) => (
+      {NAV_ITEMS.map((item, i) => (
         <button
           key={item}
           onClick={() => { setActive(item); onNavigate?.(item); }}
+          className={i >= 5 ? 'v2-hide-sm' : undefined}
           style={{
             padding: '4px 10px',
             fontSize: 12,
@@ -94,6 +113,8 @@ export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
       <div style={{ position: 'relative' }}>
         <button
           onClick={() => setShowMore(!showMore)}
+          aria-haspopup="menu"
+          aria-expanded={showMore}
           style={{
             padding: '4px 8px',
             fontSize: 12,
@@ -110,8 +131,9 @@ export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
           More <ChevronDown size={11} />
         </button>
         {showMore && (
-          <DropdownMenu onClose={() => setShowMore(false)}>
-            {['Settings', 'Help', 'About', 'Keyboard Shortcuts'].map((item) => (
+          <DropdownMenu>
+            <DropdownItem onClick={() => { setShowMore(false); onToggleSettings?.(); }}>Settings</DropdownItem>
+            {['Help', 'About', 'Keyboard Shortcuts'].map((item) => (
               <DropdownItem key={item} onClick={() => setShowMore(false)}>{item}</DropdownItem>
             ))}
           </DropdownMenu>
@@ -123,7 +145,9 @@ export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
         {/* Search */}
         <div ref={searchRef} style={{ position: 'relative' }}>
           <button
-            onClick={() => setShowSearch(!showSearch)}
+            onClick={() => onSearchOpenChange?.(!searchOpen)}
+            aria-label="Search symbols (Ctrl+K)"
+            aria-expanded={searchOpen}
             style={{
               padding: '4px 8px',
               fontSize: 12,
@@ -138,9 +162,9 @@ export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
             }}
           >
             <Search size={14} />
-            <span>Search</span>
+            <span className="v2-brand-text">Search</span>
           </button>
-          {showSearch && (
+          {searchOpen && (
             <div style={{
               position: 'absolute',
               top: '100%',
@@ -157,8 +181,12 @@ export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => onSearchQueryChange?.(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && searchResults.length) handleSelectSymbol(searchResults[0]);
+                }}
                 placeholder="Search symbols..."
+                aria-label="Search symbols"
                 autoFocus
                 style={{
                   width: '100%',
@@ -173,10 +201,16 @@ export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
               />
               {searchQuery && (
                 <div style={{ marginTop: 4 }}>
-                  {['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK']
-                    .filter((s) => s.toLowerCase().includes(searchQuery.toLowerCase()))
-                    .map((s) => (
-                      <button key={s} style={{
+                  {searchResults.length === 0 && (
+                    <div style={{ padding: '6px 8px', fontSize: 11, color: V2_COLORS.text.muted }}>
+                      No symbols found
+                    </div>
+                  )}
+                  {searchResults.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => handleSelectSymbol(s)}
+                      style={{
                         display: 'block',
                         width: '100%',
                         padding: '5px 8px',
@@ -187,7 +221,7 @@ export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
                         textAlign: 'left',
                         cursor: 'pointer',
                       }}>{s}</button>
-                    ))}
+                  ))}
                 </div>
               )}
             </div>
@@ -198,6 +232,8 @@ export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
         <div ref={notifRef} style={{ position: 'relative' }}>
           <button
             onClick={() => setShowNotifications(!showNotifications)}
+            aria-label="Notifications"
+            aria-expanded={showNotifications}
             style={{
               padding: 6,
               color: V2_COLORS.text.secondary,
@@ -247,40 +283,49 @@ export default function V2TopNavigation({ activeView = 'Chart', onNavigate }) {
           )}
         </div>
 
-        <button style={{
-          padding: 6,
-          color: V2_COLORS.text.secondary,
-          background: 'transparent',
-          border: 'none',
-          borderRadius: 4,
-          cursor: 'pointer',
-          display: 'flex',
-        }}>
+        <button
+          onClick={() => onToggleSettings?.()}
+          aria-label="Settings"
+          style={{
+            padding: 6,
+            color: V2_COLORS.text.secondary,
+            background: 'transparent',
+            border: 'none',
+            borderRadius: 4,
+            cursor: 'pointer',
+            display: 'flex',
+          }}
+        >
           <Settings size={14} />
         </button>
-        <div style={{
-          width: 26,
-          height: 26,
-          borderRadius: '50%',
-          background: V2_COLORS.accent.secondary,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 10,
-          fontWeight: 600,
-          color: '#fff',
-          cursor: 'pointer',
-        }}>
+        <button
+          aria-label="Account"
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: '50%',
+            background: V2_COLORS.accent.secondary,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 10,
+            fontWeight: 600,
+            color: '#fff',
+            cursor: 'pointer',
+            border: 'none',
+            padding: 0,
+          }}
+        >
           <User size={12} />
-        </div>
+        </button>
       </div>
     </div>
   );
 }
 
-function DropdownMenu({ children, onClose }) {
+function DropdownMenu({ children }) {
   return (
-    <div style={{
+    <div role="menu" style={{
       position: 'absolute',
       top: '100%',
       right: 0,
@@ -300,6 +345,7 @@ function DropdownMenu({ children, onClose }) {
 function DropdownItem({ children, onClick }) {
   return (
     <button
+      role="menuitem"
       onClick={onClick}
       style={{
         display: 'block',

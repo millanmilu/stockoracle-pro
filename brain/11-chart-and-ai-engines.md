@@ -37,6 +37,23 @@ kuch draw nahi hota — consumer list me bhi uska rasta hona chahiye.
 `type` ki values: `overlay`, `overlay_multi`, `overlay_supertrend`, `overlay_psar`,
 `overlay_ichimoku`, `oscillator`, `smc`, `levels`, `profile`, `ai`, `custom`.
 
+### SMC Pro overlay pattern (current standard)
+
+SMC ka professional mode usually ek single combined overlay ke roop me aata hai, not multiple noisy toggles. Current app me `smc_pro` indicator ko `market_structure` category se define kiya jaata hai aur ek compact summary card ke saath chart ke top-left me render hota hai, while keeping the normal individual SMC detectors available for advanced users.
+
+- `src/components/chart/indicatorDefinitions.js` → single `SMC Pro` entry in market structure catalog
+- `src/utils/marketStructure.js` → `smc_pro` detector aggregates BOS / CHoCH / liquidity / FVG / OB / S&R into one signal stream
+- BOS/CHoCH only emit on a close crossing a confirmed swing; unbroken swings are not structure events, and each swing emits at most one break
+- SMC bias is derived from 4× and 16× candle aggregations; disagreement or insufficient aggregated history reports neutral rather than inventing HTF data
+- Premium/discount follows range convention: above equilibrium = premium, below = discount; setup direction requires configured confluence
+- SMC score counts only observed, direction-aligned evidence; OB/FVG contributions must be untouched and near current price, while absent sweep, structure, displacement, zone, session, or volume evidence contributes zero
+- `src/components/live-chart/ChartFloaters.jsx` → compact, draggable/collapsible summary card; bias, structure, session, score come from `analyzeSMC()` rather than candle-to-candle guesses
+- `src/components/live-chart/SmcProLayer.jsx` → viewport-aware SVG rendering; only short confirmed-structure markers, short active-liquidity rails, short setup rails, and active OB/FVG rectangles
+- `src/utils/smc/selection/smcSelect.js` → lifecycle + relevance + current-price/zoom filtering; SMART mode favors setup context, hides filled/invalidated zones, and reduces density when zoomed out
+- `src/utils/smc/selection/smcLabels.js` → priority-ranked pixel bounding-box collision placement against other labels and reserved chart areas
+- `src/components/chart/canvas/useIndicatorGroups.js` keeps `smc_pro` out of the legacy price-line renderer; `indicatorOverlayEffects.js` removes any stale legacy series when it is toggled to the single SVG overlay
+- Rule: no FVG/OB/swing full-width rails, no filled FVG or invalidated/mitigated OB, no EQ/PD helper rails in the default overlay; lower-priority labels yield to setup levels and MSS/CHoCH
+
 ## 2. Engines — `src/utils/`
 
 | File | Kaam |
@@ -44,7 +61,7 @@ kuch draw nahi hota — consumer list me bhi uska rasta hona chahiye.
 | `indicatorEngine.js` | Engine registry + contract: `INDICATOR_ENGINE`, `Indicator`, `createParameter()`, `validateParameters()`, `calculateById(id, candles, params)` → `{ valid, points }`. Yahan WMA/HMA/KAMA/AnchoredVWAP/Donchian/Stoch/CCI/Williams %R/ROC/Momentum/TRIX/ATR/Keltner/StdDev/HistVol/BBWidth... bhi hain. |
 | `chartIndicators.js` | Shared primitives (16 exports) jo AI engines bhi import karte hain: `calculateSMA/EMA/RSI/MACD/BollingerBands/ATR/ADX/Supertrend/StochRSI`. Ek hi jagah math rakho — copy-paste na karo. |
 | `aiIndicatorEngine.js` | AI studies (neeche). Ye file import hote hi apne engines registry me register karti hai (`AI_REGISTRY.forEach`), isliye `calculateById('ai_trend', …)` kaam karta hai. |
-| `aiSignalEngine.js` | `analyzeSignal(candles)` → rule-based confluence report: `{ available, direction: buy/sell/neutral, probability, entry, stopLoss, takeProfit, riskReward, confluence: {buy, sell, neutral}, why: [...], missing: [...] }`. |
+| `aiSignalEngine.js` | `analyzeSignal(candles)` → rule-based confluence report with a heuristic `confidence` score (not a calibrated probability), `direction`, Entry/SL/TP, confluence votes, reasons, and missing inputs. The legacy `probability` field remains for compatibility only (neutral is 50); do not interpret it as a probability. |
 
 ### AI engines (`aiIndicatorEngine.js` — `AI_REGISTRY`, series return karte hain)
 
@@ -94,6 +111,11 @@ Plus: `type === 'profile'` → `VolumeProfileOverlay` (LiveChartView), aur `type
 `ai_breakout` ke 3 outputs catalog me likhe hain (BRK markers, impulse −100…+100, SQUEEZE/impulse
 state) — par impulse series ka koi pane nahi hai; wo sirf `AIDashboard` ke BRK chip ke tooltip me
 dikhta hai.
+
+**Marker-only series invariant:** Lightweight Charts crosshair marker renderer calls
+`firstValue()` for any series with a marker at the active time. `ai_signal` ka invisible marker
+anchor series isliye latest valid close ka ek hidden data point rakhta hai; `setMarkers()` ke
+saath empty `setData([])` crash kara sakta hai (`Value is null`).
 
 ## Traps (inhi se bugs aate hain)
 
@@ -161,6 +183,13 @@ dikhta hai.
   baad zero). 60s+ hidden gap `visibilitychange` se continuity invalidate karta hai;
   har `loadHistory` start reset karta hai; full-stage merge strictly-newer live bars
   preserve karke continuity re-arm karta hai (16s-load wick loss band).
+- **Holiday/fallback gate (`canUpdateLiveCandle`, chartHelpers.js):** equity candle
+  mutate/spawn sirf tab jab tick genuinely live ho. Sirf clock window (09:15–15:30 IST)
+  NSE holidays nahi dekh sakta — Gandhi Jayanti jaise weekday-holidays clock window ke
+  ANDAR aate hain, aur broadcaster holiday/ broker-outage pe verified EOD fallback
+  `is_live:false` bhejta rehta hai. Explicit `is_live:false` clock gate ko VETO karta
+  hai (fake 1m candle kabhi nahi); flag missing ho to legacy clock behavior; crypto
+  24/7 bypass. Unit test: `chartHelpers.test.js` (AGENTS.md §4).
 - **Viewport guard:** `scrollToRealtime()` sirf tab jab viewport already right edge pe ho
   (`range.to >= totalBars - 2`) — history pan karne pe snap-back nahi.
 - **Cache budget:** `chartDataCache` me `MAX_ENTRIES=5` + 30 MB byte-budget
@@ -190,17 +219,86 @@ dikhta hai.
 - **Replay:** timer deps me `replayIndex` nahi (speed even), end-toast once (ref guard),
   keydown listener once (stable refs) — har candle pe re-attach nahi.
 
+## Chart Settings store (TradingView dialog — Oct 2026)
+
+`src/utils/chartSettings.js` = saare chart knobs ka single source. Dialog
+(`ChartSettingsModal.jsx`) sirf yahan likhta hai; `ChartCanvas.jsx`,
+`VolumePane.jsx`, `OscillatorPane.jsx` aur `LiveChartView.jsx` subscribe karte hain.
+
+Flow: **modal → `saveChartSettings()` (cache + localStorage, notify 60ms coalesced)
+→ subscribers → `buildChartOptions()` / `buildSeriesOptions()` → `chart/series.applyOptions()`**
+
+| Store API | Kaam |
+|-----------|------|
+| `loadChartSettings()` | DEFAULT + saved merge (cached read; `invalidateChartSettingsCache()` se refresh) |
+| `saveChartSettings(patch)` | merge + persist + notify — persist turant, broadcast 60ms trailing (color `<input>` per-pixel chalta hai) |
+| `resetChartSettings()` | defaults + storage clear + **immediate** notify |
+| `subscribeChartSettings(fn)` | unsubscribe fn; **turant ek baar** current value se call hota hai (mount paint isi se hota hai) |
+| `buildChartOptions(s, theme)` | chart-level patch: bg / grid / crosshair / axis text+size / scale visibility. `null` color = theme token |
+| `buildSeriesOptions(s, type)` | primary series patch: colors, border/wick toggle, last-value tag, price line |
+| `applyScalePlacement(chart, s, series[])` | scale side flip + har series ka `priceScaleId` move |
+| `applyPaneChartOptions(chart, s, theme, series[])` | sub-pane par wahi patch (grid/crosshair/axis + scale side) |
+
+Dialog ke 5 tabs: **Symbol / Candles** (6 chart styles, body/border/wick colors,
+line color, borders/wicks/last-value/price-line toggles), **Appearance & Grid**
+(bg theme|custom, grid toggles+colors, crosshair mode normal/magnet/hidden +
+style + labels + label bg, axis text color/size, symbol watermark),
+**Scales & Precision** (scale side, normal/log/percentage, invert, precision
+auto|0–8, timezone, auto-fit prices), **Status Line** (title, OHLC, change %,
+volume, indicator values, countdown), **Trading** (trade button, trading
+panel, position lines — teeno `showTradeButton` / `showTradeDocket` /
+`showPositionLines` par store me hain).
+
+### Traps (inhi se bugs aate hain)
+
+1. **Live preview + Cancel-restore:** dialog khulte waqt snapshot; har change
+   turant store me; Cancel / X / backdrop = snapshot wapas (aur
+   `onApplySettings` bhi wapas). Sirf OK pe parent state (chartType,
+   priceScaleMode, invertScale, timezone) persist rehti hai — wo LiveChartView
+   ke **props** hain, store nahi.
+2. **Chart rebuild settings nahi bhulta:** `createPrimarySeries()` settings
+   leta hai, creation `buildChartOptions` apply karta hai, aur theme-change
+   effect ke baad subscriber dobara apply karta hai — warna `applyChartTheme`
+   user colors grid/crosshair par mita deta.
+3. **Scale side = series ka kaam:** sirf `leftPriceScale.visible` karne se
+   left axis khali rehti hai (saari series `'right'` par hain). `applyScalePlacement`
+   har series ka `priceScaleId` badalta hai (lightweight-charts applyOptions se
+   scale par move hota hai). Series banane waale effect ke end me
+   `syncScalePlacement()` call hota hai — naya series-creating effect add karo
+   to wahan bhi call karo, warna wo series active scale par nahi dikhegi.
+4. **`null` color = theme fallback:** defaults me grid/crosshair/axis colors
+   `null` hain aur `|| tk.*` se theme token aata hai. Light theme me koi
+   hardcoded `#1E222D`/`#787B86` mat lagao — concrete value sirf user ke
+   choose karne par aati hai.
+5. **Precision do jagah lagti hai:** axis labels (`data load`) aur series
+   `priceFormat` (chart-type switch). Dono jagah
+   `resolvePrecision(settings, autoDec)` se guzaro, warna axis aur legend alag
+   decimal bolenge.
+6. **60ms notify:** test me `await` chahiye (`chartSettings.test.js` dekho);
+   `subscribeChartSettings` ka initial call synchronous hai.
+7. **Countdown** LiveChartView render karta hai (ChartCanvas nahi), isliye wahan
+   bhi store subscribe hota hai (`showCountdown`).
+8. **Trading tab:** `showTradeButton`/`showTradeDocket` par LiveChartView
+   **derive** karta hai (useState nahi) — toolbar ke toggle bhi
+   `saveChartSettings()` se likhte hain, warna state alag ho jayegi.
+   `showPositionLines: false` hona `paperPosition` prop ko `null` karta hai;
+   ChartCanvas ka paper-lines effect cleanup early-return se **pehle** lines
+   hata hai, isliye toggle off karte hi entry/SL/TP lines gayab hoti hain.
+
 ## Tests + commands
 
 ```bash
-cd frontend && npm test        # = node --test src/utils/*.test.js (8 files)
+cd frontend && npm test        # = node --test src/utils/*.test.js (11 files)
 ```
 
 - `aiIndicatorEngine.test.js` — har AI engine ka behaviour synthetic candles pe (trend ±100,
   exhaustion sign, band widening, markers, dashboard aggregate, short-series safety).
 - `indicatorEngine.test.js`, `chartHelpers.test.js`, `volumeProfile.test.js`,
   `drawingGeometry.test.js`, `aiSignalEngine.test.js`, `watchlist.test.js`,
-  `timeframeQuickSwitch.test.js` (number-key timeframe resolver).
+  `timeframeQuickSwitch.test.js` (number-key timeframe resolver),
+  `chartSettings.test.js` (settings store + option builders),
+  `drawingRepair.test.js` (`repairDrawings` — catalog `spec.points` anchor count
+  se repair; 2-point tools reload pe drop na hon — FRVP regression).
 - **CI me `npm test` nahi chalta** (CI sirf `npm run build`) — isliye ye locally chalao.
 - `*.test.js` files `src/utils/` me hi rehti hain (`package.json` ka glob) — test ko
   `src/components/` me na rakho, warna chalega hi nahi.

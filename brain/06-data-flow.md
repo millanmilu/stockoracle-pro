@@ -35,10 +35,14 @@ hai. Pehle download first hota tha — har restart ke baad pehla chart load atak
 ## 3. Intraday ka safar
 ```
 fetch_stock_data(ticker, period, interval=1m/5m/15m/1h)
-  → memory cache `hist_{t}_{p}_{i}` → direct return (equity intraday SQLite me SAVE NAHI)
-  → Crypto/Gold (24/7): `intraday_candles` table check. Window covered hone par agar
-    stale ho to Binance `startTime` se sirf missing tail candles ka Incremental Fetch (~50ms)
-    hota hai aur fast batch upsert chalta hai (poora 10k bars refetch nahi hota).
+  → memory cache `hist_{t}_{p}_{i}` → direct return
+  → `intraday_candles` table (intra_db): fresh (<5m for 1m) → sqlite source.
+    Stale ho to sirf incremental delta Angel se maanga jaata hai (purana base
+    merge hota hai) — poora window refetch nahi.
+  → Angel session down / empty response? → step 4b: stale `intra_db` lautao
+    `sqlite_stale` source ke saath (404 kabhi nahi, data local hai) — regression
+    test `test_intraday_stale_fallback.py`.
+  → Crypto/Gold (24/7): same table + Binance `startTime` incremental tail fetch.
   → fill_intraday_time_gaps(): chhote gap flat-fill (prev close, vol 0), bada gap khaali
   → frontend bucketing: activeCandle ya rollover pe nayi candle
 ```

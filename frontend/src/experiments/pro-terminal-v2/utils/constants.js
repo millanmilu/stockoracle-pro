@@ -80,8 +80,23 @@ export const V2_KEYBOARD_SHORTCUTS = {
   SAVE: 'Ctrl+S',
   INDICATORS: 'Alt+I',
   AI_INDICATORS: 'Alt+A',
+  UNDO: 'Ctrl+Z',
   CLOSE: 'Escape',
 };
+
+/** Indicator presets applied from the toolbar Templates menu. */
+export const V2_TEMPLATES = [
+  { id: 'Default', indicators: ['ema_20', 'ema_50', 'ema_200', 'volume', 'rsi', 'macd'], ai: ['ai_sr'] },
+  { id: 'Trend Following', indicators: ['ema_20', 'ema_50', 'ema_200', 'volume'], ai: [] },
+  { id: 'Momentum', indicators: ['ema_20', 'ema_50', 'volume', 'rsi', 'macd'], ai: ['ai_momentum'] },
+  { id: 'Mean Reversion', indicators: ['ema_200', 'volume', 'rsi'], ai: ['ai_sr'] },
+  { id: 'Breakout', indicators: ['ema_20', 'ema_50', 'ema_200', 'volume', 'macd'], ai: ['ai_breakout', 'ai_forecast'] },
+];
+
+/** Drawing tools that commit immediately on the first click. */
+export const V2_INSTANT_DRAWING_TOOLS = [
+  'horizontal_line', 'vertical_line', 'text', 'callout', 'price_label',
+];
 
 export const V2_INDICATORS = [
   { id: 'ema_20', name: 'EMA 20', shortName: 'EMA20', color: '#06B6D4', type: 'overlay', defaultVisible: true },
@@ -206,7 +221,32 @@ export const V2_DRAWING_TOOLS = [
   },
 ];
 
+/** Flatten every drawing tool (groups + children) into an id → label lookup. */
+const DRAWING_TOOL_LABELS = V2_DRAWING_TOOLS.reduce((acc, tool) => {
+  acc[tool.id] = tool.label;
+  (tool.children || []).forEach((child) => { acc[child.id] = child.label; });
+  return acc;
+}, {});
+
+export function getDrawingToolLabel(id) {
+  return DRAWING_TOOL_LABELS[id] || id;
+}
+
+/**
+ * How many anchors each drawing tool needs before it can be committed.
+ * 1 = single click (price/time level), 2 = click-drag / click-click.
+ * Tools missing here default to 2 anchors.
+ */
+export const V2_DRAWING_POINT_COUNT = {
+  horizontal_line: 1,
+  vertical_line: 1,
+  text: 1,
+  callout: 1,
+  price_label: 1,
+};
+
 export const V2_BOTTOM_TABS = [
+  { id: 'overview', label: 'Market Overview' },
   { id: 'screener', label: 'Stock Screener' },
   { id: 'financials', label: 'Financials' },
   { id: 'technicals', label: 'Technicals' },
@@ -224,11 +264,11 @@ export const V2_SCREENER_COLUMNS = [
   { id: 'symbol', label: 'Symbol', width: 120, pinned: true, sortable: true },
   { id: 'ltp', label: 'LTP', width: 100, sortable: true },
   { id: 'change', label: '% Change', width: 90, sortable: true },
-  { id: 'market_cap', label: 'Market Cap', width: 110, sortable: true },
+  { id: 'marketCap', label: 'Market Cap', width: 110, sortable: true },
   { id: 'pe', label: 'P/E', width: 70, sortable: true },
   { id: 'roe', label: 'ROE', width: 70, sortable: true },
   { id: 'roce', label: 'ROCE', width: 70, sortable: true },
-  { id: 'debt_equity', label: 'Debt/Equity', width: 90, sortable: true },
+  { id: 'debtEquity', label: 'Debt/Equity', width: 90, sortable: true },
   { id: 'rsi', label: 'RSI', width: 60, sortable: true },
-  { id: 'above_ema200', label: 'Close > EMA200', width: 110, sortable: true },
+  { id: 'aboveEma200', label: 'Close > EMA200', width: 110, sortable: true },
 ];

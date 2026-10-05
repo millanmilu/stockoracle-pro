@@ -1,19 +1,31 @@
 // Pro Terminal V2 — Screener Panel
 
 import React, { useState } from 'react';
-import { Plus, Play, Save, Filter, X } from 'lucide-react';
+import { Plus, Play, Save, Filter, X, Check } from 'lucide-react';
 import { V2_COLORS } from '../utils/constants';
-import { mockFilterFields } from '../data/mockScreener';
+import { mockFilterFields, mockScreenerResults } from '../data/mockScreener';
 import V2ScreenerTable from './V2ScreenerTable';
 
-export default function V2Screener({ filters, onAddFilter, onRemoveFilter, results }) {
+export default function V2Screener({
+  filters,
+  onAddFilter,
+  onRemoveFilter,
+  results,
+  scanning = false,
+  onScan,
+  onSaveFilters,
+  onOpenSymbol,
+  watchlist,
+  onToggleWatchlist,
+}) {
   const [showFilterBuilder, setShowFilterBuilder] = useState(false);
   const [newFilterField, setNewFilterField] = useState('');
   const [newFilterOp, setNewFilterOp] = useState('>');
   const [newFilterValue, setNewFilterValue] = useState('');
+  const [savedFlash, setSavedFlash] = useState(false);
 
   const handleAddFilter = () => {
-    if (!newFilterField || !newFilterValue) return;
+    if (!newFilterField || newFilterValue === '') return;
     const field = mockFilterFields.find((f) => f.id === newFilterField);
     onAddFilter({
       field: newFilterField,
@@ -24,6 +36,13 @@ export default function V2Screener({ filters, onAddFilter, onRemoveFilter, resul
     setNewFilterField('');
     setNewFilterValue('');
     setShowFilterBuilder(false);
+  };
+
+  const handleSaveFilters = () => {
+    if (onSaveFilters?.()) {
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1500);
+    }
   };
 
   return (
@@ -55,20 +74,24 @@ export default function V2Screener({ filters, onAddFilter, onRemoveFilter, resul
             color: V2_COLORS.accent.primary,
           }}>
             <span>{filter.label}</span>
-            <button onClick={() => onRemoveFilter(filter.id)} style={{
-              background: 'transparent',
-              border: 'none',
-              color: V2_COLORS.text.muted,
-              cursor: 'pointer',
-              fontSize: 10,
-              padding: 0,
-              display: 'flex',
-            }}><X size={10} /></button>
+            <button
+              onClick={() => onRemoveFilter(filter.id)}
+              aria-label={`Remove filter ${filter.label}`}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: V2_COLORS.text.muted,
+                cursor: 'pointer',
+                fontSize: 10,
+                padding: 0,
+                display: 'flex',
+              }}><X size={10} /></button>
           </div>
         ))}
 
         <button
           onClick={() => setShowFilterBuilder(!showFilterBuilder)}
+          aria-expanded={showFilterBuilder}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -86,37 +109,49 @@ export default function V2Screener({ filters, onAddFilter, onRemoveFilter, resul
           Add Filter
         </button>
 
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-          <button style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            padding: '4px 12px',
-            fontSize: 11,
-            fontWeight: 600,
-            color: '#fff',
-            background: V2_COLORS.accent.primary,
-            border: 'none',
-            borderRadius: 4,
-            cursor: 'pointer',
-          }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+          <span style={{ fontSize: 10, color: V2_COLORS.text.muted }}>
+            {results.length} / {mockScreenerResults.length} stocks
+          </span>
+          <button
+            onClick={() => onScan?.()}
+            disabled={scanning}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 12px',
+              fontSize: 11,
+              fontWeight: 600,
+              color: '#fff',
+              background: V2_COLORS.accent.primary,
+              border: 'none',
+              borderRadius: 4,
+              cursor: scanning ? 'wait' : 'pointer',
+              opacity: scanning ? 0.7 : 1,
+            }}
+          >
             <Play size={11} />
-            Scan
+            {scanning ? 'Scanning…' : 'Scan'}
           </button>
-          <button style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            padding: '4px 10px',
-            fontSize: 11,
-            color: V2_COLORS.text.secondary,
-            background: 'transparent',
-            border: `1px solid ${V2_COLORS.bg.border}`,
-            borderRadius: 4,
-            cursor: 'pointer',
-          }}>
-            <Save size={11} />
-            Save
+          <button
+            onClick={handleSaveFilters}
+            aria-label="Save filter set"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 10px',
+              fontSize: 11,
+              color: savedFlash ? V2_COLORS.positive : V2_COLORS.text.secondary,
+              background: 'transparent',
+              border: `1px solid ${V2_COLORS.bg.border}`,
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            {savedFlash ? <Check size={11} /> : <Save size={11} />}
+            {savedFlash ? 'Saved' : 'Save'}
           </button>
         </div>
       </div>
@@ -134,6 +169,7 @@ export default function V2Screener({ filters, onAddFilter, onRemoveFilter, resul
           <select
             value={newFilterField}
             onChange={(e) => setNewFilterField(e.target.value)}
+            aria-label="Filter field"
             style={{
               padding: '4px 8px',
               fontSize: 11,
@@ -151,6 +187,7 @@ export default function V2Screener({ filters, onAddFilter, onRemoveFilter, resul
           <select
             value={newFilterOp}
             onChange={(e) => setNewFilterOp(e.target.value)}
+            aria-label="Filter operator"
             style={{
               padding: '4px 8px',
               fontSize: 11,
@@ -169,6 +206,8 @@ export default function V2Screener({ filters, onAddFilter, onRemoveFilter, resul
             value={newFilterValue}
             onChange={(e) => setNewFilterValue(e.target.value)}
             placeholder="Value"
+            aria-label="Filter value"
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddFilter(); }}
             style={{
               width: 80,
               padding: '4px 8px',
@@ -192,7 +231,12 @@ export default function V2Screener({ filters, onAddFilter, onRemoveFilter, resul
       )}
 
       {/* Results table */}
-      <V2ScreenerTable results={results} />
+      <V2ScreenerTable
+        results={results}
+        onOpenSymbol={onOpenSymbol}
+        watchlist={watchlist}
+        onToggleWatchlist={onToggleWatchlist}
+      />
     </div>
   );
 }

@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Activity, BarChart2, Check, ChevronDown, ChevronRight, Fullscreen, History, Maximize2,
+  Activity, BarChart2, Bell, Check, ChevronDown, ChevronRight, Fullscreen, History, Maximize2,
   PenTool, RotateCcw, Settings, SlidersHorizontal, Zap, Wallet, Search,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DRAWING_TOOL_GROUPS, getToolSpec } from '../chart-tools/drawingToolCatalog';
 import SymbolSearchModal from '../chart-tools/SymbolSearchModal';
 import { isGoldSymbol, isCryptoSymbol, isSupportedInterval, resolveTimeframeBuffer } from '../../utils/chartHelpers';
+import { loadSmcDisplay, saveSmcDisplay, subscribeSmcDisplay } from '../../utils/smcDisplayPrefs';
 import api from '../../utils/api';
 import useStore from '../../store/useStore';
 import { getThemeTokens } from '../../utils/theme';
@@ -78,6 +79,7 @@ export default function ChartToolbar({
   showTradeBar = true, onToggleTradeBar = () => {},
   showTradeDocket = false, onToggleTradeDocket = () => {},
   paperPositionCount = 0,
+  smcProOn = false, onToggleSmcPro = () => {}, onOpenAlerts = () => {},
 }) {
   const [openMenu, setOpenMenu] = useState(null);
   const [openDrawGroup, setOpenDrawGroup] = useState(null);
@@ -85,6 +87,8 @@ export default function ChartToolbar({
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const rootRef = useRef(null);
+  const [smcDisplay, setSmcDisplay] = useState(() => loadSmcDisplay());
+  useEffect(() => subscribeSmcDisplay(setSmcDisplay), []);
 
   // ── TV number-key timeframe switch (type "15" → 15m, "4h" → 4H) ──
   const [tfBuffer, setTfBuffer] = useState('');
@@ -332,6 +336,119 @@ export default function ChartToolbar({
         {(!isMobile) && <span>Indicators</span>}
         {activeIndicatorCount > 0 && <span style={tvCountBadge}>{activeIndicatorCount}</span>}
       </button>
+
+      {/* ── SMC Pro cluster (toggle + display menu + alerts) ── */}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+        <button
+          type="button"
+          onClick={onToggleSmcPro}
+          title={smcProOn ? 'Disable SMC Pro overlays' : 'Enable SMC Pro overlays'}
+          style={{
+            ...tvBtn(tk),
+            gap: 7,
+            padding: '5px 10px',
+            border: `1px solid ${smcProOn ? '#2962FF' : tk.toolbarBorder}`,
+            borderRadius: 7,
+            color: smcProOn ? '#7AA2FF' : tk.toolbarText,
+            fontWeight: 600,
+            fontSize: 12,
+          }}
+        >
+          {!isMobile && <span>SMC Pro</span>}
+          <span
+            role="switch"
+            aria-checked={!!smcProOn}
+            style={{
+              width: 30, height: 17, borderRadius: 9, padding: 2, display: 'flex',
+              alignItems: 'center', justifyContent: smcProOn ? 'flex-end' : 'flex-start',
+              background: smcProOn ? '#2962FF' : 'rgba(127,127,127,0.45)',
+            }}
+          >
+            <span style={{ width: 13, height: 13, borderRadius: '50%', background: '#FFF' }} />
+          </span>
+        </button>
+        {!isMobile && (
+          <button
+            type="button"
+            onClick={() => setOpenMenu(openMenu === 'smc' ? null : 'smc')}
+            title="SMC Pro display options"
+            style={{ ...tvBtn(tk), minWidth: 26, color: openMenu === 'smc' ? '#2962FF' : tk.toolbarMuted }}
+          >
+            <ChevronDown size={14} />
+          </button>
+        )}
+        {!isMobile && (
+          <button type="button" onClick={onOpenAlerts} title="Price alerts" style={tvBtn(tk)}>
+            <Bell size={17} />
+          </button>
+        )}
+        {openMenu === 'smc' && (
+          <Menu style={{ minWidth: 250 }}>
+            <div style={drawGroupHeader}>Display mode</div>
+            {[
+              ['smart', 'Smart — active structures only'],
+              ['minimal', 'Minimal — structure + setup'],
+              ['full', 'Full — more history'],
+              ['debug', 'Debug — every detection'],
+            ].map(([mode, label]) => (
+              <MenuItem
+                key={mode}
+                active={smcDisplay.mode === mode}
+                onClick={() => saveSmcDisplay({ mode })}
+              >
+                {label}
+              </MenuItem>
+            ))}
+            <div style={{ height: 1, background: tk.toolbarBorder, margin: '4px 0' }} />
+            <div style={drawGroupHeader}>Max visible</div>
+            {[
+              ['maxOb', 'Order blocks / side'],
+              ['maxFvg', 'FVGs / side'],
+              ['maxLiquidity', 'Liquidity levels'],
+              ['maxStructure', 'Structure tags'],
+            ].map(([key, label]) => (
+              <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 12px', fontSize: 12, color: tk.toolbarText }}>
+                <span>{label}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => saveSmcDisplay({ [key]: Math.max(0, (Number(smcDisplay[key]) || 0) - 1) })}
+                    style={{ width: 22, height: 22, borderRadius: 4, border: `1px solid ${tk.toolbarBorder}`, background: 'transparent', color: tk.toolbarText, cursor: 'pointer' }}
+                  >
+                    −
+                  </button>
+                  <span style={{ minWidth: 18, textAlign: 'center', fontWeight: 700 }}>{smcDisplay[key] ?? '—'}</span>
+                  <button
+                    type="button"
+                    onClick={() => saveSmcDisplay({ [key]: Math.min(12, (Number(smcDisplay[key]) || 0) + 1) })}
+                    style={{ width: 22, height: 22, borderRadius: 4, border: `1px solid ${tk.toolbarBorder}`, background: 'transparent', color: tk.toolbarText, cursor: 'pointer' }}
+                  >
+                    +
+                  </button>
+                </span>
+              </div>
+            ))}
+            <div style={{ height: 1, background: tk.toolbarBorder, margin: '4px 0' }} />
+            <div style={drawGroupHeader}>SMC Pro layers</div>
+            {[
+              ['zones', 'Order blocks + FVG zones'],
+              ['structure', 'BOS / CHoCH / HH / HL labels'],
+              ['liquidity', 'BSL / SSL / EQH / EQL lines'],
+              ['killzones', 'Asia / London / New York strip'],
+              ['setup', 'Entry / TP / SL box'],
+              ['scoreCard', 'SMC Pro summary card'],
+            ].map(([key, label]) => (
+              <MenuItem
+                key={key}
+                active={!!smcDisplay[key]}
+                onClick={() => saveSmcDisplay({ [key]: !smcDisplay[key] })}
+              >
+                {label}
+              </MenuItem>
+            ))}
+          </Menu>
+        )}
+      </div>
 
       {!isTablet && <TvDivider />}
 

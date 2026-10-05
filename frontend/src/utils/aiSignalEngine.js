@@ -1,7 +1,7 @@
 /**
  * StockOracle Pro — Rule-Based AI Signal Engine (spec §17)
  *
- * Produces a probability-weighted trading signal from REAL indicator values
+ * Produces a heuristic consensus score from real indicator values
  * computed by the modular indicator engine. No ML model is required; a
  * separately-trained ML consensus can be surfaced by the caller.
  *
@@ -9,7 +9,8 @@
  * {
  *   available: boolean,
  *   direction: 'buy' | 'sell' | 'neutral',
- *   probability: 0..100,
+ *   confidence: 0..100,         // heuristic score, not a calibrated probability
+ *   probability: 0..100,         // deprecated legacy field; neutral reports 50
  *   confluence: { buy: number, sell: number, neutral: number },  // count of votes
  *   score: -100..100,            // net directional strength
  *   entry: number,
@@ -128,12 +129,12 @@ export function analyzeSignal(candles) {
     const r = lastVal(rsi);
     if (r == null) {
       missing.push('RSI');
-    } else if (r >= 70) {
-      vote(signal('sell', 0.15, `RSI overbought at ${r.toFixed(1)}`, { href: 'momentum', label: 'RSI', value: r.toFixed(1) }));
-    } else if (r <= 30) {
-      vote(signal('buy', 0.15, `RSI oversold at ${r.toFixed(1)}`, { href: 'momentum', label: 'RSI', value: r.toFixed(1) }));
+    } else if (r >= 55) {
+      vote(signal('buy', 0.08, `RSI bullish at ${r.toFixed(1)}; extreme readings are not automatic reversal signals`, { href: 'momentum', label: 'RSI', value: r.toFixed(1) }));
+    } else if (r <= 45) {
+      vote(signal('sell', 0.08, `RSI bearish at ${r.toFixed(1)}; extreme readings are not automatic reversal signals`, { href: 'momentum', label: 'RSI', value: r.toFixed(1) }));
     } else {
-      vote(signal('neutral', 0.05, `RSI in neutral zone at ${r.toFixed(1)}`, { href: 'momentum', label: 'RSI', value: r.toFixed(1) }));
+      vote(signal('neutral', 0.04, `RSI near its midpoint at ${r.toFixed(1)}`, { href: 'momentum', label: 'RSI', value: r.toFixed(1) }));
     }
   } catch { missing.push('RSI'); }
 
@@ -167,14 +168,10 @@ export function analyzeSignal(candles) {
     const d = lastVal(stoch.d);
     if (k == null || d == null) {
       missing.push('Stochastic');
-    } else if (k >= 80) {
-      vote(signal('sell', 0.10, `Stochastic overbought at ${k.toFixed(1)}`, { href: 'momentum', label: 'Stoch', value: k.toFixed(1) }));
-    } else if (k <= 20) {
-      vote(signal('buy', 0.10, `Stochastic oversold at ${k.toFixed(1)}`, { href: 'momentum', label: 'Stoch', value: k.toFixed(1) }));
     } else if (k > d) {
-      vote(signal('buy', 0.08, 'Stochastic %K above %D', { href: 'momentum', label: 'Stoch', value: `${k.toFixed(1)}/${d.toFixed(1)}` }));
+      vote(signal('buy', 0.06, `Stochastic %K above %D (${k.toFixed(1)}); extremes alone are not reversal signals`, { href: 'momentum', label: 'Stoch', value: `${k.toFixed(1)}/${d.toFixed(1)}` }));
     } else {
-      vote(signal('sell', 0.08, 'Stochastic %K below %D', { href: 'momentum', label: 'Stoch', value: `${k.toFixed(1)}/${d.toFixed(1)}` }));
+      vote(signal('sell', 0.06, `Stochastic %K below %D (${k.toFixed(1)}); extremes alone are not reversal signals`, { href: 'momentum', label: 'Stoch', value: `${k.toFixed(1)}/${d.toFixed(1)}` }));
     }
   } catch { missing.push('Stochastic'); }
 
@@ -201,12 +198,12 @@ export function analyzeSignal(candles) {
     const c = lastVal(cci);
     if (c == null) {
       missing.push('CCI');
-    } else if (c >= 100) {
-      vote(signal('sell', 0.08, `CCI overbought at ${c.toFixed(1)}`, { href: 'reversal', label: 'CCI', value: c.toFixed(1) }));
-    } else if (c <= -100) {
-      vote(signal('buy', 0.08, `CCI oversold at ${c.toFixed(1)}`, { href: 'reversal', label: 'CCI', value: c.toFixed(1) }));
+    } else if (c > 0) {
+      vote(signal('buy', 0.04, `CCI positive at ${c.toFixed(1)}; extremes need reversal confirmation`, { href: 'reversal', label: 'CCI', value: c.toFixed(1) }));
+    } else if (c < 0) {
+      vote(signal('sell', 0.04, `CCI negative at ${c.toFixed(1)}; extremes need reversal confirmation`, { href: 'reversal', label: 'CCI', value: c.toFixed(1) }));
     } else {
-      vote(signal('neutral', 0.03, `CCI neutral at ${c.toFixed(1)}`, { href: 'reversal', label: 'CCI', value: c.toFixed(1) }));
+      vote(signal('neutral', 0.02, 'CCI is neutral', { href: 'reversal', label: 'CCI', value: c.toFixed(1) }));
     }
   } catch { missing.push('CCI'); }
 
@@ -275,24 +272,30 @@ export function analyzeSignal(candles) {
   const totalWeight = buyWeight + sellWeight + neutralWeight;
   const netDiff = buyWeight - sellWeight;
   const netScore = totalWeight > 0 ? Math.round((netDiff / totalWeight) * 100) : 0;
+  const directionalGroups = new Set(
+    signals.filter((item) => item.state !== 'neutral')
+      .map((item) => item.href === 'reversal' ? 'momentum' : item.href),
+  );
 
-  // Direction is decided by the weighted balance of conviction (not raw vote
-  // counts) so strong trends are not neutralised by contrarian oscillator votes.
+  // A directional call needs meaningful weighted balance from at least two
+  // independent study groups; a stack of correlated indicators is not enough.
   let direction = 'neutral';
-  if (netScore > 5) direction = 'buy';
-  else if (netScore < -5) direction = 'sell';
+  if (netScore >= 12 && directionalGroups.size >= 2) direction = 'buy';
+  else if (netScore <= -12 && directionalGroups.size >= 2) direction = 'sell';
 
-  const conviction = Math.min(100, Math.abs(netScore));
-  const probability = direction === 'neutral' ? 50 : 50 + Math.round(conviction / 2);
+  const confidence = direction === 'neutral'
+    ? 0
+    : Math.min(80, 50 + Math.round(Math.abs(netScore) * 0.3));
+  const probability = direction === 'neutral' ? 50 : confidence;
 
   // ── Entry / SL / TP zones from real values ────────────────────────────────
   const atrFallback = (close * 0.01) || 1;
   const useAtr = atr != null && atr > 0 ? atr : atrFallback;
   const volRatio = Math.min(3, Math.max(1, 1 + (Math.abs(netScore) / 100)));
 
-  let entry = close;
-  let stopLoss;
-  let takeProfit;
+  const entry = direction === 'neutral' ? null : close;
+  let stopLoss = null;
+  let takeProfit = null;
   if (direction === 'buy') {
     stopLoss = Math.max(0.01, entry - useAtr * 1.5);
     takeProfit = Math.max(0.01, entry + useAtr * 3 * volRatio);
@@ -300,13 +303,10 @@ export function analyzeSignal(candles) {
     stopLoss = Math.max(0.01, entry + useAtr * 1.5);
     const rawTP = entry - useAtr * 3 * volRatio;
     takeProfit = rawTP > 0.01 ? rawTP : Math.max(0.01, entry * 0.5);
-  } else {
-    stopLoss = Math.max(0.01, entry - useAtr * 1.5);
-    takeProfit = Math.max(0.01, entry + useAtr * 1.5);
   }
-  const risk = Math.abs(entry - stopLoss) || (useAtr * 1.5) || 1;
-  const reward = Math.abs(takeProfit - entry) || (useAtr * 3) || 1;
-  const riskReward = Number((reward / risk).toFixed(2));
+  const risk = direction === 'neutral' ? null : Math.abs(entry - stopLoss) || (useAtr * 1.5) || 1;
+  const reward = direction === 'neutral' ? null : Math.abs(takeProfit - entry) || (useAtr * 3) || 1;
+  const riskReward = risk && reward ? Number((reward / risk).toFixed(2)) : null;
 
   const why = signals
     .filter((s) => s.state !== 'neutral')
@@ -317,12 +317,13 @@ export function analyzeSignal(candles) {
   return {
     available: true,
     direction,
+    confidence,
     probability,
     confluence: { buy: buyVotes, sell: sellVotes, neutral: neutralVotes },
     score: netScore,
-    entry: Number(entry.toFixed(2)),
-    stopLoss: Number(stopLoss.toFixed(2)),
-    takeProfit: Number(takeProfit.toFixed(2)),
+    entry: entry == null ? null : Number(entry.toFixed(2)),
+    stopLoss: stopLoss == null ? null : Number(stopLoss.toFixed(2)),
+    takeProfit: takeProfit == null ? null : Number(takeProfit.toFixed(2)),
     riskReward,
     atr: Number(useAtr.toFixed(2)),
     signals: signals.map((s) => ({ ...s, value: s.value ?? '—' })),
@@ -335,6 +336,7 @@ function unavailable(reasons = []) {
   return {
     available: false,
     direction: 'neutral',
+    confidence: 0,
     probability: 0,
     confluence: { buy: 0, sell: 0, neutral: 0 },
     score: 0,

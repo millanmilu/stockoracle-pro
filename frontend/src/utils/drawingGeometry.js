@@ -440,6 +440,8 @@ export function polygonPath(points = []) {
 export function strokeDasharray(lineStyle = 'solid', width = 2) {
   if (lineStyle === 'dashed') return `${Math.max(4, width * 3)} ${Math.max(3, width * 2)}`;
   if (lineStyle === 'dotted') return `${Math.max(1, width)} ${Math.max(3, width * 2)}`;
+  if (lineStyle === 'dash_dot') return `${Math.max(5, width * 3)} ${Math.max(2, width)} ${Math.max(1, width)} ${Math.max(2, width)}`;
+  if (lineStyle === 'long_dash') return `${Math.max(8, width * 6)} ${Math.max(3, width * 2)}`;
   return undefined;
 }
 

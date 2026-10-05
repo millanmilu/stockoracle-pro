@@ -1,36 +1,65 @@
 // Pro Terminal V2 — Chart Toolbar
 
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Undo2, Redo2, Save, Settings, Camera, Maximize, Zap, RotateCcw } from 'lucide-react';
-import { V2_COLORS, V2_INTERVALS, V2_CHART_TYPES } from '../utils/constants';
+import {
+  ChevronDown, Undo2, Redo2, Save, Settings, Camera, Maximize, Minimize,
+  Zap, RotateCcw, Check,
+} from 'lucide-react';
+import { V2_COLORS, V2_INTERVALS, V2_CHART_TYPES, V2_TEMPLATES } from '../utils/constants';
 
 export default function V2ChartToolbar({
   symbol,
   interval,
   chartType,
+  exchange = 'NSE',
+  isFullscreen = false,
+  canUndo = false,
+  canRedo = false,
+  symbols = ['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'WIPRO', 'HCLTECH'],
   onSymbolChange,
   onIntervalChange,
   onChartTypeChange,
+  onExchangeChange,
   onToggleIndicators,
   onToggleAI,
   onToggleSettings,
   onToggleFullscreen,
+  onUndo,
+  onRedo,
+  onSave,
+  onScreenshot,
+  onResetView,
+  onTemplateChange,
+  onTrade,
 }) {
   const [openMenu, setOpenMenu] = useState(null);
+  const [savedFlash, setSavedFlash] = useState(false);
   const rootRef = useRef(null);
+  const flashTimerRef = useRef(null);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (rootRef.current && !rootRef.current.contains(e.target)) setOpenMenu(null);
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      clearTimeout(flashTimerRef.current);
+    };
   }, []);
 
   const toggleMenu = (menu) => setOpenMenu(openMenu === menu ? null : menu);
 
+  const handleSave = () => {
+    if (onSave?.()) {
+      setSavedFlash(true);
+      clearTimeout(flashTimerRef.current);
+      flashTimerRef.current = setTimeout(() => setSavedFlash(false), 1500);
+    }
+  };
+
   return (
-    <div ref={rootRef} style={{
+    <div ref={rootRef} className="v2-chart-toolbar" style={{
       display: 'flex',
       alignItems: 'center',
       height: 36,
@@ -44,15 +73,16 @@ export default function V2ChartToolbar({
     }}>
       {/* Symbol selector */}
       <DropdownButton label={symbol} open={openMenu === 'symbol'} onToggle={() => toggleMenu('symbol')}>
-        {['RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 'SBIN', 'WIPRO', 'HCLTECH'].map((s) => (
+        {symbols.map((s) => (
           <DropdownItem key={s} label={s} onClick={() => { onSymbolChange(s); setOpenMenu(null); }} />
         ))}
       </DropdownButton>
 
       {/* Exchange */}
-      <DropdownButton label="NSE" open={openMenu === 'exchange'} onToggle={() => toggleMenu('exchange')}>
-        <DropdownItem label="NSE" onClick={() => setOpenMenu(null)} />
-        <DropdownItem label="BSE" onClick={() => setOpenMenu(null)} />
+      <DropdownButton label={exchange} open={openMenu === 'exchange'} onToggle={() => toggleMenu('exchange')}>
+        {['NSE', 'BSE'].map((ex) => (
+          <DropdownItem key={ex} label={ex} onClick={() => { onExchangeChange?.(ex); setOpenMenu(null); }} />
+        ))}
       </DropdownButton>
 
       {/* Interval */}
@@ -81,33 +111,49 @@ export default function V2ChartToolbar({
 
       {/* Templates */}
       <DropdownButton label="Templates" open={openMenu === 'templates'} onToggle={() => toggleMenu('templates')}>
-        {['Default', 'Trend Following', 'Momentum', 'Mean Reversion', 'Breakout'].map((t) => (
-          <DropdownItem key={t} label={t} onClick={() => setOpenMenu(null)} />
+        {V2_TEMPLATES.map((t) => (
+          <DropdownItem
+            key={t.id}
+            label={t.id}
+            onClick={() => { onTemplateChange?.(t.id); setOpenMenu(null); }}
+          />
         ))}
       </DropdownButton>
 
       {/* Right section */}
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}>
-        <IconButton icon={<Undo2 size={13} />} title="Undo" />
-        <IconButton icon={<Redo2 size={13} />} title="Redo" />
-        <IconButton icon={<Save size={13} />} title="Save" />
+        <IconButton icon={<Undo2 size={13} />} title="Undo drawing (Ctrl+Z)" onClick={onUndo} disabled={!canUndo} />
+        <IconButton icon={<Redo2 size={13} />} title="Redo drawing (Ctrl+Shift+Z)" onClick={onRedo} disabled={!canRedo} />
+        <IconButton
+          icon={savedFlash ? <Check size={13} color={V2_COLORS.positive} /> : <Save size={13} />}
+          title={savedFlash ? 'Saved' : 'Save drawings (Ctrl+S)'}
+          onClick={handleSave}
+        />
         <IconButton icon={<Settings size={13} />} title="Settings" onClick={onToggleSettings} />
-        <IconButton icon={<Camera size={13} />} title="Screenshot" />
-        <IconButton icon={<Maximize size={13} />} title="Fullscreen" onClick={onToggleFullscreen} />
-        <IconButton icon={<RotateCcw size={13} />} title="Reset View" />
-        <button style={{
-          padding: '4px 10px',
-          fontSize: 11,
-          fontWeight: 600,
-          color: '#fff',
-          background: V2_COLORS.accent.primary,
-          border: 'none',
-          borderRadius: 4,
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-        }}>
+        <IconButton icon={<Camera size={13} />} title="Screenshot chart" onClick={onScreenshot} />
+        <IconButton
+          icon={isFullscreen ? <Minimize size={13} /> : <Maximize size={13} />}
+          title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+          onClick={onToggleFullscreen}
+        />
+        <IconButton icon={<RotateCcw size={13} />} title="Reset view" onClick={onResetView} />
+        <button
+          onClick={() => onTrade?.('BUY')}
+          aria-label="Open order ticket"
+          style={{
+            padding: '4px 10px',
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#fff',
+            background: V2_COLORS.accent.primary,
+            border: 'none',
+            borderRadius: 4,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
+        >
           <Zap size={12} />
           Trade
         </button>
@@ -121,6 +167,8 @@ function DropdownButton({ label, open, onToggle, children }) {
     <div style={{ position: 'relative' }}>
       <button
         onClick={onToggle}
+        aria-haspopup="menu"
+        aria-expanded={open}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -140,7 +188,7 @@ function DropdownButton({ label, open, onToggle, children }) {
         <ChevronDown size={11} />
       </button>
       {open && (
-        <div style={{
+        <div role="menu" style={{
           position: 'absolute',
           top: '100%',
           left: 0,
@@ -162,6 +210,7 @@ function DropdownButton({ label, open, onToggle, children }) {
 function DropdownItem({ label, onClick }) {
   return (
     <button
+      role="menuitem"
       onClick={onClick}
       style={{
         display: 'block',
@@ -184,6 +233,7 @@ function ToolbarButton({ icon, label, onClick }) {
   return (
     <button
       onClick={onClick}
+      aria-label={label}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -204,19 +254,22 @@ function ToolbarButton({ icon, label, onClick }) {
   );
 }
 
-function IconButton({ icon, title, onClick }) {
+function IconButton({ icon, title, onClick, disabled = false }) {
   return (
     <button
       title={title}
+      aria-label={title}
       onClick={onClick}
+      disabled={disabled}
       style={{
         padding: 5,
         color: V2_COLORS.text.secondary,
         background: 'transparent',
         border: 'none',
         borderRadius: 4,
-        cursor: 'pointer',
+        cursor: disabled ? 'default' : 'pointer',
         display: 'flex',
+        opacity: disabled ? 0.35 : 1,
       }}
     >
       {icon}

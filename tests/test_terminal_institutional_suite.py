@@ -11,7 +11,7 @@ from backend.main import app
 from backend.analysis.valuation import calculate_dcf_valuation
 from backend.analysis.rrg_rotation import calculate_rrg_sector_rotation
 from backend.analysis.options_lab import calculate_strategy_payoff
-from backend.analysis.volume_profile import calculate_volume_profile
+from backend.analysis.volume_profile import calculate_volume_profile, calculate_exchange_report
 from backend.analysis.macro_terminal import get_sovereign_macro_dashboard
 from backend.analysis.quant_risk import calculate_portfolio_risk_cockpit
 
@@ -79,6 +79,62 @@ def test_volume_profile_poc_and_value_area():
     profile_volume_total = sum(b["total_volume"] for b in vp["profile"])
     assert abs(profile_volume_total - fixture_volume_total) <= n_bins
     assert abs(vp["total_volume"] - fixture_volume_total) <= 1
+
+
+def test_volume_profile_preserves_fractional_volume():
+    """Fractional crypto volume must remain allocated across profile bins."""
+    fixture_df = pd.DataFrame({
+        "open": [100.0] * 10,
+        "high": [102.0] * 10,
+        "low": [99.0] * 10,
+        "close": [101.0] * 10,
+        "volume": [0.5] * 10,
+    })
+
+    with patch("backend.analysis.volume_profile.fetch_stock_data", return_value=fixture_df):
+        vp = calculate_volume_profile("BTC", period="1M", n_bins=25)
+
+    profile_volume_total = sum(row["total_volume"] for row in vp["profile"])
+    buy_volume_total = sum(row["buy_volume"] for row in vp["profile"])
+    sell_volume_total = sum(row["sell_volume"] for row in vp["profile"])
+    assert vp["total_volume"] == pytest.approx(5.0)
+    assert profile_volume_total == pytest.approx(5.0)
+    assert buy_volume_total + sell_volume_total == pytest.approx(5.0)
+    assert all(row["total_volume"] > 0 for row in vp["profile"])
+
+
+def test_volume_profile_range_includes_open_and_close():
+    """Price bins must cover OHLC even when source high/low bounds are malformed."""
+    fixture_df = pd.DataFrame({
+        "open": [103.0] * 10,
+        "high": [102.0] * 10,
+        "low": [99.0] * 10,
+        "close": [101.0] * 10,
+        "volume": [1.0] * 10,
+    })
+
+    with patch("backend.analysis.volume_profile.fetch_stock_data", return_value=fixture_df):
+        vp = calculate_volume_profile("BTC", period="1M", n_bins=25)
+
+    assert vp["profile"][0]["price_level"] > 99.0
+    assert vp["profile"][-1]["price_level"] < 103.0
+    assert sum(row["total_volume"] for row in vp["profile"]) == pytest.approx(10.0)
+
+
+def test_exchange_report_uses_binance_trade_volume():
+    """Trade-level exchange report must preserve price-range volume and show Binance source."""
+    with patch("urllib.request.urlopen") as mock_urlopen:
+        mock_urlopen.return_value.__enter__.return_value.read.return_value = (
+            b'[{"p":"100.00","q":"1.0","m":true},{"p":"101.00","q":"2.0","m":false},{"p":"100.50","q":"3.0","m":true}]'
+        )
+        rep = calculate_exchange_report("BTC", period="1D", n_bins=10)
+
+    assert rep["source"] == "binance_aggtrade"
+    assert rep["pair"] == "BTCUSDT"
+    assert rep["total_volume"] == pytest.approx(6.0)
+    assert rep["buy_volume"] + rep["sell_volume"] == pytest.approx(6.0)
+    assert rep["poc_price"] >= rep["val_price"]
+    assert rep["vah_price"] >= rep["poc_price"]
 
 
 def test_sovereign_macro_dashboard():

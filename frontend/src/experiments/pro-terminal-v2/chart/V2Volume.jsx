@@ -4,7 +4,7 @@ import React, { useEffect, useRef } from 'react';
 import { createChart, ColorType } from 'lightweight-charts';
 import { V2_COLORS } from '../utils/constants';
 
-export default function V2Volume({ volumeData, height = 100, visible = true }) {
+export default function V2Volume({ volumeData, height = 100, visible = true, paneSync }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const seriesRef = useRef(null);
@@ -30,6 +30,10 @@ export default function V2Volume({ volumeData, height = 100, visible = true }) {
         visible: false,
         borderColor: V2_COLORS.bg.border,
       },
+      // Display-only strip: scroll/scale disabled so the main chart stays
+      // the single source of truth for the visible range.
+      handleScroll: false,
+      handleScale: { mouseWheel: false, pinch: false, axisPressedMouseMove: false },
       width: containerRef.current.clientWidth,
       height: containerRef.current.clientHeight,
     });
@@ -42,6 +46,7 @@ export default function V2Volume({ volumeData, height = 100, visible = true }) {
 
     chartRef.current = chart;
     seriesRef.current = series;
+    paneSync?.addPane(chart);
 
     const ro = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -53,15 +58,18 @@ export default function V2Volume({ volumeData, height = 100, visible = true }) {
 
     return () => {
       ro.disconnect();
+      paneSync?.removePane(chart);
       chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
     };
-  }, []);
+    // Recreate when visibility flips: while hidden the container is unmounted,
+    // so the chart must be built fresh when the pane comes back.
+  }, [visible, paneSync]);
 
   useEffect(() => {
-    if (seriesRef.current && volumeData.length) {
-      seriesRef.current.setData(volumeData);
-      seriesRef.current.applyOptions({ visible });
-    }
+    if (!visible || !seriesRef.current) return;
+    if (volumeData.length) seriesRef.current.setData(volumeData);
   }, [volumeData, visible]);
 
   if (!visible) return null;

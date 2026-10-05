@@ -11,9 +11,13 @@
  * the renderers).
  */
 
-import { getToolSpec } from './drawingToolCatalog';
+import { getToolSpec } from './drawingToolCatalog.js';
+import { getToolFactoryDefault } from './drawingToolDefaults.js';
+import { SUPPORTED_INTERVALS } from '../../utils/chartHelpers.js';
+import { getThemeTokens } from '../../utils/theme.js';
 
-export const VISIBILITY_INTERVALS = ['1m', '5m', '15m', '1h', '4h', '1d', '1W', '1M'];
+export const VISIBILITY_INTERVALS = [...SUPPORTED_INTERVALS, '1W', '1M'];
+export const DRAWING_SETTINGS_STORAGE_KEY = 'stockoracle_drawing_settings_tv_v1';
 
 export const COLOR_PRESETS = [
   '#2962FF', '#10B981', '#F59E0B', '#EF5350',
@@ -21,7 +25,16 @@ export const COLOR_PRESETS = [
 ];
 
 export const LINE_WIDTHS = [1, 2, 3, 4, 5];
-export const LINE_STYLES = ['solid', 'dashed', 'dotted'];
+export const LINE_STYLES = ['solid', 'dashed', 'dotted', 'dash_dot', 'long_dash'];
+
+/** Line-style metadata shared by the toolbar, settings modal and previews. */
+export const LINE_STYLE_META = [
+  { id: 'solid', label: 'Solid' },
+  { id: 'dashed', label: 'Dashed' },
+  { id: 'dotted', label: 'Dotted' },
+  { id: 'dash_dot', label: 'Dash-Dot' },
+  { id: 'long_dash', label: 'Long Dash' },
+];
 
 /** Fib retracement levels toggleable in Style (TradingView parity). */
 export const FIB_TOGGLES = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
@@ -133,6 +146,103 @@ const GROUP_FALLBACK = {
   trading: { line: true, background: true, border: true, coords: 2, stats: true },
 };
 
+export const DRAWING_THEME_DEFAULTS = {
+  lineColor: '#2962FF',
+  fillColor: '#2962FF',
+  selectionColor: '#2962FF',
+  hoverColor: '#787B86',
+  textColor: '#D1D4DC',
+  labelBackground: '#1E222D',
+  labelText: '#D1D4DC',
+  defaultLineWidth: 2,
+  defaultLineStyle: 'solid',
+  defaultFillOpacity: 0.15,
+  selectedOpacity: 1,
+  lockedOpacity: 0.7,
+  controlPointSize: 5,
+  controlPointColor: '#FFFFFF',
+};
+
+function readStoredSettings() {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const value = JSON.parse(localStorage.getItem(DRAWING_SETTINGS_STORAGE_KEY) || '{}');
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+export function loadDrawingSettings() {
+  const stored = readStoredSettings();
+  return {
+    theme: { ...DRAWING_THEME_DEFAULTS, ...(stored.theme || {}) },
+    toolDefaults: stored.toolDefaults && typeof stored.toolDefaults === 'object' ? stored.toolDefaults : {},
+    recentColors: Array.isArray(stored.recentColors) ? stored.recentColors.slice(0, 12) : [],
+    savedColors: Array.isArray(stored.savedColors) ? stored.savedColors.slice(0, 24) : [],
+  };
+}
+
+export function applyDrawingThemeTokens(theme = 'dark') {
+  if (typeof document === 'undefined') return;
+  const base = getThemeTokens(theme);
+  const drawing = loadDrawingSettings().theme;
+  const root = document.documentElement;
+  const tokens = {
+    '--drawing-toolbar-bg': base.cardBg,
+    '--drawing-toolbar-border': base.divider,
+    '--drawing-toolbar-text': base.topbarText,
+    '--drawing-toolbar-muted': base.topbarMuted,
+    '--drawing-toolbar-hover': base.hoverBg,
+    '--drawing-toolbar-active': base.toolbarActive,
+    '--drawing-settings-bg': base.cardBg,
+    '--drawing-settings-text': base.topbarText,
+    '--drawing-settings-border': base.divider,
+    '--drawing-control-bg': base.inputBg,
+    '--drawing-control-border': base.inputBorder,
+    '--drawing-accent': base.toolbarActive,
+    '--drawing-selection-color': drawing.selectionColor,
+    '--drawing-hover-color': drawing.hoverColor,
+    '--drawing-label-bg': drawing.labelBackground,
+    '--drawing-label-text': drawing.labelText,
+    '--drawing-control-point-color': drawing.controlPointColor,
+    '--drawing-control-point-size': `${drawing.controlPointSize}px`,
+  };
+  Object.entries(tokens).forEach(([key, value]) => root.style.setProperty(key, value));
+}
+
+export function saveDrawingSettings(patch) {
+  const current = loadDrawingSettings();
+  const next = {
+    ...current,
+    ...patch,
+    theme: { ...current.theme, ...(patch?.theme || {}) },
+    toolDefaults: { ...current.toolDefaults, ...(patch?.toolDefaults || {}) },
+  };
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(DRAWING_SETTINGS_STORAGE_KEY, JSON.stringify(next));
+    } catch (error) {
+      console.warn('Could not persist drawing settings:', error);
+    }
+  }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('drawing-settings-changed'));
+    if (patch?.theme) window.dispatchEvent(new Event('drawing-theme-changed'));
+  }
+  return next;
+}
+
+export function rememberDrawingColor(color, { save = false } = {}) {
+  if (!/^#[0-9a-f]{6}$/i.test(color || '')) return loadDrawingSettings();
+  const current = loadDrawingSettings();
+  const recentColors = [color.toUpperCase(), ...current.recentColors.filter((item) => item.toUpperCase() !== color.toUpperCase())].slice(0, 12);
+  const savedColors = save && !current.savedColors.some((item) => item.toUpperCase() === color.toUpperCase())
+    ? [color.toUpperCase(), ...current.savedColors].slice(0, 24)
+    : current.savedColors;
+  return saveDrawingSettings({ recentColors, savedColors });
+}
+
 export function getDrawingCaps(toolId) {
   if (CAP_OVERRIDES[toolId]) return { ...BASE, ...CAP_OVERRIDES[toolId] };
   try {
@@ -148,16 +258,23 @@ export function getDrawingCaps(toolId) {
 
 /** Defaults applied to a drawing object for every new settings key. */
 export function drawingDefaults(type) {
+  const stored = readStoredSettings();
+  const global = stored.theme || DRAWING_THEME_DEFAULTS;
+  const toolDefault = stored.toolDefaults?.[type] || {};
+  // Per-tool factory template (fill / extend / font / fib / stats).
+  const factory = getToolFactoryDefault(type) || {};
   return {
-    color: '#38BDF8',
-    strokeWidth: 2,
-    lineStyle: 'solid',
+    color: global.lineColor || '#2962FF',
+    strokeWidth: global.defaultLineWidth || 2,
+    lineStyle: global.defaultLineStyle || 'solid',
+    opacity: 1,
     // Fill / border (shapes, channels, ranges)
     backgroundVisible: true,
-    backgroundColor: null, // null = derive from line color via tint()
-    backgroundOpacity: 0.12,
+    backgroundColor: global.fillColor || null,
+    backgroundOpacity: global.defaultFillOpacity ?? 0.15,
     borderVisible: true,
     borderColor: null, // null = line color
+    borderOpacity: 1,
     borderWidth: null, // null = strokeWidth
     borderStyle: null, // null = lineStyle
     // Lines
@@ -166,9 +283,13 @@ export function drawingDefaults(type) {
     // Text
     text: '',
     fontSize: 12,
+    fontFamily: 'Trebuchet MS',
     fontBold: true,
+    fontItalic: false,
+    textAlign: 'left',
     // Fib
     fibLevelsVisible: [...FIB_TOGGLES],
+    fibLevelValues: {}, // custom level overrides { 0.236: 0.35 } — TV-style level editing
     showPrices: true,
     // Ranges / ruler
     showMidLine: true,
@@ -190,6 +311,10 @@ export function drawingDefaults(type) {
     // Coordinates visibility handled via visibleIntervals
     visibleIntervals: null, // null = all timeframes (TradingView default)
     locked: false,
+    selectable: true,
+    magnetMode: 'off',
+    ...factory,
+    ...toolDefault,
   };
 }
 
@@ -212,4 +337,13 @@ export function isDrawingVisibleOn(drawing, interval) {
   // Normalize: '1D' vs '1d', '1W' vs '1w'
   const norm = (v) => String(v || '').toLowerCase();
   return vis.map(norm).includes(norm(interval));
+}
+
+export function getLineDashArray(style, width = 2) {
+  const w = Math.max(1, Number(width) || 2);
+  if (style === 'dashed') return `${Math.max(4, w * 3)} ${Math.max(3, w * 2)}`;
+  if (style === 'dotted') return `${Math.max(1, w)} ${Math.max(3, w * 2)}`;
+  if (style === 'dash_dot') return `${Math.max(5, w * 3)} ${Math.max(2, w)} ${Math.max(1, w)} ${Math.max(2, w)}`;
+  if (style === 'long_dash') return `${Math.max(8, w * 6)} ${Math.max(3, w * 2)}`;
+  return undefined;
 }

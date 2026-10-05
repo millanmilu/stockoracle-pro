@@ -5,6 +5,7 @@ import { Eye, EyeOff, X } from 'lucide-react';
 import { calculateById } from '../../utils/indicatorEngine';
 import useStore from '../../store/useStore';
 import { getChartBaseOptions, getThemeTokens } from '../../utils/theme';
+import { loadChartSettings, subscribeChartSettings, applyPaneChartOptions } from '../../utils/chartSettings';
 import { PRICE_AXIS_WIDTH, sanitizeSeriesData } from '../../utils/chartHelpers';
 import '../../utils/aiIndicatorEngine.js';
 
@@ -182,6 +183,10 @@ export default forwardRef(function OscillatorPane({
     } catch {}
   }, [theme]);
 
+  // Chart Settings (scale placement / grid / crosshair / axis text) must
+  // apply to stacked panes too, otherwise the axis moves without them.
+  useEffect(() => subscribeChartSettings((s) => applyPaneChartOptions(chartRef.current, s, theme, Object.values(seriesRefs.current || {}))), [theme]);
+
   // DOM refs for zero-latency legend updates
   const val1Ref  = useRef(null);
   const val2Ref  = useRef(null);
@@ -349,6 +354,7 @@ export default forwardRef(function OscillatorPane({
     }
 
     seriesRefs.current = refs;
+    applyPaneChartOptions(chart, loadChartSettings(), theme, Object.values(refs));
 
     chart.timeScale().subscribeVisibleLogicalRangeChange((range) => { if (range) onVisibleRangeChange(range, oscType); });
     chart.subscribeCrosshairMove((param) => {

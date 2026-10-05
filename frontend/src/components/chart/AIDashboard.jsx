@@ -106,12 +106,12 @@ export default function AIDashboard({
   ].filter((e) => e.sig?.available);
 
   const alignment = useMemo(() => {
-    const entries = mtfEntries.filter((e) => e.sig && e.sig.available && e.sig.direction !== 'neutral');
+    const entries = mtfEntries.filter((e) => e.sig && e.sig.available);
     if (!entries.length) return { label: 'N/A', pct: 0, note: 'No directional timeframes' };
     const bulls = entries.filter((e) => e.sig.direction === 'buy').length;
     const bears = entries.filter((e) => e.sig.direction === 'sell').length;
     const pct = Math.round((Math.max(bulls, bears) / entries.length) * 100);
-    const dir = bulls > bears ? 'Bullish' : bulls < bears ? 'Bearish' : 'Mixed';
+    const dir = bulls > bears ? 'Bullish' : bulls < bears ? 'Bearish' : bulls === 0 && bears === 0 ? 'Neutral' : 'Mixed';
     return {
       label: dir,
       pct,
@@ -147,7 +147,7 @@ export default function AIDashboard({
           color: dir.color,
           fontWeight: 800,
           fontSize: 11,
-        }}>{dir.label} {signal.probability}%</span>
+        }} title="Heuristic consensus confidence score; not a calibrated probability">{dir.label} {signal.confidence}/100</span>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
           <span style={{ color: '#94A3B8', fontSize: 10 }}>MTF</span>
@@ -199,13 +199,13 @@ export default function AIDashboard({
             {mtfEntries.map((entry) => {
               const d = DIR_STYLE[entry.sig.direction] || DIR_STYLE.neutral;
               return (
-                <span key={entry.label} title={`${entry.label}: ${entry.sig.probability}%`} style={{
+                <span key={entry.label} title={`${entry.label}: heuristic confidence ${entry.sig.confidence}/100`} style={{
                   display: 'inline-flex', alignItems: 'center', gap: 3,
                   padding: '1px 6px', borderRadius: 3,
                   background: d.bg, border: `1px solid ${d.border}`,
                   color: d.color, fontSize: 9, fontWeight: 800,
                 }}>
-                  {entry.label} {entry.sig.available ? entry.sig.probability : '—'}%
+                  {entry.label} {entry.sig.available ? `${entry.sig.confidence}/100` : '—'}
                 </span>
               );
             })}

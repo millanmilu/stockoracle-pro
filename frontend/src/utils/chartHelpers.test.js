@@ -4,7 +4,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { getSessionBucketStart, sanitizeSeriesData, sanitizeCandles, isAppendableTime, compareChartTime, computeFillSlots, INTERVAL_SLOT_SEC, normalizeInterval, isSupportedInterval, SUPPORTED_INTERVALS, getIstDateString, getBoundedTimeframe, BACKFILL_LEVELS, BACKFILL_TRIGGER_BARS, nextBackfillTimeframe, BACKFILL_CHUNK_LIMIT, BACKFILL_MIN_LIMIT, BACKFILL_MAX_LIMIT, getBackfillChunkLimit, POPULAR_STOCKS } from './chartHelpers.js';
+import { getSessionBucketStart, sanitizeSeriesData, sanitizeCandles, isAppendableTime, compareChartTime, computeFillSlots, INTERVAL_SLOT_SEC, normalizeInterval, isSupportedInterval, SUPPORTED_INTERVALS, getIstDateString, getBoundedTimeframe, BACKFILL_LEVELS, BACKFILL_TRIGGER_BARS, nextBackfillTimeframe, BACKFILL_CHUNK_LIMIT, BACKFILL_MIN_LIMIT, BACKFILL_MAX_LIMIT, getBackfillChunkLimit, POPULAR_STOCKS, canUpdateLiveCandle, countdownDockRight, shouldRefetchStaleTail, FRESH_TAIL_SOURCES } from './chartHelpers.js';
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 const HOUR = 3600;
@@ -310,9 +310,140 @@ describe('getSessionBucketStart', () => {
   });
 });
 
+describe('canUpdateLiveCandle — holiday/fallback tick gating (live 1m candle regression)', () => {
+  it('VETOES an is_live:false fallback tick even inside the 09:15–15:30 clock window', () => {
+    // Oct 2 2026 = Gandhi Jayanti: weekday, clock says "market hours",
+    // but the broadcaster sends verified EOD fallbacks (is_live:false).
+    // Regression: this used to mint fake live 1m candles on NSE holidays.
+    assert.equal(
+      canUpdateLiveCandle({ isCrypto: false, isMarketHours: true, isLive: false }),
+      false
+    );
+  });
+
+  it('allows a confirmed live tick during market hours', () => {
+    assert.equal(
+      canUpdateLiveCandle({ isCrypto: false, isMarketHours: true, isLive: true }),
+      true
+    );
+  });
+
+  it('allows a confirmed live tick even if the client clock disagrees (tz skew)', () => {
+    assert.equal(
+      canUpdateLiveCandle({ isCrypto: false, isMarketHours: false, isLive: true }),
+      true
+    );
+  });
+
+  it('keeps legacy clock behavior when the payload has no is_live flag', () => {
+    assert.equal(
+      canUpdateLiveCandle({ isCrypto: false, isMarketHours: true, isLive: undefined }),
+      true
+    );
+    assert.equal(
+      canUpdateLiveCandle({ isCrypto: false, isMarketHours: false, isLive: undefined }),
+      false
+    );
+  });
+
+  it('crypto (24/7) bypasses every gate', () => {
+    assert.equal(canUpdateLiveCandle({ isCrypto: true, isMarketHours: false, isLive: false }), true);
+    assert.equal(canUpdateLiveCandle({ isCrypto: true, isMarketHours: false, isLive: undefined }), true);
+  });
+
+  it('never paints equity candles outside market hours without a live flag', () => {
+    assert.equal(
+      canUpdateLiveCandle({ isCrypto: false, isMarketHours: false, isLive: false }),
+      false
+    );
+    assert.equal(
+      canUpdateLiveCandle({ isCrypto: false, isMarketHours: false, isLive: undefined }),
+      false
+    );
+  });
+
+  it('is defensive about missing/garbage args', () => {
+    assert.equal(canUpdateLiveCandle(), false);
+    assert.equal(canUpdateLiveCandle({}), false);
+    assert.equal(canUpdateLiveCandle({ isLive: null, isMarketHours: true }), true);
+    assert.equal(canUpdateLiveCandle({ isLive: 0, isMarketHours: true }), true); // 0 !== false
+  });
+});
+
+describe('countdownDockRight — badge docks into the RIGHT price-axis strip', () => {
+  it('returns a small right-edge offset (not paneWidth - 56) on a normal chart', () => {
+    // Regression: `paneWidth - 56` is a LEFT-style offset; with CSS `right`
+    // measured from the RIGHT edge it flung the countdown to the far LEFT.
+    const right = countdownDockRight(1200);
+    assert.ok(right >= 0 && right <= 4, `expected 0..4, got ${right}`);
+    assert.ok(right < 1200 - 56, 'must not be the old paneWidth - 56 left-style value');
+  });
+
+  it('centres the 52px badge inside the 60px axis strip (offset 4)', () => {
+    assert.equal(countdownDockRight(1200, 52), (60 - 52) / 2);
+    assert.equal(countdownDockRight(800), 4);
+  });
+
+  it('keeps the badge fully inside tiny panes (never negative / no overflow)', () => {
+    assert.equal(countdownDockRight(40, 52), 0); // pane narrower than badge
+    assert.equal(countdownDockRight(53, 52), 1);
+    assert.equal(countdownDockRight(52, 52), 0);
+  });
+
+  it('is defensive about missing/garbage widths', () => {
+    assert.equal(countdownDockRight(undefined), 4);
+    assert.equal(countdownDockRight(null), 4);
+    assert.equal(countdownDockRight(0), 4);
+    assert.equal(countdownDockRight(-100), 4);
+    assert.equal(countdownDockRight('abc'), 4);
+    assert.equal(countdownDockRight(NaN), 4);
+  });
+});
+
 function isAsc(points) {
   for (let i = 1; i < points.length; i++) {
     if (!(points[i - 1].time < points[i].time)) return false;
   }
   return true;
 }
+
+describe('shouldRefetchStaleTail (stale-tail auto-recovery guard)', () => {
+  const NOW = istEpochSec(2026, 10, 5, 19, 45);
+  const base = { slotSec: 60, nowMs: NOW * 1000, attempts: 0, lastTryMs: 0 };
+
+  it('refetches a 2h-old DB tail on 1m (the warmup-race gap)', () => {
+    assert.equal(shouldRefetchStaleTail({
+      ...base, tailTime: istEpochSec(2026, 10, 5, 17, 47), source: 'sqlite',
+    }), true);
+  });
+
+  it('never refetches a vendor-fresh frame even with an old tail', () => {
+    for (const source of [...FRESH_TAIL_SOURCES]) {
+      assert.equal(shouldRefetchStaleTail({
+        ...base, tailTime: istEpochSec(2026, 10, 5, 17, 47), source,
+      }), false, source);
+    }
+  });
+
+  it('does not refetch a current tail (live edge healthy)', () => {
+    assert.equal(shouldRefetchStaleTail({
+      ...base, tailTime: istEpochSec(2026, 10, 5, 19, 44), source: 'sqlite',
+    }), false);
+  });
+
+  it('caps at 3 attempts and enforces 60s between tries', () => {
+    const stale = { ...base, tailTime: istEpochSec(2026, 10, 5, 17, 47), source: 'sqlite' };
+    assert.equal(shouldRefetchStaleTail({ ...stale, attempts: 3 }), false);
+    assert.equal(shouldRefetchStaleTail({ ...stale, attempts: 1, lastTryMs: NOW * 1000 - 30000 }), false);
+    assert.equal(shouldRefetchStaleTail({ ...stale, attempts: 1, lastTryMs: NOW * 1000 - 61000 }), true);
+  });
+
+  it('handles daily IST date tails and null inputs safely', () => {
+    assert.equal(shouldRefetchStaleTail({
+      ...base, tailTime: '2026-10-02', source: 'sqlite_stale', slotSec: undefined,
+    }), true); // Friday tail on Monday — older than the 1-day cap
+    assert.equal(shouldRefetchStaleTail({ ...base, tailTime: null, source: 'sqlite' }), false);
+    assert.equal(shouldRefetchStaleTail({ ...base, tailTime: NOW - 60, source: null }), false);
+    assert.equal(shouldRefetchStaleTail({ ...base, tailTime: NOW - 60, source: 'mystery' }), false);
+  });
+});
