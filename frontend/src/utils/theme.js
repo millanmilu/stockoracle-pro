@@ -105,6 +105,9 @@ export function getThemeTokens(theme) {
   return THEMES[normalizeTheme(theme)] || THEMES.dark;
 }
 
+/** Charts app-wide format dates/ticks with this ICU locale (IST, NSE convention). */
+export const CHART_ICU_LOCALE = 'en-IN';
+
 /** Base lightweight-charts options (layout/grid/scales) for a given theme. */
 export function getChartBaseOptions(theme) {
   const tk = getThemeTokens(theme);
@@ -114,6 +117,21 @@ export function getChartBaseOptions(theme) {
       textColor: tk.chartText,
       fontFamily: "'Trebuchet MS', Roboto, Ubuntu, sans-serif",
       fontSize: 11,
+    },
+    // Pin the ICU locale for every chart (main + volume/oscillator panes).
+    // Lightweight Charts defaults `localization.locale` to the RAW
+    // `navigator.language` (chartOptionsDefaults) and its default tick-mark
+    // formatter feeds that string straight into `Date.toLocaleString(locale,…)`.
+    // A browser whose locale tag is not BCP-47 — e.g. Chrome on a POSIX/`LANG=C`
+    // Linux container reports `en-US@posix` — makes that call throw
+    // `RangeError: Invalid language tag`, inside a React effect for panes that
+    // pass no formatter (volume / oscillator): the error aborts the commit and
+    // the whole terminal blanks out. Pinning the tag removes the dependency on
+    // the browser locale and keeps pane dates in the same en-IN/IST convention
+    // as the main chart (chartInit.js sets the same locale + IST formatters).
+    localization: {
+      locale: CHART_ICU_LOCALE,
+      dateFormat: 'yyyy-MM-dd',
     },
     grid: {
       vertLines: { color: tk.gridVert },

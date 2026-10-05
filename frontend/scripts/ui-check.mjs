@@ -9,6 +9,7 @@
  *   node scripts/ui-check.mjs            # checks http://localhost:5173/
  *   node scripts/ui-check.mjs /screener  # checks a specific route
  *   UI_CHECK_URL=http://localhost:5173 node scripts/ui-check.mjs
+ *   UI_CHECK_CHROMIUM=/path/to/chrome node scripts/ui-check.mjs   # explicit browser binary
  *
  * Exit code: 0 = healthy, 1 = problems found (CI friendly).
  */
@@ -42,10 +43,14 @@ async function launchBrowser() {
   // Playwright-bundled Chromium, and finally retry with --no-sandbox for
   // restricted CI containers.
   const attempts = [
+    // Explicit binary wins: CI images / sandboxes often ship Chrome (or a
+    // sparticuz-style build) outside Playwright's registry paths.
+    process.env.UI_CHECK_CHROMIUM ? { executablePath: process.env.UI_CHECK_CHROMIUM, headless: true } : null,
     { channel: 'chrome', headless: true },
     { headless: true },
     { channel: 'chrome', headless: true, args: ['--no-sandbox'] },
-  ];
+    { headless: true, args: ['--no-sandbox', '--no-zygote', '--single-process', '--disable-dev-shm-usage'] },
+  ].filter(Boolean);
   let lastErr;
   for (const opts of attempts) {
     try {
@@ -117,8 +122,13 @@ try {
   await page.screenshot({ path: screenshotPath, fullPage: true });
 
   // ---- Report ----
-  const sameOriginConsole = consoleErrors.filter((e) => !e.url || isSameOrigin(e.url));
-  const extConsole = consoleErrors.filter((e) => e.url && !isSameOrigin(e.url));
+  // A failed off-origin socket (upstream market-data feeds like Binance) is
+  // attributed by Chrome to the originating module URL, i.e. looks same-origin.
+  // Classify by the URL inside the message so blocked third-party feeds stay
+  // warnings instead of failing an otherwise healthy app.
+  const externalHostIn = (text) => (String(text).match(/wss?:\/\/[^\s'"]+/g) || []).some((u) => !isSameOrigin(u));
+  const sameOriginConsole = consoleErrors.filter((e) => (!e.url || isSameOrigin(e.url)) && !externalHostIn(e.text));
+  const extConsole = consoleErrors.filter((e) => !sameOriginConsole.includes(e));
   const sameOriginFailed = failedRequests.filter((r) => r.sameOrigin);
   const extFailed = failedRequests.filter((r) => !r.sameOrigin);
   const sameOriginBad = badResponses.filter((r) => r.sameOrigin);

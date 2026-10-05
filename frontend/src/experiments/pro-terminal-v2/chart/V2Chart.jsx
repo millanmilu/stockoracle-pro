@@ -5,6 +5,7 @@
 
 import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { createChart, ColorType, CrosshairMode, LineStyle } from 'lightweight-charts';
+import { CHART_ICU_LOCALE } from '../../../utils/theme';
 import { V2_COLORS, V2_DRAWING_POINT_COUNT, getDrawingToolLabel } from '../utils/constants';
 import { formatPrice, formatPercent } from '../utils/formatters';
 
@@ -69,6 +70,7 @@ export default function V2Chart({
     if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
+      localization: { locale: CHART_ICU_LOCALE },
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: V2_COLORS.text.secondary,

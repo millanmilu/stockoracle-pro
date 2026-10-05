@@ -1,7 +1,10 @@
 import { createChart } from 'lightweight-charts';
+import { CHART_ICU_LOCALE } from './theme';
 
 /**
  * Creates a guarded Lightweight Charts instance that:
+ * 0. Pins a valid ICU locale (`localization.locale`) so the default tick-mark
+ *    formatter can never throw on a non-BCP-47 `navigator.language`.
  * 1. Tracks its disposal lifecycle via `chart.__isDisposed`.
  * 2. Neutralizes methods on destroyed charts and series (prevents zombie calls).
  * 3. Patches internal drawing loops to catch and swallow asynchronous
@@ -14,7 +17,21 @@ import { createChart } from 'lightweight-charts';
 export function safeCreateChart(container, options) {
   if (!container) return null;
 
-  const chart = createChart(container, options);
+  // Pin the ICU locale unless the caller set one. Lightweight Charts defaults
+  // `localization.locale` to the RAW `navigator.language`, and its default
+  // tick-mark formatter feeds that string to `Date.toLocaleString(locale, …)`.
+  // A browser whose locale tag is not BCP-47 — Chrome on a POSIX/`LANG=C` Linux
+  // container reports `en-US@posix` — makes that throw
+  // `RangeError: Invalid language tag` INSIDE the creating effect, which aborts
+  // the commit and blanks the whole view. Centralizing it here covers every
+  // chart in the app (main / volume / oscillator / grid panes); callers can
+  // still override by passing their own `localization.locale`.
+  const safeOptions = {
+    ...options,
+    localization: { ...(options?.localization || {}), locale: options?.localization?.locale || CHART_ICU_LOCALE },
+  };
+
+  const chart = createChart(container, safeOptions);
   chart.__isDisposed = false;
 
   const trackedSeries = new Set();

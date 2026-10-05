@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { createChart, ColorType, LineStyle } from 'lightweight-charts';
+import { CHART_ICU_LOCALE } from '../../../utils/theme';
 import { V2_COLORS } from '../utils/constants';
 
 export default function V2AITrend({ aiTrendData, height = 80, visible = true, paneSync }) {
@@ -13,6 +14,7 @@ export default function V2AITrend({ aiTrendData, height = 80, visible = true, pa
     if (!containerRef.current) return;
 
     const chart = createChart(containerRef.current, {
+      localization: { locale: CHART_ICU_LOCALE },
       layout: {
         background: { type: ColorType.Solid, color: 'transparent' },
         textColor: V2_COLORS.text.muted,

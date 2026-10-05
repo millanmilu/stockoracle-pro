@@ -24,19 +24,23 @@ venv/bin/pytest tests/test_ws_broadcast_fallback.py tests/test_indicators.py -v
 ```
 
 ## Frontend tests (JS — CI me bhi chalte hain)
-<!-- check: frontend_tests=15 -->
+<!-- check: frontend_tests=16 -->
 ```bash
 cd frontend && npm test        # = node --test src/utils/*.test.js
 ```
-- **15 `*.test.js` files**, sab `src/utils/` me — glob `package.json` me `src/utils/*.test.js` hai,
+- **16 `*.test.js` files**, sab `src/utils/` me — glob `package.json` me `src/utils/*.test.js` hai,
 isliye test wahi rakho, warna chala hi nahi.
-- Indicator/AI engine tests: `aiIndicatorEngine.test.js`, `indicatorEngine.test.js`, `aiSignalEngine.test.js` (+ `chartHelpers`, `volumeProfile`, `drawingGeometry`, `drawingRepair`, `drawingSettings`, `drawingToolDefaults`, `smcSetupLevels`, `smcSelection`, `brokerHelpers`, `watchlist`, `timeframeQuickSwitch`, `chartSettings`).
+- Indicator/AI engine tests: `aiIndicatorEngine.test.js`, `indicatorEngine.test.js`, `aiSignalEngine.test.js` (+ `chartHelpers`, `volumeProfile`, `drawingGeometry`, `drawingRepair`, `drawingSettings`, `drawingToolDefaults`, `smcSetupLevels`, `smcSelection`, `brokerHelpers`, `watchlist`, `timeframeQuickSwitch`, `chartSettings`, `theme` — pinned chart ICU locale).
 - CI ka `frontend-ci` job `npm test` + `npm run lint` (0-errors gate) + `npm run build` chalata hai — red test ya lint error commit hi nahi hoga.
 
 ## UI check (headless browser)
 ```bash
 cd frontend && npm run ui:check              # = node scripts/ui-check.mjs (servers :5173/:8000 up hone chahiye)
 node scripts/ui-check.mjs /screener          # specific route check
+npm run ui:livechart                         # Live Chart tab check (mock market data — backend ki zaroorat nahi)
+npm run ui:livechart -- real                 # wahi checks asli backend/window pe (candles load hone chahiye)
+LIVECHART_LOCALE=en-US@posix npm run ui:livechart   # LANG=C/POSIX locale regression (LWC locale trap)
+UI_CHECK_CHROMIUM=/path/to/chrome npm run ui:livechart   # explicit browser binary
 ```
 - `frontend/scripts/ui-check.mjs` real headless Chrome (Playwright devDependency, system Chrome use karta hai) me app
   load karta hai, React hydration wait karta hai, aur console errors / uncaught exceptions / failed requests /
@@ -44,6 +48,11 @@ node scripts/ui-check.mjs /screener          # specific route check
 - Exit code 0 = healthy, 1 = problems (CI-friendly). External-origin warnings fail nahi karte.
 - Ye sirf dev-time script hai — CI me nahi chalta, `playwright` browsers download karne ki zaroorat nahi
   (system Chrome se chalta hai; fallback bundled Chromium).
+- `frontend/scripts/livechart-check.mjs` Live Chart tab ka dedicated check hai: **mock pass** default
+  (deterministic synthetic /history + /ws ticks — staged slim→full load, OHLC status line, live tick
+  candle, bucket rollover, left-pan cursor backfill, interval switch, crosshair, modals, oscillator pane)
+  aur **real pass** (`real` arg — asli backend pe hydrate + candles). Screenshots + JSON report
+  `logs/livechart-check/` me. Real backend data ke bina bhi frontend chart path verify ho jata hai.
 
 ## Brain checker
 ```bash

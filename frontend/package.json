@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "node --test src/utils/*.test.js",
     "ui:check": "node scripts/ui-check.mjs",
+    "ui:livechart": "node scripts/livechart-check.mjs",
     "lint": "eslint src/ --ext .js,.jsx",
     "lint:fix": "eslint src/ --ext .js,.jsx --fix"
   },

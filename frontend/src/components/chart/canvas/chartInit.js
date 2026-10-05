@@ -2,7 +2,7 @@ import { CrosshairMode } from 'lightweight-charts';
 import { safeCreateChart } from '../../../utils/safeChart';
 import { CHART_OPTIONS, BACKFILL_TRIGGER_BARS } from '../../../utils/chartHelpers';
 import { buildChartOptions, applyScalePlacement } from '../../../utils/chartSettings';
-import { getChartBaseOptions } from '../../../utils/theme';
+import { getChartBaseOptions, CHART_ICU_LOCALE } from '../../../utils/theme';
 import { createPrimarySeries } from './chartSeriesFactory';
 
 export function initChart({
@@ -76,6 +76,10 @@ export function initChart({
         },
       },
       localization: {
+        // Explicit locale as well as formatters: LWC defaults this key to the
+        // raw `navigator.language`, which is not always a valid ICU tag (see
+        // getChartBaseOptions in utils/theme.js).
+        locale: CHART_ICU_LOCALE,
         dateFormat: 'yyyy-MM-dd',
         timeFormatter: (time) => {
           if (typeof time === 'number') {

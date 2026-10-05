@@ -149,6 +149,19 @@ saath empty `setData([])` crash kara sakta hai (`Value is null`).
 7. **Sparse warmup normal hai** — engine series shuruat me khaali hote hain, panes nulls filter
    karte hain. Isliye "chart me line nahi aayi" ka matlab hamesha bug nahi hota; `calculateById()`
    ka `valid` flag dekho.
+8. **Chart ICU locale pin karo, `navigator.language` pe bharosa mat karo.** Lightweight Charts
+   `localization.locale` default me **raw `navigator.language`** rakhta hai
+   (`chartOptionsDefaults`) aur uska default tick-mark formatter us string ko
+   `Date.toLocaleString(locale, …)` me bhejta hai. POSIX/`LANG=C` Linux container ka Chrome
+   `en-US@posix` report karta hai — jo valid ICU tag nahi hai — to wo call
+   `RangeError: Invalid language tag` throw karti hai. Panes (volume/oscillator) koi
+   `tickMarkFormatter`/`timeFormatter` pass nahi karte, isliye throw unke React effect ke andar
+   hota hai: poora terminal tree unmount ho jata hai (blank app, koi error boundary nahi).
+   Main chart pehle se IST formatters deta hai, isliye wahi bach jata hai. Fix: har chart ke
+   options me `CHART_ICU_LOCALE` (`utils/theme.js`) — `getChartBaseOptions()` sab panes ko
+   deta hai aur `chartInit.js` main chart pe explicitly lagata hai. Regression guard:
+   `src/utils/theme.test.js`. Symptom yaad rakho: pane add karte hi screen blank + console me
+   `Invalid language tag`.
 
 ## Live-chart perf + correctness locks (P0/P1 — Sep 2026)
 
@@ -288,7 +301,7 @@ panel, position lines — teeno `showTradeButton` / `showTradeDocket` /
 ## Tests + commands
 
 ```bash
-cd frontend && npm test        # = node --test src/utils/*.test.js (11 files)
+cd frontend && npm test        # = node --test src/utils/*.test.js (16 files)
 ```
 
 - `aiIndicatorEngine.test.js` — har AI engine ka behaviour synthetic candles pe (trend ±100,
@@ -299,6 +312,8 @@ cd frontend && npm test        # = node --test src/utils/*.test.js (11 files)
   `chartSettings.test.js` (settings store + option builders),
   `drawingRepair.test.js` (`repairDrawings` — catalog `spec.points` anchor count
   se repair; 2-point tools reload pe drop na hon — FRVP regression).
+- `theme.test.js` — chart base options ka pinned ICU locale (`CHART_ICU_LOCALE`), yaani
+  wahi regression jisse panes ka default tick formatter crash karta tha (neeche trap dekho).
 - **CI me `npm test` nahi chalta** (CI sirf `npm run build`) — isliye ye locally chalao.
 - `*.test.js` files `src/utils/` me hi rehti hain (`package.json` ka glob) — test ko
   `src/components/` me na rakho, warna chalega hi nahi.

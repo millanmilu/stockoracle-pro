@@ -5,6 +5,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // Vite >= 5.4.12 blocks requests whose Host header isn't localhost/an IP.
+    // Sandbox/preview URLs (e.g. 5173-<id>.e2b.app) are proxied to this dev
+    // server, so without this the preview would answer 403 "Blocked request".
+    allowedHosts: ['.e2b.app'],
     proxy: {
       // Proxy all /api and /ws requests to the FastAPI backend during local dev
       '/api': {
