@@ -19,6 +19,13 @@ import pytest
 pytestmark = pytest.mark.anyio
 
 from backend.main import ConnectionManager
+from backend.data.database import init_db
+
+
+@pytest.fixture(autouse=True)
+def setup_db():
+    """Never inherit schema from whatever test ran before this file."""
+    init_db()
 
 
 # ── test infrastructure helpers ──────────────────────────────────────────────

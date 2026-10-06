@@ -9,6 +9,7 @@ Verifies:
 """
 import pytest
 
+from backend.data.database import init_db
 from backend.data.fetcher import (
     _is_gold_ticker,
     _binance_crypto_symbol,
@@ -16,6 +17,12 @@ from backend.data.fetcher import (
     _generate_crypto_seed_data,
     search_nse_stocks,
 )
+
+
+@pytest.fixture(autouse=True)
+def setup_db():
+    """Never inherit schema from whatever test ran before this file."""
+    init_db()
 
 
 class TestGoldAliasRouting:

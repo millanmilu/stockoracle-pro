@@ -14,8 +14,6 @@ from backend.core.logging import get_logger
 
 logger = get_logger("stockoracle.db")
 
-# Absolute path for the SQLite database file
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stockoracle.db")
 DATE_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -23,7 +21,32 @@ from sqlalchemy import select, update, delete, func, text, or_, and_
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from backend.shared.database import engine, init_database, get_db_session
+from backend.shared.database import (
+    engine, init_database, get_db_session, DATABASE_URL, DEFAULT_SQLITE_PATH,
+)
+
+
+def _resolve_sqlite_path() -> str:
+    """Path of the SQLite file the legacy raw-sqlite3 helpers must open.
+
+    Single source of truth = ``backend.shared.database`` (the ORM engine), so
+    the raw path can never drift from the engine URL. With a hardcoded path,
+    any process that points ``DATABASE_URL`` at a different SQLite file — the
+    test suite does exactly that (``test_stockoracle.db``) — had ``init_db()``
+    create the schema in that file while ``get_db_connection()`` still opened
+    the default one, i.e. every legacy caller died with "no such table".
+    Relative URLs resolve against the CWD, matching SQLAlchemy's own semantics.
+    """
+    if not DATABASE_URL.startswith("sqlite"):
+        return DEFAULT_SQLITE_PATH
+    tail = DATABASE_URL.split("sqlite:///", 1)[-1].split("?", 1)[0]
+    if not tail or tail.startswith(":"):  # driver-less URL / ':memory:'
+        return DEFAULT_SQLITE_PATH
+    return tail if os.path.isabs(tail) else os.path.join(os.getcwd(), tail)
+
+
+# Absolute path for the SQLite database file (same file the ORM engine opens).
+DB_PATH = _resolve_sqlite_path()
 from backend.shared.models import (
     Base, HistoricalPrice, StockUniverse, LiveTick, IntradayCandle,
     PortfolioPosition, SmartAlert, PaperAccount, PaperPosition, PaperOrder,

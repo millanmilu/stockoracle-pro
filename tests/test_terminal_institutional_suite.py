@@ -8,6 +8,7 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.data.database import init_db
 from backend.analysis.valuation import calculate_dcf_valuation
 from backend.analysis.rrg_rotation import calculate_rrg_sector_rotation
 from backend.analysis.options_lab import calculate_strategy_payoff
@@ -16,6 +17,15 @@ from backend.analysis.macro_terminal import get_sovereign_macro_dashboard
 from backend.analysis.quant_risk import calculate_portfolio_risk_cockpit
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def setup_db():
+    """TestClient(app) without a context manager never runs the app lifespan,
+    so init_db() (called there in production) has to happen explicitly here —
+    otherwise every DB-reading engine below fails with "no such table".
+    """
+    init_db()
 
 
 def test_dcf_and_graham_valuation_engine():

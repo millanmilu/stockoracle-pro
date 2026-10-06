@@ -16,8 +16,17 @@ import pandas as pd
 import pytest
 from datetime import datetime, timedelta
 
+from zoneinfo import ZoneInfo
+
 from backend.data.database import init_db, save_intraday_candles
 from backend.data.fetcher import fetch_stock_data
+
+# The app stores intraday timestamps as IST wall-clock strings and measures
+# staleness with datetime.now(_IST) (fetcher.py step 2b). Seeding with naive
+# datetime.now() therefore made the "fresh" case host-timezone dependent: on a
+# UTC box (CI runners) just-seeded rows read as 5.5 h old, the fast DB path was
+# skipped and the stale fallback returned 'sqlite_stale' instead of 'sqlite'.
+_IST = ZoneInfo("Asia/Kolkata")
 
 
 @pytest.fixture(autouse=True)
@@ -39,8 +48,12 @@ def no_broker(monkeypatch):
 
 
 def _seed_stale_intraday(ticker, interval="1m", n=12, age_minutes=120):
-    """Seed `n` candles ending `age_minutes` in the past (stale: 1m threshold is 5 min)."""
-    end = datetime.now() - timedelta(minutes=age_minutes)
+    """Seed `n` candles ending `age_minutes` in the past (stale: 1m threshold is 5 min).
+
+    Timestamps follow the app's IST wall-clock convention (see _IST above) so the
+    result is identical on an IST dev box and a UTC CI runner.
+    """
+    end = datetime.now(_IST) - timedelta(minutes=age_minutes)
     base = end - timedelta(minutes=n - 1)
     rows = []
     for i in range(n):
@@ -55,11 +68,13 @@ def _seed_stale_intraday(ticker, interval="1m", n=12, age_minutes=120):
 
 
 def _cleanup(ticker, interval="1m"):
-    import sqlite3
-    import os
-    db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           "backend", "data", "stockoracle.db")
-    conn = sqlite3.connect(db_path)
+    # Use the app's own connection helper: it now resolves DB_PATH from
+    # DATABASE_URL, so cleanup hits the same file the seed wrote to. Hand-rolling
+    # the path here silently deleted from backend/data/stockoracle.db while the
+    # rows lived in the test DB — leftover rows then made the *next* test in this
+    # file see "stale" data (order-dependent failures on a clean checkout).
+    from backend.data.database import get_db_connection
+    conn = get_db_connection()
     try:
         conn.execute(
             "DELETE FROM intraday_candles WHERE ticker = ? AND interval = ?",

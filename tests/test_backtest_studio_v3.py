@@ -12,7 +12,16 @@ import numpy as np
 import pandas as pd
 from fastapi.testclient import TestClient
 from backend.main import app
+from backend.data.database import init_db
 from backend.analysis.backtester import run_backtest, _compute_monthly_analytics, _compute_pnl_distribution
+
+
+@pytest.fixture(autouse=True)
+def setup_db():
+    """The /api/backtest endpoint reads cached history from the DB; the module
+    level TestClient never runs the app lifespan, so create the schema here.
+    """
+    init_db()
 
 
 @pytest.fixture

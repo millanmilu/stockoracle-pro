@@ -6,7 +6,21 @@ Tests:
 3. Consensus score aggregation and signal agreement calculation
 """
 import pytest
+
+from backend.data.database import init_db
 from backend.services.ai_consensus import compute_ai_consensus
+
+
+@pytest.fixture(autouse=True)
+def setup_db():
+    """Schema must exist before compute_ai_consensus reads/writes DB state.
+
+    Without this the test only passed when a previous test file happened to
+    leave an initialised SQLite file behind (fresh CI checkout → "no such
+    table: historical_prices").
+    """
+    init_db()
+
 
 def test_ai_consensus_structure():
     """Verify the 3-engine consensus schema and valid score range (0-100)."""

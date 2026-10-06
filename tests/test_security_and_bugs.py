@@ -14,6 +14,20 @@ import math
 import unittest
 from unittest.mock import patch, MagicMock
 
+import pytest
+
+from backend.data.database import init_db
+
+
+@pytest.fixture(autouse=True)
+def setup_db():
+    """Schema must exist before any DB-touching case below runs.
+
+    Autouse fixtures apply to unittest.TestCase methods too, so this keeps the
+    file order-independent instead of relying on an earlier test file's DB.
+    """
+    init_db()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # P0-1  User identity — single-user safe mode
