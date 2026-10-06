@@ -302,6 +302,7 @@ panel, position lines — teeno `showTradeButton` / `showTradeDocket` /
 
 ```bash
 cd frontend && npm test        # = node --test src/utils/*.test.js (16 files)
+npm run ui:smc-ai              # end-to-end: SMC Pro overlay + AI layer asli browser me (backend chahiye)
 ```
 
 - `aiIndicatorEngine.test.js` — har AI engine ka behaviour synthetic candles pe (trend ±100,

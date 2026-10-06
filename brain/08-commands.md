@@ -41,6 +41,9 @@ npm run ui:livechart                         # Live Chart tab check (mock market
 npm run ui:livechart -- real                 # wahi checks asli backend/window pe (candles load hone chahiye)
 LIVECHART_LOCALE=en-US@posix npm run ui:livechart   # LANG=C/POSIX locale regression (LWC locale trap)
 UI_CHECK_CHROMIUM=/path/to/chrome npm run ui:livechart   # explicit browser binary
+npm run ui:smc-ai                            # SMC Pro overlay + AI layer check (live backend chahiye)
+SMC_AI_SYMBOL=RELIANCE npm run ui:smc-ai     # symbol choose karo (default RELIANCE)
+UI_CHECK_CHROMIUM=/path/to/chrome npm run ui:smc-ai   # explicit browser binary
 ```
 - `frontend/scripts/ui-check.mjs` real headless Chrome (Playwright devDependency, system Chrome use karta hai) me app
   load karta hai, React hydration wait karta hai, aur console errors / uncaught exceptions / failed requests /
@@ -53,6 +56,15 @@ UI_CHECK_CHROMIUM=/path/to/chrome npm run ui:livechart   # explicit browser bina
   candle, bucket rollover, left-pan cursor backfill, interval switch, crosshair, modals, oscillator pane)
   aur **real pass** (`real` arg — asli backend pe hydrate + candles). Screenshots + JSON report
   `logs/livechart-check/` me. Real backend data ke bina bhi frontend chart path verify ho jata hai.
+- `frontend/scripts/smc-ai-check.mjs` **SMC Pro + AI layer** ka check hai (live backend chahiye —
+  ismein /api mock nahi hota, kyunki SMC overlay aur AI panel asli candles pe hi bante hain):
+  toolbar toggle → `SmcProLayer` SVG (shapes + CHoCH/HH/HL labels) + score card
+  (Bias/Structure/Phase/Session/Score), phir AI Trend sub-pane, AI Signal price-pane overlay,
+  AIDashboard strip, AI Chat panel (key na ho to graceful guidance), aur Dashboard ka
+  3-Engine AI Consensus gauge (visible + live score). Report `logs/smc-ai-check/` me.
+  **Zaroori:** active interval pe candles hone chahiye — app default 1m/5D kholta hai, isliye
+  seed DB me intraday rows chahiye; sirf daily (1d) rows ho to overlay khaali rehta hai
+  (detection ke liye ≥20 candles chahiye, `SmcProLayer` chup-chaap empty div deta hai).
 
 ## Brain checker
 ```bash
