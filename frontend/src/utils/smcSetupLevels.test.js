@@ -64,3 +64,28 @@ test('findSwings detects local extremes', () => {
   const { highs, lows } = findSwings(candles);
   assert.ok(Array.isArray(highs) && Array.isArray(lows));
 });
+
+test('fallback targets extend beyond distant anchors in both directions', () => {
+  for (const bullish of [true, false]) {
+    for (const anchorCount of [1, 2]) {
+      const cs = trendCandles(60, bullish ? 1000 : 2000, 1, bullish);
+      const entry = cs.at(-1).close;
+      const sign = bullish ? 1 : -1;
+      const anchors = Array.from({ length: anchorCount }, (_, i) => entry + sign * (100 + 20 * i));
+      const result = deriveSetupLevels(cs, {
+        setup: { direction: bullish ? 'bullish' : 'bearish', entry },
+        liquidity: { levels: anchors.map((price) => ({ price })) },
+      });
+      assert.ok(result);
+      assert.deepEqual(result.takeProfits.slice(0, anchorCount), anchors);
+      const ladder = [entry, ...result.takeProfits];
+      for (let i = 1; i < ladder.length; i++) assert.ok(sign * (ladder[i] - ladder[i - 1]) > 0);
+    }
+  }
+});
+
+test('missing entry uses a real price instead of converting null to zero', () => {
+  const cs = trendCandles(60, 1000, 1);
+  const result = deriveSetupLevels(cs, { setup: { direction: 'bullish', entry: null } });
+  assert.equal(result.entry, cs.at(-1).close);
+});

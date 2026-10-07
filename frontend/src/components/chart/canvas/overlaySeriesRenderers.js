@@ -4,11 +4,43 @@ import { detectSMC } from '../../../utils/marketStructure';
 import { getAISupportResistance } from '../../../utils/aiIndicatorEngine';
 import { analyzeSignal } from '../../../utils/aiSignalEngine';
 import { resolveOverlayData } from './chartSeriesFactory';
+import { calculateCustomIndicator } from '../../../utils/customIndicatorEngine';
 
 export function renderOverlayIndicator(chart, def, candles, currentSeriesMap, hiddenIndicators, engineValueRef) {
       const id = def.id;
       const isHidden = hiddenIndicators.includes(id);
       const kind = def.type === 'ai' ? (def.aiOverlay || 'info') : def.type;
+
+      if (def.isUserCustom) {
+        const plots = calculateCustomIndicator(def.customScript, candles);
+        let seriesList = currentSeriesMap[id];
+        if (!Array.isArray(seriesList)) seriesList = [];
+        while (seriesList.length > plots.length) {
+          const series = seriesList.pop();
+          try { chart.removeSeries(series); } catch {}
+        }
+        plots.forEach((plot, index) => {
+          if (!seriesList[index]) {
+            seriesList[index] = chart.addLineSeries({
+              color: plot.color,
+              lineWidth: 1.5,
+              priceLineVisible: false,
+              lastValueVisible: true,
+              title: plot.title,
+            });
+          }
+          seriesList[index].applyOptions({
+            visible: !isHidden,
+            color: plot.color,
+            title: plot.title,
+          });
+          const data = sanitizeSeriesData(plot.data);
+          try { seriesList[index].setData(data); } catch {}
+          if (index === 0 && data.length) engineValueRef.current[id] = data[data.length - 1].value;
+        });
+        currentSeriesMap[id] = seriesList;
+        return;
+      }
 
       // ── Standard single-line overlay ──────────────────────────────────────
       if (def.type === 'overlay') {

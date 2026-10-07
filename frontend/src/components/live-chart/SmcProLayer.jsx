@@ -3,6 +3,8 @@ import { analyzeSMC } from '../../utils/smc/engine/smcEngine';
 import { loadSmcDisplay, subscribeSmcDisplay } from '../../utils/smcDisplayPrefs';
 import { placeTags } from '../../utils/smc/selection/smcLabels';
 import { selectVisibleSMC } from '../../utils/smc/selection/smcSelect';
+import { snapshotSMCCandles } from '../../utils/smc/engine/smcSnapshot';
+import { SmcProSummaryCard } from './ChartFloaters';
 
 // --- SmcProLayer: SMART SMC visualization (detection ≠ rendering) ---
 //
@@ -15,7 +17,7 @@ import { selectVisibleSMC } from '../../utils/smc/selection/smcSelect';
 //     shift then drop — never stacked)
 //   - candles stay dominant: thin lines, translucent fills, compact tags
 // Click-through SVG above canvas (z 30, under drawings); repaints on candles,
-// visible-range change and resize; analysis memoized on a bar signature.
+// visible-range change and resize; analysis uses a shared candle snapshot.
 
 const FONT = "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, sans-serif";
 const KZ_H = 22;
@@ -46,14 +48,45 @@ function shortZoneLabel(z) {
   return compactSMCLabel(z?.label || z?.rawType || z?.kind || '');
 }
 
-export default function SmcProLayer({ chartCanvasRef, candles, symbol, interval, active }) {
-  const wrapRef = useRef(null);
+export default function SmcProLayer({ chartCanvasRef, candles, symbol, interval, active, activeCandleRef, isReplaying }) {
   const [prefs, setPrefs] = useState(() => loadSmcDisplay());
+  const [snapshot, setSnapshot] = useState(() => snapshotSMCCandles(candles));
+  useEffect(() => subscribeSmcDisplay(setPrefs), []);
+  useEffect(() => {
+    if (!active || isReplaying) return undefined;
+    const sample = () => setSnapshot((previous) => snapshotSMCCandles(candles, activeCandleRef?.current, previous));
+    sample();
+    // Local, bounded refresh: no per-tick subscription on the parent chart.
+    const timer = setInterval(sample, 1000);
+    return () => clearInterval(timer);
+  }, [active, candles, activeCandleRef, isReplaying]);
+  const snapshotCandles = useMemo(() => (
+    isReplaying || snapshot.source !== candles ? snapshotSMCCandles(candles).candles : snapshot.candles
+  ), [candles, isReplaying, snapshot]);
+  const analysis = useMemo(() => {
+    if (!active || snapshotCandles.length < 20) return null;
+    try {
+      return analyzeSMC(snapshotCandles);
+    } catch {
+      return null;
+    }
+  }, [active, snapshotCandles]);
+  if (!active) return null;
+  return (
+    <>
+      <SmcProDrawingLayer chartCanvasRef={chartCanvasRef} candles={snapshotCandles}
+        symbol={symbol} interval={interval} active={active} analysis={analysis} prefs={prefs} />
+      {prefs.scoreCard !== false && <SmcProSummaryCard summary={analysis} />}
+    </>
+  );
+}
+
+function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active, analysis, prefs }) {
+  const wrapRef = useRef(null);
   const [, bumpRepaint] = useReducer((t) => (t + 1) % 1000000, 0);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [visibleBars, setVisibleBars] = useState(0);
 
-  useEffect(() => subscribeSmcDisplay(setPrefs), []);
   useEffect(() => {
     bumpRepaint();
   }, [symbol, interval]);
@@ -97,22 +130,6 @@ export default function SmcProLayer({ chartCanvasRef, candles, symbol, interval,
   }, [active, chartCanvasRef, symbol, interval]);
 
   const lastBar = Array.isArray(candles) && candles.length ? candles[candles.length - 1] : null;
-  const lastCloseBucket = lastBar && Number.isFinite(Number(lastBar.close))
-    ? Math.round(Number(lastBar.close) / Math.max(1, Number(lastBar.close) * 0.0005))
-    : 0;
-  const barSig = active
-    ? `${Array.isArray(candles) ? candles.length : 0}|${lastBar?.time ?? ''}|${lastCloseBucket}`
-    : 'off';
-
-  const analysis = useMemo(() => {
-    if (!active || !Array.isArray(candles) || candles.length < 20) return null;
-    try {
-      return analyzeSMC(candles);
-    } catch {
-      return null;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [barSig]);
 
   const selection = useMemo(() => {
     if (!active || !analysis) return null;
@@ -130,8 +147,7 @@ export default function SmcProLayer({ chartCanvasRef, candles, symbol, interval,
     } catch {
       return null;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [barSig, analysis, prefs.mode, prefs.maxOb, prefs.maxFvg, prefs.maxLiquidity, prefs.maxStructure, prefs.minScore, visibleBars]);
+  }, [active, candles, symbol, interval, analysis, prefs.mode, prefs.maxOb, prefs.maxFvg, prefs.maxLiquidity, prefs.maxStructure, prefs.minScore, visibleBars]);
 
   if (!active || !analysis || !selection || size.w <= 0) {
     return <div ref={wrapRef} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 30 }} />;
@@ -261,7 +277,7 @@ export default function SmcProLayer({ chartCanvasRef, candles, symbol, interval,
   }
 
   // ---- Setup is primary: compact, separated labels + short aligned rails ----
-  if (selection.setup) {
+  if (prefs.setup && selection.setup) {
     const s = selection.setup;
     const x2 = plotW - 4;
     const x1 = Math.max(0, x2 - 42);

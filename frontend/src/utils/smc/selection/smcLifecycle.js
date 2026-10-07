@@ -46,8 +46,9 @@ function evolveZone(obj, candles) {
   const out = { ...obj };
   const { top, bottom, direction } = out;
   const bull = direction !== 'bearish';
-  const start = indexAtOrAfter(candles, out.createdTime);
-  const from = start < 0 ? 0 : start + 1; // creation bar itself never counts
+  // Formation/departure bars confirm the zone; only later bars can retest it.
+  const start = indexAtOrAfter(candles, out.confirmedTime ?? out.createdTime);
+  const from = start < 0 ? 0 : start + 1;
   let retests = 0;
   let maxFill = 0;
   let touched = false;
@@ -108,13 +109,23 @@ function evolveZone(obj, candles) {
 
 function evolveLiquidity(obj, candles, lastClose) {
   const out = { ...obj };
+  // Confirmed swings arrive with lifecycle computed by the detector for this
+  // candle snapshot. Preserve its evidence and sweepDetection setting.
+  if (out.confirmedTime != null) {
+    out.ageBars = Math.max(0, candles.length - 1 - indexAtOrAfter(candles, out.createdTime));
+    return out;
+  }
   const p = Number(out.price ?? out.mid);
   if (!Number.isFinite(p)) {
     out.state = 'consumed';
     return out;
   }
-  const start = indexAtOrAfter(candles, out.createdTime);
-  const from = start < 0 ? 0 : start;
+  const start = indexAtOrAfter(candles, out.confirmedTime ?? out.createdTime);
+  const from = start < 0 ? 0 : start + 1;
+  const side = String(out.rawType || '').toLowerCase();
+  const above = out.liquiditySide === 'buy' || /bsl|eqh|pdh|pwh|resistance/.test(side) ? true
+    : out.liquiditySide === 'sell' || /ssl|eql|pdl|pwl|support/.test(side) ? false
+      : p >= num(candles[start]?.close ?? lastClose);
   let state = 'active';
   for (let i = from; i < candles.length; i++) {
     const c = candles[i];
@@ -124,7 +135,6 @@ function evolveLiquidity(obj, candles, lastClose) {
     if (![h, l, cl].every(Number.isFinite)) continue;
     const a = atrAt(candles, i);
     const buf = Number.isFinite(a) ? a * 0.15 : Math.abs(p) * 0.0005;
-    const above = p >= (Number.isFinite(lastClose) ? lastClose : p);
     // Sweep: wick takes the level, body closes back on the original side.
     const wickedPast = above ? h > p + buf * 0.2 : l < p - buf * 0.2;
     const closedBack = above ? cl <= p : cl >= p;

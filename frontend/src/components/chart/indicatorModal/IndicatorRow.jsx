@@ -6,6 +6,7 @@ import {
   Eye,
   EyeOff,
   Info,
+  Pencil,
   Plus,
   Settings2,
   Sparkles,
@@ -116,6 +117,7 @@ export default function IndicatorRow({
   onToggleHideIndicator,
   onMoveIndicator,
   onRemoveIndicator,
+  onEditCustom = () => {},
 }) {
     const active = activeById.has(indicator.id);
     const hidden = hiddenById.has(indicator.id);
@@ -126,7 +128,7 @@ export default function IndicatorRow({
     const expanded = expandedId === indicator.id;
     // TradingView parity: EVERY indicator has settings (Inputs/Style/Visibility).
     // Engine-backed use live schema, legacy field-based use fallback inputs.
-    const configurable = true;
+    const configurable = !indicator.isUserCustom;
     const rowKey = `${isActiveSection ? 'active' : 'browse'}-${indicator.id}`;
     const activePos = activeIndicators.indexOf(indicator.id);
     return (
@@ -217,6 +219,17 @@ export default function IndicatorRow({
               onMouseLeave={(e) => { e.currentTarget.style.color = '#64748B'; }}
             >
               <Settings2 size={13} />
+            </button>
+          )}
+          {indicator.isUserCustom && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onEditCustom(indicator); }}
+              title="Edit custom script"
+              aria-label={`Edit ${indicator.name}`}
+              style={{ ...iconButton, width: 24, height: 24, flexShrink: 0, color: '#7DD3FC' }}
+            >
+              <Pencil size={13} />
             </button>
           )}
 

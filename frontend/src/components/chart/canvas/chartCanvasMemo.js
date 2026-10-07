@@ -38,7 +38,7 @@ function chartCanvasPropsEqual(prev, next) {
     }
     if (prev[k] !== next[k]) return false;
   }
-  if (prev.activeIndicators !== next.activeIndicators || prev.hiddenIndicators !== next.hiddenIndicators || prev.indicatorOverrides !== next.indicatorOverrides) return false;
+  if (prev.activeIndicators !== next.activeIndicators || prev.hiddenIndicators !== next.hiddenIndicators || prev.indicatorOverrides !== next.indicatorOverrides || prev.customIndicators !== next.customIndicators) return false;
   // Callbacks are stable useCallbacks in the parent; ref-compare them.
   if (prev.onVisibleRangeChange !== next.onVisibleRangeChange) return false;
   if (prev.onCrosshairMove !== next.onCrosshairMove) return false;

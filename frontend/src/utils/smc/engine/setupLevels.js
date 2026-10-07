@@ -12,6 +12,7 @@
  */
 
 function num(v, fallback = NaN) {
+  if (v == null) return fallback;
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
 }
@@ -68,7 +69,7 @@ export function deriveSetupLevels(candles, analysis = {}) {
 
   const last = candles[candles.length - 1];
   const lastClose = num(last?.close);
-  if (!Number.isFinite(lastClose)) return null;
+  if (!Number.isFinite(lastClose) || lastClose <= 0) return null;
 
   const { highs, lows } = findSwings(candles);
   const blocks = Array.isArray(analysis?.orderBlocks?.blocks)
@@ -91,6 +92,7 @@ export function deriveSetupLevels(candles, analysis = {}) {
     entry = bull ? num(edgeBlock?.top) : num(edgeBlock?.bottom);
   }
   if (!Number.isFinite(entry)) entry = lastClose;
+  if (entry <= 0) return null;
 
   // Reference extreme: nearest swept swing on the risk side.
   const riskSwings = (bull ? lows : highs).filter((s) => bull ? s.price < entry : s.price > entry);
@@ -98,7 +100,7 @@ export function deriveSetupLevels(candles, analysis = {}) {
   const ref = refSwing ? refSwing.price : (bull ? entry - buffer * 4 : entry + buffer * 4);
   const stopLoss = bull ? ref - buffer : ref + buffer;
   const risk = Math.abs(entry - stopLoss);
-  if (!(risk > 0)) return null;
+  if (!(risk > 0) || !Number.isFinite(risk) || stopLoss <= 0) return null;
 
   // Opposing anchors: swing extremes + liquidity levels beyond entry.
   const oppSwings = (bull ? highs : lows)
@@ -115,12 +117,14 @@ export function deriveSetupLevels(candles, analysis = {}) {
     if (picked.every((q) => Math.abs(q - p) > risk * 0.5)) picked.push(p);
     if (picked.length >= 3) break;
   }
-  // Risk-multiple fallbacks for missing rungs.
+  // Extend beyond the last anchor; a distant TP1 must never precede a nearer TP2.
   const multiples = [1.5, 2.5, 4];
   while (picked.length < 3) {
-    const m = multiples[picked.length];
-    picked.push(bull ? entry + risk * m : entry - risk * m);
+    const previousDistance = picked.length ? Math.abs(picked.at(-1) - entry) : 0;
+    const distance = Math.max(risk * multiples[picked.length], previousDistance + risk);
+    picked.push(bull ? entry + distance : entry - distance);
   }
+  if (picked.some((price) => !Number.isFinite(price) || price <= 0)) return null;
 
   return {
     direction,

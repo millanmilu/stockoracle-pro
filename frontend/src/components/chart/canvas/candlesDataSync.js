@@ -31,13 +31,23 @@ export function syncCandlesData({
       // stale live buckets, but any out-of-order bar here would throw
       // "Assertion failed: data must be asc ordered by time" and crash the
       // app. Sanitize so setData always receives strictly ascending data.
-      const rawFormatted = candles.map((c) => ({
-        time: c.time,
-        open: Number(c.open),
-        high: Number(c.high),
-        low: Number(c.low),
-        close: Number(c.close),
-      }));
+      // OHLC validity is re-checked here (not just in formatHistoryCandles):
+      // live ticks / cache restores can carry NaN, zero or inverted
+      // high/low through `candles` state, and a single corrupt bar poisons
+      // the series PlotList / price-scale, surfacing one frame later as an
+      // uncaught "Value is null" in SeriesBarColorer during paint.
+      const rawFormatted = [];
+      for (const c of candles) {
+        if (!c || c.time == null || c.time === '') continue;
+        const open = Number(c.open);
+        const high = Number(c.high);
+        const low = Number(c.low);
+        const close = Number(c.close);
+        if (!isFinite(open) || !isFinite(high) || !isFinite(low) || !isFinite(close)) continue;
+        if (open <= 0 || high <= 0 || low <= 0 || close <= 0) continue;
+        if (high < Math.max(open, close) || low > Math.min(open, close)) continue;
+        rawFormatted.push({ time: c.time, open, high, low, close });
+      }
       const formattedCandles = sanitizeCandles(rawFormatted);
       if (formattedCandles.length === 0) return;
 

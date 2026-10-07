@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { INDICATOR_DEFINITIONS } from '../indicatorDefinitions';
 import { getEngineFallbackId } from '../indicatorSettingsSchema';
 
-export function useIndicatorGroups(activeIndicators, indicatorOverrides, interval) {
+export function useIndicatorGroups(activeIndicators, indicatorOverrides, interval, customIndicators = []) {
   // Resolve active catalog definitions once (shared by overlays, zones, markers).
   // TradingView parity: flat overrides split into inputs (engine params) +
   // style (`__color`, `__lineWidth`, `__sub_{i}_color`) + visibility
@@ -11,7 +11,7 @@ export function useIndicatorGroups(activeIndicators, indicatorOverrides, interva
     const normIv = String(interval || '').toLowerCase();
     return activeIndicators
       .map(id => {
-        const def = INDICATOR_DEFINITIONS.find(item => item.id === id);
+        const def = [...INDICATOR_DEFINITIONS, ...customIndicators].find(item => item.id === id);
         if (!def) return null;
         const overrides = indicatorOverrides[id];
         if (!overrides || !Object.keys(overrides).length) return def;
@@ -47,7 +47,7 @@ export function useIndicatorGroups(activeIndicators, indicatorOverrides, interva
         return next;
       })
       .filter(Boolean);
-  }, [activeIndicators, indicatorOverrides, interval]);
+  }, [activeIndicators, indicatorOverrides, interval, customIndicators]);
 
   // Filter active indicators to only include overlays (not oscillators which live in sub-panes),
   // applying per-indicator parameter overrides so custom params reflect in rendering.
@@ -56,7 +56,7 @@ export function useIndicatorGroups(activeIndicators, indicatorOverrides, interva
   // in LiveChartView — excluded here so no line series is created for it.
   const overlayIndicators = useMemo(() => {
     return resolvedActive
-      .filter(item => (!['oscillator', 'smc', 'ai', 'custom', 'profile'].includes(item.type))
+      .filter(item => (!['oscillator', 'smc', 'ai', 'profile'].includes(item.type))
         || (item.type === 'ai' && item.aiOverlay === 'bands'));
   }, [resolvedActive]);
 

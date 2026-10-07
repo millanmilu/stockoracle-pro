@@ -24,13 +24,13 @@ venv/bin/pytest tests/test_ws_broadcast_fallback.py tests/test_indicators.py -v
 ```
 
 ## Frontend tests (JS — CI me bhi chalte hain)
-<!-- check: frontend_tests=15 -->
+<!-- check: frontend_tests=16 -->
 ```bash
 cd frontend && npm test        # = node --test src/utils/*.test.js
 ```
-- **15 `*.test.js` files**, sab `src/utils/` me — glob `package.json` me `src/utils/*.test.js` hai,
+- **16 `*.test.js` files**, sab `src/utils/` me — glob `package.json` me `src/utils/*.test.js` hai,
 isliye test wahi rakho, warna chala hi nahi.
-- Indicator/AI engine tests: `aiIndicatorEngine.test.js`, `indicatorEngine.test.js`, `aiSignalEngine.test.js` (+ `chartHelpers`, `volumeProfile`, `drawingGeometry`, `drawingRepair`, `drawingSettings`, `drawingToolDefaults`, `smcSetupLevels`, `smcSelection`, `brokerHelpers`, `watchlist`, `timeframeQuickSwitch`, `chartSettings`).
+- Indicator/AI engine tests: `aiIndicatorEngine.test.js`, `indicatorEngine.test.js`, `customIndicatorEngine.test.js`, `aiSignalEngine.test.js` (+ `chartHelpers`, `volumeProfile`, `drawingGeometry`, `drawingRepair`, `drawingSettings`, `drawingToolDefaults`, `smcSetupLevels`, `smcSelection`, `brokerHelpers`, `watchlist`, `timeframeQuickSwitch`, `chartSettings`).
 - CI ka `frontend-ci` job `npm test` + `npm run lint` (0-errors gate) + `npm run build` chalata hai — red test ya lint error commit hi nahi hoga.
 
 ## UI check (headless browser)

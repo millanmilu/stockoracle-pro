@@ -1,20 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Crosshair } from 'lucide-react';
 import CandleCountdown from '../chart/CandleCountdown';
 import ReplayBar from '../chart/ReplayBar';
 import VolumeProfileOverlay from '../chart/VolumeProfileOverlay';
-import { loadSmcDisplay, subscribeSmcDisplay } from '../../utils/smcDisplayPrefs';
-import { analyzeSMC } from '../../utils/smc/engine/smcEngine';
 import { formatReplayBarLabel } from './format';
 
-function SmcProSummaryCard({ candles }) {
+export function SmcProSummaryCard({ summary }) {
   const [collapsed, setCollapsed] = useState(false);
   const [position, setPosition] = useState({ left: 12, top: 12 });
   const dragRef = useRef(null);
-  const summary = useMemo(() => {
-    if (!Array.isArray(candles) || candles.length < 20) return null;
-    return analyzeSMC(candles);
-  }, [candles]);
   const bias = String(summary?.mtf?.bias || 'neutral').toLowerCase();
   const biasLabel = bias === 'bullish' ? 'Bullish' : bias === 'bearish' ? 'Bearish' : 'Neutral';
   const latestBreak = summary?.swings?.bos?.[summary.swings.bos.length - 1];
@@ -143,14 +137,8 @@ export default function ChartFloaters({
   hiddenIndicators,
   indicatorParamOverrides,
 }) {
-  const [smcPrefs, setSmcPrefs] = useState(() => loadSmcDisplay());
-  useEffect(() => subscribeSmcDisplay(setSmcPrefs), []);
   return (
     <>
-      {activeIndicators.includes('smc_pro') && smcPrefs.scoreCard !== false && (
-        <SmcProSummaryCard candles={chartCandles} />
-      )}
-
       {/* Replay Simulation Watermark */}
       {isReplaying && (
         <div style={{

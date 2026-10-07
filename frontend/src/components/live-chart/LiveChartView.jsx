@@ -138,6 +138,7 @@ export default function LiveChartView() {
   // ── Advanced indicator library (state, persistence & handlers) ───────────
   const {
     activeIndicators,
+    customIndicators,
     setActiveIndicators,
     hiddenIndicators,
     showIndicatorModal,
@@ -154,6 +155,8 @@ export default function LiveChartView() {
     handleMoveIndicator,
     handleOpenIndicatorSettings,
     handleSaveIndicatorParams,
+    handleSaveCustomIndicator,
+    handleDeleteCustomIndicator,
     resolveDefinition,
   } = useIndicatorLibrary(interval);
 
@@ -368,6 +371,7 @@ export default function LiveChartView() {
       showDrawingTools, setShowDrawingTools, userToggledDrawRef, activeDrawingTool, setActiveDrawingTool,
       showSettingsModal, setShowSettingsModal, showIndicatorModal, setShowIndicatorModal,
       activeIndicators, hiddenIndicators, indicatorParamOverrides, indicatorSettings, setIndicatorSettings,
+      customIndicators, handleSaveCustomIndicator, handleDeleteCustomIndicator,
       handleToggleIndicator, handleClearAllIndicators, handleToggleHideIndicator, handleRemoveIndicator,
       handleMoveIndicator, handleOpenIndicatorSettings, handleSaveIndicatorParams,
       activeOscillators, resolveDefinition, showAIDashboard,

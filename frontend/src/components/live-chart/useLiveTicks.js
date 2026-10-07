@@ -125,12 +125,18 @@ export function useLiveTicks({
         }
         const o = Number(rawCandle.open);
         const c = ltp;
+        // Guard corrupt exchange fields: a missing/NaN open/high/low would
+        // otherwise propagate as NaN OHLC into series.update() and poison the
+        // PlotList (one frame later: "Value is null" in paint).
+        if (!isFinite(o) || o <= 0) return;
+        const rawH = Number(rawCandle.high);
+        const rawL = Number(rawCandle.low);
         const liveCandle = {
           ...rawCandle,
           time: formattedTime,
           open: o,
-          high: Math.max(Number(rawCandle.high), o, c),
-          low: Math.min(Number(rawCandle.low), o, c),
+          high: Math.max(isFinite(rawH) ? rawH : o, o, c),
+          low: Math.min(isFinite(rawL) ? rawL : o, o, c),
           close: c,
           volume: Number(rawCandle.volume || 0),
         };

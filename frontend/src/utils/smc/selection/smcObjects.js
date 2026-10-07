@@ -119,6 +119,7 @@ export function normalizeZone(raw, kind, candles, symbol, interval) {
     bottom: b,
     mid: (t + b) / 2,
     createdTime: raw.time ?? null,
+    confirmedTime: raw.confirmedTime ?? null,
     label: raw.label || raw.type || kind,
     color: raw.color || null,
     rawType: raw.type || kind,

@@ -1,9 +1,9 @@
 import React from 'react';
-import { Activity, Search, Trash2, X } from 'lucide-react';
+import { Activity, Code2, Search, Trash2, X } from 'lucide-react';
 import { iconButton } from './indicatorModalStyles';
 
         {/* Fixed header: title + active count + close */}
-export function ModalHeader({ activeCount, hiddenIndicators, onClose }) {
+export function ModalHeader({ activeCount, hiddenIndicators, onClose, onCreateCustom }) {
   return (
         <header
           style={{
@@ -23,6 +23,14 @@ export function ModalHeader({ activeCount, hiddenIndicators, onClose }) {
             {activeCount} Active{hiddenIndicators.length > 0 && ` · ${hiddenIndicators.length} hidden`}
           </span>
           <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 2 }}>
+            <button
+              type="button"
+              onClick={onCreateCustom}
+              title="Create a custom script indicator"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 8px', border: '1px solid rgba(56,189,248,0.28)', borderRadius: 4, background: 'rgba(56,189,248,0.08)', color: '#7DD3FC', cursor: 'pointer', font: '600 10px JetBrains Mono, monospace' }}
+            >
+              <Code2 size={13} /> Create script
+            </button>
             <button
               type="button"
               onClick={onClose}

@@ -71,6 +71,7 @@ export default function ChartShell({
   showIndicatorModal,
   setShowIndicatorModal,
   activeIndicators,
+  customIndicators,
   hiddenIndicators,
   indicatorParamOverrides,
   indicatorSettings,
@@ -82,6 +83,8 @@ export default function ChartShell({
   handleMoveIndicator,
   handleOpenIndicatorSettings,
   handleSaveIndicatorParams,
+  handleSaveCustomIndicator,
+  handleDeleteCustomIndicator,
   activeOscillators,
   resolveDefinition,
   showAIDashboard,
@@ -267,6 +270,7 @@ export default function ChartShell({
               livePrice={curPrice}
               liveChange={replayDayChange}
               activeIndicators={activeIndicators}
+              customIndicators={customIndicators}
               hiddenIndicators={hiddenIndicators}
               indicatorOverrides={indicatorParamOverrides}
               onToggleHideIndicator={handleToggleHideIndicator}
@@ -294,11 +298,14 @@ export default function ChartShell({
             {/* SMC Pro institutional overlays (zones, structure, liquidity,
                 setup, killzones) — SVG above canvas, click-through. */}
             <SmcProLayer
+              key={`${selectedSymbol}:${interval}:${isReplaying}`}
               chartCanvasRef={chartCanvasRef}
               candles={chartCandles}
               symbol={selectedSymbol}
               interval={interval}
-              active={smcProOn}
+              active={smcProOn && !hiddenIndicators.includes('smc_pro')}
+              activeCandleRef={activeCandleRef}
+              isReplaying={isReplaying}
             />
 
             <ChartFloaters
@@ -370,6 +377,7 @@ export default function ChartShell({
         isOpen={showIndicatorModal}
         onClose={() => setShowIndicatorModal(false)}
         activeIndicators={activeIndicators}
+        customIndicators={customIndicators}
         hiddenIndicators={hiddenIndicators}
         onToggleIndicator={handleToggleIndicator}
         onToggleHideIndicator={handleToggleHideIndicator}
@@ -377,6 +385,8 @@ export default function ChartShell({
         onClearAll={handleClearAllIndicators}
         onOpenSettings={handleOpenIndicatorSettings}
         onMoveIndicator={handleMoveIndicator}
+        onSaveCustomIndicator={handleSaveCustomIndicator}
+        onDeleteCustomIndicator={handleDeleteCustomIndicator}
       />
 
       {/* 4. Indicator Parameter Settings Modal */}

@@ -1,6 +1,29 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { DEFAULT_ACTIVE_INDICATORS, INDICATOR_DEFINITIONS } from '../chart/indicatorDefinitions';
 import { getEngineFallbackId } from '../chart/indicatorSettingsSchema';
+import { validateCustomIndicatorScript } from '../../utils/customIndicatorEngine';
+
+const CUSTOM_INDICATORS_KEY = 'stockoracle_custom_indicators_v1';
+
+function loadCustomIndicators() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(CUSTOM_INDICATORS_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item) =>
+      item && typeof item.id === 'string' && item.id.startsWith('custom_') &&
+      typeof item.name === 'string' && typeof item.customScript === 'string' &&
+      validateCustomIndicatorScript(item.customScript).valid
+    ).map((item) => ({
+      ...item,
+      category: 'custom',
+      type: 'custom',
+      isUserCustom: true,
+      badge: 'Script',
+    }));
+  } catch {
+    return [];
+  }
+}
 
 /**
  * useIndicatorLibrary — owns the advanced-indicator state machine for
@@ -8,6 +31,8 @@ import { getEngineFallbackId } from '../chart/indicatorSettingsSchema';
  * param/style overrides, modal state and every indicator handler.
  */
 export function useIndicatorLibrary(interval) {
+  const [customIndicators, setCustomIndicators] = useState(loadCustomIndicators);
+
   // Advanced Indicators State — persisted ids are validated against the catalog so
   // a renamed/removed definition can never inflate the active count or bind to
   // nothing on the chart.
@@ -17,7 +42,10 @@ export function useIndicatorLibrary(interval) {
       if (!saved) return DEFAULT_ACTIVE_INDICATORS;
       const parsed = JSON.parse(saved);
       if (!Array.isArray(parsed)) return DEFAULT_ACTIVE_INDICATORS;
-      const known = new Set(INDICATOR_DEFINITIONS.map((item) => item.id));
+      const known = new Set([
+        ...INDICATOR_DEFINITIONS.map((item) => item.id),
+        ...customIndicators.map((item) => item.id),
+      ]);
       return parsed.filter((id) => known.has(id));
     } catch {
       return DEFAULT_ACTIVE_INDICATORS;
@@ -43,6 +71,12 @@ export function useIndicatorLibrary(interval) {
       localStorage.setItem('stockoracle_indicators', JSON.stringify(activeIndicators));
     } catch {}
   }, [activeIndicators]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CUSTOM_INDICATORS_KEY, JSON.stringify(customIndicators));
+    } catch {}
+  }, [customIndicators]);
 
   // Persist indicator settings (Inputs + Style + Visibility) — TradingView parity
   useEffect(() => {
@@ -96,6 +130,45 @@ export function useIndicatorLibrary(interval) {
   const handleRemoveIndicator = useCallback((id) => {
     setActiveIndicators((prev) => prev.filter((item) => item !== id));
     setHiddenIndicators((prev) => prev.filter((item) => item !== id));
+  }, []);
+
+  const handleSaveCustomIndicator = useCallback((draft) => {
+    const name = String(draft?.name || '').trim();
+    const customScript = String(draft?.customScript || '');
+    if (!name || name.length > 60) throw new Error('Indicator name must be between 1 and 60 characters.');
+    const validation = validateCustomIndicatorScript(customScript);
+    if (!validation.valid) throw new Error(validation.error);
+    const id = draft.id || `custom_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const indicator = {
+      id,
+      name,
+      shortName: name.slice(0, 24),
+      description: 'User-created Pine-inspired script indicator.',
+      category: 'custom',
+      type: 'custom',
+      color: '#38BDF8',
+      badge: 'Script',
+      isUserCustom: true,
+      customScript,
+    };
+    setCustomIndicators((prev) => {
+      const found = prev.some((item) => item.id === id);
+      return found ? prev.map((item) => item.id === id ? indicator : item) : [...prev, indicator];
+    });
+    setActiveIndicators((prev) => prev.includes(id) ? prev : [...prev, id]);
+    return indicator;
+  }, []);
+
+  const handleDeleteCustomIndicator = useCallback((id) => {
+    setCustomIndicators((prev) => prev.filter((item) => item.id !== id));
+    setActiveIndicators((prev) => prev.filter((item) => item !== id));
+    setHiddenIndicators((prev) => prev.filter((item) => item !== id));
+    setIndicatorParamOverrides((prev) => {
+      if (!Object.prototype.hasOwnProperty.call(prev, id)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   }, []);
 
   // Applied-list ordering drives oscillator pane order and overlay draw order.
@@ -165,6 +238,7 @@ export function useIndicatorLibrary(interval) {
 
   return {
     activeIndicators,
+    customIndicators,
     setActiveIndicators,
     hiddenIndicators,
     showIndicatorModal,
@@ -178,6 +252,8 @@ export function useIndicatorLibrary(interval) {
     handleClearAllIndicators,
     handleToggleHideIndicator,
     handleRemoveIndicator,
+    handleSaveCustomIndicator,
+    handleDeleteCustomIndicator,
     handleMoveIndicator,
     handleOpenIndicatorSettings,
     handleSaveIndicatorParams,

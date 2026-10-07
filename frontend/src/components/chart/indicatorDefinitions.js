@@ -578,12 +578,6 @@ export const INDICATOR_DEFINITIONS = [
     backtest: 'Only backtest on walk-forward out-of-sample folds; in-sample metrics are not shown.',
   },
 
-  // ── Custom ───────────────────────────────────────────────────────────────────
-  {
-    id: 'custom', name: 'Custom Indicator Placeholder', shortName: 'Custom',
-    category: 'custom', type: 'custom', color: '#CBD5E1',
-    description: 'Reserved for user-defined indicator scripts.', badge: 'Custom',
-  },
 ];
 
 export const DEFAULT_ACTIVE_INDICATORS = ['sma_20'];

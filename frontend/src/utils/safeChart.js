@@ -19,6 +19,18 @@ export function safeCreateChart(container, options) {
 
   const trackedSeries = new Set();
 
+  // Transient paint-race errors that must never crash the app. lightweight-charts
+  // paints on rAF — a setData/update/removeSeries racing the draw loop can leave
+  // the pane view's cached items out of sync with the series PlotList for one
+  // frame, so SeriesBarColorer throws `Value is null` / `Value is undefined`
+  // (ensureNotNull/ensureDefined on a stale bar index). Same for teardown races
+  // (`disposed`). Swallow one frame; the next valid frame repaints correctly.
+  const isBenignPaintError = (err) => {
+    if (!err?.message) return false;
+    const msg = String(err.message).toLowerCase();
+    return msg.includes('disposed') || msg.includes('value is null') || msg.includes('value is undefined');
+  };
+
   // 1. Locate and protect internal ChartWidget if accessible
   const chartWidget =
     chart._private__chartWidget ||
@@ -34,8 +46,9 @@ export function safeCreateChart(container, options) {
         try {
           origPaint(invalidateMask);
         } catch (err) {
-          if (err?.message && String(err.message).toLowerCase().includes('disposed')) {
-            // Benign teardown race in fancy-canvas / TimeAxisWidget
+          if (isBenignPaintError(err)) {
+            // Benign teardown / transient paint race (fancy-canvas disposed,
+            // stale bar-index during setData/update). Next frame repaints.
             return;
           }
           throw err;
@@ -50,7 +63,7 @@ export function safeCreateChart(container, options) {
         try {
           origDrawImpl(mask, time);
         } catch (err) {
-          if (err?.message && String(err.message).toLowerCase().includes('disposed')) {
+          if (isBenignPaintError(err)) {
             return;
           }
           throw err;

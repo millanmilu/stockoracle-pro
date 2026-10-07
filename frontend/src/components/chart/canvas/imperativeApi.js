@@ -46,8 +46,17 @@ export function createImperativeApi({
 
           const o = Number(candle.open);
           const c = Number(candle.close);
-          const h = Math.max(Number(candle.high), o, c);
-          const l = Math.min(Number(candle.low), o, c);
+          // Drop corrupt ticks before they poison the series PlotList: a NaN /
+          // zero / inverted bar stored via update() surfaces one frame later
+          // as an uncaught "Value is null" in SeriesBarColorer paint.
+          if (!isFinite(o) || !isFinite(c) || o <= 0 || c <= 0) return;
+          let h = Number(candle.high);
+          let l = Number(candle.low);
+          if (!isFinite(h)) h = Math.max(o, c);
+          if (!isFinite(l)) l = Math.min(o, c);
+          h = Math.max(h, o, c);
+          l = Math.min(l, o, c);
+          if (!isFinite(h) || !isFinite(l) || h <= 0 || l <= 0) return;
 
           const isLineType = ['line', 'area', 'baseline'].includes(chartTypeRef.current);
           if (isLineType) {

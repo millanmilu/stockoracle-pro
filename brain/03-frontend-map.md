@@ -25,7 +25,7 @@ Backend `enrich_stock_dataframe()` ~45 columns deta hai, par `market.py` ka `_CH
   - `live-chart/` (16 files, `LiveChartView.jsx` ka split: controller + `useHistoryData`/`useLiveTicks`/`useBarReplay` hooks + `ChartShell`/`ChartOverlays`/panes)
   - `fundamentals/` (17 files, `FundamentalsPanel.jsx` ka split: sections + `useDerivedMetrics`)
   - `backtest/` (9 files, `BacktestPanel.jsx`), `broker-settings/` (7 files, `BrokerSettingsView.jsx`), `screener/` (13 files, `AdvancedScreener.jsx` + existing filters/modals)
-  - `chart/` — chart engine layer: `ChartCanvas.jsx` (render hub, split → `chart/canvas/` 13 files), `OscillatorPane.jsx`, `VolumePane.jsx`, `VolumeProfileOverlay.jsx`, `IndicatorModal.jsx` (split → `chart/indicatorModal/` 7 files), `IndicatorParamsModal.jsx`, `IndicatorLegend.jsx`, `ReplayBar.jsx`, `AIDashboard.jsx` + catalog `indicatorDefinitions.js` aur `indicatorSettingsSchema.js`.
+  - `chart/` — chart engine layer: `ChartCanvas.jsx` (render hub, split → `chart/canvas/` 13 files), `OscillatorPane.jsx`, `VolumePane.jsx`, `VolumeProfileOverlay.jsx`, `IndicatorModal.jsx` (split → `chart/indicatorModal/` 7 files), `CustomIndicatorEditor.jsx` (safe Pine-inspired script editor), `IndicatorParamsModal.jsx`, `IndicatorLegend.jsx`, `ReplayBar.jsx`, `AIDashboard.jsx` + catalog `indicatorDefinitions.js` aur `indicatorSettingsSchema.js`.
   - `chart-tools/` — drawing toolbar/shape/renderers, `smcEngine.js`; `DrawingTools.jsx` ab 1-line entry hai (asli code `DrawingToolsComponent.jsx` + `useDrawing*` hooks + mouse down/move/up modules + JSX subcomponents), renderers `shapeRendererRegistry.jsx` + `*Renderers.jsx` me hain.
   - `terminal/` — Bloomberg-style terminal views (Options Lab, Quant Risk Cockpit, RRG Rotation, Valuation, Macro, MultiTile, CommandPalette, ticker tape) + `terminal/mit/` = Market Intelligence tab (`useMitAi.js`, `useMitIntel.js`, `useMitData.js` + `MitAiHero`, `MitSignal`, `MitConsensus`, `MitDivergence`, `MitFearGreed`, `MitSummary`, ...).
   - `screener/`, `paper/`, `heatmap/`.
@@ -140,10 +140,12 @@ levels, BOS/CHoCH/MSS + HH/HL tags, Entry/TP1-3/SL rails with right-side chips, 
 NewYork killzone strip. Detection ZERO naya — `analyzeSMC()` (`src/utils/smc/`) +
 `detectSwingPoints`/`detectBosChoch` (`src/utils/marketStructure.js`) ka output sirf paint hota hai;
 setup levels pure `deriveSetupLevels()` (`src/utils/smc/engine/setupLevels.js`, test
-`src/utils/smcSetupLevels.test.js`) se. Analysis bar-signature memo me hai (per-tick recompute nahi),
-repaint sirf candles/range/resize par. Display toggles `src/utils/smcDisplayPrefs.js` store me
+`src/utils/smcSetupLevels.test.js`) se. `SmcProLayer.jsx` active candle ka immutable OHLCV snapshot
+once per second leta hai (`src/utils/smc/engine/smcSnapshot.js`) aur overlay + summary card ko
+ek analysis deta hai; unchanged snapshot pe recompute nahi. Replay live ref ignore karta hai,
+aur symbol/interval switch fresh instance banata hai. Display toggles `src/utils/smcDisplayPrefs.js` store me
 (`so_smc_display_v1`) — top-bar SMC Pro switch + menu + score card sab wahi padhte hain, prop drilling nahi.
-Layer + score card sirf `smc_pro` indicator active hone par mount hote hain. Bottom range bar jaan-bujhkar nahi banaya.
+Layer + score card sirf `smc_pro` indicator active aur visible hone par render hote hain. Bottom range bar jaan-bujhkar nahi banaya.
 
 ## SMC visibility architecture (declutter rework — Oct 2026)
 Detection ≠ visualization: engine hazaaron objects detect kar sakta hai, chart par sirf

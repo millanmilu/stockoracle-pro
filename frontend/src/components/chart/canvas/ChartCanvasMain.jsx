@@ -39,6 +39,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   activeIndicators = [],
   hiddenIndicators = [],
   indicatorOverrides = {},
+  customIndicators = [],
   onToggleHideIndicator = () => {},
   onRemoveIndicator = () => {},
   onVisibleRangeChange = () => {},
@@ -110,7 +111,7 @@ const ChartCanvas = forwardRef(function ChartCanvas({
   }, [theme]);
 
   const { overlayIndicators, smcIndicators, aiZoneIndicators, aiMarkerIndicators, aiOverlays } =
-    useIndicatorGroups(activeIndicators, indicatorOverrides, interval);
+    useIndicatorGroups(activeIndicators, indicatorOverrides, interval, customIndicators);
 
   // Update top-left legend in DOM at 0ms latency
   const isCrypto = isCryptoSymbol(selectedSymbol);

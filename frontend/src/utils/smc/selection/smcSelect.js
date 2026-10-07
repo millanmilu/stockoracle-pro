@@ -66,7 +66,7 @@ export function previousSessionLevels(candles) {
     const wLo = Math.min(...week.map(([, g]) => g.lo));
     const mk = (type, price, label, color) => ({
       kind: 'liquidity', rawType: type, type, price, top: price, bottom: price,
-      time: prev.lastTime, label, color, direction: /high/i.test(type) ? 'bearish' : 'bullish',
+      time: prev.lastTime, label, color, direction: /pdh|pwh/.test(type) ? 'bearish' : 'bullish',
     });
     if (Number.isFinite(prev.hi)) out.push(mk('pdh', prev.hi, `PDH ${prev.hi.toFixed(1)}`, '#EF5350'));
     if (Number.isFinite(prev.lo)) out.push(mk('pdl', prev.lo, `PDL ${prev.lo.toFixed(1)}`, '#10B981'));
@@ -103,12 +103,16 @@ export function clusterEqualExtremes(candles, tolerance = 0.0008, lookback = 120
 }
 
 /** Recent displacement: any of the last N bodies exceeding k×ATR. */
-export function recentDisplacement(candles, bars = 10, k = 1.2) {
+export function recentDisplacement(candles, bars = 10, k = 1.2, direction = null) {
   try {
     const a = atr(candles);
     if (!Number.isFinite(a) || a <= 0) return false;
     const rows = candles.slice(-bars);
-    return rows.some((c) => Math.abs(Number(c?.close) - Number(c?.open)) > a * k);
+    return rows.some((c) => {
+      const body = Number(c?.close) - Number(c?.open);
+      const aligned = direction === 'bullish' ? body > 0 : direction === 'bearish' ? body < 0 : true;
+      return aligned && Math.abs(body) > a * k;
+    });
   } catch {
     return false;
   }
@@ -141,7 +145,8 @@ export function checkSetupConfluence(candles, analysis, pool = {}) {
   const liqLevels = Array.isArray(pool) ? pool : (pool.liqLevels || []);
   const anchorRef = Number(pool?.lastClose);
   const swept = liqLevels.filter((l) => l?.state === 'swept' && barsSince(candles, l.sweptAt) <= 40);
-  const goodSweep = swept.find((l) => Number.isFinite(anchorRef) && (bull ? l.price < anchorRef : l.price > anchorRef));
+  const goodSweep = swept.find((l) => l.direction === direction
+    && Number.isFinite(anchorRef) && (bull ? l.price < anchorRef : l.price > anchorRef));
   if (goodSweep) reasons.push(`${bull ? 'sell' : 'buy'}-side sweep`);
   else missing.push(`${bull ? 'sell' : 'buy'}-side sweep`);
 
@@ -156,7 +161,7 @@ export function checkSetupConfluence(candles, analysis, pool = {}) {
   if (freshBreak) reasons.push(`${freshBreak.type || 'structural break'}`);
   else missing.push(`${direction} MSS/CHoCH`);
 
-  if (recentDisplacement(candles)) reasons.push('displacement');
+  if (recentDisplacement(candles, 10, 1.2, direction)) reasons.push('displacement');
   else missing.push('displacement');
 
   const liveZones = (Array.isArray(pool) ? [] : (pool.zones || [])).filter((z) => z?.direction === direction && ['active', 'tested', 'partial'].includes(z?.state));
@@ -199,8 +204,10 @@ export function selectVisibleSMC({ candles, analysis, symbol, interval, settings
   const visibleBars = Number(settings.visibleBars);
   const zoomedIn = Number.isFinite(visibleBars) && visibleBars > 0 && visibleBars <= 100;
   const zoomedOut = Number.isFinite(visibleBars) && visibleBars > 180;
+  const structureLimit = Number.isFinite(Number(settings.maxStructure))
+    ? Math.max(0, Math.floor(Number(settings.maxStructure))) : Infinity;
   if (zoomedIn && mode === 'smart') {
-    caps.breaks = Math.max(caps.breaks, 2);
+    caps.breaks = Math.min(structureLimit, Math.max(caps.breaks, 2));
   }
 
   const last = candles[candles.length - 1];
@@ -227,13 +234,16 @@ export function selectVisibleSMC({ candles, analysis, symbol, interval, settings
     return {
       uid: `${String(symbol).toUpperCase()}|${String(interval).toLowerCase()}|liquidity|${directionOf(l.type)}|${l.time ?? 'na'}|${price}`,
       kind: 'liquidity',
-      direction: directionOf(l.type),
+      direction: l.direction || directionOf(l.type),
       price, top: Number(l.top), bottom: Number(l.bottom),
       createdTime: l.time ?? null,
+      confirmedTime: l.confirmedTime,
+      liquiditySide: l.liquiditySide,
       label: l.label || 'Liquidity',
       color: l.color || null,
       rawType: l.type || 'liquidity',
-      state: 'active',
+      state: l.state || 'active',
+      sweptAt: l.sweptAt,
       retests: 0,
       displacement: 0.3,
       ageBars: 0,
@@ -297,7 +307,7 @@ export function selectVisibleSMC({ candles, analysis, symbol, interval, settings
   // BSL + SSL + fresh sweeps always lead; ranked rest fills the cap.
   const visLiq = [...sweptRecent, ...bsl, ...ssl, ...rest]
     .filter((l, i, arr) => arr.indexOf(l) === i)
-    .slice(0, Math.max(caps.liq, 2));
+    .slice(0, Math.max(0, Math.floor(caps.liq)));
 
   // EQ lines (clustered extremes), capped.
   const eqLines = mode === 'minimal' ? [] : clusterEqualExtremes(candles).slice(0, caps.eq);
@@ -373,13 +383,14 @@ export function selectVisibleSMC({ candles, analysis, symbol, interval, settings
     }),
     ...visSwings.map((s) => ({ ...s, segFrom: null, segTo: null })),
   ];
-  const visibleEvents = setup && mode === 'smart'
+  const filteredEvents = setup && mode === 'smart'
     ? events.filter((event) => {
       if (event.kind === 'break') return event.direction === setup.direction;
       const label = String(event.label || '').toUpperCase();
       return setup.direction === 'bullish' ? ['HH', 'HL'].includes(label) : ['LH', 'LL'].includes(label);
     })
     : events;
+  const visibleEvents = filteredEvents.slice(0, structureLimit);
 
   debug.visible.fvg = visibleZones.filter((z) => z.kind === 'fvg').length;
   debug.visible.ob = visibleZones.filter((z) => z.kind === 'ob').length;

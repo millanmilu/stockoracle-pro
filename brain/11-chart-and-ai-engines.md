@@ -54,6 +54,17 @@ SMC ka professional mode usually ek single combined overlay ke roop me aata hai,
 - `src/components/chart/canvas/useIndicatorGroups.js` keeps `smc_pro` out of the legacy price-line renderer; `indicatorOverlayEffects.js` removes any stale legacy series when it is toggled to the single SVG overlay
 - Rule: no FVG/OB/swing full-width rails, no filled FVG or invalidated/mitigated OB, no EQ/PD helper rails in the default overlay; lower-priority labels yield to setup levels and MSS/CHoCH
 
+SMC correctness fixes (Oct 2026):
+- OB/FVG lifecycle starts after confirmation (OB: two departure bars, FVG: third formation bar). Formation candles never count as retests; scoring excludes zones touched after confirmation, and mitigation uses a trailing lookback.
+- Setup rails honor the Setup display toggle. Liquidity caps include sweeps; structure caps apply to the combined break/swing list and remain effective when zoomed in, including zero.
+- Setup displacement must match the setup direction; an opposite-direction impulse cannot satisfy confluence.
+- Premium/discount defaults to the **last 120** candles, including shorter histories; missing valid prices return an unknown range, never Infinity/NaN.
+- `src/utils/smc/engine/liquidityDetector.js` supplies BSL/SSL from confirmed swings. Only a subsequent wick beyond the level with a close back counts as a sweep; a close through consumes the level. Volume pockets are not sweep evidence. Score/setup only count bias-aligned sweeps from the last 40 bars, and the selector preserves the detector's lifecycle/direction.
+- `src/utils/smc/engine/sessionDetector.js` accepts Unix seconds (also milliseconds), uses each configured IANA timezone with DST, and reports daily date strings as unknown. London/New York take priority over overlapping Asian windows; an explicit fixed offset remains supported, including zero.
+- Bearish engine signals use range high for SL and range low for TP. Drawable TP fallbacks extend beyond existing targets in order; null entry falls back to a real price and invalid/nonpositive levels are suppressed.
+- `src/utils/smc/engine/smcSnapshot.js` snapshots the active candle's OHLCV. `SmcProLayer.jsx` samples the matching active ref once per second locally and shares one analysis with the summary card; unchanged samples skip analysis. History replacements and symbol/timeframe changes refresh normally, hidden SMC stops polling, and replay ignores the live ref. Do not restore a price-relative cache key (price / (price × 0.0005) is constant).
+- Regression coverage stays in `src/utils/smcSelection.test.js` and `src/utils/smcSetupLevels.test.js`: default range, session units/DST, confirmed sweeps, aligned/recent scoring, mirrored SL/TP, ordered targets, and immutable live/replay snapshots.
+
 ## 2. Engines — `src/utils/`
 
 | File | Kaam |
@@ -78,6 +89,14 @@ Analytics functions (registry me nahi, directly call hote hain):
 `getAISupportResistance()`, `detectAIPatterns()` (max 6), `getAIPatternMarkers()`,
 `getAIBreakoutMarkers()`, `getAIReversalMarkers()`, `labelRegime()`,
 `computeAIDashboardScores()` (dashboard strip ka ek snapshot).
+
+## 2b. Custom script indicators (safe Pine-inspired subset)
+
+- `src/components/chart/CustomIndicatorEditor.jsx` creates/edits scripts from the indicator modal; scripts and custom definitions persist in browser `localStorage` (`stockoracle_custom_indicators_v1`), not the backend.
+- `src/utils/customIndicatorEngine.js` parses a bounded DSL and never evaluates JavaScript. Supported forms: assignments, `indicator()` / `study()` metadata, fixed-default numeric `input()` / `input.int()` / `input.float()`, OHLCV sources (`open`, `high`, `low`, `close`, `volume`, `hl2`, `hlc3`, `ohlc4`), arithmetic/comparisons, and up to six `plot()` lines.
+- Series functions: `ta.sma`, `ta.ema`, `ta.rsi`, and the listed `math.*` scalar/series functions. Plot colors are six-digit hex. Scripts have length, line, token, nesting, period, and plot limits.
+- Custom studies render as price-pane line overlays through `overlaySeriesRenderers.js`; this is a supported subset, **not** full Pine Script compatibility. Functions, control flow, strategies, alerts, drawings, imports, and oscillator panes are not supported.
+- `customIndicatorEngine.test.js` covers interpreter results, validation, and unsupported syntax. Avoid adding `eval`/`Function` or broadening the grammar without matching tests and explicit resource bounds.
 
 ## 3. Consumers — ek definition ko draw karne ke 6 raaste
 
@@ -288,7 +307,7 @@ panel, position lines — teeno `showTradeButton` / `showTradeDocket` /
 ## Tests + commands
 
 ```bash
-cd frontend && npm test        # = node --test src/utils/*.test.js (11 files)
+cd frontend && npm test        # = node --test src/utils/*.test.js (16 files)
 ```
 
 - `aiIndicatorEngine.test.js` — har AI engine ka behaviour synthetic candles pe (trend ±100,

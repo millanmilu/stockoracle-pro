@@ -3,6 +3,7 @@ import { detectFVGs } from '../../marketStructure.js';
 export function detectSMCFVGs(candles, settings = {}) {
   const fvgs = detectFVGs(candles, settings.maxGaps || 8).map((item, idx) => ({
     ...item,
+    confirmedTime: candles[candles.findIndex((candle) => candle.time === item.time) + 1]?.time,
     mid: item.mid ?? ((item.top + item.bottom) / 2),
     fill: 0,
     state: 'active',

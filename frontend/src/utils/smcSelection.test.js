@@ -11,6 +11,12 @@ import { analyzeMultiTimeframe } from './smc/engine/mtfAnalyzer.js';
 import { determinePremiumDiscount } from './smc/engine/premiumDiscount.js';
 import { detectSetup } from './smc/engine/setupDetector.js';
 import { createSMCAnalysis } from './smc/engine/smcEngine.js';
+import { detectSession } from './smc/engine/sessionDetector.js';
+import { detectLiquidityZones } from './smc/engine/liquidityDetector.js';
+import { detectSMCOrderBlocks } from './smc/engine/orderBlockDetector.js';
+import { detectSMCFVGs } from './smc/engine/fvgDetector.js';
+import { detectMitigation } from './smc/engine/mitigationDetector.js';
+import { snapshotSMCCandles } from './smc/engine/smcSnapshot.js';
 
 function candles(n, from, step, up = true, startTime = 1700000000, slot = 3600) {
   const out = [];
@@ -289,4 +295,180 @@ test('SMC end-to-end reports trend bias without manufacturing a low-confluence s
   assert.equal(analysis.signal.entry, null);
   assert.equal(analysis.signal.stopLoss, null);
   assert.equal(analysis.signal.takeProfit, null);
+});
+
+test('default premium/discount uses the last 120 bars, including short histories', () => {
+  for (const length of [20, 60, 120, 256]) {
+    const cs = candles(length, 1000, 1);
+    const actual = determinePremiumDiscount(cs);
+    assert.deepEqual(actual, determinePremiumDiscount(cs, { lookback: 120 }));
+    assert.equal(actual.swingLow, Math.min(...cs.slice(-120).map((c) => c.low)));
+    assert.ok(Number.isFinite(actual.equilibrium));
+    assert.equal(actual.zone, 'premium');
+  }
+  const invalid = determinePremiumDiscount([{ high: NaN, low: null, close: NaN }]);
+  assert.equal(invalid.equilibrium, null);
+  assert.equal(invalid.zone, 'unknown');
+});
+
+test('session detection honors Unix seconds, configured timezones, DST and daily dates', () => {
+  const session = (iso, settings) => detectSession({ time: Date.parse(iso) / 1000 }, settings);
+  assert.equal(session('2026-10-07T08:30:00Z'), 'london');
+  assert.equal(session('2026-01-07T09:30:00Z'), 'london');
+  assert.equal(session('2026-10-07T18:00:00Z'), 'newYork');
+  assert.equal(session('2026-01-07T19:00:00Z'), 'newYork');
+  assert.equal(session('2026-10-07T00:00:00Z'), 'asian');
+  assert.equal(session('2026-10-07T12:30:00Z'), 'overnight');
+  assert.equal(detectSession({ time: Date.parse('2026-10-07T08:30:00Z') }), 'london');
+  assert.equal(detectSession({ time: '2026-10-07' }), 'unknown');
+  assert.equal(detectSession({ time: NaN }), 'unknown');
+  assert.equal(session('2026-10-07T23:30:00Z', {
+    asian: { start: '23:00', end: '01:00', tz: 'UTC' },
+  }), 'asian');
+  assert.equal(session('2026-10-07T09:30:00Z', { timezoneOffsetMinutes: 0 }), 'london');
+});
+
+function sweepCandles(buySide = false) {
+  const cs = Array.from({ length: 12 }, (_, i) => ({
+    time: 1700000000 + i * 3600, open: 100, high: 102, low: 98, close: 100, volume: 100,
+  }));
+  cs[3][buySide ? 'high' : 'low'] = buySide ? 110 : 90;
+  cs[11][buySide ? 'high' : 'low'] = buySide ? 111 : 89;
+  return cs;
+}
+
+test('sweeps require a confirmed swing and a wick rejection, not a volume pocket', () => {
+  for (const buySide of [true, false]) {
+    const cs = sweepCandles(buySide);
+    assert.equal(detectLiquidityZones(cs.slice(0, 11)).sweeps.length, 0);
+    const result = detectLiquidityZones(cs);
+    assert.equal(result.sweeps.length, 1);
+    assert.equal(result.sweeps[0].direction, buySide ? 'bearish' : 'bullish');
+    assert.equal(result.sweeps[0].sweptAt, cs.at(-1).time);
+    assert.equal(result.sweeps[0].sweptIndex, 11);
+    assert.equal(detectLiquidityZones(cs, { sweepDetection: false }).sweeps.length, 0);
+    const broken = cs.map((c, i) => i === 8 ? {
+      ...c, close: buySide ? 112 : 88, high: buySide ? 113 : 102, low: buySide ? 98 : 87,
+    } : c);
+    assert.equal(detectLiquidityZones(broken).sweeps.length, 0, 'consumed levels cannot later sweep');
+    assert.equal(detectLiquidityZones(cs.slice(0, 7)).sweeps.length, 0, 'confirmation candles do not sweep');
+  }
+});
+
+test('only recent, bias-aligned sweeps add score and confluence', () => {
+  for (const buySide of [false, true]) {
+    const prefix = candles(256, 1000, 1);
+    const tail = sweepCandles(buySide).map((c, i) => ({
+      ...c, time: prefix.at(-1).time + (i + 1) * 3600,
+      open: c.open + 1155, high: c.high + 1155, low: c.low + 1155, close: c.close + 1155,
+    }));
+    const result = createSMCAnalysis([...prefix, ...tail]);
+    assert.equal(result.mtf.bias, 'bullish');
+    assert.equal(result.setup.reasons.includes('liquidity sweep'), !buySide);
+    const visible = selectVisibleSMC({ candles: [...prefix, ...tail], analysis: result, symbol: SYM, interval: IV,
+      settings: { mode: 'full', maxLiquidity: 100 } });
+    assert.ok(visible.levels.some((level) => level.state === 'swept'
+      && level.confirmedTime != null && level.direction === (buySide ? 'bearish' : 'bullish')),
+    'selector preserves the detector sweep and its side');
+    const disabled = createSMCAnalysis([...prefix, ...tail], { liquidity: { sweepDetection: false } });
+    assert.equal(result.score.score - disabled.score.score, buySide ? 0 : 15);
+    const old = createSMCAnalysis([...prefix, ...tail, ...candles(41, 1255, 1, true, tail.at(-1).time + 3600)], {
+      liquidity: { lookback: 300 },
+    });
+    assert.ok(!old.setup.reasons.includes('liquidity sweep'));
+  }
+});
+
+test('engine trade levels mirror correctly for bullish and bearish setups', () => {
+  for (const bullish of [true, false]) {
+    const analysis = createSMCAnalysis(candles(256, 1000, 1, bullish), { signals: { minimumConfluence: 1 } });
+    assert.equal(analysis.setup.direction, bullish ? 'bullish' : 'bearish');
+    const { entry, stopLoss, takeProfit } = analysis.signal;
+    assert.ok([entry, stopLoss, takeProfit].every(Number.isFinite));
+    assert.ok(bullish ? stopLoss < entry && entry < takeProfit : takeProfit < entry && entry < stopLoss);
+  }
+});
+
+test('SMC snapshots refresh same-bar prices and wicks without changing source candles', () => {
+  const cs = candles(30, 80000, 1);
+  const original = structuredClone(cs);
+  const first = snapshotSMCCandles(cs);
+  assert.strictEqual(snapshotSMCCandles(cs, null, first), first, 'unchanged samples keep their identity');
+  const active = { ...cs.at(-1), close: 81000, high: 81000 };
+  const updated = snapshotSMCCandles(cs, active, first);
+  assert.notStrictEqual(updated, first);
+  assert.equal(updated.candles.at(-1).close, 81000);
+  active.high = 81500;
+  const wicked = snapshotSMCCandles(cs, active, updated);
+  assert.equal(wicked.candles.at(-1).high, 81500);
+  assert.equal(updated.candles.at(-1).high, 81000);
+  assert.deepEqual(cs, original);
+  const replacement = cs.map((c) => ({ ...c, close: c.close - 0.2 }));
+  assert.notStrictEqual(snapshotSMCCandles(replacement, null, first), first, 'history replacement refreshes');
+  const replay = cs.slice(0, 20);
+  assert.deepEqual(snapshotSMCCandles(replay, active).candles, replay, 'future live bars cannot enter replay');
+});
+
+
+test('zone formation candles do not count as retests or mitigation', () => {
+  const cs = [
+    [100, 102, 99, 101], [101, 102, 99, 100], [100, 105, 100, 104],
+    [104, 107, 103, 106], [106, 109, 105, 108],
+  ].map(([open, high, low, close], time) => ({ time, open, high, low, close }));
+  const block = detectSMCOrderBlocks(cs).blocks[0];
+  const gap = detectSMCFVGs(cs).gaps[0];
+  for (const [raw, kind] of [[block, 'ob'], [gap, 'fvg']]) {
+    assert.ok(raw);
+    const zone = normalizeZone(raw, kind, cs, SYM, IV);
+    assert.equal(updateLifecycle([zone], cs)[0].state, 'active', kind);
+    assert.equal(detectMitigation(cs, [raw])[0].state, 'active', kind);
+    const retested = [...cs, { time: 5, open: 108, high: 109, low: 101, close: 108 }];
+    assert.notEqual(updateLifecycle([zone], retested)[0].state, 'active', kind);
+    assert.equal(detectMitigation(retested, [raw])[0].state, 'mitigated', kind);
+  }
+});
+
+test('only untouched confirmed order blocks contribute to the score', () => {
+  const prefix = candles(256, 1000, 1);
+  const tail = [
+    [100, 102, 99, 101], [101, 102, 99, 100], [100, 105, 100, 104],
+    [104, 107, 103, 106], [106, 109, 105, 108],
+  ].map(([open, high, low, close], i) => ({
+    time: prefix.at(-1).time + (i + 1) * 3600,
+    open: open + 1156, high: high + 1156, low: low + 1156, close: close + 1156,
+  }));
+  const cs = [...prefix, ...tail];
+  assert.ok(createSMCAnalysis(cs).setup.reasons.includes('order block'));
+  const retested = [...cs, { time: cs.at(-1).time + 3600, open: 1264, high: 1265, low: 1257, close: 1264 }];
+  assert.ok(!createSMCAnalysis(retested).setup.reasons.includes('order block'));
+});
+
+test('opposite-direction displacement cannot confirm a setup', () => {
+  for (const direction of ['bullish', 'bearish']) {
+    const cs = candles(60, 1000, 0.1);
+    cs[58] = { ...cs[58], open: 1006, close: direction === 'bullish' ? 996 : 1016, high: 1017, low: 995 };
+    const gate = checkSetupConfluence(cs, { setup: { direction }, mtf: { bias: direction } });
+    assert.ok(gate.missing.includes('displacement'));
+    cs[58] = { ...cs[58], open: cs[58].close, close: cs[58].open };
+    assert.ok(checkSetupConfluence(cs, { setup: { direction }, mtf: { bias: direction } }).reasons.includes('displacement'));
+  }
+});
+
+test('liquidity and structure caps honor zero and one at every zoom', () => {
+  const cs = candles(80, 1000, 1);
+  cs[10] = { ...cs[10], high: 1020 };
+  const analysis = { mtf: { bias: 'neutral' }, liquidity: { levels: [
+    { type: 'bsl', price: 1081, top: 1081, bottom: 1081, time: cs.at(-1).time },
+    { type: 'ssl', price: 1079, top: 1079, bottom: 1079, time: cs.at(-1).time },
+  ] } };
+  for (const mode of ['smart', 'minimal', 'full', 'debug']) {
+    for (const visibleBars of [50, 150, 250]) {
+      for (const cap of [0, 1]) {
+        const result = selectVisibleSMC({ candles: cs, analysis, symbol: SYM, interval: IV,
+          settings: { mode, visibleBars, minScore: 0, maxLiquidity: cap, maxStructure: cap } });
+        assert.ok(result.levels.length <= cap, `${mode}: liquidity cap ${cap}`);
+        assert.ok(result.events.length <= cap, `${mode}: structure cap ${cap}`);
+      }
+    }
+  }
 });

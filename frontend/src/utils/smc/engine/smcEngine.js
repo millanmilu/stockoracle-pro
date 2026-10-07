@@ -48,8 +48,8 @@ export function createSMCAnalysis(candles, settings = {}) {
     const distance = currentPrice < low ? low - currentPrice : currentPrice > high ? currentPrice - high : 0;
     return distance <= relevanceRange;
   };
-  const obIsUntouched = (block) => {
-    const creationIndex = candles.findIndex((candle) => candle.time === block.time);
+  const zoneIsUntouched = (block) => {
+    const creationIndex = candles.findIndex((candle) => candle.time === (block.confirmedTime ?? block.time));
     if (creationIndex < 0) return false;
     const low = Math.min(Number(block.top), Number(block.bottom));
     const high = Math.max(Number(block.top), Number(block.bottom));
@@ -68,19 +68,22 @@ export function createSMCAnalysis(candles, settings = {}) {
     : 0;
   const alignedFvgs = fvgs.gaps.filter((gap) => biasDirection
     && gap.type?.startsWith(`${biasDirection === 'bull' ? 'bullish' : 'bearish'}_`)
-    && isNearPrice(gap));
+    && isNearPrice(gap)
+    && zoneIsUntouched(gap));
   const alignedOrderBlocks = orderBlocks.blocks.filter((block) => biasDirection
     && block.type?.startsWith(`${biasDirection === 'bull' ? 'bullish' : 'bearish'}_`)
     && isNearPrice(block)
-    && obIsUntouched(block));
+    && zoneIsUntouched(block));
   const structureLabel = hasRecentStructure && latestBreak.direction === biasDirection
     ? latestBreak.type
     : 'neutral';
   const premiumDiscountAligned = (mtf.bias === 'bullish' && premiumDiscount.zone === 'discount')
     || (mtf.bias === 'bearish' && premiumDiscount.zone === 'premium');
+  const alignedSweeps = liquidity.sweeps.filter((sweep) => sweep.direction === mtf.bias
+    && Number.isInteger(sweep.sweptIndex) && candles.length - 1 - sweep.sweptIndex <= 40);
   const context = {
     htfAlignmentScore: mtf.bias === 'neutral' ? 0 : mtf.confidence / 100,
-    liquiditySweepScore: liquidity.sweeps.length ? 1 : 0,
+    liquiditySweepScore: alignedSweeps.length ? 1 : 0,
     structureScore: structureLabel === 'neutral' ? 0 : 1,
     displacementScore: displacement,
     fvgScore: alignedFvgs.length ? 1 : 0,
@@ -90,12 +93,12 @@ export function createSMCAnalysis(candles, settings = {}) {
     volumeVolatilityScore: imbalance.volumeImbalance.length ? 1 : 0,
     bias: mtf.bias,
     structure: structureLabel,
-    liquidity: liquidity.sweeps,
+    liquidity: alignedSweeps,
     orderBlocks: alignedOrderBlocks,
     fvg: alignedFvgs,
     entry: premiumDiscount.equilibrium,
-    stopLoss: premiumDiscount.swingLow,
-    takeProfit: premiumDiscount.swingHigh,
+    stopLoss: mtf.bias === 'bearish' ? premiumDiscount.swingHigh : premiumDiscount.swingLow,
+    takeProfit: mtf.bias === 'bearish' ? premiumDiscount.swingLow : premiumDiscount.swingHigh,
   };
 
   const score = calculateSMCScore(context, normalized);

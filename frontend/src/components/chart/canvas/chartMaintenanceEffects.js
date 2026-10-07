@@ -4,6 +4,29 @@ import { resolvePrecision } from '../../../utils/chartSettings';
 import { decimalsForPrice } from './chartFormat';
 import { createPrimarySeries } from './chartSeriesFactory';
 
+/**
+ * Candles state → setData-safe bars. Drops missing times, non-finite /
+ * non-positive OHLC and inverted high/low so a single corrupt bar can never
+ * poison the series PlotList (which surfaces a frame later as an uncaught
+ * "Value is null" in SeriesBarColorer paint).
+ */
+function toValidCandles(rows) {
+  const out = [];
+  if (!Array.isArray(rows)) return out;
+  for (const c of rows) {
+    if (!c || c.time == null || c.time === '') continue;
+    const open = Number(c.open);
+    const high = Number(c.high);
+    const low = Number(c.low);
+    const close = Number(c.close);
+    if (!isFinite(open) || !isFinite(high) || !isFinite(low) || !isFinite(close)) continue;
+    if (open <= 0 || high <= 0 || low <= 0 || close <= 0) continue;
+    if (high < Math.max(open, close) || low > Math.min(open, close)) continue;
+    out.push({ time: c.time, open, high, low, close });
+  }
+  return sanitizeCandles(out);
+}
+
 export function restoreChartVisibility({
   chartInstanceRef,
   candleSeriesRef,
@@ -28,18 +51,13 @@ export function restoreChartVisibility({
       try {
         const rows = candlesRef.current;
         if (Array.isArray(rows) && rows.length > 0) {
-          const safe = sanitizeCandles(rows.map((c) => ({
-            time: c.time,
-            open: Number(c.open),
-            high: Number(c.high),
-            low: Number(c.low),
-            close: Number(c.close),
-          })));
+          const safe = toValidCandles(rows);
           if (safe.length) {
             if (['line', 'area', 'baseline'].includes(chartTypeRef.current)) {
-              series.setData(sanitizeSeriesData(
-                safe.map((c) => ({ time: c.time, value: Number(c.close) })),
-              ));
+              const linePts = sanitizeSeriesData(
+                safe.filter((c) => isFinite(c.close)).map((c) => ({ time: c.time, value: Number(c.close) })),
+              );
+              if (linePts.length) series.setData(linePts);
             } else {
               series.setData(safe);
             }
@@ -83,17 +101,12 @@ export function switchChartType({
         const lastC = candlesRef.current[candlesRef.current.length - 1];
         syncSeriesPrecision(resolvePrecision(settingsRef.current, decimalsForPrice(lastC?.close, isCrypto)));
         try {
-          const safe = sanitizeCandles(candlesRef.current.map(c => ({
-            time: c.time,
-            open: Number(c.open),
-            high: Number(c.high),
-            low: Number(c.low),
-            close: Number(c.close),
-          })));
+          const safe = toValidCandles(candlesRef.current);
           if (['line', 'area', 'baseline'].includes(chartType)) {
-            newSeries.setData(sanitizeSeriesData(
-              safe.map(c => ({ time: c.time, value: Number(c.close) }))
-            ));
+            const linePts = sanitizeSeriesData(
+              safe.filter((c) => isFinite(c.close)).map(c => ({ time: c.time, value: Number(c.close) }))
+            );
+            if (linePts.length) newSeries.setData(linePts);
           } else if (safe.length) {
             newSeries.setData(safe);
           }

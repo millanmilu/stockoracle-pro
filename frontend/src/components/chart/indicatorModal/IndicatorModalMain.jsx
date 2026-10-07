@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { INDICATOR_CATEGORIES, INDICATOR_DEFINITIONS } from '../indicatorDefinitions';
+import CustomIndicatorEditor from '../CustomIndicatorEditor';
 import { shell, FAVORITES_KEY, RECENT_KEY, MAX_RECENT } from './indicatorModalStyles';
 import { loadFavorites, loadRecent } from './indicatorStorage';
 import { scoreIndicator } from './indicatorSearch';
@@ -10,6 +11,7 @@ export default function IndicatorModal({
   isOpen = false,
   onClose = () => {},
   activeIndicators = [],
+  customIndicators = [],
   hiddenIndicators = [],
   onToggleIndicator = () => {},
   onToggleHideIndicator = () => {},
@@ -17,6 +19,8 @@ export default function IndicatorModal({
   onClearAll = () => {},
   onOpenSettings = () => {},
   onMoveIndicator = () => {},
+  onSaveCustomIndicator = () => {},
+  onDeleteCustomIndicator = () => {},
 }) {
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
@@ -24,6 +28,7 @@ export default function IndicatorModal({
   const [favorites, setFavorites] = useState(() => loadFavorites());
   const [recent, setRecent] = useState(() => loadRecent());
   const [expandedId, setExpandedId] = useState(null);
+  const [editingCustom, setEditingCustom] = useState(null);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
   const searchInputRef = useRef(null);
   const listRef = useRef(null);
@@ -37,6 +42,7 @@ export default function IndicatorModal({
 
   const activeById = useMemo(() => new Set(activeIndicators), [activeIndicators]);
   const hiddenById = useMemo(() => new Set(hiddenIndicators), [hiddenIndicators]);
+  const catalog = useMemo(() => [...INDICATOR_DEFINITIONS, ...customIndicators], [customIndicators]);
 
   const toggleFavorite = (id) => {
     setFavorites((prev) => {
@@ -70,10 +76,10 @@ export default function IndicatorModal({
   ], []);
 
   const categoryCount = (id) => {
-    if (id === 'all') return INDICATOR_DEFINITIONS.length;
+    if (id === 'all') return catalog.length;
     if (id === 'favorites') return favorites.length;
-    if (id === 'oscillators') return INDICATOR_DEFINITIONS.filter((d) => d.type === 'oscillator').length;
-    return INDICATOR_DEFINITIONS.filter((d) => d.category === id).length;
+    if (id === 'oscillators') return catalog.filter((d) => d.type === 'oscillator').length;
+    return catalog.filter((d) => d.category === id).length;
   };
 
   const matchesCategory = (indicator) => {
@@ -85,7 +91,7 @@ export default function IndicatorModal({
 
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
-    const inCategory = INDICATOR_DEFINITIONS.filter(matchesCategory);
+    const inCategory = catalog.filter(matchesCategory);
     if (!query) {
       let list = [...inCategory];
       // Favorites float to the top when browsing "All".
@@ -111,7 +117,7 @@ export default function IndicatorModal({
       .sort((a, b) => b.score - a.score)
       .map((row) => row.indicator);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCategory, search, favorites]);
+  }, [activeCategory, search, favorites, catalog]);
 
   // Display order drives keyboard navigation. On "All" with no query the AI
   // catalog renders as its own section first, so keyboard order follows the
@@ -130,16 +136,16 @@ export default function IndicatorModal({
 
   const recentDefinitions = useMemo(() => {
     return recent
-      .map((id) => INDICATOR_DEFINITIONS.find((item) => item.id === id))
+      .map((id) => catalog.find((item) => item.id === id))
       .filter(Boolean)
       .slice(0, 6);
-  }, [recent]);
+  }, [recent, catalog]);
 
   const activeDefinitions = useMemo(() => {
     return activeIndicators
-      .map((id) => INDICATOR_DEFINITIONS.find((item) => item.id === id))
+      .map((id) => catalog.find((item) => item.id === id))
       .filter(Boolean);
-  }, [activeIndicators]);
+  }, [activeIndicators, catalog]);
 
   useEffect(() => {
     setHighlightedIndex(0);
@@ -167,6 +173,7 @@ export default function IndicatorModal({
   useEffect(() => {
     if (!isOpen) return undefined;
     const handleKeyDown = (event) => {
+      if (editingCustom) return;
       // Tab must never escape the dialog — the background is visually blocked by
       // the overlay, so focus landing out there reads as a frozen UI.
       if (event.key === 'Tab' && dialogRef.current) {
@@ -216,7 +223,7 @@ export default function IndicatorModal({
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [displayOrder, highlightedIndex, isOpen, onClose, onToggleIndicator, activeById]);
+  }, [displayOrder, editingCustom, highlightedIndex, isOpen, onClose, onToggleIndicator, activeById]);
 
   if (!isOpen) return null;
 
@@ -253,9 +260,11 @@ export default function IndicatorModal({
     onToggleHideIndicator,
     onMoveIndicator,
     onRemoveIndicator,
+    onEditCustom: setEditingCustom,
   };
 
   return (
+    <>
     <div
       role="presentation"
       onClick={onClose}
@@ -288,7 +297,7 @@ export default function IndicatorModal({
         }}
       >
 
-        <ModalHeader activeCount={activeCount} hiddenIndicators={hiddenIndicators} onClose={onClose} />
+        <ModalHeader activeCount={activeCount} hiddenIndicators={hiddenIndicators} onClose={onClose} onCreateCustom={() => setEditingCustom({})} />
 
         <SearchBar searchInputRef={searchInputRef} search={search} setSearch={setSearch} highlighted={highlighted} />
 
@@ -327,5 +336,20 @@ export default function IndicatorModal({
         <ModalFooter activeCount={activeCount} isMobile={isMobile} highlighted={highlighted} highlightedActive={highlightedActive} handleToggle={handleToggle} onClearAll={onClearAll} onClose={onClose} />
       </div>
     </div>
+    {editingCustom && (
+      <CustomIndicatorEditor
+        indicator={editingCustom.id ? editingCustom : null}
+        onSave={(draft) => {
+          onSaveCustomIndicator(draft);
+          setEditingCustom(null);
+        }}
+        onDelete={(id) => {
+          onDeleteCustomIndicator(id);
+          setEditingCustom(null);
+        }}
+        onClose={() => setEditingCustom(null)}
+      />
+    )}
+    </>
   );
 }
