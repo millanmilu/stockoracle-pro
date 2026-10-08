@@ -3,7 +3,7 @@ import useStore from '../../store/useStore';
 import {
   toChartTime, getSessionBucketStart, isCryptoSymbol, subscribeLiveTick,
   isAppendableTime, compareChartTime, INTERVAL_SLOT_SEC, computeFillSlots,
-  getIstDateString, canUpdateLiveCandle,
+  getIstDateString, canUpdateLiveCandle, isValidChartTime,
 } from '../../utils/chartHelpers';
 
 /**
@@ -82,8 +82,15 @@ export function useLiveTicks({
         : [];
       const ordered = [...fills, newCandle];
       for (const c of ordered) {
-        // Frozen during Bar Replay — the replay cursor owns the chart surface.
-        if (replayIndexRef.current == null) chartCanvasRef.current?.updateActiveCandle(c);
+        // Update the candle already present in the series for low-latency
+        // ticks. New bars are committed through setCandles -> setData only;
+        // calling series.update() first and immediately replacing the whole
+        // dataset can leave Lightweight Charts' hit-test cache on stale rows.
+        const updatesExistingBar = prevTime != null && c.time === prevTime;
+        const missingActiveAnchor = prevTime == null;
+        if (replayIndexRef.current == null && (updatesExistingBar || missingActiveAnchor)) {
+          chartCanvasRef.current?.updateActiveCandle(c);
+        }
       }
       activeCandleRef.current = newCandle;
       lastTickBucketRef.current = newCandle.time;
@@ -112,7 +119,7 @@ export function useLiveTicks({
     if (storeLiveTick.liveCandle) {
       const rawCandle = storeLiveTick.liveCandle;
       const formattedTime = toChartTime(rawCandle.time, isIntraday);
-      if (formattedTime) {
+      if (isValidChartTime(formattedTime)) {
         // Guard: never regress activeCandleRef with a stale/out-of-order
         // exchange bar — lightweight-charts `setData` throws
         // "data must be asc ordered by time" if such a bar is appended.
@@ -181,7 +188,7 @@ export function useLiveTicks({
         // Frozen during Bar Replay — the replay cursor owns the chart surface.
         if (replayIndexRef.current == null) chartCanvasRef.current?.updateActiveCandle(active);
       }
-    } else if (currentBucketTime && canUpdateCandle) {
+    } else if (isValidChartTime(currentBucketTime) && canUpdateCandle) {
       // Guard: drop stale buckets (client clock behind server history, late
       // ticks, or interval-switch races). Appending a time <= active.time
       // would make `candles` non-ascending and crash lightweight-charts

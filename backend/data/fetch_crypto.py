@@ -31,6 +31,11 @@ def fetch_crypto_data(ticker: str, period: str = "ALL", interval: str = "1d",
     import urllib.request
 
     ticker = ticker.upper().strip()
+    # Spot gold is its own provider contract. PAXGUSDT remains available only
+    # when the caller explicitly asks for PAXG/PAXGUSDT.
+    if _is_gold_ticker(ticker) and not ticker.startswith("PAXG"):
+        from .xauusd import fetch_xauusd_data
+        return fetch_xauusd_data(period=period, interval=interval)
     cache_key = f"hist_{ticker}_{period}_{interval}"
 
     fresh = _get_cached(cache_key)
@@ -319,21 +324,6 @@ def fetch_crypto_data(ticker: str, period: str = "ALL", interval: str = "1d",
             intra_db.attrs["data_source"] = "sqlite"
             return intra_db
 
-    # 5. Baseline seed data fallback (for isolated environments without internet)
-    # Charts-only: seed is NEVER persisted to historical_prices/intraday_candles.
-    # Daily seed dates are len-10 strings, so persisting them would launder
-    # synthetic bars into future "sqlite" reads and poison ML/backtest inputs.
-    seed_df = _generate_crypto_seed_data(ticker, interval_clean, is_intraday)
-    if seed_df is not None and not seed_df.empty:
-        logger.warning(
-            "Serving crypto_seed baseline for %s (%s) — charts only, "
-            "blocked from ML/backtest by require_real_data.",
-            ticker, interval_clean,
-        )
-        seed_df.attrs["data_source"] = "crypto_seed"
-        _set_cached(cache_key, seed_df)
-        return seed_df
-
     return None
 
 
@@ -343,6 +333,17 @@ def fetch_crypto_live_ticker(ticker: str) -> Optional[dict]:
     import urllib.request
 
     ticker = ticker.upper().strip()
+    if _is_gold_ticker(ticker) and not ticker.startswith("PAXG"):
+        from .xauusd import fetch_xauusd_data
+        frame = fetch_xauusd_data(period="7D", interval="15m")
+        if frame is None or frame.empty:
+            return None
+        latest = frame.iloc[-1]
+        return {
+            "ticker": ticker, "ltp": float(latest["close"]), "current_price": float(latest["close"]),
+            "open": float(latest["open"]), "high": float(latest["high"]), "low": float(latest["low"]),
+            "volume": float(latest.get("volume", 0) or 0), "source": "xauusd_yahoo_fx",
+        }
     symbol = _binance_crypto_symbol(ticker)
     url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
 

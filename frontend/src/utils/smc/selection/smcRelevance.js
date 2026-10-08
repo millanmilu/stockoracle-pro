@@ -112,15 +112,18 @@ export function mergeZones(zones, threshold = 0.6) {
       const a = list[i];
       const b = list[j];
       if (a.kind !== b.kind || a.direction !== b.direction) continue;
+      if ((stateFactor(a.state) > 0) !== (stateFactor(b.state) > 0)) continue;
       if (zoneOverlap(a, b) < threshold) continue;
-      const winner = (b.relevance || 0) > (a.relevance || 0) ? b : a;
+      const winner = (b.relevance || 0) >= (a.relevance || 0) ? b : a;
       const loser = winner === b ? a : b;
+      const top = Math.max(Number(a.top), Number(b.top));
+      const bottom = Math.min(Number(a.bottom), Number(b.bottom));
       mergedIds.push(loser.uid);
       list[i] = {
         ...winner,
-        top: Math.max(Number(a.top), Number(b.top)),
-        bottom: Math.min(Number(a.bottom), Number(b.bottom)),
-        get mid() { return (this.top + this.bottom) / 2; },
+        top,
+        bottom,
+        mid: (top + bottom) / 2,
         mergedFrom: [...(winner.mergedFrom || []), loser.uid],
       };
       list[j] = null;

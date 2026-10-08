@@ -12,11 +12,13 @@ export function calculateSMCScore(context = {}, settings = {}) {
     'fvg', 'orderBlock', 'premiumDiscount', 'session', 'volumeVolatility',
   ];
   const raw = keys.reduce((sum, key) => sum + value(key) * Number(weights[key] || 0), 0);
+  const components = Object.fromEntries(keys.map((key) => [key, value(key)]));
 
   const score = (raw / total) * 100;
   return {
     raw,
     total,
     score: Math.max(0, Math.min(100, score)),
+    components,
   };
 }

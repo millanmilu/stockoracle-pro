@@ -5,7 +5,7 @@ import ReplayBar from '../chart/ReplayBar';
 import VolumeProfileOverlay from '../chart/VolumeProfileOverlay';
 import { formatReplayBarLabel } from './format';
 
-export function SmcProSummaryCard({ summary }) {
+export function SmcProSummaryCard({ summary, setup, backtest: _backtest, detailOpen = false, onToggleDetail = () => {} }) {
   const [collapsed, setCollapsed] = useState(false);
   const [position, setPosition] = useState({ left: 12, top: 12 });
   const dragRef = useRef(null);
@@ -21,10 +21,21 @@ export function SmcProSummaryCard({ summary }) {
     .replace('asian', 'Asia')
     .replace('newYork', 'New York')
     .replace('london', 'London')
-    .replace('overnight', 'Overnight');
+    .replace('overnight', 'Overnight')
+    .replace('unknown', '—');
   const scoreValue = Number(summary?.score?.score);
   const score = Number.isFinite(scoreValue) ? `${Math.round(scoreValue)}/100` : '—';
   const isWaiting = !summary;
+  const hasSetup = setup && Number.isFinite(Number(setup.entry))
+    && Number.isFinite(Number(setup.stopLoss))
+    && Array.isArray(setup.takeProfits) && setup.takeProfits.length >= 3;
+  const fmtLevel = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '—';
+    if (n >= 1000) return n.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    if (n >= 1) return n.toFixed(2);
+    return n.toPrecision(4);
+  };
   const onDragStart = (event) => {
     if (event.target.closest('button')) return;
     event.preventDefault();
@@ -53,7 +64,7 @@ export function SmcProSummaryCard({ summary }) {
         position: 'absolute',
         top: position.top,
         left: position.left,
-        zIndex: 25,
+        zIndex: 40,
         minWidth: collapsed ? 104 : 172,
         padding: '7px 9px',
         borderRadius: 10,
@@ -80,6 +91,14 @@ export function SmcProSummaryCard({ summary }) {
           <span style={{ fontSize: '0.59rem', color: isWaiting ? '#94A3B8' : bias === 'bullish' ? '#34D399' : bias === 'bearish' ? '#F87171' : '#FBBF24', fontWeight: 800 }}>{collapsed ? biasLabel.toUpperCase() : biasLabel}</span>
           <button
             type="button"
+            aria-label={detailOpen ? 'Close SMC Pro detail panel' : 'Open SMC Pro detail panel'}
+            title="MTF confluence · zones · backtest · export"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={onToggleDetail}
+            style={{ border: 0, background: 'transparent', color: detailOpen ? '#9ECBFF' : '#8AA0C2', padding: 0, fontSize: 10, lineHeight: 1, cursor: 'pointer' }}
+          >⤢</button>
+          <button
+            type="button"
             aria-label={collapsed ? 'Expand SMC Pro panel' : 'Collapse SMC Pro panel'}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => setCollapsed((value) => !value)}
@@ -100,6 +119,30 @@ export function SmcProSummaryCard({ summary }) {
           <span style={{ color: '#E2E8F0', fontWeight: 600, textAlign: 'right' }}>{session}</span>
           <span style={{ color: '#8AA0C2' }}>Score</span>
           <span style={{ color: isWaiting ? '#CBD5E1' : '#FBBF24', fontWeight: 700, textAlign: 'right' }}>{score}</span>
+          {hasSetup ? (
+            <>
+              <span style={{ color: '#8AA0C2' }}>Levels</span>
+              <span style={{
+                color: setup.confirmed ? '#34D399' : '#FBBF24',
+                fontWeight: 700,
+                textAlign: 'right',
+              }}>
+                {setup.confirmed ? 'Confirmed' : 'Plan · awaiting confluence'}
+              </span>
+              <span style={{ color: '#8AA0C2' }}>Entry</span>
+              <span style={{ color: '#60A5FA', fontWeight: 700, textAlign: 'right' }}>{fmtLevel(setup.entry)}</span>
+              <span style={{ color: '#8AA0C2' }}>Stop loss</span>
+              <span style={{ color: '#F87171', fontWeight: 700, textAlign: 'right' }}>{fmtLevel(setup.stopLoss)}</span>
+              <span style={{ color: '#8AA0C2' }}>TP1 / TP2 / TP3</span>
+              <span style={{ color: '#34D399', fontWeight: 700, textAlign: 'right' }}>
+                {setup.takeProfits.slice(0, 3).map(fmtLevel).join(' / ')}
+              </span>
+            </>
+          ) : (
+            <span style={{ gridColumn: '1 / -1', marginTop: 3, color: '#94A3B8', fontSize: '0.54rem' }}>
+              Waiting for full confluence
+            </span>
+          )}
         </div>
       )}
     </div>

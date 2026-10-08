@@ -59,6 +59,10 @@ BUILTIN_STRATEGIES: Dict[str, Dict[str, str]] = {
         "label": "Supertrend Volatility Trail",
         "description": "Dynamic ATR-based trailing trend-following stop.",
     },
+    "smc_pro": {
+        "label": "SMC Pro (MTF + Structure)",
+        "description": "Confirmed SMC confluence with structural stops/targets and long/short trades.",
+    },
 }
 
 

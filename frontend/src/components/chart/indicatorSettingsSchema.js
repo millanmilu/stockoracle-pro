@@ -94,6 +94,18 @@ const FALLBACK_INPUTS = {
   ],
   pivot_points: [{ key: 'period', label: 'Lookback', type: 'number', def: 1, min: 1, max: 30 }],
   fibonacci: [{ key: 'period', label: 'Lookback', type: 'number', def: 50, min: 5, max: 500 }],
+  smc_pro: [
+    { key: 'windowSize', label: 'Swing Window', type: 'number', def: 5, min: 2, max: 20 },
+    { key: 'lookback', label: 'Zone Lookback', type: 'number', def: 120, min: 20, max: 500 },
+  ],
+  swing_hl: [{ key: 'windowSize', label: 'Swing Window', type: 'number', def: 5, min: 2, max: 20 }],
+  hh_hl: [{ key: 'windowSize', label: 'Swing Window', type: 'number', def: 5, min: 2, max: 20 }],
+  bos_choch: [{ key: 'windowSize', label: 'Swing Window', type: 'number', def: 5, min: 2, max: 20 }],
+  supply_demand: [{ key: 'lookback', label: 'Lookback', type: 'number', def: 120, min: 20, max: 500 }],
+  order_blocks: [{ key: 'lookback', label: 'Lookback', type: 'number', def: 100, min: 20, max: 500 }],
+  fvg: [{ key: 'maxGaps', label: 'Max Gaps', type: 'number', def: 8, min: 1, max: 30 }],
+  liquidity: [{ key: 'bins', label: 'Volume Bins', type: 'number', def: 8, min: 2, max: 24 }],
+  sr_lines: [{ key: 'lookback', label: 'Lookback', type: 'number', def: 150, min: 20, max: 500 }],
 };
 
 export function getFallbackInputs(indicatorId) {

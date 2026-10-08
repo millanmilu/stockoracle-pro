@@ -136,8 +136,8 @@ aur Rotated Rectangle Alt+Shift+W use karta hai taaki chords clash na hon.
 ## SMC Pro layer (screenshot-parity overlays — Oct 2026)
 `src/components/live-chart/SmcProLayer.jsx` price pane ke upar click-through SVG layer hai
 (`zIndex 30`, drawings ke neeche): translucent OB/FVG rectangles, BSL/SSL + EQH/EQL dashed
-levels, BOS/CHoCH/MSS + HH/HL tags, Entry/TP1-3/SL rails with right-side chips, Asia/London/
-NewYork killzone strip. Detection ZERO naya — `analyzeSMC()` (`src/utils/smc/`) +
+levels, BOS/CHoCH/MSS + HH/HL tags, calculated Entry/TP1-3/SL rails with right-side chips,
+aur same levels ka compact score card, Asia/London/NewYork killzone strip. Detection ZERO naya — `analyzeSMC()` (`src/utils/smc/`) +
 `detectSwingPoints`/`detectBosChoch` (`src/utils/marketStructure.js`) ka output sirf paint hota hai;
 setup levels pure `deriveSetupLevels()` (`src/utils/smc/engine/setupLevels.js`, test
 `src/utils/smcSetupLevels.test.js`) se. `SmcProLayer.jsx` active candle ka immutable OHLCV snapshot
@@ -146,6 +146,15 @@ ek analysis deta hai; unchanged snapshot pe recompute nahi. Replay live ref igno
 aur symbol/interval switch fresh instance banata hai. Display toggles `src/utils/smcDisplayPrefs.js` store me
 (`so_smc_display_v1`) — top-bar SMC Pro switch + menu + score card sab wahi padhte hain, prop drilling nahi.
 Layer + score card sirf `smc_pro` indicator active aur visible hone par render hote hain. Bottom range bar jaan-bujhkar nahi banaya.
+
+## SMC Pro Backtest Studio
+`BacktestPanel.jsx` me SMC Pro strategy select karne par interval (`1m`–`4h`) aur lookback controls
+dikhenge. Backend `backtest_smc.py` causal 4×/16× bias, confirmed swings/breaks, sweeps,
+untouched OB/FVG, premium/discount aur timezone-aware sessions se out-of-sample signals banata hai;
+trades next candle open par long/short fill hote hain, structural stop/target levels par wick hit
+resolve hote hain (same-candle ambiguity me stop pehle). SMC holding cap candles me hai aur
+generic percent stop/target controls apply nahi hote. Chart detail panel ka baseline backtest alag
+hai; usse Studio ke SMC Pro strategy result na samjhein.
 
 ## SMC visibility architecture (declutter rework — Oct 2026)
 Detection ≠ visualization: engine hazaaron objects detect kar sakta hai, chart par sirf

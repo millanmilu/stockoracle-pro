@@ -21,7 +21,7 @@ export function EquityCurveTab({ data }) {
                   <span><span style={{ color: '#F43F5E' }}>|</span> Sell Marker</span>
                 </div>
                 <div style={{ fontSize: '0.68rem', color: '#64748B' }}>
-                  Total Sessions: {data.equity_curve?.length || 0} days
+                  Total Sessions: {data.equity_curve?.length || 0} {data.interval ? `${data.interval} bars` : 'days'}
                 </div>
               </div>
               <ResponsiveContainer width="100%" height={290}>
@@ -145,7 +145,7 @@ export function MonteCarloTab({ data, currSymbol }) {
                 </strong>
               </div>
               <p style={{ fontSize: '0.74rem', color: '#94A3B8', lineHeight: 1.6, margin: 0 }}>
-                This test shuffles your strategy's daily return sequence 500 times with random permutation. 
+                This test shuffles your strategy's {data.interval ? 'per-bar' : 'daily'} return sequence 500 times with random permutation.
                 If your real observed Sharpe (<strong style={{ color: '#818CF8' }}>{fmtNum(data.sharpe_ratio)}</strong>) is above the 
                 median (<strong style={{ color: '#F59E0B' }}>{fmtNum(data.monte_carlo.sharpe_p50)}</strong>) and approaches the 95th percentile 
                 (<strong style={{ color: '#10B981' }}>{fmtNum(data.monte_carlo.sharpe_p95)}</strong>), the observed performance represents a genuine quantitative edge rather than luck.

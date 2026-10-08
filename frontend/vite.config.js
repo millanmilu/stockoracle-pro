@@ -24,7 +24,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'charts-vendor': ['lightweight-charts', 'chart.js', 'react-chartjs-2'],
+          'charts-vendor': ['lightweight-charts'],
           'react-vendor': ['react', 'react-dom', 'zustand', 'axios'],
           'ui-icons': ['lucide-react', 'react-hot-toast'],
         },

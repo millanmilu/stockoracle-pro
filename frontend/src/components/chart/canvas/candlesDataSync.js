@@ -1,4 +1,4 @@
-import { sanitizeCandles, sanitizeSeriesData } from '../../../utils/chartHelpers';
+import { isValidChartTime, sanitizeCandles, sanitizeSeriesData } from '../../../utils/chartHelpers';
 import { resolvePrecision } from '../../../utils/chartSettings';
 import { decimalsForPrice } from './chartFormat';
 
@@ -38,7 +38,7 @@ export function syncCandlesData({
       // uncaught "Value is null" in SeriesBarColorer during paint.
       const rawFormatted = [];
       for (const c of candles) {
-        if (!c || c.time == null || c.time === '') continue;
+        if (!c || !isValidChartTime(c.time)) continue;
         const open = Number(c.open);
         const high = Number(c.high);
         const low = Number(c.low);

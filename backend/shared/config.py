@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: Optional[str] = Field(default=None, alias="TELEGRAM_BOT_TOKEN")
     TELEGRAM_CHAT_ID: Optional[str] = Field(default=None, alias="TELEGRAM_CHAT_ID")
 
+    # Deterministic SMC agent (disabled until explicitly enabled in deployment)
+    SMC_AGENT_ENABLED: bool = False
+    SMC_AGENT_POLL_SECONDS: int = 30
+    SMC_AGENT_MAX_RISK_PCT: float = 1.0
+
     # Terminal UI Settings
     TERMINAL_THEME: str = "dark"
     TERMINAL_DEFAULT_SYMBOL: str = "RELIANCE"

@@ -30,5 +30,6 @@ export function detectInducement(candles, settings = {}) {
     }
   }
 
-  return events.slice(-settings.maxEvents || 6);
+  const maxEvents = Math.max(1, Math.floor(Number(settings.maxEvents) || 6));
+  return events.slice(-maxEvents);
 }

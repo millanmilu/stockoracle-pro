@@ -400,6 +400,40 @@ export default function ChartToolbar({
               </MenuItem>
             ))}
             <div style={{ height: 1, background: tk.toolbarBorder, margin: '4px 0' }} />
+            <div style={drawGroupHeader}>Detection quality (ATR)</div>
+            {[
+              ['minObDisplacement', 'Min OB displacement', 0.1, 3],
+              ['minFvgAtr', 'Min FVG size', 0.05, 1],
+            ].map(([key, label, step, max]) => {
+              const value = Number(smcDisplay[key]);
+              const safeValue = Number.isFinite(value) ? value : 0;
+              const precision = 2;
+              return (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 12px', fontSize: 12, color: tk.toolbarText }}>
+                  <span>{label}</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <button
+                      type="button"
+                      aria-label={`Decrease ${label}`}
+                      onClick={() => saveSmcDisplay({ [key]: Math.max(0, Number((safeValue - step).toFixed(precision))) })}
+                      style={{ width: 22, height: 22, borderRadius: 4, border: `1px solid ${tk.toolbarBorder}`, background: 'transparent', color: tk.toolbarText, cursor: 'pointer' }}
+                    >
+                      −
+                    </button>
+                    <span style={{ minWidth: 28, textAlign: 'center', fontWeight: 700 }}>{safeValue.toFixed(precision)}×</span>
+                    <button
+                      type="button"
+                      aria-label={`Increase ${label}`}
+                      onClick={() => saveSmcDisplay({ [key]: Math.min(max, Number((safeValue + step).toFixed(precision))) })}
+                      style={{ width: 22, height: 22, borderRadius: 4, border: `1px solid ${tk.toolbarBorder}`, background: 'transparent', color: tk.toolbarText, cursor: 'pointer' }}
+                    >
+                      +
+                    </button>
+                  </span>
+                </div>
+              );
+            })}
+            <div style={{ height: 1, background: tk.toolbarBorder, margin: '4px 0' }} />
             <div style={drawGroupHeader}>Max visible</div>
             {[
               ['maxOb', 'Order blocks / side'],

@@ -145,20 +145,24 @@ const VolumePane = forwardRef(function VolumePane({
   }, [onCrosshairMove, onVisibleRangeChange, updateLegend]);
 
   useEffect(() => {
-    if (!volumeRef.current || volumeRef.current.__isDisposed || !candles.length) return;
+    if (!volumeRef.current || volumeRef.current.__isDisposed) return;
+    try { volumeRef.current.applyOptions({ visible: !isHidden }); } catch {}
+    try { maRef.current?.applyOptions({ visible: !isHidden }); } catch {}
+    if (isHidden || !candles.length) return;
     // Defense-in-depth: out-of-order `candles` would crash setData with
     // "data must be asc ordered by time". Sanitize first.
     const ordered = sanitizeSeriesData(candles);
     if (ordered.length === 0) return;
     const data = sanitizeSeriesData(ordered.map(c => ({ time: c.time, value: Number(c.volume || 0), color: Number(c.close) >= Number(c.open) ? 'rgba(38,166,154,0.65)' : 'rgba(239,83,80,0.65)' })));
-    const maData = sanitizeSeriesData(ordered.map((c, index) => {
-      const slice = ordered.slice(Math.max(0, index - volumeMA + 1), index + 1);
-      return { time: c.time, value: slice.reduce((sum, item) => sum + Number(item.volume || 0), 0) / slice.length };
-    }));
+    const maWindow = Math.max(1, Math.floor(volumeMA) || 1);
+    let rollingVolume = 0;
+    const maData = ordered.map((c, index) => {
+      rollingVolume += Number(c.volume || 0);
+      if (index >= maWindow) rollingVolume -= Number(ordered[index - maWindow].volume || 0);
+      return { time: c.time, value: rollingVolume / Math.min(index + 1, maWindow) };
+    });
     try { volumeRef.current.setData(data); } catch {}
     try { maRef.current?.setData(maData); } catch {}
-    try { volumeRef.current.applyOptions({ visible: !isHidden }); } catch {}
-    try { maRef.current?.applyOptions({ visible: !isHidden }); } catch {}
     updateLegend(candles[candles.length - 1]);
   }, [candles, isHidden, volumeMA, updateLegend]);
 

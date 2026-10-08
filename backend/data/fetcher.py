@@ -627,7 +627,7 @@ def fetch_stock_data(ticker: str, period: str = "ALL", interval: str = "1d", pol
     #   Afternoon bucket -> 13:15–15:30 (covers 13:15, 14:15, 15:15)
     # Each bucket is labelled with its session start time (09:15 or 13:15).
     if interval_clean == "4h":
-        df_1h = fetch_stock_data(ticker, period="365D" if period in ["ALL", "MAX", None, "1Y", "5Y"] else period, interval="1h")
+        df_1h = fetch_stock_data(ticker, period="370D" if period in ["ALL", "MAX", None, "1Y", "5Y"] else period, interval="1h")
         if df_1h is not None and not df_1h.empty:
             dt = pd.to_datetime(df_1h["date"], format="mixed", errors="coerce")
             # Assign each 1h candle to the session bucket it belongs to

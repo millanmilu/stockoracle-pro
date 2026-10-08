@@ -259,6 +259,35 @@ export function compareChartTime(a, b) {
 }
 
 /**
+ * Lightweight Charts only accepts finite epoch seconds or valid BusinessDay
+ * values. A malformed date string can survive ordinary sorting and later make
+ * the renderer look up a missing plot row, surfacing as `Value is null` during
+ * candlestick paint.
+ */
+export function isValidChartTime(time) {
+  if (typeof time === 'number') return Number.isFinite(time) && time >= 0;
+  let year;
+  let month;
+  let day;
+  if (typeof time === 'string') {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(time);
+    if (!match) return false;
+    [, year, month, day] = match.map(Number);
+  } else if (time && typeof time === 'object') {
+    year = Number(time.year);
+    month = Number(time.month);
+    day = Number(time.day);
+  } else {
+    return false;
+  }
+  if (![year, month, day].every(Number.isInteger) || year < 1 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const check = new Date(Date.UTC(year, month - 1, day));
+  return check.getUTCFullYear() === year
+    && check.getUTCMonth() === month - 1
+    && check.getUTCDate() === day;
+}
+
+/**
  * Sanitize an array of {time, ...} points for lightweight-charts `setData`,
  * which throws "Assertion failed: data must be asc ordered by time" on any
  * out-of-order or duplicate timestamp.
@@ -275,7 +304,7 @@ export function compareChartTime(a, b) {
  */
 export function sanitizeSeriesData(points) {
   if (!Array.isArray(points) || points.length === 0) return [];
-  const valid = points.filter((p) => p && p.time != null && p.time !== '');
+  const valid = points.filter((p) => p && isValidChartTime(p.time));
   if (valid.length === 0) return [];
   const dominantType = typeof valid[0].time;
   const sameType = valid.filter((p) => typeof p.time === dominantType);

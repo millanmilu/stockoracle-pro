@@ -4,7 +4,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { getSessionBucketStart, sanitizeSeriesData, sanitizeCandles, isAppendableTime, compareChartTime, computeFillSlots, INTERVAL_SLOT_SEC, normalizeInterval, isSupportedInterval, SUPPORTED_INTERVALS, getIstDateString, getBoundedTimeframe, BACKFILL_LEVELS, BACKFILL_TRIGGER_BARS, nextBackfillTimeframe, BACKFILL_CHUNK_LIMIT, BACKFILL_MIN_LIMIT, BACKFILL_MAX_LIMIT, getBackfillChunkLimit, POPULAR_STOCKS, canUpdateLiveCandle, countdownDockRight, shouldRefetchStaleTail, FRESH_TAIL_SOURCES } from './chartHelpers.js';
+import { getSessionBucketStart, sanitizeSeriesData, sanitizeCandles, isAppendableTime, compareChartTime, isValidChartTime, computeFillSlots, INTERVAL_SLOT_SEC, normalizeInterval, isSupportedInterval, SUPPORTED_INTERVALS, getIstDateString, getBoundedTimeframe, BACKFILL_LEVELS, BACKFILL_TRIGGER_BARS, nextBackfillTimeframe, BACKFILL_CHUNK_LIMIT, BACKFILL_MIN_LIMIT, BACKFILL_MAX_LIMIT, getBackfillChunkLimit, POPULAR_STOCKS, canUpdateLiveCandle, countdownDockRight, shouldRefetchStaleTail, FRESH_TAIL_SOURCES } from './chartHelpers.js';
 
 const IST_OFFSET_MS = 5.5 * 3600 * 1000;
 const HOUR = 3600;
@@ -91,6 +91,17 @@ describe('getSessionBucketStart', () => {
   });
 
   describe('sanitizeSeriesData — asc-order crash regression', () => {
+    it('drops malformed chart times before the renderer sees them', () => {
+      assert.equal(isValidChartTime('2026-10-07'), true);
+      assert.equal(isValidChartTime({ year: 2026, month: 10, day: 7 }), true);
+      assert.equal(isValidChartTime('2026-02-30'), false);
+      assert.equal(isValidChartTime('2026-10-07 09:15:00'), false);
+      assert.deepEqual(sanitizeCandles([
+        { time: '2026-02-30', open: 1, high: 1, low: 1, close: 1 },
+        { time: '2026-10-07', open: 1, high: 1, low: 1, close: 1 },
+      ]).map((c) => c.time), ['2026-10-07']);
+    });
+
     it('reproduces the reported crash: late bucket 1789805400 after 1789805580 is reordered, never descending', () => {
       const prev = 1789805580;
       const late = 1789805400;

@@ -18,6 +18,8 @@ export default function BacktestPanel({ ticker: propTicker }) {
   const [activeTicker, setActiveTicker] = useState((propTicker || globalSymbol || 'RELIANCE').toUpperCase());
   const [searchInput, setSearchInput] = useState('');
   const [strategy, setStrategy] = useState('ai_ensemble');
+  const [interval, setInterval] = useState('15m');
+  const [period, setPeriod] = useState('120D');
 
   const isCrypto = useMemo(() => {
     const t = activeTicker.toUpperCase();
@@ -43,6 +45,7 @@ export default function BacktestPanel({ ticker: propTicker }) {
   const [params, setParams] = useState({
     initial_capital: 100000,
     position_size_pct: 100,
+    risk_per_trade_pct: 1.0,
     entry_threshold: 1.5,
     stop_loss: 4.0,
     take_profit: 8.0,
@@ -70,8 +73,10 @@ export default function BacktestPanel({ ticker: propTicker }) {
       const res = await api.get(`/api/stock/${targetTicker}/backtest`, {
         params: {
           strategy: targetStrategy,
+          ...(targetStrategy === 'smc_pro' ? { interval, period } : {}),
           initial_capital: currentParams.initial_capital,
           position_size_pct: currentParams.position_size_pct,
+          ...(targetStrategy === 'smc_pro' ? { risk_per_trade_pct: currentParams.risk_per_trade_pct } : {}),
           entry_threshold: currentParams.entry_threshold / 100,
           stop_loss: currentParams.stop_loss / 100,
           take_profit: currentParams.take_profit / 100,
@@ -99,7 +104,7 @@ export default function BacktestPanel({ ticker: propTicker }) {
     } finally {
       setLoading(false);
     }
-  }, [activeTicker, strategy, params]);
+  }, [activeTicker, strategy, params, interval, period]);
 
   // Initial load & ticker synchronization
   useEffect(() => {
@@ -111,7 +116,7 @@ export default function BacktestPanel({ ticker: propTicker }) {
   // Execute backtest on ticker switch or strategy switch
   useEffect(() => {
     runBacktest();
-  }, [activeTicker, strategy]);
+  }, [activeTicker, strategy, interval, period]);
 
   // Custom strategies (backend registry) — builtin list par merge, bina tode
   useEffect(() => {
@@ -243,6 +248,10 @@ export default function BacktestPanel({ ticker: propTicker }) {
         strategy={strategy}
         setStrategy={setStrategy}
         strategyOptions={strategyOptions}
+        interval={interval}
+        setInterval={setInterval}
+        period={period}
+        setPeriod={setPeriod}
         applyPreset={applyPreset}
         data={data}
         loading={loading}
@@ -257,7 +266,7 @@ export default function BacktestPanel({ ticker: propTicker }) {
 
       {/* ── Configurable Params Drawer ── */}
       {showSettings && (
-      <BacktestParamsDrawer params={params} setParams={setParams} currSymbol={currSymbol} />
+      <BacktestParamsDrawer params={params} setParams={setParams} currSymbol={currSymbol} isSmc={strategy === 'smc_pro'} />
       )}
 
       {/* ── Error Notification ── */}
@@ -295,7 +304,7 @@ export default function BacktestPanel({ ticker: propTicker }) {
               <Shield size={14} />
               <span>
                 <strong>Pure Out-of-Sample Results</strong> — In-sample training up to <strong>{data.out_of_sample_start}</strong> ({data.train_test_split_pct}%).
-                Testing on remaining {data.backtest_days} trading sessions.
+                Testing on remaining {data.backtest_days} {data.interval ? `${data.interval} candles` : 'trading sessions'}.
               </span>
             </div>
             <span style={{ color: '#94A3B8', fontSize: '0.66rem' }}>
@@ -354,6 +363,7 @@ export default function BacktestPanel({ ticker: propTicker }) {
           {activeTab === 'journal' && (
             <TradeJournalTab
               data={data}
+              isSmc={data.strategy === 'smc_pro'}
               currSymbol={currSymbol}
               filteredTrades={filteredTrades}
               journalFilter={journalFilter}

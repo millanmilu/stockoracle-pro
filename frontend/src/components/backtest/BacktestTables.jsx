@@ -68,7 +68,7 @@ export function MonthlyHeatmapTab({ data }) {
 
 export function TradeJournalTab({
   data, currSymbol, filteredTrades, journalFilter, setJournalFilter,
-  journalSearch, setJournalSearch, handleExportCSV,
+  journalSearch, setJournalSearch, handleExportCSV, isSmc = false,
 }) {
   return (
             <div style={{
@@ -128,7 +128,10 @@ export function TradeJournalTab({
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.72rem' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94A3B8', fontSize: '0.65rem', textTransform: 'uppercase' }}>
-                      {['#', 'Entry Date', 'Exit Date', 'Entry Px', 'Exit Px', 'Hold Days', 'P&L', 'P&L %', 'Exit Reason', 'Result'].map(h => (
+                      {[
+                        '#', ...(isSmc ? ['Side'] : []), 'Entry Date', 'Exit Date', 'Entry Px',
+                        'Exit Px', isSmc ? 'Hold Bars' : 'Hold Days', 'P&L', 'P&L %', 'Exit Reason', 'Result',
+                      ].map(h => (
                         <th key={h} style={{ padding: '7px 8px', textAlign: 'left' }}>{h}</th>
                       ))}
                     </tr>
@@ -137,11 +140,12 @@ export function TradeJournalTab({
                     {filteredTrades.map((t, idx) => (
                       <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
                         <td style={{ padding: '7px 8px', color: '#64748B' }}>{t.trade_id || idx + 1}</td>
+                        {isSmc && <td style={{ padding: '7px 8px', color: t.direction === 'SHORT' ? '#F87171' : '#34D399', fontWeight: 700 }}>{t.direction}</td>}
                         <td style={{ padding: '7px 8px' }}>{t.entry_date}</td>
                         <td style={{ padding: '7px 8px' }}>{t.exit_date}</td>
                         <td style={{ padding: '7px 8px', fontFamily: 'JetBrains Mono, monospace' }}>{currSymbol}{t.entry_price}</td>
                         <td style={{ padding: '7px 8px', fontFamily: 'JetBrains Mono, monospace' }}>{currSymbol}{t.exit_price}</td>
-                        <td style={{ padding: '7px 8px', textAlign: 'center' }}>{t.holding_days}</td>
+                        <td style={{ padding: '7px 8px', textAlign: 'center' }}>{isSmc ? (t.holding_bars ?? t.holding_days) : t.holding_days}</td>
                         <td style={{ padding: '7px 8px', fontWeight: 700, color: t.pnl >= 0 ? '#10B981' : '#F43F5E', fontFamily: 'JetBrains Mono, monospace' }}>
                           {t.pnl >= 0 ? '+' : ''}{currSymbol}{t.pnl.toFixed(0)}
                         </td>

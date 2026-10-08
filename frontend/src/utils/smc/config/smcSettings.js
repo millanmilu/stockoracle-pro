@@ -34,6 +34,7 @@ export const DEFAULT_SMC_SETTINGS = {
     fvg: true,
     ifvg: true,
     volumeImbalance: false,
+    minGapAtr: 0.05,
   },
   premiumDiscount: {
     autoRange: true,

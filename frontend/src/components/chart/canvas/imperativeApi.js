@@ -1,3 +1,5 @@
+import { isValidChartTime } from '../../../utils/chartHelpers';
+
 export function createImperativeApi({
   chartInstanceRef,
   candleSeriesRef,
@@ -26,10 +28,18 @@ export function createImperativeApi({
       }
     },
     updateActiveCandle: (candle) => {
-      if (candleSeriesRef.current && !candleSeriesRef.current.__isDisposed && candle && candle.time) {
+      if (candleSeriesRef.current && !candleSeriesRef.current.__isDisposed && candle && isValidChartTime(candle.time)) {
         try {
-          const lastCandle = candlesRef.current && candlesRef.current.length > 0
-            ? candlesRef.current[candlesRef.current.length - 1]
+          const currentRows = candlesRef.current;
+          if (!Array.isArray(currentRows) || currentRows.length === 0) return;
+          const seriesRows = typeof candleSeriesRef.current.data === 'function'
+            ? candleSeriesRef.current.data()
+            : null;
+          // Do not update a freshly-created/cleared series before its matching
+          // history frame has been pushed by syncCandlesData.
+          if (Array.isArray(seriesRows) && seriesRows.length === 0) return;
+          const lastCandle = currentRows.length > 0
+            ? currentRows[currentRows.length - 1]
             : null;
 
           // Guard against mixing time types (e.g. string 'YYYY-MM-DD' vs numeric epoch seconds)

@@ -38,6 +38,7 @@ class MarketDataService:
     _OHLCV_TTL      = 60.0       # 1 minute    — historical bars
     _FUNDAMENTALS_TTL = 14400.0  # 4 hours     — balance sheet / ratios
     _OPTIONS_TTL    = 120.0      # 2 minutes   — options chain
+    _CACHE_MAX_ENTRIES = 256
 
     def __init__(self):
         self._cache: Dict[str, Tuple[float, Any]] = {}
@@ -69,11 +70,17 @@ class MarketDataService:
         if entry is not None:
             ts, val = entry
             if time.time() - ts < ttl:
+                self._cache.pop(key)
+                self._cache[key] = entry
                 return val
+            self._cache.pop(key, None)
         return None
 
     def _cache_set(self, key: str, val: Any) -> None:
+        self._cache.pop(key, None)
         self._cache[key] = (time.time(), val)
+        while len(self._cache) > self._CACHE_MAX_ENTRIES:
+            self._cache.pop(next(iter(self._cache)))
 
     async def _run(self, fn, *args, **kwargs) -> Any:
         """Offload synchronous blocking I/O to default ThreadPoolExecutor."""

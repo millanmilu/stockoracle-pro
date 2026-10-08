@@ -38,6 +38,7 @@ from backend.data.fetcher import (
 )
 from backend.data.market_calendar import is_market_open
 from backend.services.alert_scheduler import run_alert_scheduler_loop
+from backend.services.smc_agent import run_smc_agent_loop
 
 configure_logging()
 logger = get_logger("stockoracle.main")
@@ -457,6 +458,9 @@ async def lifespan(app: FastAPI):
         logger.warning("Screener refresh daemon unavailable: %s", exc)
         background_tasks = [price_task, alert_task, keepalive_task]
 
+    if settings.SMC_AGENT_ENABLED:
+        background_tasks.append(asyncio.create_task(run_smc_agent_loop()))
+
     # SmartAPI tick streamer (Phase 3): true tick-by-tick equity feed with
     # automatic reconnect. Falls back gracefully to REST polling when broker
     # credentials / feed tokens are unavailable.
@@ -566,6 +570,7 @@ from backend.api.routers.ai_chat import router as aichat_router
 from backend.api.routers.sentiment_ta import router as sentiment_ta_router
 from backend.api.routers.broker import router as broker_router
 from backend.api.routers.ai_providers import router as ai_providers_router
+from backend.api.routers.smc import router as smc_agent_router
 
 app.include_router(system_router)
 app.include_router(market_router)
@@ -578,6 +583,7 @@ app.include_router(aichat_router)
 app.include_router(sentiment_ta_router)
 app.include_router(broker_router)
 app.include_router(ai_providers_router)
+app.include_router(smc_agent_router)
 
 
 

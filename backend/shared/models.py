@@ -143,6 +143,27 @@ class SmartAlert(Base):
     )
 
 
+class SmcAgentSetup(Base):
+    """Durable SMC agent decisions; fingerprint prevents duplicate alerts after restart."""
+    __tablename__ = "smc_agent_setups"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    fingerprint = Column(String(64), nullable=False, unique=True, index=True)
+    ticker = Column(String(20), nullable=False, index=True)
+    direction = Column(String(10), nullable=False)
+    status = Column(String(20), nullable=False, default="confirmed")
+    entry = Column(Float, nullable=False)
+    stop_loss = Column(Float, nullable=False)
+    target = Column(Float, nullable=False)
+    risk_reward = Column(Float, nullable=False)
+    confirmed_at = Column(String(50), nullable=False, index=True)
+    reason = Column(Text, nullable=False)
+    notified_at = Column(String(50), nullable=True)
+    created_at = Column(String(50), nullable=False, default=lambda: datetime.now(timezone.utc).isoformat())
+
+    __table_args__ = (Index("idx_smc_setup_ticker_status", "ticker", "status"),)
+
+
 class PaperAccount(Base):
     """Virtual paper trading account (default ₹10 Lakhs)."""
     __tablename__ = "paper_accounts"
@@ -542,7 +563,6 @@ class BrokerAuditLog(Base):
     __table_args__ = (
         Index("idx_broker_audit_broker", "broker"),
     )
-
 
 
 

@@ -17,6 +17,10 @@
 **Rule #1:** teeno layers ko ek saath update karo. Sirf catalog me entry add karne se
 kuch draw nahi hota — consumer list me bhi uska rasta hona chahiye.
 
+## Chart runtime / bundle performance
+- `App.jsx` ka Dashboard route lazy-loaded hai; Chart.js/react-chartjs-2 default Live Chart entry ke static graph me nahi aane chahiye, aur `vite.config.js` Lightweight Charts ko alag vendor chunk me rakhta hai.
+- `VolumePane.jsx` skips candle/MA preparation while hidden, refreshes when shown, and computes MA with a rolling sum (O(n)); keep the hidden pane's chart-series state current only on visibility restore.
+
 ## 1. Catalog — `indicatorDefinitions.js`
 
 `INDICATOR_DEFINITIONS` (array) single source hai. Saath me `INDICATOR_CATEGORIES`,
@@ -49,6 +53,7 @@ SMC ka professional mode usually ek single combined overlay ke roop me aata hai,
 - SMC score counts only observed, direction-aligned evidence; OB/FVG contributions must be untouched and near current price, while absent sweep, structure, displacement, zone, session, or volume evidence contributes zero
 - `src/components/live-chart/ChartFloaters.jsx` → compact, draggable/collapsible summary card; bias, structure, session, score come from `analyzeSMC()` rather than candle-to-candle guesses
 - `src/components/live-chart/SmcProLayer.jsx` → viewport-aware SVG rendering; only short confirmed-structure markers, short active-liquidity rails, short setup rails, and active OB/FVG rectangles
+- SMC Pro ke indicator Inputs (`windowSize`, `lookback`) `ChartShell` se `SmcProLayer` ke detector settings tak thread hote hain; expandable `SmcProDetailPanel` component score contributions, MTF confluence, filtered OB/FVG zones, baseline backtest, event feed aur level/zone exports dikhata hai.
 - `src/utils/smc/selection/smcSelect.js` → lifecycle + relevance + current-price/zoom filtering; SMART mode favors setup context, hides filled/invalidated zones, and reduces density when zoomed out
 - `src/utils/smc/selection/smcLabels.js` → priority-ranked pixel bounding-box collision placement against other labels and reserved chart areas
 - `src/components/chart/canvas/useIndicatorGroups.js` keeps `smc_pro` out of the legacy price-line renderer; `indicatorOverlayEffects.js` removes any stale legacy series when it is toggled to the single SVG overlay
@@ -62,8 +67,24 @@ SMC correctness fixes (Oct 2026):
 - `src/utils/smc/engine/liquidityDetector.js` supplies BSL/SSL from confirmed swings. Only a subsequent wick beyond the level with a close back counts as a sweep; a close through consumes the level. Volume pockets are not sweep evidence. Score/setup only count bias-aligned sweeps from the last 40 bars, and the selector preserves the detector's lifecycle/direction.
 - `src/utils/smc/engine/sessionDetector.js` accepts Unix seconds (also milliseconds), uses each configured IANA timezone with DST, and reports daily date strings as unknown. London/New York take priority over overlapping Asian windows; an explicit fixed offset remains supported, including zero.
 - Bearish engine signals use range high for SL and range low for TP. Drawable TP fallbacks extend beyond existing targets in order; null entry falls back to a real price and invalid/nonpositive levels are suppressed.
+- Entry/SL/TP rails and the summary card show a provisional `PLAN` when 4×/16× aggregated HTF bias agrees but full setup confluence is missing; these levels are explicitly not presented as a confirmed signal. Full confluence upgrades the same levels to confirmed.
+- OB/FVG engine controls are enforced at detection time: bullish/bearish OB toggles, minimum OB displacement in ATR units, FVG visibility/cap, and a minimum FVG-size-to-ATR threshold. The top-bar SMC menu lets users tune minimum OB displacement and FVG width; a zero object cap means none, and unavailable ATR cannot pass a positive quality threshold.
+- Drawable setup levels now prefer a live same-direction OB/FVG edge for entry, place the stop beyond the nearest structural invalidation with an ATR buffer and minimum risk, then use opposing swings/liquidity with >=1.25R measured fallbacks for ordered TP1/TP2/TP3. The SMC Pro card and SVG layer expose the same Entry, SL and three targets.
 - `src/utils/smc/engine/smcSnapshot.js` snapshots the active candle's OHLCV. `SmcProLayer.jsx` samples the matching active ref once per second locally and shares one analysis with the summary card; unchanged samples skip analysis. History replacements and symbol/timeframe changes refresh normally, hidden SMC stops polling, and replay ignores the live ref. Do not restore a price-relative cache key (price / (price × 0.0005) is constant).
-- Regression coverage stays in `src/utils/smcSelection.test.js` and `src/utils/smcSetupLevels.test.js`: default range, session units/DST, confirmed sweeps, aligned/recent scoring, mirrored SL/TP, ordered targets, and immutable live/replay snapshots.
+- Backtest Studio’s `smc_pro` strategy is separate from the chart detail panel’s baseline demo: it uses verified intraday OHLCV, causal 4×/16× bias, confirmed structure, sweep/OB/FVG and session evidence, and structural long/short exits in `backend/analysis/backtest_smc.py`.
+- `src/utils/smc/engine/setupLifecycle.js` freezes the first surfaced SMC setup (including PLAN levels) and keeps it on the chart until TP1 or SL is touched; same-bar re-entry is suppressed until the next candle. Stop wins when one candle touches both stop and target.
+- Backend `smc_pro` backtests follow the same position lifecycle: an open trade is not replaced by an opposite later signal; it closes only at structural SL/target, the configured max holding **bars**, or period end. This avoids candle-to-candle signal churn being counted as extra losses.
+- SMC backtest sizing defaults to `risk_per_trade_pct=1.0`, budgeting structural stop distance plus conservative round-trip friction bounds before the position-size cap; gaps can exceed the budget. Backtest Studio exposes a 0.1–5% risk slider.
+- Backend confirmation requires aligned HTF, sweep, structure, recent directional displacement (>1.2 ATR in 10 bars), OB/FVG and premium/discount. Targets require >=1.25R. Entry is a next-bar limit at the planned price (better open permitted); unfilled orders expire after that bar and still record equity. Python and chart detectors remain separate implementations, so this is not exact live-chart replay; the chart panel baseline is also separate.
+- Locked PLAN status can upgrade to confirmed in the same direction without moving levels. Exit tracking scans loaded bars from creation and checks sampled close for same-bar SL/TP revisits. Pre-creation wicks alone do not trigger an exit; a touch/reversal entirely between samples within an existing wick remains unknowable from OHLC. Missing unloaded bars cannot be reconstructed by this helper.
+- `src/utils/smc/selection/smcSelect.js` ranks zones before overlap merging, and `src/utils/smc/selection/smcRelevance.js` prevents dead (`invalidated`/`filled`) zones from merging with or swallowing live zones. `src/utils/smcDisplayPrefs.js` syncs `SMC_MODE_PRESETS` when switching between `smart`/`minimal`/`full`/`debug` modes, and `SmcProLayer.jsx` computes `Killzones` directly from loaded intraday candles via `detectSession()` so non-24/7 sessions, 4H/1D charts, and historical replay never stretch session boxes across the viewport.
+- `calculateSMCScore()` returns normalized per-component values alongside the aggregate so the detail panel cannot mistake `{raw,total,score}` for component scores; zone tables/exports filter out liquidity points and include only OB/FVG bands.
+- Live ticks update an already-present candle imperatively; new bars/fill slots go through React candle state and one `setData` replacement only. Do not append with `series.update()` and then immediately replace that same appended dataset, which can leave Lightweight Charts hit-testing stale rows.
+- Regression coverage stays in `src/utils/smcSelection.test.js`, `src/utils/smcSetupLevels.test.js`, `src/utils/smcBacktest.test.js` and `src/utils/smcMtfConfluence.test.js`: default range, session units/DST, confirmed sweeps, aligned/recent scoring, mirrored SL/TP, ordered targets, dead-vs-live overlap survival, mode preset transitions, immutable live/replay snapshots, baseline R accounting and aggregated HTF confluence.
+
+### Server-side SMC agent
+
+`backend/smc/engine.py` is an independent, deterministic live-agent contract: 4H closed-candle EMA bias → 1H confirmed BOS/CHoCH, liquidity and departed order block → 15M closed sweep, 1.2×ATR displacement and FVG. It rejects synthetic sources and forming candles, requires a 1:2 target, and creates a durable fingerprint. `backend/services/smc_agent.py` evaluates Binance Top-20 USDT symbols (quote-volume ranking cached hourly) plus explicit XAUUSD, persists `SmcAgentSetup` rows, and retries Telegram delivery until a notification is recorded. It is disabled by default via `SMC_AGENT_ENABLED`; its own 24/7 loop must never be gated by the NSE alert scheduler. `backend/data/xauusd.py` fetches the `XAUUSD=X` FX instrument separately; XAUUSD no longer silently maps to PAXGUSDT (PAXG remains explicit). This engine is not yet the chart overlay or the legacy Backtest Studio strategy; do not present their results as agent performance.
 
 ## 2. Engines — `src/utils/`
 
@@ -135,6 +156,12 @@ dikhta hai.
 `firstValue()` for any series with a marker at the active time. `ai_signal` ka invisible marker
 anchor series isliye latest valid close ka ek hidden data point rakhta hai; `setMarkers()` ke
 saath empty `setData([])` crash kara sakta hai (`Value is null`).
+
+**Primary candle paint guard:** `chartHelpers.isValidChartTime()` + `sanitizeCandles()` invalid
+calendar/timestamp rows ko primary series se drop karte hain. `candlesDataSync` OHLC/time ko
+dobara validate karta hai, live imperative updates empty/stale series par skip hote hain, aur
+`safeChart` ka chart-scoped paint guard transient lightweight-charts `Value is null` frames ko
+fatal app overlay banne se rokta hai.
 
 ## Traps (inhi se bugs aate hain)
 

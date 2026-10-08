@@ -132,7 +132,8 @@ export function checkSetupConfluence(candles, analysis, pool = {}) {
   const missing = [];
   const reasons = [];
   const setup = analysis?.setup || {};
-  const direction = setup.direction || analysis?.summary?.direction || 'neutral';
+  const candidates = [setup.direction, analysis?.summary?.direction, analysis?.mtf?.bias];
+  const direction = candidates.find((d) => d === 'bullish' || d === 'bearish') || 'neutral';
   const bull = direction === 'bullish';
   if (!bull && direction !== 'bearish') {
     return { pass: false, direction, reasons, missing: ['no directional bias'] };
@@ -190,15 +191,15 @@ export function selectVisibleSMC({ candles, analysis, symbol, interval, settings
 
   const mode = SMC_MODES.includes(settings.mode) ? settings.mode : 'smart';
   const caps = { ...MODE_CAPS[mode] };
-  if (Number.isFinite(Number(settings.maxOb))) caps.obSide = Number(settings.maxOb);
-  if (Number.isFinite(Number(settings.maxFvg))) caps.fvgSide = Number(settings.maxFvg);
+  if (Number.isFinite(Number(settings.maxOb))) caps.obSide = Math.max(0, Math.floor(Number(settings.maxOb)));
+  if (Number.isFinite(Number(settings.maxFvg))) caps.fvgSide = Math.max(0, Math.floor(Number(settings.maxFvg)));
   if (Number.isFinite(Number(settings.maxLiquidity))) {
-    const configured = Number(settings.maxLiquidity);
-    caps.liq = mode === 'smart' ? Math.min(caps.liq, configured) : configured;
+    caps.liq = Math.max(0, Math.floor(Number(settings.maxLiquidity)));
   }
   if (Number.isFinite(Number(settings.maxStructure))) {
-    caps.breaks = Math.min(caps.breaks, Number(settings.maxStructure));
-    caps.swings = Math.min(caps.swings, Number(settings.maxStructure));
+    const structCap = Math.max(0, Math.floor(Number(settings.maxStructure)));
+    caps.breaks = Math.min(caps.breaks, structCap);
+    caps.swings = Math.min(caps.swings, structCap);
   }
   const minScore = Number.isFinite(Number(settings.minScore)) ? Number(settings.minScore) : caps.minScore;
   const visibleBars = Number(settings.visibleBars);
@@ -255,7 +256,8 @@ export function selectVisibleSMC({ candles, analysis, symbol, interval, settings
   zones = updateLifecycle(zones, candles);
   liqObjs = updateLifecycle(liqObjs, candles);
 
-  // ---- 3. Merge overlaps + rank ----
+  // ---- 3. Rank first so stronger/live zones win overlaps, then merge + re-rank ----
+  zones = rankObjects(zones, ctx);
   const obZones = zones.filter((z) => z.kind === 'ob');
   const fvgZones = zones.filter((z) => z.kind === 'fvg');
   const mergedOb = mergeZones(obZones);
@@ -331,29 +333,32 @@ export function selectVisibleSMC({ candles, analysis, symbol, interval, settings
   const visSwings = [...latestBySwing.values()]
     .slice(0, zoomedOut && mode === 'smart' ? 0 : caps.swings);
 
-  // ---- 6. Setup: confluence-gated (all modes incl. minimal), levels from
-  // the tested deriver. Without confluence no setup paints — never bare
-  // OB/FVG/BOS alone.
+  // ---- 6. Trade levels: confirmed setups require full confluence. When HTF
+  // bias is aligned but confluence is incomplete, show clearly marked plan
+  // levels instead of presenting them as a confirmed trade.
   let setup = null;
   let setupMissing = [];
   {
     const gate = checkSetupConfluence(candles, analysis, { zones: visZones, liqLevels: liqObjs, lastClose });
     setupMissing = gate.missing;
-    if (gate.pass) {
-      try {
-        const lv = deriveSetupLevels(candles, analysis);
-        if (lv) {
-          setup = {
-            ...lv,
-            fromTime: candles[Math.max(0, candles.length - 60)]?.time ?? lastTime,
-            entryTime: lastTime,
-          };
-        }
-
-      } catch {}
-    } else {
-      debug.setupSuppressed = true;
+    const direction = gate.pass
+      ? gate.direction
+      : ['bullish', 'bearish'].includes(analysis?.mtf?.bias) ? analysis.mtf.bias : null;
+    if (direction) {
+      const derivation = gate.pass
+        ? analysis
+        : { ...analysis, setup: { ...analysis.setup, direction } };
+      const lv = deriveSetupLevels(candles, derivation);
+      if (lv) {
+        setup = {
+          ...lv,
+          confirmed: gate.pass,
+          fromTime: candles[Math.max(0, candles.length - 60)]?.time ?? lastTime,
+          entryTime: lv.entryTime ?? lastTime,
+        };
+      }
     }
+    debug.setupSuppressed = !setup;
   }
 
   // A valid setup owns the visual focus; unrelated opposite-side zones and

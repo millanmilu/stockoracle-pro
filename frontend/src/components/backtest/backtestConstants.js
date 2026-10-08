@@ -7,7 +7,11 @@ export const STRATEGIES = [
   { id: 'momentum_breakout', name: '20D Momentum Breakout', desc: 'Donchian channel breakout with volume expansion', icon: '🚀', badge: 'MOMENTUM' },
   { id: 'macd_crossover', name: 'MACD Momentum Cross', desc: 'MACD line cross above signal with positive momentum', icon: '🌊', badge: 'MACD' },
   { id: 'supertrend', name: 'Supertrend Volatility', desc: 'Dynamic ATR-based trailing trend-following stop', icon: '🛡️', badge: 'VOLATILITY' },
+  { id: 'smc_pro', name: 'SMC Pro', desc: 'Causal MTF confluence, confirmed structure, liquidity sweeps and structural long/short exits', icon: '🔷', badge: 'SMC' },
 ];
+
+export const SMC_INTERVALS = ['1m', '5m', '15m', '30m', '1h', '4h'];
+export const SMC_PERIODS = ['7D', '45D', '120D', '200D', '370D'];
 
 export const PRESETS = [
   {

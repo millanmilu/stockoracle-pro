@@ -12,14 +12,15 @@ stockoracle-pro /
 │   ├── shared/              # SINGLE SOURCE OF TRUTH: config, database, models, security
 │   ├── api/
 │   │   ├── _guards.py       # require_real_data() synthetic-block guard
-│   │   └── routers/         # 11 domain routers (neeche table)
+│   │   └── routers/         # 12 domain routers (neeche table)
 │   ├── data/                # fetcher, database, market_calendar, options, fundamentals, news, streamer, redis_cache
 │   ├── analysis/            # indicators, patterns, levels, backtester, quant_risk, monte_carlo, ...
+│   ├── smc/                 # deterministic closed-candle 4H/1H/15M SMC agent engine/contracts
 │   ├── research/            # screener_dsl, screener_engines, screener_pipeline, ai_screener, screener_backtest
 │   ├── ml/                  # predictor (+saved_models/*.pt), lstm_model, transformer_model, benchmarking, forecast_bands
 │   ├── models/              # per-symbol XGBoost/ElasticNet JSON bundles (trainer/backtester/explainer padhte hain)
 │   ├── ai/                  # provider (6 LLMs), chat, news_summarizer
-│   ├── services/            # market_data, ai_consensus, alert_scheduler, telegram_bot
+│   ├── services/            # market_data, ai_consensus, alert_scheduler, smc_agent, telegram_bot
 │   ├── tasks/               # celery_app, ml_tasks
 │   ├── providers/openbb/    # OpenBB wrapper + terminal_service
 │   ├── scripts/             # backup_db, refresh_index, refresh_index_constituents, clear_price_data
@@ -36,13 +37,13 @@ stockoracle-pro /
 │   ├── src/constants/       # screenerConfig.js
 │   └── src/utils/           # engines (indicatorEngine, chartIndicators, aiIndicatorEngine, aiSignalEngine) + *.test.js
 ├── terminal_ui/             # institutional_terminal, chart_widget (ASCII)
-├── tests/                   # 21 test_*.py + conftest.py (invariants + features)
+├── tests/                   # 24 test_*.py + conftest.py (invariants + features)
 └── logs/, aws/, .github/workflows/ci.yml
 ```
 
 **Detail files:** chart + AI engine layer → `11-chart-and-ai-engines.md`; screener/research layer + model artifacts → `12-research-screener.md`.
 
-## 11 API Routers (`backend/main.py` me mount order)
+## 12 API Routers (`backend/main.py` me mount order)
 | Router file | Prefix | Kaam |
 |-------------|--------|------|
 | `system.py` | `/`, `/api/health`, `/api/db/status`, `/api/audit-log`, `/api/system/disclaimer` | health + observability |
@@ -56,6 +57,7 @@ stockoracle-pro /
 | `sentiment_ta.py` | `/api` | sentiment+TA hub, compare, market-overview |
 | `broker.py` | `/api/broker` | 4 brokers save/test/connect/clear, .env persist |
 | `ai_providers.py` | `/api/ai/providers` | 6 LLM keys manage/test/activate/delete/usage |
+| `smc.py` | `/api/smc-agent` | deterministic closed-candle SMC agent status, saved setups, manual evaluation |
 
 ## Core vs Shared (confuse mat hona)
 - `backend/core/` = app plumbing: `logging.py` (JSON/console logger), `middleware.py` (RequestId + access log), `config_loader.py` (sirf `shared.config` ko re-export karta hai — backward compat bridge).

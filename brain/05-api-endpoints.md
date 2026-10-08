@@ -3,6 +3,7 @@
 ## System (`system.py`)
 - `GET /` → status/version
 - `GET /api/health` → status, database, angel_one_api, alert_scheduler, environment
+- `GET /api/smc-agent/status` → closed-candle SMC agent configuration, monitored symbols and last run; `GET /api/smc-agent/setups` → durable setup journal; `POST /api/smc-agent/evaluate/{symbol}` → one deterministic on-demand evaluation.
 - `GET /api/db/status` (auth) → row counts
 - `GET /api/audit-log?limit&user_id` (auth)
 - `GET /api/system/disclaimer` → SEBI/risk text
@@ -42,7 +43,7 @@
 - `GET /api/stock/{s}/explain`, `/shap-drivers`
 - `POST /api/train/{t}?epochs` → task_id (Celery ya background)
 - `GET /api/task/{task_id}`, `/api/models/registry?ticker`
-- `GET /api/stock/{t}/backtest?strategy&...` (6 builtin + custom registry strategies + risk params)
+- `GET /api/stock/{t}/backtest?strategy&...` (7 builtin + custom registry; SMC Pro accepts intraday `interval` + `period`, supports structural long/short exits)
 - `GET /api/backtest/strategies` → builtin + custom list (BacktestPanel dropdown merge)
 - `GET /api/stock/{t}/ai-consensus`, `/ml/benchmark/{t}`, `/stock/{t}/forecast-bands`
 

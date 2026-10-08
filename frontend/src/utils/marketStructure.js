@@ -185,7 +185,7 @@ export function detectSupplyDemand(candles, lookback = 120) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 5. Order Blocks
 // ─────────────────────────────────────────────────────────────────────────────
-export function detectOrderBlocks(candles, lookback = 100) {
+export function detectOrderBlocks(candles, lookback = 100, maxBlocks = 8) {
   if (!Array.isArray(candles) || candles.length < 5) return [];
   const obs = [];
   const start = Math.max(0, candles.length - lookback);
@@ -219,7 +219,8 @@ export function detectOrderBlocks(candles, lookback = 100) {
       });
     }
   }
-  return obs.slice(-8);
+  const cap = Math.max(0, Math.floor(Number(maxBlocks) || 8));
+  return cap === 0 ? [] : obs.slice(-cap);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -321,7 +322,8 @@ export function detectLiquidity(candles, bins = 8) {
 // ─────────────────────────────────────────────────────────────────────────────
 export function detectSR(candles, lookback = 150) {
   if (!Array.isArray(candles) || candles.length < 5) return [];
-  const swings = detectSwingPoints(candles, 3);
+  const windowCandles = candles.slice(-Math.max(5, Math.floor(Number(lookback) || 150)));
+  const swings = detectSwingPoints(windowCandles, 3);
   const levels = [];
   const seen = new Set();
 

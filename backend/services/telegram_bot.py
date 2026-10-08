@@ -33,10 +33,11 @@ def send_telegram_alert(ticker: str, alert_type: str, reason: str, price: float 
         "volume_spike": "🔥",
         "pattern": "📊",
         "ai_signal": "🤖",
+        "smc_setup": "🔷",
     }
     emoji = emoji_map.get(alert_type, "🔔")
 
-    price_text = f"\n💰 <b>Current Price:</b> ₹{price:,.2f}" if price else ""
+    price_text = f"\n💰 <b>Current Price:</b> {price:,.8g}" if price else ""
 
     text = (
         f"{emoji} <b>StockOracle Pro Alert: {ticker.upper()}</b>\n"

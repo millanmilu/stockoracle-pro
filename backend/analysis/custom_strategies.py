@@ -1,7 +1,7 @@
 """
 StockOracle Pro — Custom Backtest Strategies (apni strategy yahan likho)
 
-Ye file optional hai — na ho to 6 builtin strategies waise hi chalti hain.
+Ye file optional hai — na ho to 7 builtin strategies waise hi chalti hain.
 Server start par `backtester._try_load_custom_strategies()` ise auto-import
 karta hai, aur har `run_backtest()` call par dobara load hota hai, isliye
 file save karte hi agli backtest me nayi strategy bina restart ke milegi.

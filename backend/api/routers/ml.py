@@ -120,6 +120,8 @@ def get_task_status_endpoint(task_id: str):
 def get_stock_backtest(
     ticker: str,
     strategy: str = "ai_ensemble",
+    interval: str = "1d",
+    period: str = "ALL",
     initial_capital: float = 100000.0,
     position_size_pct: float = 100.0,
     entry_threshold: float = 0.015,
@@ -136,21 +138,36 @@ def get_stock_backtest(
     atr_multiplier: float = 2.0,
     slippage_bps: float = 10.0,
     commission_bps: float = 5.0,
+    risk_per_trade_pct: float = 1.0,
 ):
     """
-    Runs an institutional out-of-sample walk-forward backtest across 6 builtin
+    Runs an institutional out-of-sample walk-forward backtest across builtin
     quantitative strategies + any custom strategies registered via
     `backend/analysis/custom_strategies.py` (@register_strategy / @register_exit).
     All risk & execution parameters are configurable with zero look-ahead bias.
     """
     t = ticker.upper().strip()
-    df = fetch_stock_data(t, period="ALL")
-    if df is None or len(df) < 60:
+    strategy_id = str(strategy or "ai_ensemble").lower().strip()
+    if strategy_id == "smc_pro":
+        supported_intervals = {"1m", "5m", "15m", "30m", "1h", "4h"}
+        supported_periods = {"7D", "45D", "120D", "200D", "370D"}
+        interval = str(interval).lower().strip()
+        period = str(period).upper().strip()
+        if interval not in supported_intervals:
+            raise HTTPException(status_code=422, detail="SMC Pro supports intraday intervals: 1m, 5m, 15m, 30m, 1h, 4h.")
+        if period not in supported_periods:
+            raise HTTPException(status_code=422, detail="Unsupported SMC Pro lookback. Choose 7D, 45D, 120D, 200D, or 370D.")
+        df = fetch_stock_data(t, period=period, interval=interval)
+    else:
+        interval = "1d"
+        df = fetch_stock_data(t, period="ALL")
+    minimum = 160 if strategy_id == "smc_pro" else 60
+    if strategy_id != "smc_pro" and (df is None or len(df) < minimum):
         from backend.data.database import get_historical_prices
         df = get_historical_prices(t)
 
-    if df is None or len(df) < 60:
-        raise HTTPException(status_code=404, detail=f"Insufficient history for '{t}'. Need ≥ 60 trading days.")
+    if df is None or len(df) < minimum:
+        raise HTTPException(status_code=404, detail=f"Insufficient history for '{t}'. Need at least {minimum} verified candles.")
 
     require_real_data(df, t, "backtest")
     res = run_backtest(
@@ -172,6 +189,9 @@ def get_stock_backtest(
         atr_multiplier=atr_multiplier,
         slippage_bps=slippage_bps,
         commission_bps=commission_bps,
+        risk_per_trade_pct=risk_per_trade_pct,
+        interval=interval,
+        period=period,
     )
     if "error" in res:
         raise HTTPException(status_code=400, detail=res["error"])
@@ -222,5 +242,3 @@ def get_forecast_bands_endpoint(ticker: str):
     require_real_data(df, t, "forecast-bands")
     from backend.ml.forecast_bands import compute_forecast_bands
     return compute_forecast_bands(t, df)
-
-

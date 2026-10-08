@@ -1,10 +1,10 @@
 import React from 'react';
 import { Play, RefreshCw, Settings, Search, BookOpen, Download, Copy, Check, BarChart2 } from 'lucide-react';
-import { QUICK_TICKERS, PRESETS } from './backtestConstants';
+import { QUICK_TICKERS, PRESETS, SMC_INTERVALS, SMC_PERIODS } from './backtestConstants';
 
 export default function BacktestHeader({
   activeTicker, handleTickerSelect, searchInput, setSearchInput, handleSearchSubmit,
-  strategy, setStrategy, strategyOptions, applyPreset, data, loading, copiedReport,
+  strategy, setStrategy, strategyOptions, interval, setInterval, period, setPeriod, applyPreset, data, loading, copiedReport,
   handleCopyReport, handleExportCSV, setShowGuideModal, showSettings, setShowSettings, runBacktest,
 }) {
   return (
@@ -175,6 +175,27 @@ export default function BacktestHeader({
                 ))}
               </select>
             </div>
+            {strategy === 'smc_pro' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ fontSize: '0.65rem', color: '#64748B', fontWeight: 700, textTransform: 'uppercase' }}>SMC candles:</span>
+                <select
+                  aria-label="SMC candle interval"
+                  value={interval}
+                  onChange={(e) => setInterval(e.target.value)}
+                  style={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(99,102,241,0.4)', color: '#818CF8', borderRadius: 6, padding: '4px 8px', fontSize: '0.72rem', fontWeight: 700 }}
+                >
+                  {SMC_INTERVALS.map((value) => <option key={value} value={value}>{value}</option>)}
+                </select>
+                <select
+                  aria-label="SMC historical lookback"
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value)}
+                  style={{ background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(99,102,241,0.4)', color: '#818CF8', borderRadius: 6, padding: '4px 8px', fontSize: '0.72rem', fontWeight: 700 }}
+                >
+                  {SMC_PERIODS.map((value) => <option key={value} value={value}>{value}</option>)}
+                </select>
+              </div>
+            )}
 
             {/* Presets Pills */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>

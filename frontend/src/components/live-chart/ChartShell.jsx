@@ -10,6 +10,7 @@ import VolumePane from '../chart/VolumePane';
 import DrawingTools from '../chart-tools/DrawingTools';
 import ChartSettingsModal from '../ChartSettingsModal';
 import { saveChartSettings } from '../../utils/chartSettings';
+import { isIndicatorVisibleOn } from '../chart/indicatorSettingsSchema';
 import LivePriceBadge from './LivePriceBadge';
 import ChartOverlays from './ChartOverlays';
 import ChartFloaters from './ChartFloaters';
@@ -303,7 +304,8 @@ export default function ChartShell({
               candles={chartCandles}
               symbol={selectedSymbol}
               interval={interval}
-              active={smcProOn && !hiddenIndicators.includes('smc_pro')}
+              active={smcProOn && !hiddenIndicators.includes('smc_pro') && isIndicatorVisibleOn(indicatorParamOverrides?.smc_pro, interval)}
+              indicatorOverrides={indicatorParamOverrides?.smc_pro}
               activeCandleRef={activeCandleRef}
               isReplaying={isReplaying}
             />

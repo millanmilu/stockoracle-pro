@@ -77,7 +77,9 @@ def _compute_pnl_distribution(trade_journal: List[Dict]) -> List[Dict]:
     ]
 
 
-def _run_monte_carlo(daily_rets: pd.Series, n_sims: int = 500, initial_capital: float = 100000.0) -> Dict:
+def _run_monte_carlo(daily_rets: pd.Series, n_sims: int = 500,
+                     initial_capital: float = 100000.0,
+                     periods_per_year: int = 252) -> Dict:
     """
     Performs 500 random shuffle permutations to test strategy robustness and calculate confidence intervals.
     """
@@ -89,7 +91,8 @@ def _run_monte_carlo(daily_rets: pd.Series, n_sims: int = 500, initial_capital: 
         }
 
     rets_arr = daily_rets.values
-    rf_daily = 0.065 / 252.0
+    periods_per_year = max(1, int(periods_per_year))
+    rf_daily = 0.065 / periods_per_year
     sim_sharpes = []
     sim_finals = []
     sim_dds = []
@@ -102,7 +105,7 @@ def _run_monte_carlo(daily_rets: pd.Series, n_sims: int = 500, initial_capital: 
 
         # Sharpe
         std = float(np.std(shuffled))
-        sharpe = float(((np.mean(shuffled) - rf_daily) / (std + 1e-9)) * np.sqrt(252)) if std > 0 else 0.0
+        sharpe = float(((np.mean(shuffled) - rf_daily) / (std + 1e-9)) * np.sqrt(periods_per_year)) if std > 0 else 0.0
         sim_sharpes.append(sharpe)
 
         # Max drawdown

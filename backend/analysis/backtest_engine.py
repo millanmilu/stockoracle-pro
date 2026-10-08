@@ -44,12 +44,25 @@ def run_backtest(
     atr_multiplier: float = 2.0,
     slippage_bps: float = 10.0,
     commission_bps: float = 5.0,
+    risk_per_trade_pct: float = 1.0,
     run_monte_carlo_sims: bool = True,
+    interval: str = "1d",
+    period: str = "ALL",
 ) -> Dict[str, Any]:
     """
     StockOracle Pro Institutional Walk-Forward Multi-Strategy Backtesting Engine.
-    Executes real out-of-sample backtests with no look-ahead bias across 6 strategy archetypes.
+    Executes out-of-sample backtests with no look-ahead bias across built-in strategies.
     """
+    if str(strategy or "").lower().strip() == "smc_pro":
+        from .backtest_smc import run_smc_backtest
+        return run_smc_backtest(
+            df, ticker, interval=interval, initial_capital=initial_capital,
+            position_size_pct=position_size_pct, train_test_split=train_test_split,
+            max_holding_days=max_holding_days, slippage_bps=slippage_bps,
+            commission_bps=commission_bps, run_monte_carlo_sims=run_monte_carlo_sims,
+            period=period, risk_per_trade_pct=risk_per_trade_pct,
+        )
+
     # 1. Causal Feature Engineering
     features_df = _build_features_row_by_row(df)
     if len(features_df) < 60:

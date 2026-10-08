@@ -1,7 +1,6 @@
 import React, { useState, lazy, Suspense, useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import useStore from './store/useStore';
-import Dashboard from './components/Dashboard';
 import LiveChartView from './components/LiveChartView';
 import ErrorBoundary from './components/ErrorBoundary';
 
@@ -14,6 +13,7 @@ import CommandPalette from './components/terminal/CommandPalette';
 import { useWebSocket } from './hooks/useWebSocket';
 
 const MultiChartGrid = lazy(() => import('./components/MultiChartGrid'));
+const Dashboard = lazy(() => import('./components/Dashboard'));
 const NewsPanel = lazy(() => import('./components/NewsPanel'));
 const PatternsPanel = lazy(() => import('./components/PatternsPanel'));
 const LevelsPanel = lazy(() => import('./components/LevelsPanel'));
@@ -126,7 +126,7 @@ export default function App() {
       case 'Live Chart':        return <LiveChartView />;
       case 'Multi-Tile':        return <Suspense fallback={<LoadingFallback />}><MultiTileWorkspace /></Suspense>;
       case 'Chart Grid':        return <Suspense fallback={<LoadingFallback />}><MultiChartGrid /></Suspense>;
-      case 'Dashboard':         return <Dashboard />;
+      case 'Dashboard':         return <Suspense fallback={<LoadingFallback />}><Dashboard /></Suspense>;
       case 'Valuation':         return <Suspense fallback={<LoadingFallback />}><ValuationTerminalView ticker={selectedSymbol} /></Suspense>;
       case 'Sector Rotation':   return <Suspense fallback={<LoadingFallback />}><RRGRotationView /></Suspense>;
       case 'Macro Terminal':    return <Suspense fallback={<LoadingFallback />}><MacroTerminalView /></Suspense>;

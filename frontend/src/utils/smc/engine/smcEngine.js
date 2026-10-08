@@ -9,6 +9,7 @@ import { detectInducement } from './inducementDetector.js';
 import { detectMitigation } from './mitigationDetector.js';
 import { detectSession } from './sessionDetector.js';
 import { analyzeMultiTimeframe } from './mtfAnalyzer.js';
+import { analyzeMTFConfluence } from './mtfConfluence.js';
 import { detectSetup } from './setupDetector.js';
 import { calculateSMCScore } from './smcScore.js';
 import { buildSignal } from './signalEngine.js';
@@ -23,7 +24,29 @@ export function createSMCAnalysis(candles, settings = {}) {
   const premiumDiscount = determinePremiumDiscount(candles, normalized.premiumDiscount);
   const imbalance = detectImbalance(candles, normalized.imbalance);
   const inducement = detectInducement(candles, normalized.liquidity);
-  const mtf = analyzeMultiTimeframe(candles, normalized.mtf);
+  const mtfBase = analyzeMultiTimeframe(candles, normalized.mtf);
+  // MTF confluence enriches (never overrides) the proven base MTF fields:
+  // HTF structure break, HTF OB/FVG zones, premium/discount and an explicit
+  // alignment score. Bias/alignment/contract stays with the base analyzer.
+  let mtf = mtfBase;
+  try {
+    const confluence = analyzeMTFConfluence(candles);
+    mtf = {
+      ...mtfBase,
+      alignmentScore: confluence.alignmentScore,
+      htfBreak: confluence.structure,
+      htfZones: confluence.zones,
+      htfPremiumDiscount: confluence.premiumDiscount,
+      priceInHtfZone: confluence.priceInHtfZone,
+      confluenceComponents: confluence.components,
+      timeframes: [
+        ...mtfBase.timeframes,
+        { factor: 16, label: 'htf-confluence', bias: confluence.bias, confidence: confluence.confidence },
+      ],
+    };
+  } catch {
+    mtf = mtfBase;
+  }
   const session = detectSession(candles[candles.length - 1] || {}, normalized.sessions);
 
   const mitigatedZones = detectMitigation(candles, [...liquidity.levels, ...fvgs.gaps, ...orderBlocks.blocks], normalized.liquidity);

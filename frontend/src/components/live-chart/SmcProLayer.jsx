@@ -1,10 +1,15 @@
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { analyzeSMC } from '../../utils/smc/engine/smcEngine';
+import { detectSession } from '../../utils/smc/engine/sessionDetector';
 import { loadSmcDisplay, subscribeSmcDisplay } from '../../utils/smcDisplayPrefs';
 import { placeTags } from '../../utils/smc/selection/smcLabels';
 import { selectVisibleSMC } from '../../utils/smc/selection/smcSelect';
 import { snapshotSMCCandles } from '../../utils/smc/engine/smcSnapshot';
+import { cloneSetup, advanceSetup } from '../../utils/smc/engine/setupLifecycle';
+import { backtestSetup } from '../../utils/smc/engine/setupBacktest';
+import { useSmcEventAlerts } from '../../utils/smc/smcAlerts';
 import { SmcProSummaryCard } from './ChartFloaters';
+import SmcProDetailPanel from './SmcProDetailPanel';
 
 // --- SmcProLayer: SMART SMC visualization (detection ≠ rendering) ---
 //
@@ -48,8 +53,10 @@ function shortZoneLabel(z) {
   return compactSMCLabel(z?.label || z?.rawType || z?.kind || '');
 }
 
-export default function SmcProLayer({ chartCanvasRef, candles, symbol, interval, active, activeCandleRef, isReplaying }) {
+export default function SmcProLayer({ chartCanvasRef, candles, symbol, interval, active, indicatorOverrides = {}, activeCandleRef, isReplaying }) {
   const [prefs, setPrefs] = useState(() => loadSmcDisplay());
+  const [setup, setSetup] = useState(null);
+  const [detailOpen, setDetailOpen] = useState(false);
   const [snapshot, setSnapshot] = useState(() => snapshotSMCCandles(candles));
   useEffect(() => subscribeSmcDisplay(setPrefs), []);
   useEffect(() => {
@@ -66,26 +73,68 @@ export default function SmcProLayer({ chartCanvasRef, candles, symbol, interval,
   const analysis = useMemo(() => {
     if (!active || snapshotCandles.length < 20) return null;
     try {
-      return analyzeSMC(snapshotCandles);
+      const obPoolSize = prefs.mode === 'debug' ? 50 : Math.max(8, (Number(prefs.maxOb) || 1) * 4);
+      const fvgPoolSize = prefs.mode === 'debug' ? 50 : Math.max(8, (Number(prefs.maxFvg) || 1) * 4);
+      const rawWindow = Number(indicatorOverrides.windowSize);
+      const rawLookback = Number(indicatorOverrides.lookback);
+      const windowSize = Number.isFinite(rawWindow) ? Math.max(2, Math.min(20, Math.floor(rawWindow))) : null;
+      const lookback = Number.isFinite(rawLookback) ? Math.max(20, Math.min(500, Math.floor(rawLookback))) : null;
+      const structure = windowSize == null ? {} : { windowSize };
+      const liquidity = windowSize == null && lookback == null ? {} : {
+        ...(windowSize == null ? {} : { windowSize }),
+        ...(lookback == null ? {} : { lookback }),
+      };
+      const orderBlocks = {
+        minDisplacement: prefs.minObDisplacement,
+        maxActiveOBs: obPoolSize,
+        ...(lookback == null ? {} : { lookback }),
+      };
+      return analyzeSMC(snapshotCandles, {
+        structure,
+        liquidity,
+        orderBlocks,
+        imbalance: { minGapAtr: prefs.minFvgAtr, maxGaps: fvgPoolSize },
+      });
+    } catch {
+      return null;
+    }
+  }, [active, snapshotCandles, indicatorOverrides.windowSize, indicatorOverrides.lookback, prefs.mode, prefs.maxOb, prefs.maxFvg, prefs.minObDisplacement, prefs.minFvgAtr]);
+  // Baseline backtest on the same snapshot — bounded template replay,
+  // recomputed with the analysis cadence (1s max, only while active).
+  const backtest = useMemo(() => {
+    if (!active || snapshotCandles.length < 80) return null;
+    try {
+      return backtestSetup(snapshotCandles, { maxTrades: 120, horizon: 120 });
     } catch {
       return null;
     }
   }, [active, snapshotCandles]);
+  // SMC event alerts: BOS/CHoCH breaks, sweeps, FVG fills, OB invalidations.
+  const eventFeed = useSmcEventAlerts({ analysis, symbol, interval, enabled: active, isReplaying });
   if (!active) return null;
   return (
     <>
       <SmcProDrawingLayer chartCanvasRef={chartCanvasRef} candles={snapshotCandles}
-        symbol={symbol} interval={interval} active={active} analysis={analysis} prefs={prefs} />
-      {prefs.scoreCard !== false && <SmcProSummaryCard summary={analysis} />}
+        symbol={symbol} interval={interval} active={active} analysis={analysis} prefs={prefs}
+        onSetupChange={setSetup} />
+      {prefs.scoreCard !== false && (
+        <SmcProSummaryCard summary={analysis} setup={setup} backtest={backtest}
+          detailOpen={detailOpen} onToggleDetail={() => setDetailOpen((v) => !v)} />
+      )}
+      <SmcProDetailPanel analysis={analysis} setup={setup} backtest={backtest} events={eventFeed}
+        symbol={symbol} interval={interval} open={detailOpen} onClose={() => setDetailOpen(false)} />
     </>
   );
 }
 
-function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active, analysis, prefs }) {
+function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active, analysis, prefs, onSetupChange }) {
   const wrapRef = useRef(null);
   const [, bumpRepaint] = useReducer((t) => (t + 1) % 1000000, 0);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [visibleBars, setVisibleBars] = useState(0);
+  const [lockedSetup, setLockedSetup] = useState(null);
+  const lockedSetupRef = useRef(null);
+  const closedBarRef = useRef(null);
 
   useEffect(() => {
     bumpRepaint();
@@ -134,22 +183,81 @@ function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active,
   const selection = useMemo(() => {
     if (!active || !analysis) return null;
     try {
-      return selectVisibleSMC({
-        candles, analysis, symbol, interval,
-        settings: {
-          mode: prefs.mode || 'smart',
+      const mode = prefs.mode || 'smart';
+      const settings = mode === 'debug'
+        ? { mode, minScore: 0, visibleBars }
+        : {
+          mode,
           maxOb: prefs.maxOb, maxFvg: prefs.maxFvg,
           maxLiquidity: prefs.maxLiquidity, maxStructure: prefs.maxStructure,
-          minScore: prefs.minScore,
+          minScore: mode === 'full' ? 0 : prefs.minScore,
           visibleBars,
-        },
+        };
+      return selectVisibleSMC({
+        candles, analysis, symbol, interval, settings,
       });
     } catch {
       return null;
     }
   }, [active, candles, symbol, interval, analysis, prefs.mode, prefs.maxOb, prefs.maxFvg, prefs.maxLiquidity, prefs.maxStructure, prefs.minScore, visibleBars]);
 
-  if (!active || !analysis || !selection || size.w <= 0) {
+  useEffect(() => {
+    const latest = candles?.at?.(-1);
+    if (!active || !latest || !Array.isArray(candles) || !candles.length) {
+      lockedSetupRef.current = null;
+      closedBarRef.current = null;
+      setLockedSetup(null);
+      onSetupChange?.(null);
+      return;
+    }
+
+    const locked = lockedSetupRef.current;
+    if (locked) {
+      const { exit, setup: updated } = advanceSetup(locked, candles, selection?.setup);
+      if (exit) {
+        closedBarRef.current = latest.time;
+        lockedSetupRef.current = null;
+        setLockedSetup(null);
+        onSetupChange?.(null);
+      } else {
+        if (updated !== locked.setup) {
+          locked.setup = updated;
+          setLockedSetup(updated);
+        }
+        onSetupChange?.(locked.setup);
+      }
+      return;
+    }
+
+    // Once a setup exits, wait for the next candle before accepting a new one.
+    // This prevents a live wick from closing one setup and opening another on
+    // the same bar with freshly recalculated levels.
+    if (closedBarRef.current === latest.time) {
+      onSetupChange?.(null);
+      return;
+    }
+
+    const candidate = selection?.setup;
+    if (!candidate || !Array.isArray(candidate.takeProfits) || candidate.takeProfits.length < 1) {
+      onSetupChange?.(null);
+      return;
+    }
+
+    const frozen = cloneSetup(candidate);
+    lockedSetupRef.current = {
+      setup: frozen,
+      baseline: { time: latest.time, high: latest.high, low: latest.low },
+    };
+    setLockedSetup(frozen);
+    onSetupChange?.(frozen);
+  }, [active, candles, onSetupChange, selection]);
+
+  const renderSetup = closedBarRef.current === lastBar?.time
+    ? null
+    : (lockedSetup || selection?.setup || null);
+  const renderSelection = selection ? { ...selection, setup: renderSetup } : selection;
+
+  if (!active || !analysis || !renderSelection || size.w <= 0) {
     return <div ref={wrapRef} style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 30 }} />;
   }
 
@@ -180,11 +288,15 @@ function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active,
       return Number.isFinite(x) ? x : null;
     } catch { return null; }
   };
-  const yOf = (p) => {
+  const rawYOf = (p) => {
     try {
       const y = series.priceToCoordinate(Number(p));
-      return Number.isFinite(y) && y >= -50 && y <= plotH + 50 ? y : null;
+      return Number.isFinite(y) ? y : null;
     } catch { return null; }
+  };
+  const yOf = (p) => {
+    const y = rawYOf(p);
+    return y != null && y >= 4 && y <= plotH - 4 ? y : null;
   };
 
   const rects = [];
@@ -193,26 +305,31 @@ function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active,
 
   // ---- Active zones (rectangles only; never render zone price rails) ----
   if (prefs.zones) {
-    for (const z of selection.zones) {
+    for (const z of renderSelection.zones) {
       const rawX1 = xOf(z.createdTime);
       const rawX2 = xOf(lastTime);
       const x1 = Math.max(0, rawX1 ?? 0);
       const x2 = Math.min(plotW, rawX2 ?? plotW);
-      const y1 = yOf(z.top);
-      const y2 = yOf(z.bottom);
-      if (y1 == null || y2 == null || x2 <= x1) continue;
+      const ry1 = rawYOf(z.top);
+      const ry2 = rawYOf(z.bottom);
+      if (ry1 == null || ry2 == null || x2 <= x1) continue;
+      const topY = Math.min(ry1, ry2);
+      const botY = Math.max(ry1, ry2);
+      if (botY < 0 || topY > plotH) continue;
+      const y1 = Math.max(0, topY);
+      const y2 = Math.min(plotH, botY);
       const st = (ZONE_STYLE[z.kind] || ZONE_STYLE.fvg)[z.direction === 'bearish' ? 'bearish' : 'bullish'];
       const faded = z.state === 'partial' || z.state === 'tested';
       rects.push({
-        key: z.uid, x: x1, y: Math.min(y1, y2),
-        w: Math.max(2, x2 - x1), h: Math.max(2, Math.abs(y2 - y1)),
+        key: z.uid, x: x1, y: y1,
+        w: Math.max(2, x2 - x1), h: Math.max(2, y2 - y1),
         fill: st.fill, border: st.border, opacity: faded ? 0.55 : 1,
       });
       const lx = x1 + 7;
-      const zoneHeight = Math.abs(y2 - y1);
+      const zoneHeight = y2 - y1;
       if (lx < plotW - 45 && zoneHeight >= 14) {
         rawTags.push({
-          x: lx, y: Math.min(y1, y2) + 11,
+          x: lx, y: y1 + 11,
           text: shortZoneLabel(z),
           color: st.text,
           anchor: 'start', kind: z.kind, key: `zt-${z.uid}`,
@@ -224,7 +341,7 @@ function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active,
 
   // ---- Major active liquidity (short rails); sweeps use compact markers ----
   if (prefs.liquidity) {
-    for (const l of selection.levels) {
+    for (const l of renderSelection.levels) {
       const y = yOf(l.price);
       if (y == null) continue;
       const x2 = plotW - 3;
@@ -245,12 +362,12 @@ function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active,
 
   // ---- Confirmed structure: short local markers, MSS/CHoCH ranked highest ----
   if (prefs.structure) {
-    for (const e of selection.events) {
+    for (const e of renderSelection.events) {
       if (e.kind === 'break') {
         const y = yOf(e.price);
         const rawX = xOf(e.createdTime);
-        if (y == null) continue;
-        const x1 = Math.min(plotW - 70, Math.max(0, rawX ?? plotW - 72));
+        if (y == null || rawX == null || rawX < -40 || rawX > plotW - 16) continue;
+        const x1 = Math.min(plotW - 70, Math.max(0, rawX));
         const x2 = Math.min(plotW - 3, x1 + (/mss|choch/i.test(e.breakType) ? 66 : 48));
         const important = /mss|choch/i.test(e.breakType);
         const color = e.color || (important ? '#F59E0B' : '#94A3B8');
@@ -266,7 +383,7 @@ function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active,
       } else {
         const x = xOf(e.createdTime);
         const y = yOf(e.price);
-        if (x == null || y == null) continue;
+        if (x == null || y == null || x < 4 || x > plotW - 48) continue;
         const label = compactSMCLabel(e.label || e.swingType || '', '');
         if (label) rawTags.push({
           x: Math.min(plotW - 48, x + 4), y: y - 1, text: label,
@@ -277,14 +394,16 @@ function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active,
   }
 
   // ---- Setup is primary: compact, separated labels + short aligned rails ----
-  if (prefs.setup && selection.setup) {
-    const s = selection.setup;
+  if (prefs.setup && renderSelection.setup) {
+    const s = renderSelection.setup;
     const x2 = plotW - 4;
     const x1 = Math.max(0, x2 - 42);
     const rails = [
-      { p: s.entry, c: '#60A5FA', tag: `ENTRY ${fmtPx(s.entry)}` },
-      { p: s.stopLoss, c: '#F87171', tag: `SL ${fmtPx(s.stopLoss)}` },
-      ...s.takeProfits.slice(0, 2).map((tp, i) => ({ p: tp, c: '#34D399', tag: `TP${i + 1} ${fmtPx(tp)}` })),
+      { p: s.entry, c: '#60A5FA', tag: `${s.confirmed ? '' : 'PLAN '}ENTRY ${fmtPx(s.entry)}` },
+      { p: s.stopLoss, c: '#F87171', tag: `${s.confirmed ? '' : 'PLAN '}SL ${fmtPx(s.stopLoss)}` },
+      ...s.takeProfits.slice(0, 3).map((tp, i) => ({
+        p: tp, c: '#34D399', tag: `${s.confirmed ? '' : 'PLAN '}TP${i + 1} ${fmtPx(tp)}`,
+      })),
     ];
     for (const r of rails) {
       const y = yOf(r.p);
@@ -306,8 +425,8 @@ function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active,
     for (let i = from; i <= to; i++) {
       const c = candles[i];
       const x = xOf(c?.time);
-      const yHigh = yOf(c?.high);
-      const yLow = yOf(c?.low);
+      const yHigh = rawYOf(c?.high);
+      const yLow = rawYOf(c?.low);
       if (x == null || yHigh == null || yLow == null) continue;
       candleAreas.push({ left: x - 3, right: x + 3, top: Math.min(yHigh, yLow) - 2, bottom: Math.max(yHigh, yLow) + 2 });
     }
@@ -330,7 +449,8 @@ function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active,
         ))}
         {tags.map((t) => {
           const label = String(t.text || '');
-          const width = Math.max(34, Math.min(82, label.length * 5.7 + 14));
+          const maxWidth = t.kind === 'setupLevel' ? 126 : 82;
+          const width = Math.max(34, Math.min(maxWidth, label.length * 5.7 + 14));
           const x = t.anchor === 'start' ? t.x - 2 : t.x - width / 2;
           const arrow = t.anchor === 'start' ? [x + width, t.y - 7, x + width + 6, t.y - 1, x + width, t.y + 5] : [x, t.y - 7, x - 6, t.y - 1, x, t.y + 5];
           return (
@@ -345,8 +465,8 @@ function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active,
             </g>
           );
         })}
-        {prefs.killzones && <Killzones xOf={xOf} w={w} h={h} />}
-        {selection.mode === 'debug' && <DebugPanel debug={selection.debug} w={w} />}
+        {prefs.killzones && <Killzones candles={candles} visibleRange={visibleRange} xOf={xOf} plotW={plotW} h={h} />}
+        {renderSelection.mode === 'debug' && <DebugPanel debug={renderSelection.debug} w={w} />}
       </svg>
     </div>
   );
@@ -355,40 +475,62 @@ function SmcProDrawingLayer({ chartCanvasRef, candles, symbol, interval, active,
 function fmtPx(p) {
   const n = Number(p);
   if (!Number.isFinite(n)) return '—';
-  return n >= 1000 ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : n.toFixed(2);
+  if (n >= 10000) return n.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  if (n >= 1) return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n.toPrecision(4);
 }
 
-const SESSIONS = [
-  { id: 'asia', label: 'Asia', startUTC: 0, endUTC: 7, fill: 'rgba(245,158,11,0.10)', text: '#F59E0B' },
-  { id: 'london', label: 'London', startUTC: 7, endUTC: 12, fill: 'rgba(59,130,246,0.12)', text: '#60A5FA' },
-  { id: 'ny', label: 'New York', startUTC: 12, endUTC: 21, fill: 'rgba(168,85,247,0.12)', text: '#C084FC' },
-];
+const SESSION_META = {
+  asian: { id: 'asia', label: 'Asia', fill: 'rgba(245,158,11,0.10)', text: '#F59E0B' },
+  london: { id: 'london', label: 'London', fill: 'rgba(59,130,246,0.12)', text: '#60A5FA' },
+  newYork: { id: 'ny', label: 'New York', fill: 'rgba(168,85,247,0.12)', text: '#C084FC' },
+};
 
-function Killzones({ xOf, w, h }) {
+function Killzones({ candles, visibleRange, xOf, plotW, h }) {
   const out = [];
   try {
-    const nowUTC = Math.floor(Date.now() / 1000);
-    const dayUTC = 86400;
-    const todayStart = nowUTC - (nowUTC % dayUTC);
-    for (let d = 13; d >= 0; d--) {
-      const ds = todayStart - d * dayUTC;
-      for (const s of SESSIONS) {
-        let x0 = xOf(ds + s.startUTC * 3600);
-        let x1 = xOf(ds + s.endUTC * 3600);
-        // TradingView-style viewport clamping (same as zone rects): a session
-        // touching the loaded window still paints — null means off-window on
-        // that side (past data not backfilled yet, or the live session still
-        // running into the future), NOT a reason to drop the whole block.
-        // Both null = fully outside the data range → skip.
-        if (x0 == null && x1 == null) continue;
-        if (x0 == null) x0 = 0;
-        if (x1 == null) x1 = w;
-        const bx = Math.max(0, Math.min(x0, x1));
-        const bw = Math.min(w, Math.max(x0, x1)) - bx;
-        if (bw < 14) continue;
-        out.push({ key: `kz-${ds}-${s.id}`, x: bx, w: bw, s });
+    if (!Array.isArray(candles) || candles.length < 2 || typeof candles[0]?.time !== 'number') return null;
+    const from = visibleRange ? Math.max(0, Math.floor(visibleRange.from) - 2) : Math.max(0, candles.length - 300);
+    const to = visibleRange ? Math.min(candles.length - 1, Math.ceil(visibleRange.to) + 2) : candles.length - 1;
+    let halfBar = 3;
+    if (to > from) {
+      const xa = xOf(candles[from]?.time);
+      const xb = xOf(candles[to]?.time);
+      if (xa != null && xb != null && to > from) {
+        halfBar = Math.max(1, Math.min(24, Math.abs(xb - xa) / (2 * (to - from))));
       }
     }
+    let run = null;
+    const flush = () => {
+      if (!run) return;
+      const x0 = xOf(run.startTime);
+      const x1 = xOf(run.endTime);
+      if (x0 != null && x1 != null) {
+        const left = Math.max(0, Math.min(x0, x1) - halfBar);
+        const right = Math.min(plotW, Math.max(x0, x1) + halfBar);
+        const bw = right - left;
+        if (bw >= 12) {
+          out.push({ key: `kz-${run.startTime}-${run.meta.id}`, x: left, w: bw, s: run.meta });
+        }
+      }
+      run = null;
+    };
+    for (let i = from; i <= to; i++) {
+      const c = candles[i];
+      if (!c || typeof c.time !== 'number') { flush(); continue; }
+      const sess = detectSession(c);
+      const meta = SESSION_META[sess] || null;
+      const gapBreak = run && (c.time - run.endTime > 6 * 3600);
+      if (!meta) {
+        flush();
+      } else if (!run || run.sess !== sess || gapBreak) {
+        flush();
+        run = { sess, meta, startTime: c.time, endTime: c.time };
+      } else {
+        run.endTime = c.time;
+      }
+    }
+    flush();
   } catch {}
   if (!out.length) return null;
   const y = h - KZ_H;

@@ -16,7 +16,9 @@ import { detectLiquidityZones } from './smc/engine/liquidityDetector.js';
 import { detectSMCOrderBlocks } from './smc/engine/orderBlockDetector.js';
 import { detectSMCFVGs } from './smc/engine/fvgDetector.js';
 import { detectMitigation } from './smc/engine/mitigationDetector.js';
+import { detectInducement } from './smc/engine/inducementDetector.js';
 import { snapshotSMCCandles } from './smc/engine/smcSnapshot.js';
+import { resetSmcDisplay, saveSmcDisplay } from './smcDisplayPrefs.js';
 
 function candles(n, from, step, up = true, startTime = 1700000000, slot = 3600) {
   const out = [];
@@ -199,6 +201,35 @@ test('confluence gate blocks bare setups, passes full confluence', () => {
   assert.ok(bare.missing.length > 0);
 });
 
+test('SMC shows planned Entry, SL and TP levels for directional HTF bias without calling them confirmed', () => {
+  const cs = candles(80, 80000, 30, true);
+  const selected = selectVisibleSMC({
+    candles: cs,
+    analysis: {
+      mtf: { bias: 'bullish' },
+      setup: { direction: 'neutral' },
+      premiumDiscount: { swingLow: 80000, swingHigh: 82400, equilibrium: 81200, zone: 'premium' },
+      liquidity: { levels: [] },
+      orderBlocks: { blocks: [] },
+      fvgs: { gaps: [] },
+    },
+    symbol: SYM,
+    interval: IV,
+    settings: { mode: 'smart' },
+  });
+
+  assert.ok(selected.setup);
+  assert.equal(selected.setup.direction, 'bullish');
+  assert.equal(selected.setup.confirmed, false);
+  assert.ok(selected.setup.stopLoss < selected.setup.entry);
+  assert.equal(selected.setup.takeProfits.length, 3);
+  assert.ok(selected.setup.entry < selected.setup.takeProfits[0]);
+  assert.ok(selected.setup.takeProfits[0] < selected.setup.takeProfits[1]);
+  assert.ok(selected.setup.takeProfits[1] < selected.setup.takeProfits[2]);
+  assert.equal(selected.debug.setupSuppressed, false);
+  assert.ok(selected.setupMissing.length > 0, 'incomplete confluence is still exposed');
+});
+
 test('label collision keeps the higher priority tag, never stacks', () => {
   const tags = [
     { x: 100, y: 100, text: 'BOS', color: '#fff', kind: 'structure' },
@@ -292,6 +323,10 @@ test('SMC end-to-end reports trend bias without manufacturing a low-confluence s
   assert.equal(analysis.mtf.bias, 'bullish');
   assert.equal(analysis.setup.direction, 'neutral');
   assert.ok(analysis.score.score < 60, `unsupported setup evidence should not score highly: ${analysis.score.score}`);
+  assert.deepEqual(Object.keys(analysis.score.components).sort(), [
+    'displacement', 'fvg', 'htfAlignment', 'liquiditySweep', 'orderBlock',
+    'premiumDiscount', 'session', 'structure', 'volumeVolatility',
+  ]);
   assert.equal(analysis.signal.entry, null);
   assert.equal(analysis.signal.stopLoss, null);
   assert.equal(analysis.signal.takeProfit, null);
@@ -428,6 +463,24 @@ test('zone formation candles do not count as retests or mitigation', () => {
   }
 });
 
+test('SMC detector controls filter OB direction, weak displacement, FVG size and FVG visibility', () => {
+  const cs = [
+    [100, 102, 99, 101], [101, 102, 99, 100], [100, 105, 100, 104],
+    [104, 107, 105, 106], [106, 109, 105, 108],
+  ].map(([open, high, low, close], time) => ({ time, open, high, low, close }));
+
+  const defaultBlocks = detectSMCOrderBlocks(cs).blocks;
+  assert.ok(defaultBlocks.some((block) => block.type === 'bullish_ob'));
+  assert.equal(detectSMCOrderBlocks(cs, { bullish: false }).blocks.length, 0);
+  assert.equal(detectSMCOrderBlocks(cs, { minDisplacement: 10 }).blocks.length, 0);
+  assert.equal(detectSMCOrderBlocks(cs, { maxActiveOBs: 0 }).active.length, 0);
+
+  assert.ok(detectSMCFVGs(cs).gaps.length > 0);
+  assert.equal(detectSMCFVGs(cs, { fvg: false }).gaps.length, 0);
+  assert.equal(detectSMCFVGs(cs, { minGapAtr: 10 }).gaps.length, 0);
+  assert.equal(detectSMCFVGs(cs, { maxGaps: 0 }).gaps.length, 0);
+});
+
 test('only untouched confirmed order blocks contribute to the score', () => {
   const prefix = candles(256, 1000, 1);
   const tail = [
@@ -471,4 +524,61 @@ test('liquidity and structure caps honor zero and one at every zoom', () => {
       }
     }
   }
+});
+
+test('older invalidated zone overlapping a fresh active zone never kills the active zone', () => {
+  const cs = candles(60, 1000, 1, true);
+  // Bar 15 dips to 950 so an OB formed at bar 10 gets invalidated,
+  // while a new OB at the same range formed at bar 57 (confirmed bar 59) remains active.
+  const custom = cs.map((c, i) => (i === 15
+    ? { ...c, open: 980, high: 985, low: 940, close: 945 }
+    : c));
+  const current = custom.at(-1).close;
+  const analysis = {
+    mtf: { bias: 'bullish' },
+    setup: { direction: 'neutral' },
+    premiumDiscount: { zone: 'discount', swingHigh: current + 20, swingLow: current - 20, equilibrium: current },
+    liquidity: { levels: [] },
+    orderBlocks: {
+      blocks: [
+        { type: 'bullish_ob', top: current, bottom: current - 2, time: custom[10].time, confirmedTime: custom[12].time },
+        { type: 'bullish_ob', top: current, bottom: current - 2, time: custom[57].time, confirmedTime: custom[59].time },
+      ],
+    },
+    fvgs: { gaps: [] },
+  };
+  const selected = selectVisibleSMC({ candles: custom, analysis, symbol: SYM, interval: IV, settings: { mode: 'smart' } });
+  assert.equal(selected.zones.length, 1, 'fresh active OB survives despite earlier invalidated OB at same price');
+  assert.equal(selected.zones[0].state, 'active');
+});
+
+test('switching SMC display mode syncs mode preset caps unless explicitly overridden', () => {
+  resetSmcDisplay();
+  const minimal = saveSmcDisplay({ mode: 'minimal' });
+  assert.equal(minimal.maxOb, 0);
+  assert.equal(minimal.maxFvg, 0);
+  assert.equal(minimal.minScore, 30);
+
+  const full = saveSmcDisplay({ mode: 'full' });
+  assert.equal(full.maxOb, 3);
+  assert.equal(full.maxFvg, 3);
+  assert.equal(full.maxLiquidity, 8);
+  assert.equal(full.minScore, 0);
+
+  const smartCustom = saveSmcDisplay({ mode: 'smart', maxOb: 4 });
+  assert.equal(smartCustom.maxOb, 4);
+  assert.equal(smartCustom.maxFvg, 1);
+  resetSmcDisplay();
+});
+
+test('inducement detector caps to the most recent maxEvents instead of dropping the first 6', () => {
+  const cs = candles(30, 100, 5, true).map((c) => ({
+    ...c,
+    high: c.close + 0.5,
+    low: c.open - 0.5,
+  }));
+  const events = detectInducement(cs);
+  assert.equal(events.length, 6);
+  assert.equal(events.at(-1).time, cs.at(-2).time);
+  assert.equal(detectInducement(cs, { maxEvents: 2 }).length, 2);
 });

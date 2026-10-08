@@ -95,7 +95,7 @@ export function GuideModal({ setShowGuideModal }) {
               </p>
 
               <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', padding: 12, borderRadius: 8 }}>
-                <strong style={{ color: '#818CF8' }}>6 Quantitative Strategies Ke Rules:</strong>
+                <strong style={{ color: '#818CF8' }}>7 Strategy Rules:</strong>
                 <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: '0.74rem' }}>
                   <li><strong>AI Walk-Forward ML</strong>: Machine learning model jo price predict karke statistical edge nikalta hai.</li>
                   <li><strong>EMA Golden Cross</strong>: Fast moving average jab slow moving average ko upar cross karta hai toh buy, niche cross karne par exit.</li>
@@ -103,6 +103,7 @@ export function GuideModal({ setShowGuideModal }) {
                   <li><strong>20D Momentum Breakout</strong>: 20-day high breakout with heavy volume par buy karta hai (Classic Turtle trading).</li>
                   <li><strong>MACD Signal Cross</strong>: MACD line signal line ke upar aane par bullish entry.</li>
                   <li><strong>Supertrend Volatility Trail</strong>: Dynamic ATR trailing stop jo trend ke sath ride karta hai aur reversal par exit karta hai.</li>
+                  <li><strong>SMC Pro</strong>: Intraday 4×/16× bias, confirmed BOS/CHoCH, liquidity sweeps, untouched OB/FVG aur session confluence; long/short entries ke structural swing stops/targets.</li>
                 </ul>
               </div>
 
@@ -111,7 +112,8 @@ export function GuideModal({ setShowGuideModal }) {
                 <ol style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: '0.74rem' }}>
                   <li>Upar chips se stock chunein (jaise `RELIANCE` ya `ICICIBANK`).</li>
                   <li>Apni manpasand strategy select karein ya Quick Preset (jaise *Conservative* ya *Momentum*) par click karein.</li>
-                  <li>Agar chahein toh <strong>"Config & Risk"</strong> button dabaakar Stop Loss, Take Profit, Trailing Stop ya Slippage adjust karein.</li>
+                  <li>SMC Pro ke liye candle interval aur lookback chunein. Strategy structural exits use karti hai; holding limit candles me hoti hai.</li>
+                  <li><strong>Config & Risk</strong> me position sizing/slippage set karein; normal strategies ke liye percentage stops, aur SMC Pro ke liye structure-based exits use hote hain.</li>
                   <li><strong>Run Backtest</strong> button par click karein.</li>
                   <li>Results me **Equity Curve**, **Drawdown**, **Monthly Heatmap**, aur **Trade Journal** dekhein.</li>
                   <li>Trades ko Excel/CSV me download karne ke liye <strong>"Export CSV"</strong> use karein.</li>

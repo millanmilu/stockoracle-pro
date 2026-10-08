@@ -31,6 +31,20 @@ export function safeCreateChart(container, options) {
     return msg.includes('disposed') || msg.includes('value is null') || msg.includes('value is undefined');
   };
 
+  // Some browser builds schedule the pane renderer through a canvas callback
+  // that bypasses ChartWidget._internal_paint. Keep the same narrow guard at
+  // the window boundary so one stale paint frame cannot replace the app with a
+  // fatal overlay. The handler is removed with this chart instance.
+  const onPaintError = (event) => {
+    const error = event?.error || (event?.message ? new Error(event.message) : null);
+    const filename = String(event?.filename || '').toLowerCase();
+    if (!chart.__isDisposed && filename.includes('lightweight-charts') && isBenignPaintError(error)) {
+      event.preventDefault?.();
+      event.stopImmediatePropagation?.();
+    }
+  };
+  try { window.addEventListener('error', onPaintError, true); } catch {}
+
   // 1. Locate and protect internal ChartWidget if accessible
   const chartWidget =
     chart._private__chartWidget ||
@@ -282,6 +296,7 @@ export function safeCreateChart(container, options) {
   chart.remove = () => {
     if (chart.__isDisposed) return;
     chart.__isDisposed = true;
+    try { window.removeEventListener('error', onPaintError, true); } catch {}
 
     for (const s of trackedSeries) {
       s.__isDisposed = true;
